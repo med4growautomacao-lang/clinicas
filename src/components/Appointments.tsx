@@ -33,6 +33,7 @@ import {
   isToday
 } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { useAuth } from "../contexts/AuthContext";
 
 const appointments = [
   ...Array.from({ length: 10 }).map((_, i) => ({
@@ -65,18 +66,25 @@ const appointments = [
 ];
 
 export function Appointments() {
+  const { userRole } = useAuth();
   const [filter, setFilter] = useState("Todos");
   const [dateFilter, setDateFilter] = useState<"all" | "today">("all");
   const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
   const [currentMonth, setCurrentMonth] = useState(new Date());
 
+  // Simulating the doctor name for the logged-in doctor
+  const loggedDoctorName = "Dr. Carlos Eduardo";
+
   const filteredAppointments = useMemo(() => {
     return appointments.filter((apt) => {
-      const matchesDoctor = filter === "Todos" || apt.doctor.includes(filter);
+      const matchesDoctor = userRole === 'medico' 
+        ? apt.doctor === loggedDoctorName
+        : (filter === "Todos" || apt.doctor.includes(filter));
+      
       const matchesDate = dateFilter === "today" ? isToday(apt.date) : true;
       return matchesDoctor && matchesDate;
     });
-  }, [filter, dateFilter]);
+  }, [filter, dateFilter, userRole]);
 
   return (
     <div className="space-y-8">
@@ -86,7 +94,7 @@ export function Appointments() {
           animate={{ opacity: 1, x: 0 }}
         >
           <h2 className="text-3xl font-bold tracking-tight text-slate-900">
-            Agenda de <span className="text-teal-600">Consultas</span>
+            {userRole === 'medico' ? 'Minha ' : 'Agenda de '}<span className="text-teal-600">Consultas</span>
           </h2>
           <p className="text-slate-500 font-medium text-base">
             {dateFilter === "today" ? "Consultas agendadas para hoje." : "Acompanhe todos os agendamentos."}
@@ -132,20 +140,22 @@ export function Appointments() {
                 </button>
               </div>
 
-              <div className="flex flex-wrap items-center gap-1 bg-white p-1 rounded-lg border border-slate-200 max-w-2xl">
-                {["Todos", ...Array.from(new Set(appointments.map(a => a.doctor)))].map((f) => (
-                  <button
-                    key={f}
-                    onClick={() => setFilter(f)}
-                    className={cn(
-                      "px-2 py-1 text-[10px] font-semibold rounded-md transition-all whitespace-nowrap",
-                      filter === f ? "bg-teal-600 text-white" : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
-                    )}
-                  >
-                    {f === "Todos" ? "Todos" : f.split(' ')[0] + ' ' + (f.split(' ').length > 1 ? f.split(' ')[f.split(' ').length - 1] : '')}
-                  </button>
-                ))}
-              </div>
+              {userRole !== 'medico' && (
+                <div className="flex flex-wrap items-center gap-1 bg-white p-1 rounded-lg border border-slate-200 max-w-2xl">
+                  {["Todos", ...Array.from(new Set(appointments.map(a => a.doctor)))].map((f) => (
+                    <button
+                      key={f}
+                      onClick={() => setFilter(f)}
+                      className={cn(
+                        "px-2 py-1 text-[10px] font-semibold rounded-md transition-all whitespace-nowrap",
+                        filter === f ? "bg-teal-600 text-white" : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
+                      )}
+                    >
+                      {f === "Todos" ? "Todos" : f.split(' ')[0] + ' ' + (f.split(' ').length > 1 ? f.split(' ')[f.split(' ').length - 1] : '')}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="flex bg-white p-1 rounded-lg border border-slate-200 w-fit">

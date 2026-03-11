@@ -9,8 +9,11 @@ import { DoctorsManagement } from './components/DoctorsManagement';
 import { Settings } from './components/Settings';
 import { motion, AnimatePresence } from 'framer-motion';
 
-export default function App() {
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+
+function AppContent() {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const { clinicName, userRole } = useAuth();
 
   const renderContent = () => {
     switch (activeTab) {
@@ -61,5 +64,13 @@ export default function App() {
         </div>
       </main>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }

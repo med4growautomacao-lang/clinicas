@@ -23,11 +23,12 @@ import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { useAuth } from "../contexts/AuthContext";
 
 const patients = [
-    { id: 1, name: "Carlos A. Santos", age: "45 anos", weight: "78kg", height: "175cm", lastVisit: "2024-02-15", initials: "CS" },
-    { id: 2, name: "Ana M. Oliveira", age: "32 anos", weight: "62kg", height: "165cm", lastVisit: "2024-02-20", initials: "AO" },
-    { id: 3, name: "Lucas F. Lima", age: "58 anos", weight: "85kg", height: "180cm", lastVisit: "2024-02-10", initials: "LL" },
+    { id: 1, name: "Carlos A. Santos", age: "45 anos", weight: "78kg", height: "175cm", lastVisit: "2024-02-15", initials: "CS", doctorId: "medico-1" },
+    { id: 2, name: "Ana M. Oliveira", age: "32 anos", weight: "62kg", height: "165cm", lastVisit: "2024-02-20", initials: "AO", doctorId: "medico-2" },
+    { id: 3, name: "Lucas F. Lima", age: "58 anos", weight: "85kg", height: "180cm", lastVisit: "2024-02-10", initials: "LL", doctorId: "medico-1" },
 ];
 
 const medicalHistory = [
@@ -58,10 +59,18 @@ const medicalHistory = [
 ];
 
 export function MedicalRecords() {
-    const [selectedPatient, setSelectedPatient] = useState(patients[0]);
+    const { userRole, clinicName } = useAuth();
+    // Simulating logged doctor ID (e.g., Doctor 1 in Central Clinic)
+    const loggedDoctorId = "medico-1";
+
+    const filteredByRole = patients.filter(p => 
+        userRole === 'medico' ? p.doctorId === loggedDoctorId : true
+    );
+
+    const [selectedPatient, setSelectedPatient] = useState(filteredByRole[0] || patients[0]);
     const [searchTerm, setSearchTerm] = useState("");
 
-    const filteredPatients = patients.filter(p =>
+    const filteredPatients = filteredByRole.filter(p =>
         p.name.toLowerCase().includes(searchTerm.toLowerCase())
     );
 

@@ -13,6 +13,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion } from "framer-motion";
+import { useAuth, UserRole } from "../contexts/AuthContext";
+import { ChevronDown } from "lucide-react";
 
 // Logo removed for professional medicine icon
 
@@ -22,15 +24,19 @@ interface SidebarProps {
 }
 
 export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
-  const navItems = [
-    { id: "dashboard", label: "Visão Geral", icon: LayoutDashboard, color: "text-emerald-600" },
-    { id: "ai-secretary", label: "Assistente IA", icon: Bot, color: "text-teal-600" },
-    { id: "finance", label: "Financeiro", icon: CircleDollarSign, color: "text-emerald-700" },
-    { id: "appointments", label: "Agendamentos", icon: CalendarDays, color: "text-teal-700" },
-    { id: "medical-records", label: "Prontuários", icon: ClipboardList, color: "text-slate-700" },
-    { id: "doctors", label: "Corpo Clínico", icon: Users, color: "text-emerald-800" },
-    { id: "settings", label: "Configurações", icon: Settings, color: "text-slate-500" },
+  const { clinicName, userRole, setClinicName, setUserRole } = useAuth();
+
+  const allNavItems = [
+    { id: "dashboard", label: "Visão Geral", icon: LayoutDashboard, color: "text-emerald-600", roles: ['gestor', 'medico', 'secretaria'] },
+    { id: "ai-secretary", label: "Assistente IA", icon: Bot, color: "text-teal-600", roles: ['gestor', 'secretaria'] },
+    { id: "finance", label: "Financeiro", icon: CircleDollarSign, color: "text-emerald-700", roles: ['gestor'] },
+    { id: "appointments", label: "Agendamentos", icon: CalendarDays, color: "text-teal-700", roles: ['gestor', 'medico', 'secretaria'] },
+    { id: "medical-records", label: "Prontuários", icon: ClipboardList, color: "text-slate-700", roles: ['gestor', 'medico', 'secretaria'] },
+    { id: "doctors", label: "Corpo Clínico", icon: Users, color: "text-emerald-800", roles: ['gestor'] },
+    { id: "settings", label: "Configurações", icon: Settings, color: "text-slate-500", roles: ['gestor'] },
   ];
+
+  const navItems = allNavItems.filter(item => item.roles.includes(userRole));
 
   return (
     <div className="w-72 bg-white flex flex-col h-full border-r border-slate-200 shadow-sm z-10 transition-all duration-200">
@@ -40,8 +46,8 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
             <Stethoscope className="w-7 h-7" />
           </div>
           <div className="flex flex-col">
-            <span className="text-xl font-black text-slate-900 tracking-tight">Clinica</span>
-            <span className="text-[10px] font-bold text-teal-600 uppercase tracking-widest -mt-1">Padrão</span>
+            <span className="text-xl font-black text-slate-900 tracking-tight">{clinicName.split(' ')[0]}</span>
+            <span className="text-[10px] font-bold text-teal-600 uppercase tracking-widest -mt-1">{clinicName.split(' ')[1] || 'Padrão'}</span>
           </div>
         </div>
       </div>
@@ -75,17 +81,55 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
         })}
       </nav>
 
-      <div className="p-6 mt-auto">
-        <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-teal-800 flex items-center justify-center text-white font-bold text-sm">
-              AD
+      <div className="p-4 mt-auto border-t border-slate-100 bg-slate-50/50 space-y-3">
+        {/* SaaS Quick Controls */}
+        <div className="flex flex-col gap-2">
+          <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider px-2">Demo SaaS Controls</label>
+          <select 
+            value={clinicName}
+            onChange={(e) => setClinicName(e.target.value)}
+            className="w-full bg-white border border-slate-200 text-xs px-2 py-1.5 rounded-lg font-medium text-slate-600 outline-none focus:ring-1 focus:ring-teal-500 transition-all"
+          >
+            <option value="Clínica Central">Clínica Central</option>
+            <option value="Hospital Arca">Hospital Arca</option>
+            <option value="Odonto Prime">Odonto Prime</option>
+          </select>
+          
+          <div className="grid grid-cols-3 gap-1">
+            {(['gestor', 'medico', 'secretaria'] as UserRole[]).map((r) => (
+              <button
+                key={r}
+                onClick={() => {
+                  setUserRole(r);
+                  // Reset tab if current role doesn't have access
+                  const hasAccess = allNavItems.find(i => i.id === activeTab)?.roles.includes(r);
+                  if (!hasAccess) setActiveTab('dashboard');
+                }}
+                className={cn(
+                  "text-[9px] py-1 px-1 rounded-md font-bold uppercase transition-all",
+                  userRole === r 
+                    ? "bg-teal-600 text-white shadow-sm" 
+                    : "bg-white text-slate-400 border border-slate-200 hover:bg-slate-50"
+                )}
+              >
+                {r.slice(0, 3)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-teal-800 flex items-center justify-center text-white font-bold text-xs shrink-0">
+              {userRole === 'medico' ? 'DR' : userRole === 'gestor' ? 'AD' : 'SC'}
             </div>
-            <div className="flex flex-col">
-              <span className="text-xs font-bold text-slate-900">Administrador</span>
-              <span className="text-[10px] font-medium text-teal-600 flex items-center gap-1">
-                <ShieldCheck className="w-3 h-3" />
-                Autenticado
+            <div className="flex flex-col min-w-0">
+              <span className="text-xs font-bold text-slate-900 truncate">
+                {userRole.charAt(0).toUpperCase() + userRole.slice(1)}
+              </span>
+              <span className="text-[9px] font-medium text-teal-600 flex items-center gap-1">
+                <ShieldCheck className="w-2.5 h-2.5" />
+                Sessão Ativa
               </span>
             </div>
           </div>

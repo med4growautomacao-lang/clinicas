@@ -653,11 +653,12 @@ export interface AIConfig {
 export interface WhatsappInstance {
   id: string;
   clinic_id: string;
-  api_url: string;
+  api_id?: string;
   api_token: string;
   phone_number: string | null;
-  status: 'connected' | 'disconnected' | 'qr_pending';
+  status: 'connected' | 'disconnected' | 'qr_pending' | 'connecting';
   connected_at: string | null;
+  qr_code?: string;
 }
 
 export function useSettings() {
@@ -683,7 +684,26 @@ export function useSettings() {
     setLoading(false);
   }, [profile?.clinic_id]);
 
-  useEffect(() => { fetch(); }, [fetch]);
+  useEffect(() => { 
+    fetch(); 
+    if (!profile?.clinic_id) return;
+
+    const channel = supabase
+      .channel('whatsapp_instances_realtime')
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'whatsapp_instances',
+        filter: `clinic_id=eq.${profile.clinic_id}`
+      }, () => {
+        fetch();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetch, profile?.clinic_id]);
 
   const updateClinic = async (updates: Partial<Clinic>) => {
     if (!profile?.clinic_id) return false;

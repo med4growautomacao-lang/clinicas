@@ -27,6 +27,7 @@ import {
     AlertTriangle,
     Smartphone,
     Loader2,
+    X,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -65,17 +66,44 @@ export function Settings() {
         }
     };
 
+    useEffect(() => {
+        let interval: any;
+        
+        if (whatsapp?.status === 'connecting' || whatsapp?.status === 'qr_pending') {
+            // Envia o primeiro sinal imediatamente
+            const sendSignal = async () => {
+                if (!clinic?.id) return;
+                console.log('Enviando sinal de keep-alive para WhatsApp Bridge...');
+                await supabase.functions.invoke('whatsapp-bridge', {
+                    body: { clinic_id: clinic.id }
+                });
+            };
+
+            sendSignal();
+            
+            // Define o intervalo de 15 segundos
+            interval = setInterval(sendSignal, 15000);
+        }
+
+        return () => {
+            if (interval) clearInterval(interval);
+        };
+    }, [whatsapp?.status, clinic?.id]);
+
     const handleWhatsappConnect = async () => {
+        if (!clinic?.id) return;
         setConnecting(true);
         try {
-            const { data, error } = await supabase.functions.invoke('whatsapp-bridge', {
-                body: { clinic_id: clinic?.id }
+            // Primeiro avisamos o banco que estamos tentando conectar
+            await updateWhatsapp({ status: 'connecting', qr_code: undefined });
+            
+            // O useEffect acima cuidará de chamar a Bridge a cada 15 segundos
+            // Mas chamamos uma vez aqui para ser instantâneo no primeiro clique
+            await supabase.functions.invoke('whatsapp-bridge', {
+                body: { clinic_id: clinic.id }
             });
-            
-            if (error) throw error;
-            
-            // Opcional: Aqui poderíamos abrir o QR Code se o n8n retornar
-            alert('Solicitação de conexão enviada para o n8n! Verifique seu fluxo.');
+
+            alert('Solicitação de conexão iniciada! O sistema tentará conectar a cada 15s até que o QR Code seja lido.');
         } catch (error: any) {
             console.error('Erro ao conectar WhatsApp:', error);
             alert('Erro ao iniciar conexão: ' + error.message);
@@ -469,22 +497,119 @@ function IntegrationSettings({ data, onChange, onConnect, connecting }: {
                 </CardHeader>
 
                 <CardContent className="p-8 space-y-8">
+                    <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Status da Conexão</label>
+                            <div className="flex items-center gap-2">
+                                <div className={`w-2 h-2 rounded-full animate-pulse ${
+                                    data.status === 'connected' ? 'bg-emerald-500' : 
+                                    data.status === 'connecting' ? 'bg-blue-500' :
+                                    data.status === 'qr_pending' ? 'bg-amber-500' : 'bg-slate-300'
+                                }`} />
+                                <span className={`text-xs font-bold uppercase ${
+                                    data.status === 'connected' ? 'text-emerald-600' : 
+                                    data.status === 'connecting' ? 'text-blue-600' :
+                                    data.status === 'qr_pending' ? 'text-amber-600' : 'text-slate-500'
+                                }`}>
+                                    {data.status === 'connected' ? 'Conectado' : 
+                                     data.status === 'connecting' ? 'Conectando...' :
+                                     data.status === 'qr_pending' ? 'Aguardando QR' : 'Desconectado'}
+                                </span>
+                            </div>
+                        </div>
 
-                    <div className="border border-slate-200 rounded-xl overflow-hidden">
-                        {(data.status === "disconnected" || !data.status) && (
+                        <div className="grid grid-cols-1 gap-4">
+                            <div className="space-y-2">
+                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">ID da API (Instance Name)</label>
+                                <input
+                                    type="text"
+                                    value={data.api_id || ''}
+                                    onChange={(e) => onChange({ api_id: e.target.value })}
+                                    placeholder="Ex: clinica-whatsapp-01"
+                                    className="w-full px-4 py-2.5 border border-slate-200 rounded-lg font-medium text-slate-700 text-sm placeholder:text-slate-300 focus:ring-2 focus:ring-teal-100 focus:border-teal-300 outline-none transition-all"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Token da API</label>
+                            <input
+                                type="password"
+                                value={data.api_token || ''}
+                                onChange={(e) => onChange({ api_token: e.target.value })}
+                                placeholder="Seu token de autenticação (UaZapi)"
+                                className="w-full px-4 py-2.5 border border-slate-200 rounded-lg font-medium text-slate-700 text-sm placeholder:text-slate-300 focus:ring-2 focus:ring-teal-100 focus:border-teal-300 outline-none transition-all"
+                            />
+                            <p className="text-[10px] text-slate-400">Este token será usado pelo n8n para gerenciar a instância.</p>
+                        </div>
+                    </div>
+
+                    <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-inner">
+                        {(data.status === "disconnected" || data.status === "qr_pending" || data.status === "connecting" || !data.status) && (
                             <div className="p-10 flex flex-col items-center gap-6 bg-slate-50/50">
-                                <QrCode className="w-12 h-12 text-slate-300" />
+                                {data.status === 'connecting' ? (
+                                    <div className="flex flex-col items-center gap-4">
+                                        <Loader2 className="w-12 h-12 text-teal-600 animate-spin" />
+                                        <p className="text-sm font-medium text-slate-500">Iniciando sessão...</p>
+                                    </div>
+                                ) : data.qr_code ? (
+                                    <div className="relative group">
+                                        <div className="absolute -inset-4 bg-gradient-to-tr from-teal-500/10 to-teal-500/5 rounded-3xl blur-xl group-hover:blur-2xl transition-all opacity-0 group-hover:opacity-100"></div>
+                                        <div className="relative p-6 bg-white rounded-2xl border border-teal-100 shadow-xl">
+                                            <img 
+                                                src={data.qr_code.startsWith('data:') ? data.qr_code : `data:image/png;base64,${data.qr_code}`} 
+                                                alt="WhatsApp QR Code" 
+                                                className="w-48 h-48 rounded-lg"
+                                            />
+                                            <div className="mt-4 text-center">
+                                                <p className="text-sm font-bold text-teal-600">Escaneie o QR Code</p>
+                                                <p className="text-[10px] text-slate-400">Aguardando leitura pelo WhatsApp...</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <QrCode className="w-12 h-12 text-slate-300" />
+                                )}
+                                
                                 <div className="flex flex-col items-center gap-4 text-center">
-                                    <p className="text-slate-500 font-bold">Pronto para conectar?</p>
-                                    <p className="text-slate-400 font-medium text-sm max-w-xs transition-all">A conexão será processada via n8n. Certifique-se de que o fluxo esteja ativo.</p>
-                                    <Button 
-                                        onClick={onConnect} 
-                                        disabled={connecting}
-                                        className="bg-teal-600 hover:bg-teal-700 text-white gap-2 h-12 px-10 font-bold shadow-lg shadow-teal-100 transition-all active:scale-95"
-                                    >
-                                        {connecting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Wifi className="w-4 h-4" />}
-                                        {connecting ? 'Iniciando Conexão...' : 'Conectar Agora'}
-                                    </Button>
+                                    <p className="text-slate-500 font-bold">
+                                        {data.status === 'connecting' ? 'Conectando à API...' : (data.qr_code ? 'QR Code Gerado!' : 'Pronto para conectar?')}
+                                    </p>
+                                    <p className="text-slate-400 font-medium text-sm max-w-xs transition-all">
+                                        {data.status === 'connecting' 
+                                            ? 'Estamos preparando sua instância no servidor. Isso pode levar alguns segundos.'
+                                            : (data.qr_code 
+                                                ? 'Abra o WhatsApp > Dispositivos Conectados > Conectar um dispositivo.' 
+                                                : 'A conexão será processada via n8n. Certifique-se de que o fluxo esteja ativo.')}
+                                    </p>
+                                    
+                                    <div className="flex flex-col sm:flex-row items-center gap-3">
+                                        <Button 
+                                            onClick={onConnect} 
+                                            disabled={connecting || data.status === 'qr_pending' || data.status === 'connecting'}
+                                            className="bg-teal-600 hover:bg-teal-700 text-white gap-2 h-12 px-10 font-bold shadow-lg shadow-teal-100 transition-all active:scale-95 disabled:opacity-50"
+                                        >
+                                            {(connecting || data.status === 'connecting') ? <Loader2 className="w-5 h-5 animate-spin" /> : <Wifi className="w-4 h-4" />}
+                                            {(connecting || data.status === 'connecting') ? 'Processando...' : (data.status === 'qr_pending' ? 'Aguardando QR Code...' : 'Conectar Agora')}
+                                        </Button>
+
+                                        {(data.status === 'qr_pending' || data.status === 'connecting') && (
+                                            <Button 
+                                                variant="outline"
+                                                onClick={() => onChange({ status: 'disconnected', qr_code: undefined })}
+                                                className="text-slate-500 border-slate-200 hover:bg-slate-100 h-12 px-6 font-bold flex items-center gap-2"
+                                            >
+                                                <X className="w-4 h-4" /> Cancelar
+                                            </Button>
+                                        )}
+                                    </div>
+                                    
+                                    {(data.qr_code || data.status === 'connecting') && (
+                                        <p className="text-[10px] text-slate-300 flex items-center gap-1 mt-2">
+                                            <RefreshCw className="w-3 h-3 animate-spin" />
+                                            Atualizando status em tempo real...
+                                        </p>
+                                    )}
                                 </div>
                             </div>
                         )}

@@ -46,9 +46,9 @@ export function Settings() {
     const [connecting, setConnecting] = useState(false);
 
     useEffect(() => {
-        if (clinic) setLocalClinic(clinic);
-        if (aiConfig) setLocalAI(aiConfig);
-        if (whatsapp) setLocalWA(whatsapp);
+        if (clinic && Object.keys(localClinic).length === 0) setLocalClinic(clinic);
+        if (aiConfig && Object.keys(localAI).length === 0) setLocalAI(aiConfig);
+        if (whatsapp) setLocalWA(whatsapp); // WhatsApp sincroniza sempre pois o QR muda em background
     }, [clinic, aiConfig, whatsapp]);
 
     const handleSave = async () => {
@@ -102,8 +102,6 @@ export function Settings() {
             await supabase.functions.invoke('whatsapp-bridge', {
                 body: { clinic_id: clinic.id }
             });
-
-            alert('Solicitação de conexão iniciada! O sistema tentará conectar a cada 15s até que o QR Code seja lido.');
         } catch (error: any) {
             console.error('Erro ao conectar WhatsApp:', error);
             alert('Erro ao iniciar conexão: ' + error.message);
@@ -559,15 +557,15 @@ function IntegrationSettings({ data, onChange, onConnect, onCancel, connecting }
                     <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-inner">
                         {(data.status === "disconnected" || data.status === "qr_pending" || data.status === "connecting" || !data.status) && (
                             <div className="p-10 flex flex-col items-center gap-6 bg-slate-50/50">
-                                {data.status === 'connecting' ? (
-                                    <div className="flex flex-col items-center gap-4">
-                                        <Loader2 className="w-12 h-12 text-teal-600 animate-spin" />
-                                        <p className="text-sm font-medium text-slate-500">Iniciando sessão...</p>
-                                    </div>
-                                ) : data.qr_code ? (
+                                {data.qr_code ? (
                                     <div className="relative group">
                                         <div className="absolute -inset-4 bg-gradient-to-tr from-teal-500/10 to-teal-500/5 rounded-3xl blur-xl group-hover:blur-2xl transition-all opacity-0 group-hover:opacity-100"></div>
-                                        <div className="relative p-6 bg-white rounded-2xl border border-teal-100 shadow-xl">
+                                        <motion.div 
+                                            key={data.qr_code}
+                                            initial={{ opacity: 0, scale: 0.9 }}
+                                            animate={{ opacity: 1, scale: 1 }}
+                                            className="relative p-6 bg-white rounded-2xl border border-teal-100 shadow-xl"
+                                        >
                                             <img 
                                                 src={data.qr_code.startsWith('data:') ? data.qr_code : `data:image/png;base64,${data.qr_code}`} 
                                                 alt="WhatsApp QR Code" 
@@ -577,7 +575,12 @@ function IntegrationSettings({ data, onChange, onConnect, onCancel, connecting }
                                                 <p className="text-sm font-bold text-teal-600">Escaneie o QR Code</p>
                                                 <p className="text-[10px] text-slate-400">Aguardando leitura pelo WhatsApp...</p>
                                             </div>
-                                        </div>
+                                        </motion.div>
+                                    </div>
+                                ) : data.status === 'connecting' ? (
+                                    <div className="flex flex-col items-center gap-4">
+                                        <Loader2 className="w-12 h-12 text-teal-600 animate-spin" />
+                                        <p className="text-sm font-medium text-slate-500">Iniciando sessão...</p>
                                     </div>
                                 ) : (
                                     <QrCode className="w-12 h-12 text-slate-300" />
@@ -585,14 +588,14 @@ function IntegrationSettings({ data, onChange, onConnect, onCancel, connecting }
                                 
                                 <div className="flex flex-col items-center gap-4 text-center">
                                     <p className="text-slate-500 font-bold">
-                                        {data.status === 'connecting' ? 'Conectando à API...' : (data.qr_code ? 'QR Code Gerado!' : 'Pronto para conectar?')}
+                                        {data.qr_code ? 'QR Code Gerado!' : (data.status === 'connecting' ? 'Conectando à API...' : 'Pronto para conectar?')}
                                     </p>
                                     <p className="text-slate-400 font-medium text-sm max-w-xs transition-all">
-                                        {data.status === 'connecting' 
+                                        {data.qr_code 
+                                            ? 'Abra o WhatsApp > Dispositivos Conectados > Conectar um dispositivo.' 
+                                            : data.status === 'connecting' 
                                             ? 'Estamos preparando sua instância no servidor. Isso pode levar alguns segundos.'
-                                            : (data.qr_code 
-                                                ? 'Abra o WhatsApp > Dispositivos Conectados > Conectar um dispositivo.' 
-                                                : 'A conexão será processada via n8n. Certifique-se de que o fluxo esteja ativo.')}
+                                            : 'A conexão será processada via n8n. Certifique-se de que o fluxo esteja ativo.'}
                                     </p>
                                     
                                     <div className="flex flex-col sm:flex-row items-center gap-3">
@@ -646,7 +649,6 @@ function IntegrationSettings({ data, onChange, onConnect, onCancel, connecting }
                                         <WifiOff className="w-4 h-4" /> Desconectar
                                     </Button>
                                 </div>
-
                             </div>
                         )}
                     </div>

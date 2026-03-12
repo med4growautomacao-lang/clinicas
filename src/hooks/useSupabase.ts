@@ -668,9 +668,9 @@ export function useSettings() {
   const [whatsapp, setWhatsapp] = useState<WhatsappInstance | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetch = useCallback(async () => {
+  const fetch = useCallback(async (silent = false) => {
     if (!profile?.clinic_id) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
 
     const [clinicRes, aiRes, waRes] = await Promise.all([
       supabase.from('clinics').select('*').eq('id', profile.clinic_id).maybeSingle(),
@@ -696,7 +696,7 @@ export function useSettings() {
         table: 'whatsapp_instances',
         filter: `clinic_id=eq.${profile.clinic_id}`
       }, () => {
-        fetch();
+        fetch(true);
       })
       .subscribe();
 
@@ -751,8 +751,15 @@ export interface ChatMessage {
   patient_id: string | null;
   direction: 'inbound' | 'outbound';
   sender: 'user' | 'ai' | 'system';
-  content: string;
+  message: {
+    role?: string;
+    type?: string;
+    content?: string;
+    text?: string;
+    [key: string]: any;
+  };
   phone: string | null;
+  session_id: string | null;
   metadata: any;
   created_at: string;
 }
@@ -762,6 +769,18 @@ export function useChatMessages(leadId?: string) {
   const [data, setData] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [clinicPhone, setClinicPhone] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!profile?.clinic_id) return;
+    supabase
+      .from('whatsapp_instances')
+      .select('phone_number')
+      .eq('clinic_id', profile.clinic_id)
+      .maybeSingle()
+      .then(({ data }) => setClinicPhone(data?.phone_number || null));
+  }, [profile?.clinic_id]);
 
   const fetch = useCallback(async () => {
     if (!profile?.clinic_id) return;
@@ -808,15 +827,33 @@ export function useChatMessages(leadId?: string) {
 
   const send = async (msg: Partial<ChatMessage>) => {
     if (!profile?.clinic_id) return null;
+    
+    const leadPhone = msg.phone;
+    const finalSessionId = msg.session_id || (clinicPhone && leadPhone ? `${clinicPhone}${leadPhone}` : null);
+
+    // Prepare message object to ensure it matches the JSONB structure
+    const messageObject = msg.message || {
+      role: 'user',
+      content: msg.message?.content || '' // Fallback if someone tried to pass partially
+    };
+
+    // If content was passed directly (legacy support while transitioning), wrap it
+    if ((msg as any).content && !msg.message) {
+      messageObject.content = (msg as any).content;
+    }
+
+    const insertData: any = { 
+      clinic_id: profile.clinic_id, 
+      direction: 'outbound', 
+      sender: 'user',
+      lead_id: leadId || msg.lead_id,
+      session_id: finalSessionId,
+      message: messageObject
+    };
+
     const { data, error } = await supabase
       .from('chat_messages')
-      .insert({ 
-        ...msg, 
-        clinic_id: profile.clinic_id, 
-        direction: 'outbound', 
-        sender: 'user',
-        lead_id: leadId || msg.lead_id
-      })
+      .insert(insertData)
       .select()
       .single();
     if (error) { setError(error.message); return null; }

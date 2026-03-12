@@ -279,6 +279,7 @@ export interface Lead {
   stage_id: string | null;
   estimated_value: number | null;
   notes: string | null;
+  ai_enabled: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -687,6 +688,7 @@ export interface AIConfig {
   response_speed: 'instantanea' | 'cadenciada';
   bio_text: string | null;
   prompt: string | null;
+  phone: string | null;
   auto_schedule: boolean;
   updated_at: string;
 }

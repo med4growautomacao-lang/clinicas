@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { X, Send, Bot, User, Loader2, MessageSquare, Phone } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "./ui/button";
-import { useChatMessages, ChatMessage, Lead } from "../hooks/useSupabase";
+import { useChatMessages, ChatMessage, Lead, useLeads } from "../hooks/useSupabase";
 import { format, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/src/lib/utils";
@@ -14,6 +14,7 @@ interface LeadChatProps {
 
 export function LeadChat({ lead, onClose }: LeadChatProps) {
   const { data: messages, loading, send } = useChatMessages(lead.id);
+  const { update: updateLead } = useLeads();
   const [content, setContent] = useState("");
   const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -51,11 +52,22 @@ export function LeadChat({ lead, onClose }: LeadChatProps) {
           </div>
           <div>
             <h3 className="font-bold text-slate-900 leading-tight">{lead.name}</h3>
-            <div className="flex items-center gap-2 mt-0.5">
-              <p className="text-xs font-medium text-emerald-600 flex items-center gap-1.5">
-                <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-                Atendimento IA Ativo
-              </p>
+            <div className="flex items-center gap-3 mt-0.5">
+              <button 
+                onClick={() => updateLead(lead.id, { ai_enabled: !lead.ai_enabled })}
+                className="flex items-center gap-1.5 group outline-none"
+              >
+                <div className={cn(
+                  "w-2.5 h-2.5 rounded-full transition-all shadow-sm",
+                  lead.ai_enabled ? "bg-emerald-500 animate-pulse" : "bg-slate-300"
+                )} />
+                <span className={cn(
+                  "text-[10px] font-bold uppercase tracking-wider transition-colors",
+                  lead.ai_enabled ? "text-emerald-600" : "text-slate-400 group-hover:text-slate-600"
+                )}>
+                  IA {lead.ai_enabled ? "Ativa" : "Pausada"}
+                </span>
+              </button>
               {lead.phone && (
                 <>
                   <span className="text-slate-300">•</span>

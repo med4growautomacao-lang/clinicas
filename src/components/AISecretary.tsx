@@ -371,10 +371,10 @@ function ConfigView() {
             <div className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-100">
               <div className="pr-4">
                 <p className="text-sm font-bold text-slate-900">
-                  Agendamento Automático
+                  Atendimento Automático (IA)
                 </p>
                 <p className="text-[10px] font-semibold text-slate-500 uppercase pt-0.5">
-                  Confirmar agendamentos sem intervenção humana
+                  Interruptor geral de respostas da inteligência artificial
                 </p>
               </div>
               <button 

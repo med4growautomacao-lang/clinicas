@@ -35,6 +35,31 @@ export function LeadKanban() {
   const [isAddingStage, setIsAddingStage] = useState(false);
   const [newStageName, setNewStageName] = useState("");
 
+  const [draggedLead, setDraggedLead] = useState<any>(null);
+  const [dragOverStage, setDragOverStage] = useState<string | null>(null);
+
+  const handleDragStart = (e: React.DragEvent, lead: any) => {
+    setDraggedLead(lead);
+    e.dataTransfer.setData("leadId", lead.id);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDragOver = (e: React.DragEvent, stageId: string) => {
+    e.preventDefault();
+    setDragOverStage(stageId);
+  };
+
+  const handleDrop = async (e: React.DragEvent, targetStageId: string) => {
+    e.preventDefault();
+    setDragOverStage(null);
+    const leadId = e.dataTransfer.getData("leadId");
+    
+    if (draggedLead && draggedLead.stage_id !== targetStageId) {
+      await update(draggedLead.id, { stage_id: targetStageId });
+    }
+    setDraggedLead(null);
+  };
+
   const handleSubmit = async () => {
     if (!formData.name.trim()) return;
     setSubmitting(true);
@@ -140,9 +165,26 @@ export function LeadKanban() {
                 </button>
               </div>
 
-              <div className="flex-1 bg-slate-100/50 rounded-xl p-3 flex flex-col gap-3 min-h-[400px]">
+              <div 
+                className={cn(
+                  "flex-1 bg-slate-100/50 rounded-xl p-3 flex flex-col gap-3 min-h-[400px] transition-colors border-2 border-transparent",
+                  dragOverStage === stage.id && "bg-teal-50 border-teal-200"
+                )}
+                onDragOver={(e) => handleDragOver(e, stage.id)}
+                onDragLeave={() => setDragOverStage(null)}
+                onDrop={(e) => handleDrop(e, stage.id)}
+              >
                 {stageLeads.map((lead) => (
-                  <motion.div key={lead.id} whileHover={{ y: -2 }} className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md transition-all group">
+                  <motion.div 
+                    key={lead.id} 
+                    draggable 
+                    onDragStart={(e) => handleDragStart(e, lead)}
+                    whileHover={{ y: -2 }} 
+                    className={cn(
+                      "bg-white p-4 rounded-lg border border-slate-200 shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md transition-all group",
+                      draggedLead?.id === lead.id && "opacity-50"
+                    )}
+                  >
                     <div className="flex justify-between items-start mb-3">
                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{lead.source || 'Manual'}</span>
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">

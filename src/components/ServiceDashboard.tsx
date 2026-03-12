@@ -12,47 +12,58 @@ import {
   UserCheck
 } from "lucide-react";
 import { motion } from "framer-motion";
-
-const stats = [
-  { 
-    title: "Total Atendimentos", 
-    value: "1.284", 
-    change: "+12.5%", 
-    trend: "up", 
-    icon: MessageSquare, 
-    color: "text-blue-600",
-    bg: "bg-blue-50"
-  },
-  { 
-    title: "Tempo Médio Resposta", 
-    value: "1.2s", 
-    change: "-0.4s", 
-    trend: "up", 
-    icon: Clock, 
-    color: "text-teal-600",
-    bg: "bg-teal-50"
-  },
-  { 
-    title: "Taxa de Resolução IA", 
-    value: "94.2%", 
-    change: "+2.1%", 
-    trend: "up", 
-    icon: CheckCircle2, 
-    color: "text-emerald-600",
-    bg: "bg-emerald-50"
-  },
-  { 
-    title: "Satisfação (NPS)", 
-    value: "4.9/5", 
-    change: "Estável", 
-    trend: "neutral", 
-    icon: UserCheck, 
-    color: "text-amber-600",
-    bg: "bg-amber-50"
-  },
-];
+import { useDashboardStats } from "../hooks/useSupabase";
+import { Loader2 } from "lucide-react";
 
 export function ServiceDashboard() {
+  const { data: dashboardData, loading } = useDashboardStats();
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 text-teal-600 animate-spin" />
+      </div>
+    );
+  }
+
+  const stats = [
+    { 
+      title: "Agendamentos (Mês)", 
+      value: dashboardData.totalAppointments.toString(), 
+      change: "+0%", 
+      trend: "neutral", 
+      icon: MessageSquare, 
+      color: "text-blue-600",
+      bg: "bg-blue-50"
+    },
+    { 
+      title: "Mensagens (Mês)", 
+      value: dashboardData.totalMessages.toString(), 
+      change: "+0%", 
+      trend: "neutral", 
+      icon: MessageSquare, 
+      color: "text-teal-600",
+      bg: "bg-teal-50"
+    },
+    { 
+      title: "Faturamento (Mês)", 
+      value: new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(dashboardData.totalRevenue), 
+      change: "+0%", 
+      trend: "neutral", 
+      icon: TrendingUp, 
+      color: "text-emerald-600",
+      bg: "bg-emerald-50"
+    },
+    { 
+      title: "Novos Pacientes", 
+      value: dashboardData.newPatients.toString(), 
+      change: "+0%", 
+      trend: "neutral", 
+      icon: Users, 
+      color: "text-amber-600",
+      bg: "bg-amber-50"
+    },
+  ];
   return (
     <div className="space-y-6 h-full overflow-y-auto pr-1 custom-scrollbar pb-8">
       {/* Metrics Row */}

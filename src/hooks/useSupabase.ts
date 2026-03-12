@@ -265,6 +265,7 @@ export interface FunnelStage {
   position: number;
   color: string | null;
   is_system: boolean;
+  is_fixed: boolean;
   created_at: string;
 }
 
@@ -318,7 +319,47 @@ export function useFunnelStages() {
     return () => { supabase.removeChannel(channel); };
   }, [fetch, profile?.clinic_id]);
 
-  return { data, loading, refetch: fetch };
+  const update = async (id: string, updates: Partial<FunnelStage>) => {
+    const { error } = await supabase.from('funnel_stages').update(updates).eq('id', id);
+    if (error) return false;
+    return true;
+  };
+
+  const remove = async (id: string) => {
+    const { error } = await supabase.from('funnel_stages').delete().eq('id', id);
+    if (error) return false;
+    return true;
+  };
+
+  const reorder = async (stages: FunnelStage[]) => {
+    const updates = stages.map((s, idx) => 
+      supabase.from('funnel_stages').update({ position: idx }).eq('id', s.id)
+    );
+    await Promise.all(updates);
+    return true;
+  };
+
+  const create = async (stage: Partial<FunnelStage>) => {
+    if (!profile?.clinic_id) return null;
+    const { data: lastStage } = await supabase
+      .from('funnel_stages')
+      .select('position')
+      .eq('clinic_id', profile.clinic_id)
+      .order('position', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const newPosition = (lastStage?.position ?? -1) + 1;
+    const { data, error } = await supabase
+      .from('funnel_stages')
+      .insert({ ...stage, clinic_id: profile.clinic_id, position: newPosition })
+      .select()
+      .single();
+    if (error) return null;
+    return data;
+  };
+
+  return { data, loading, refetch: fetch, create, update, remove, reorder };
 }
 
 export function useLeads() {
@@ -782,6 +823,18 @@ export function useChatMessages(leadId?: string) {
       .then(({ data }) => setClinicPhone(data?.phone_number || null));
   }, [profile?.clinic_id]);
 
+  const parseMessage = (msg: any): any => {
+    if (typeof msg === 'string') {
+      try {
+        const parsed = JSON.parse(msg);
+        return typeof parsed === 'object' ? parsed : { content: msg };
+      } catch {
+        return { content: msg };
+      }
+    }
+    return msg || {};
+  };
+
   const fetch = useCallback(async () => {
     if (!profile?.clinic_id) return;
     setLoading(true);
@@ -797,7 +850,13 @@ export function useChatMessages(leadId?: string) {
     const { data, error } = await query.order('created_at', { ascending: true });
     
     if (error) { setError(error.message); setLoading(false); return; }
-    setData(data || []);
+    
+    const formattedData = (data || []).map(m => ({
+      ...m,
+      message: parseMessage(m.message)
+    }));
+
+    setData(formattedData);
     setError(null);
     setLoading(false);
   }, [profile?.clinic_id, leadId]);
@@ -817,7 +876,10 @@ export function useChatMessages(leadId?: string) {
         // Only add if it belongs to current filter
         const newMsg = payload.new as ChatMessage;
         if (!leadId || newMsg.lead_id === leadId) {
-          setData(prev => [...prev, newMsg]);
+          setData(prev => [...prev, {
+            ...newMsg,
+            message: parseMessage(newMsg.message)
+          }]);
         }
       })
       .subscribe();
@@ -848,8 +910,40 @@ export function useChatMessages(leadId?: string) {
       sender: 'user',
       lead_id: leadId || msg.lead_id,
       session_id: finalSessionId,
-      message: messageObject
+      message: messageObject,
+      phone: leadPhone
     };
+
+    // Auto-create lead if missing and phone is present
+    if (!insertData.lead_id && leadPhone) {
+      // 1. Check if lead already exists for this phone
+      const { data: existingLead } = await supabase
+        .from('leads')
+        .select('id')
+        .eq('clinic_id', profile.clinic_id)
+        .eq('phone', leadPhone)
+        .maybeSingle();
+
+      if (existingLead) {
+        insertData.lead_id = existingLead.id;
+      } else {
+        // 2. Create new lead if not found
+        const { data: newLead, error: leadError } = await supabase
+          .from('leads')
+          .insert({
+            clinic_id: profile.clinic_id,
+            name: `Lead ${leadPhone}`,
+            phone: leadPhone,
+            source: 'manual'
+          })
+          .select()
+          .single();
+        
+        if (!leadError && newLead) {
+          insertData.lead_id = newLead.id;
+        }
+      }
+    }
 
     const { data, error } = await supabase
       .from('chat_messages')

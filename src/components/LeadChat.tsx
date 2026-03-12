@@ -111,7 +111,10 @@ export function LeadChat({ lead, onClose }: LeadChatProps) {
                     ? (isAI ? "bg-teal-600 text-white rounded-tr-none" : "bg-white text-slate-800 border border-slate-200 rounded-tr-none")
                     : "bg-slate-200 text-slate-800 rounded-tl-none"
                 )}>
-                  {msg.message?.content || msg.message?.text || String(msg.message || '')}
+                  {typeof msg.message === 'object' 
+                    ? (msg.message.content || msg.message.text || JSON.stringify(msg.message)) 
+                    : String(msg.message || '')
+                  }
                 </div>
                 <div className="flex items-center gap-1.5 mt-1.5 px-1">
                   {isAI && <Bot className="w-3 h-3 text-teal-600" />}

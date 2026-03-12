@@ -2,6 +2,10 @@ import React, { useState } from "react";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import {
+  Settings,
+  GripVertical,
+  ChevronUp,
+  ChevronDown,
   MessageSquare,
   Plus,
   Loader2,
@@ -18,14 +22,18 @@ import { ptBR } from "date-fns/locale";
 import { LeadChat } from "./LeadChat";
 
 export function LeadKanban() {
-  const { data: stages, loading: stagesLoading } = useFunnelStages();
+  const { data: stages, loading: stagesLoading, reorder: reorderStages, update: updateStage, create: createStage, remove: removeStage } = useFunnelStages();
   const { data: leads, loading: leadsLoading, create, update, remove } = useLeads();
   const [showModal, setShowModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [selectedLead, setSelectedLead] = useState<any>(null);
   const [formData, setFormData] = useState({ name: '', phone: '', source: 'manual', stage_id: '', estimated_value: '' });
   const [submitting, setSubmitting] = useState(false);
   const [chatLead, setChatLead] = useState<any>(null);
+  const [localStages, setLocalStages] = useState<any[]>([]);
+  const [isAddingStage, setIsAddingStage] = useState(false);
+  const [newStageName, setNewStageName] = useState("");
 
   const handleSubmit = async () => {
     if (!formData.name.trim()) return;
@@ -105,10 +113,15 @@ export function LeadKanban() {
           </h2>
           <p className="text-slate-500 font-medium text-base">Gerencie a jornada dos seus leads.</p>
         </div>
-        <Button className="py-5 px-6 group" onClick={() => { setSelectedLead(null); setFormData({ name: '', phone: '', source: 'manual', stage_id: stages[0]?.id || '', estimated_value: '' }); setShowModal(true); }}>
-          <Plus className="w-5 h-5 mr-2 group-hover:rotate-90 transition-transform" />
-          Novo Lead
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button variant="outline" size="icon" className="h-10 w-10 text-slate-400 hover:text-teal-600" onClick={() => { setLocalStages([...stages]); setShowSettingsModal(true); }}>
+            <Settings className="w-5 h-5" />
+          </Button>
+          <Button className="py-5 px-6 group" onClick={() => { setSelectedLead(null); setFormData({ name: '', phone: '', source: 'manual', stage_id: stages[0]?.id || '', estimated_value: '' }); setShowModal(true); }}>
+            <Plus className="w-5 h-5 mr-2 group-hover:rotate-90 transition-transform" />
+            Novo Lead
+          </Button>
+        </div>
       </div>
 
       <div className="flex gap-4 overflow-x-auto pb-4 h-full custom-scrollbar min-h-[600px]">
@@ -251,6 +264,156 @@ export function LeadKanban() {
                 <Button variant="destructive" className="flex-1" onClick={handleDelete} disabled={submitting}>
                   {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Trash2 className="w-4 h-4 mr-2" />}
                   Excluir
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Stage Settings Modal */}
+      <AnimatePresence>
+        {showSettingsModal && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4" onClick={() => setShowSettingsModal(false)}>
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between p-6 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-teal-50 rounded-lg">
+                    <Settings className="w-5 h-5 text-teal-600" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-900">Configurar Etapas</h3>
+                    <p className="text-xs text-slate-500">Reordene as fases do seu funil comercial.</p>
+                  </div>
+                </div>
+                <button onClick={() => setShowSettingsModal(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+              </div>
+
+              <div className="p-6 max-h-[400px] overflow-y-auto space-y-4 custom-scrollbar">
+                <div className="space-y-2">
+                  {localStages.map((stage, idx) => (
+                    <div 
+                      key={stage.id} 
+                      className={cn(
+                        "flex items-center justify-between p-3 rounded-xl border transition-all",
+                        stage.is_fixed ? "bg-slate-50 border-slate-200 opacity-80" : "bg-white border-slate-200 hover:border-teal-300 hover:shadow-sm"
+                      )}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={cn("w-3 h-3 rounded-full", stageColors[stage.color] || 'bg-slate-500')} />
+                        <div>
+                          <p className="text-sm font-bold text-slate-700">{stage.name}</p>
+                          {stage.is_fixed && <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Posição Fixa</span>}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        {!stage.is_fixed ? (
+                          <>
+                            <button 
+                              disabled={idx <= 1} // Can't move above Fixed stages index
+                              onClick={() => {
+                                const newStages = [...localStages];
+                                [newStages[idx], newStages[idx-1]] = [newStages[idx-1], newStages[idx]];
+                                setLocalStages(newStages);
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded-md disabled:opacity-30"
+                            >
+                              <ChevronUp className="w-4 h-4" />
+                            </button>
+                            <button 
+                              disabled={idx === localStages.length - 1}
+                              onClick={() => {
+                                const newStages = [...localStages];
+                                [newStages[idx], newStages[idx+1]] = [newStages[idx+1], newStages[idx]];
+                                setLocalStages(newStages);
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded-md disabled:opacity-30"
+                            >
+                              <ChevronDown className="w-4 h-4" />
+                            </button>
+                            <button 
+                              onClick={async () => {
+                                if (confirm(`Deseja realmente excluir a etapa "${stage.name}"?`)) {
+                                  await removeStage(stage.id);
+                                  setLocalStages(p => p.filter(s => s.id !== stage.id));
+                                }
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </>
+                        ) : (
+                          <GripVertical className="w-4 h-4 text-slate-300" />
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {isAddingStage ? (
+                  <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="p-4 bg-teal-50/50 rounded-xl border border-teal-100 flex gap-2">
+                    <input 
+                      autoFocus
+                      type="text" 
+                      value={newStageName} 
+                      onChange={e => setNewStageName(e.target.value)}
+                      placeholder="Nome da etapa"
+                      className="flex-1 px-3 py-1.5 text-sm bg-white border border-teal-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200"
+                      onKeyDown={async (e) => {
+                        if (e.key === 'Enter' && newStageName.trim()) {
+                          const newStage = await createStage({ 
+                            name: newStageName, 
+                            color: 'bg-teal-500', 
+                            is_fixed: false,
+                            is_system: false 
+                          });
+                          if (newStage) {
+                            setLocalStages(p => [...p, newStage]);
+                            setNewStageName("");
+                            setIsAddingStage(false);
+                          }
+                        }
+                      }}
+                    />
+                    <Button size="sm" onClick={async () => {
+                      if (!newStageName.trim()) return;
+                      const newStage = await createStage({ 
+                        name: newStageName, 
+                        color: 'bg-teal-500', 
+                        is_fixed: false,
+                        is_system: false 
+                      });
+                      if (newStage) {
+                        setLocalStages(p => [...p, newStage]);
+                        setNewStageName("");
+                        setIsAddingStage(false);
+                      }
+                    }}>Adicionar</Button>
+                    <Button size="sm" variant="ghost" onClick={() => setIsAddingStage(false)}>X</Button>
+                  </motion.div>
+                ) : (
+                  <button 
+                    onClick={() => setIsAddingStage(true)}
+                    className="w-full py-3 border border-dashed border-slate-300 rounded-xl text-slate-400 text-sm font-bold hover:bg-slate-50 hover:border-slate-400 transition-all flex items-center justify-center gap-2"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Nova Etapa
+                  </button>
+                )}
+              </div>
+
+              <div className="flex gap-3 p-6 border-t border-slate-100 bg-slate-50">
+                <Button variant="outline" className="flex-1" onClick={() => setShowSettingsModal(false)}>Cancelar</Button>
+                <Button className="flex-1" onClick={async () => {
+                  setSubmitting(true);
+                  await reorderStages(localStages);
+                  setSubmitting(false);
+                  setShowSettingsModal(false);
+                }} disabled={submitting}>
+                  {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                  Salvar Ordem
                 </Button>
               </div>
             </motion.div>

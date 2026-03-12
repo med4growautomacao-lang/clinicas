@@ -10,10 +10,25 @@ import { Settings } from './components/Settings';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { Login } from './components/Login';
+import { Loader2 } from 'lucide-react';
 
 function AppContent() {
   const [activeTab, setActiveTab] = useState('dashboard');
-  const { clinicName, userRole } = useAuth();
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="h-screen bg-slate-50 flex flex-col items-center justify-center gap-4">
+        <Loader2 className="w-10 h-10 text-teal-600 animate-spin" />
+        <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">Carregando Ambiente...</p>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Login />;
+  }
 
   const renderContent = () => {
     switch (activeTab) {

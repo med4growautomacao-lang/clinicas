@@ -106,10 +106,11 @@ export function AISecretary() {
 }
 
 function ChatsView() {
-  const messages = [
+  const [chatMessages] = useState([
     { role: "user", content: "Olá! Gostaria de agendar uma consulta para a próxima semana.", time: "10:40" },
-    { role: "assistant", content: "Olá, Maria! Com certeza. Temos os seguintes horários disponíveis na próxima semana:\n\n📅 Terça-feira (14/05) às 14:00\n📅 Quinta-feira (16/05) às 10:00\n\nQual desses horários é mais conveniente para você?", time: "10:41" }
-  ];
+    { role: "assistant", content: "Olá, Maria! Com certeza. Temos os seguintes horários disponíveis na próxima semana:\n\n📅 Terça-feira (14/05) às 14:00\n📅 Quinta-feira (16/05) às 10:00\n\nQual desses horários é mais conveniente para você?", time: "10:41" },
+    { role: "human", content: "Oi Maria, sou o atendente Carlos. Vi que você tem preferência por passar com o Dr. Roberto, confere?", time: "10:42" }
+  ]);
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-8 h-full min-h-[600px]">
@@ -130,16 +131,11 @@ function ChatsView() {
         </CardHeader>
         <CardContent className="flex-1 overflow-y-auto p-2 space-y-1 mt-2">
           {[
-            { name: "Maria Silva", msg: "Gostaria de agendar...", time: "10:42", unread: true, initials: "MS", color: "bg-blue-100" },
+            { name: "Maria Silva", msg: "Oi Maria, sou o atendente...", time: "10:42", unread: false, initials: "MS", color: "bg-blue-100", isHuman: true },
             { name: "João Pedro", msg: "Qual o valor da consulta?", time: "10:15", unread: false, initials: "JP", color: "bg-yellow-100" },
             { name: "Ana Costa", msg: "Obrigada, confirmado.", time: "09:30", unread: false, initials: "AC", color: "bg-pink-100" },
             { name: "Lucas Ferreira", msg: "Pode ser na terça?", time: "Ontem", unread: false, initials: "LF", color: "bg-indigo-100" },
             { name: "Carla Souza", msg: "Obrigada Clara!", time: "Ontem", unread: false, initials: "CS", color: "bg-emerald-100" },
-            { name: "Bia Ramos", msg: "Documento enviado.", time: "2 dias", unread: false, initials: "BR", color: "bg-orange-100" },
-            { name: "Mário Lima", msg: "Como chego aí?", time: "3 dias", unread: false, initials: "ML", color: "bg-purple-100" },
-            { name: "Juliana Mércia", msg: "Consulta cancelada.", time: "4 dias", unread: false, initials: "JM", color: "bg-rose-100" },
-            { name: "Fernanda Luz", msg: "Pode me ajudar?", time: "Uma semana", unread: false, initials: "FL", color: "bg-teal-100" },
-            { name: "Ricardo Paz", msg: "Confirmado!", time: "10/02", unread: false, initials: "RP", color: "bg-lime-100" },
           ].map((chat, i) => (
             <motion.div
               key={i}
@@ -157,9 +153,14 @@ function ChatsView() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-center mb-0.5">
-                    <span className="font-bold text-sm text-slate-900 truncate">
-                      {chat.name}
-                    </span>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="font-bold text-sm text-slate-900 truncate">
+                        {chat.name}
+                      </span>
+                      {chat.isHuman && (
+                        <span title="Atendimento Humano" className="text-xs">👤</span>
+                      )}
+                    </div>
                     <span className="text-[10px] font-medium text-slate-400">{chat.time}</span>
                   </div>
                   <div className="flex justify-between items-center">
@@ -188,10 +189,13 @@ function ChatsView() {
               <div className="flex items-center gap-2 mt-0.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-sm"></span>
                 <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">
-                  Sistena Ativo
+                  Sistema Ativo
                 </span>
               </div>
             </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold text-slate-400 uppercase bg-slate-100 px-2 py-1 rounded">Modo Inteligente</span>
           </div>
         </CardHeader>
 
@@ -202,22 +206,25 @@ function ChatsView() {
             </span>
           </div>
 
-          {messages.map((msg, i) => (
+          {chatMessages.map((msg, i) => (
             <motion.div 
               key={i}
               initial={{ opacity: 0, y: 10 }} 
               animate={{ opacity: 1, y: 0 }} 
               className={cn(
                 "flex gap-4 max-w-[85%]",
-                (msg.role === "assistant" || msg.role === "system") ? "" : "ml-auto flex-row-reverse"
+                msg.role === "user" ? "" : "ml-auto flex-row-reverse"
               )}
             >
               <div className={cn(
                 "w-8 h-8 rounded-lg shadow-sm flex-shrink-0 flex items-center justify-center",
-                msg.role === "assistant" ? "bg-teal-600 shadow-md" : "bg-white border border-slate-200"
+                msg.role === "assistant" ? "bg-teal-600 shadow-md" : 
+                msg.role === "human" ? "bg-slate-800 shadow-md" : "bg-white border border-slate-200"
               )}>
                 {msg.role === "assistant" ? (
                   <Bot className="w-5 h-5 text-white" />
+                ) : msg.role === "human" ? (
+                  <User className="w-4 h-4 text-white" />
                 ) : (
                   <User className="w-4 h-4 text-slate-400" />
                 )}
@@ -226,22 +233,31 @@ function ChatsView() {
                 "p-4 rounded-xl shadow-sm relative",
                 msg.role === "assistant" 
                   ? "bg-teal-600 text-white rounded-tr-none" 
-                  : "bg-white border border-slate-200 text-slate-700 rounded-tl-none"
+                  : msg.role === "human"
+                    ? "bg-slate-800 text-white rounded-tr-none"
+                    : "bg-white border border-slate-200 text-slate-700 rounded-tl-none"
               )}>
                 <p className="text-sm font-medium leading-relaxed whitespace-pre-wrap">
                   {msg.content}
                 </p>
-                <span className={cn(
-                  "text-[9px] mt-1 block opacity-60 font-bold uppercase",
-                  msg.role === "assistant" ? "text-white text-right" : "text-slate-400"
-                )}>
-                  {msg.time}
-                </span>
+                <div className="flex items-center justify-between gap-4 mt-1">
+                  {msg.role === "human" && (
+                    <span className="text-[8px] font-black uppercase text-slate-400">Atendimento Humano</span>
+                  )}
+                  <span className={cn(
+                    "text-[9px] block opacity-60 font-bold uppercase ml-auto",
+                    (msg.role === "assistant" || msg.role === "human") ? "text-white text-right" : "text-slate-400"
+                  )}>
+                    {msg.time}
+                  </span>
+                </div>
               </div>
             </motion.div>
           ))}
         </CardContent>
       </Card>
+
+
     </div>
   );
 }

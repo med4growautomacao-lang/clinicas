@@ -10,6 +10,7 @@ import {
   Stethoscope,
   Activity,
   ShieldCheck,
+  LogOut,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion } from "framer-motion";
@@ -24,8 +25,8 @@ interface SidebarProps {
 }
 
 export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
-  const { clinicName, userRole, setClinicName, setUserRole } = useAuth();
-
+  const { clinicName, userRole, signOut, profile } = useAuth();
+  
   const allNavItems = [
     { id: "dashboard", label: "Visão Geral", icon: LayoutDashboard, color: "text-emerald-600", roles: ['gestor', 'medico', 'secretaria'] },
     { id: "ai-secretary", label: "Assistente IA", icon: Bot, color: "text-teal-600", roles: ['gestor', 'secretaria'] },
@@ -47,7 +48,7 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
           </div>
           <div className="flex flex-col">
             <span className="text-xl font-black text-slate-900 tracking-tight">{clinicName.split(' ')[0]}</span>
-            <span className="text-[10px] font-bold text-teal-600 uppercase tracking-widest -mt-1">{clinicName.split(' ')[1] || 'Padrão'}</span>
+            <span className="text-[10px] font-bold text-teal-600 uppercase tracking-widest -mt-1">{clinicName.split(' ')[1] || 'Clínica'}</span>
           </div>
         </div>
       </div>
@@ -82,56 +83,29 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
       </nav>
 
       <div className="p-4 mt-auto border-t border-slate-100 bg-slate-50/50 space-y-3">
-        {/* SaaS Quick Controls */}
-        <div className="flex flex-col gap-2">
-          <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider px-2">Demo SaaS Controls</label>
-          <select 
-            value={clinicName}
-            onChange={(e) => setClinicName(e.target.value)}
-            className="w-full bg-white border border-slate-200 text-xs px-2 py-1.5 rounded-lg font-medium text-slate-600 outline-none focus:ring-1 focus:ring-teal-500 transition-all"
-          >
-            <option value="Clínica Central">Clínica Central</option>
-            <option value="Hospital Arca">Hospital Arca</option>
-            <option value="Odonto Prime">Odonto Prime</option>
-          </select>
-          
-          <div className="grid grid-cols-3 gap-1">
-            {(['gestor', 'medico', 'secretaria'] as UserRole[]).map((r) => (
-              <button
-                key={r}
-                onClick={() => {
-                  setUserRole(r);
-                  // Reset tab if current role doesn't have access
-                  const hasAccess = allNavItems.find(i => i.id === activeTab)?.roles.includes(r);
-                  if (!hasAccess) setActiveTab('dashboard');
-                }}
-                className={cn(
-                  "text-[9px] py-1 px-1 rounded-md font-bold uppercase transition-all",
-                  userRole === r 
-                    ? "bg-teal-600 text-white shadow-sm" 
-                    : "bg-white text-slate-400 border border-slate-200 hover:bg-slate-50"
-                )}
-              >
-                {r.slice(0, 3)}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-sm">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-teal-800 flex items-center justify-center text-white font-bold text-xs shrink-0">
-              {userRole === 'medico' ? 'DR' : userRole === 'gestor' ? 'AD' : 'SC'}
+        <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-sm group">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-8 h-8 rounded-lg bg-teal-800 flex items-center justify-center text-white font-bold text-xs shrink-0">
+                {profile?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || (userRole === 'medico' ? 'DR' : 'AD')}
+              </div>
+              <div className="flex flex-col min-w-0">
+                <span className="text-xs font-bold text-slate-900 truncate">
+                  {profile?.full_name || userRole.charAt(0).toUpperCase() + userRole.slice(1)}
+                </span>
+                <span className="text-[9px] font-medium text-teal-600 flex items-center gap-1">
+                  <ShieldCheck className="w-2.5 h-2.5" />
+                  Concluir Sessão
+                </span>
+              </div>
             </div>
-            <div className="flex flex-col min-w-0">
-              <span className="text-xs font-bold text-slate-900 truncate">
-                {userRole.charAt(0).toUpperCase() + userRole.slice(1)}
-              </span>
-              <span className="text-[9px] font-medium text-teal-600 flex items-center gap-1">
-                <ShieldCheck className="w-2.5 h-2.5" />
-                Sessão Ativa
-              </span>
-            </div>
+            <button 
+              onClick={() => signOut()}
+              className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
+              title="Sair do sistema"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </div>

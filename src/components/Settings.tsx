@@ -30,7 +30,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { useSettings, Clinic, AIConfig, WhatsappInstance } from "../hooks/useSupabase";
+import { useSettings, Clinic, AIConfig, WhatsappInstance, supabase } from "../hooks/useSupabase";
 
 export function Settings() {
     const { clinic, aiConfig, whatsapp, loading, updateClinic, updateAI, updateWhatsapp } = useSettings();
@@ -41,6 +41,7 @@ export function Settings() {
     const [localAI, setLocalAI] = useState<Partial<AIConfig>>({});
     const [localWA, setLocalWA] = useState<Partial<WhatsappInstance>>({});
     const [saving, setSaving] = useState(false);
+    const [connecting, setConnecting] = useState(false);
 
     useEffect(() => {
         if (clinic) setLocalClinic(clinic);
@@ -60,6 +61,25 @@ export function Settings() {
             }
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleWhatsappConnect = async () => {
+        setConnecting(true);
+        try {
+            const { data, error } = await supabase.functions.invoke('whatsapp-bridge', {
+                body: { clinic_id: clinic?.id }
+            });
+            
+            if (error) throw error;
+            
+            // Opcional: Aqui poderíamos abrir o QR Code se o n8n retornar
+            alert('Solicitação de conexão enviada para o n8n! Verifique seu fluxo.');
+        } catch (error: any) {
+            console.error('Erro ao conectar WhatsApp:', error);
+            alert('Erro ao iniciar conexão: ' + error.message);
+        } finally {
+            setConnecting(false);
         }
     };
 
@@ -148,6 +168,8 @@ export function Settings() {
                             <IntegrationSettings 
                                 data={localWA} 
                                 onChange={(updates) => setLocalWA(prev => ({ ...prev, ...updates }))} 
+                                onConnect={handleWhatsappConnect}
+                                connecting={connecting}
                             />
                         )}
                     </motion.div>
@@ -408,7 +430,12 @@ function ClinicSettings({ data, onChange }: { data: Partial<Clinic>, onChange: (
     );
 }
 
-function IntegrationSettings({ data, onChange }: { data: Partial<WhatsappInstance>, onChange: (updates: Partial<WhatsappInstance>) => void }) {
+function IntegrationSettings({ data, onChange, onConnect, connecting }: { 
+    data: Partial<WhatsappInstance>, 
+    onChange: (updates: Partial<WhatsappInstance>) => void,
+    onConnect: () => void,
+    connecting: boolean
+}) {
     const [copied, setCopied] = useState(false);
     const [simulating, setSimulating] = useState(false);
 
@@ -482,7 +509,17 @@ function IntegrationSettings({ data, onChange }: { data: Partial<WhatsappInstanc
                         {(data.status === "disconnected" || !data.status) && (
                             <div className="p-10 flex flex-col items-center gap-6 bg-slate-50/50">
                                 <QrCode className="w-12 h-12 text-slate-300" />
-                                <p className="text-slate-400 font-medium text-sm text-center">Configure os dados acima e salve para conectar.</p>
+                                <div className="flex flex-col items-center gap-4">
+                                    <p className="text-slate-400 font-medium text-sm text-center">Configure os dados acima e salve para conectar.</p>
+                                    <Button 
+                                        onClick={onConnect} 
+                                        disabled={connecting || !data.api_url || !data.api_token}
+                                        className="bg-teal-600 hover:bg-teal-700 text-white gap-2 h-10 px-8 font-bold"
+                                    >
+                                        {connecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wifi className="w-4 h-4" />}
+                                        {connecting ? 'Iniciando Conexão...' : 'Conectar Agora (via n8n)'}
+                                    </Button>
+                                </div>
                             </div>
                         )}
 

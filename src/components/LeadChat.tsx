@@ -12,6 +12,38 @@ interface LeadChatProps {
   onClose: () => void;
 }
 
+function stripToolCallPrefix(text: string): string {
+  if (!text.startsWith('[Used tools:')) return text;
+  let depth = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '[') depth++;
+    else if (text[i] === ']') {
+      depth--;
+      if (depth === 0) return text.slice(i + 1).trimStart();
+    }
+  }
+  return text;
+}
+
+function extractMessageText(message: any): string {
+  if (!message) return '';
+  if (typeof message === 'string') return stripToolCallPrefix(message);
+  // content pode ser string ou array (formato Anthropic)
+  if (typeof message.content === 'string') return stripToolCallPrefix(message.content);
+  if (Array.isArray(message.content)) {
+    return message.content
+      .map((block: any) => block?.text || block?.content || '')
+      .filter(Boolean)
+      .join('\n');
+  }
+  if (typeof message.text === 'string') return stripToolCallPrefix(message.text);
+  if (typeof message.output === 'string') return stripToolCallPrefix(message.output);
+  // último recurso: concatena todos os valores string do objeto
+  const values = Object.values(message).filter(v => typeof v === 'string') as string[];
+  if (values.length > 0) return stripToolCallPrefix(values.join(' '));
+  return JSON.stringify(message);
+}
+
 export function LeadChat({ lead, onClose }: LeadChatProps) {
   const { data: messages, loading, send } = useChatMessages(lead.id);
   const { update: updateLead } = useLeads();
@@ -154,10 +186,7 @@ export function LeadChat({ lead, onClose }: LeadChatProps) {
                       ? (isAI ? "bg-teal-600 text-white rounded-tr-none" : "bg-white text-slate-800 border border-slate-200 rounded-tr-none")
                       : "bg-slate-200 text-slate-800 rounded-tl-none"
                   )}>
-                    {typeof msg.message === 'object' 
-                      ? (msg.message.content || msg.message.output || msg.message.text || JSON.stringify(msg.message)) 
-                      : String(msg.message || '')
-                    }
+                    {extractMessageText(msg.message)}
                   </div>
                   <div className="flex items-center gap-1.5 mt-1.5 px-1">
                     {isAI && <Bot className="w-3 h-3 text-teal-600" />}

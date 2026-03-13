@@ -854,10 +854,22 @@ export function useChatMessages(leadId?: string) {
       // Priority extraction of content
       const rawContent = data.content || data.output || data.text || data.message || "";
       
-      // Secondary cleaning of technical jargon just in case the DB trigger didn't catch it
+      // Strip [Used tools: ...] prefix using bracket counting (regex não-greedy falha com JSON aninhado)
       let content = typeof rawContent === 'object' ? JSON.stringify(rawContent) : String(rawContent);
       if (content.includes('[Used tools:')) {
-        content = content.replace(/\[Used tools:[\s\S]*?\]/g, '').trim();
+        const startIdx = content.indexOf('[Used tools:');
+        let depth = 0;
+        let endIdx = -1;
+        for (let i = startIdx; i < content.length; i++) {
+          if (content[i] === '[') depth++;
+          else if (content[i] === ']') {
+            depth--;
+            if (depth === 0) { endIdx = i; break; }
+          }
+        }
+        if (endIdx !== -1) {
+          content = (content.slice(0, startIdx) + content.slice(endIdx + 1)).trimStart();
+        }
       }
 
       return {

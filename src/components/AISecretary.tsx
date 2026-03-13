@@ -28,8 +28,197 @@ import { useLeads, useChatMessages, useSettings } from "../hooks/useSupabase";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
+function ConfirmationsView() {
+  const { aiConfig, updateAI, loading } = useSettings();
+  const [saving, setSaving] = useState(false);
+  const [localConfig, setLocalConfig] = useState<any>(null);
+
+  useEffect(() => {
+    if (aiConfig) {
+      setLocalConfig({ ...aiConfig });
+    }
+  }, [aiConfig]);
+
+  if (loading || !localConfig) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 text-teal-600 animate-spin" />
+      </div>
+    );
+  }
+
+  const handleSave = async () => {
+    const requiredTags = ['{paciente}', '{data}', '{hora}'];
+    const missingTags = requiredTags.filter(tag => !localConfig.confirm_message.toLowerCase().includes(tag));
+
+    if (missingTags.length > 0) {
+      alert(`O template precisa conter as variáveis obrigatórias: ${missingTags.join(', ')}`);
+      return;
+    }
+
+    setSaving(true);
+    await updateAI(localConfig);
+    setSaving(false);
+  };
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 h-full">
+      <Card className="border border-slate-200 shadow-sm relative overflow-hidden">
+        <div className="h-1.5 bg-teal-600 absolute top-0 left-0 right-0" />
+        <CardHeader className="pb-4">
+          <CardTitle className="text-xl font-bold text-slate-900 flex items-center gap-3">
+            <ShieldCheck className="w-6 h-6 text-teal-600" />
+            Automação de Confirmação
+          </CardTitle>
+          <CardDescription className="text-slate-500 font-medium">
+            Envie mensagens automáticas para evitar faltas e otimizar sua agenda.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-100">
+            <div>
+              <p className="text-sm font-bold text-slate-900">
+                Disparar Confirmações
+              </p>
+              <p className="text-[10px] font-semibold text-slate-500 uppercase pt-0.5">
+                Ativar envio automático via WhatsApp
+              </p>
+            </div>
+            <button 
+              onClick={() => setLocalConfig({ ...localConfig, confirm_enabled: !localConfig.confirm_enabled })}
+              className={cn(
+                "w-12 h-6 rounded-full relative transition-all",
+                localConfig.confirm_enabled ? "bg-teal-600" : "bg-slate-300"
+              )}
+            >
+              <div className={cn(
+                "w-4 h-4 bg-white rounded-full absolute top-1 transition-all shadow-sm",
+                localConfig.confirm_enabled ? "right-1" : "left-1"
+              )}></div>
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1 flex items-center gap-2">
+              <Clock className="w-3 h-3" />
+              Antecedência do Disparo (em minutos)
+            </label>
+            <div className="flex items-center gap-4">
+              <input
+                type="number"
+                value={localConfig.confirm_lead_time || ""}
+                onChange={(e) => setLocalConfig({ ...localConfig, confirm_lead_time: parseInt(e.target.value) || 0 })}
+                className="w-32 px-4 py-2 border border-slate-200 rounded-lg font-bold text-teal-700 focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all"
+                placeholder="Ex: 1440"
+              />
+              <div className="flex-1 text-[10px] font-bold text-slate-400 uppercase leading-tight">
+                {localConfig.confirm_lead_time >= 60 
+                  ? `${Math.floor(localConfig.confirm_lead_time / 60)}h ${localConfig.confirm_lead_time % 60}min antes da consulta`
+                  : `${localConfig.confirm_lead_time} minutos antes da consulta`
+                }
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2 mt-2">
+              {[
+                { val: 1440, label: '24h' },
+                { val: 60, label: '1h' },
+                { val: 30, label: '30m' }
+              ].map(shortcut => (
+                <button
+                  key={shortcut.val}
+                  type="button"
+                  onClick={() => setLocalConfig({ ...localConfig, confirm_lead_time: shortcut.val })}
+                  className="px-2 py-1.5 rounded-md border border-slate-100 bg-slate-50 text-[9px] font-bold text-slate-500 hover:bg-slate-100 transition-colors uppercase"
+                >
+                  Sugestão: {shortcut.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex justify-between items-center mb-1">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">
+                Template da Mensagem
+              </label>
+            </div>
+            <textarea
+              rows={5}
+              value={localConfig.confirm_message || ""}
+              onChange={(e) => setLocalConfig({ ...localConfig, confirm_message: e.target.value })}
+              className="w-full p-4 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all resize-none text-sm leading-relaxed"
+              placeholder="Use {paciente}, {data} e {hora} para personalizar..."
+            />
+            <p className="text-[10px] text-slate-400 font-medium italic pl-1">
+              Variáveis obrigatórias: {"{paciente}"}, {"{data}"} e {"{hora}"}.
+            </p>
+          </div>
+
+          <Button 
+            onClick={handleSave} 
+            disabled={saving}
+            className="w-full bg-teal-600 hover:bg-teal-700 text-white py-6"
+          >
+            {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : "Salvar Configuração de Confirmação"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      <div className="space-y-8">
+        <Card className="border border-slate-200 shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <Activity className="w-5 h-5 text-teal-600" />
+              Visualização (Preview)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="p-6 bg-slate-900 rounded-2xl shadow-xl border border-slate-800 relative">
+               <div className="absolute top-0 left-1/2 -translate-x-1/2 w-16 h-1 bg-slate-700 rounded-b-lg" />
+               <div className="space-y-4 pt-4">
+                 <div className="bg-white/10 w-2/3 h-8 rounded-lg animate-pulse" />
+                 <div className="bg-teal-600 text-white p-4 rounded-2xl rounded-tr-none text-sm font-medium shadow-lg">
+                    {localConfig.confirm_message
+                      .replace('{paciente}', 'João Silva')
+                      .replace('{data}', '15/05')
+                      .replace('{hora}', '14:30')}
+                 </div>
+                 <div className="bg-white/5 w-1/2 h-4 rounded-full ml-auto" />
+               </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border border-slate-200 shadow-sm bg-teal-50/30">
+          <CardContent className="p-6 space-y-4">
+             <div className="flex items-center gap-3 text-teal-700">
+               <ShieldCheck className="w-6 h-6" />
+               <h4 className="font-bold text-sm">Como funciona?</h4>
+             </div>
+             <p className="text-xs text-slate-600 leading-relaxed font-medium">
+                O sistema monitora seus agendamentos e dispara a mensagem configurada automaticamente no tempo de antecedência escolhido.
+             </p>
+             <ul className="space-y-2">
+                {[
+                  'Redução de até 30% em faltas',
+                  'Atendimento 100% humanizado',
+                  'Configuração simples e rápida'
+                ].map((item, i) => (
+                  <li key={i} className="flex items-center gap-2 text-[10px] font-bold text-teal-600 uppercase">
+                    <div className="w-1 h-1 bg-teal-600 rounded-full" />
+                    {item}
+                  </li>
+                ))}
+             </ul>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
 export function AISecretary() {
-  const [activeTab, setActiveTab] = useState<"chats" | "leads" | "dashboard" | "config">("chats");
+  const [activeTab, setActiveTab] = useState<"chats" | "leads" | "dashboard" | "config" | "confirmations">("chats");
 
   return (
     <div className="space-y-8 h-full flex flex-col">
@@ -47,6 +236,7 @@ export function AISecretary() {
             { id: "chats", label: "Atendimentos" },
             { id: "leads", label: "Funil de Leads" },
             { id: "dashboard", label: "Dashboard" },
+            { id: "confirmations", label: "Confirmações" },
             { id: "config", label: "Configurações" }
           ].map((tab) => (
             <button
@@ -77,6 +267,7 @@ export function AISecretary() {
           {activeTab === "chats" && <ChatsView />}
           {activeTab === "leads" && <LeadKanban />}
           {activeTab === "dashboard" && <ServiceDashboard />}
+          {activeTab === "confirmations" && <ConfirmationsView />}
           {activeTab === "config" && <ConfigView />}
         </motion.div>
       </AnimatePresence>

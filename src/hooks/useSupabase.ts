@@ -701,6 +701,9 @@ export interface AIConfig {
   prompt: string | null;
   phone: string | null;
   auto_schedule: boolean;
+  confirm_enabled: boolean;
+  confirm_message: string;
+  confirm_lead_time: number;
   updated_at: string;
 }
 

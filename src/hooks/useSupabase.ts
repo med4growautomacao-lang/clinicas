@@ -369,19 +369,19 @@ export function useLeads() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetch = useCallback(async () => {
+  const fetch = useCallback(async (silent = false) => {
     if (!profile?.clinic_id) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     const { data, error } = await supabase
       .from('leads')
       .select('*')
       .eq('clinic_id', profile.clinic_id)
-      .order('created_at', { ascending: false });
+      .order('updated_at', { ascending: false, nullsFirst: false });
     
-    if (error) { setError(error.message); setLoading(false); return; }
+    if (error) { setError(error.message); if (!silent) setLoading(false); return; }
     setData(data || []);
     setError(null);
-    setLoading(false);
+    if (!silent) setLoading(false);
   }, [profile?.clinic_id]);
 
   useEffect(() => { 
@@ -396,7 +396,7 @@ export function useLeads() {
         table: 'leads',
         filter: `clinic_id=eq.${profile.clinic_id}`
       }, () => {
-        fetch();
+        fetch(true); // Silent fetch on realtime update
       })
       .subscribe();
 
@@ -683,6 +683,7 @@ export interface Clinic {
 export interface AIConfig {
   id: string;
   clinic_id: string;
+  name: string | null;
   tone: number;
   response_style: 'tecnica' | 'objetiva' | 'cordial';
   response_speed: 'instantanea' | 'cadenciada';
@@ -867,17 +868,25 @@ export function useChatMessages(leadId?: string) {
     fetch(); 
     if (!profile?.clinic_id) return;
 
-    // Use event: '*' and simply refetch to guarantee the UI matches the DB state,
-    // avoiding parsing or appending issues with complex JSON updates.
     const channel = supabase
       .channel(`chat_${leadId || 'all'}`)
       .on('postgres_changes', { 
-        event: '*', 
+        event: 'INSERT', 
         schema: 'public', 
         table: 'chat_messages',
         filter: leadId ? `lead_id=eq.${leadId}` : `clinic_id=eq.${profile.clinic_id}`
-      }, () => {
-        fetch();
+      }, (payload) => {
+        const newMsg = payload.new as ChatMessage;
+        if (!leadId || newMsg.lead_id === leadId) {
+          setData(prev => {
+            // Evita duplicatas se o realtime mandar duas vezes ou fetch coincidir
+            if (prev.find(m => m.id === newMsg.id)) return prev;
+            return [...prev, {
+              ...newMsg,
+              message: parseMessage(newMsg.message)
+            }];
+          });
+        }
       })
       .subscribe();
 

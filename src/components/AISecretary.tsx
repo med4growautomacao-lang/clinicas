@@ -90,6 +90,35 @@ function ChatsView() {
   const selectedLead = leads.find(l => l.id === selectedLeadId);
   const { data: messages, loading: messagesLoading } = useChatMessages(selectedLeadId || undefined);
 
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+
+  // Solução Definitiva: MutationObserver para o scroll no ChatsView
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !selectedLeadId) return; // Só rola se tiver lead selecionado
+
+    const scrollDown = () => {
+      el.scrollTop = el.scrollHeight;
+    };
+
+    // Força o scroll na montagem ou na troca de contato
+    scrollDown();
+
+    const observer = new MutationObserver((mutations) => {
+      scrollDown();
+    });
+
+    observer.observe(el, {
+      childList: true,
+      subtree: true,
+      characterData: true
+    });
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [messagesLoading, selectedLeadId]); 
+
   // Auto-select first lead if none selected
   useEffect(() => {
     if (leads.length > 0 && !selectedLeadId) {
@@ -194,7 +223,10 @@ function ChatsView() {
               </div>
             </CardHeader>
 
-            <CardContent className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50/20 custom-scrollbar">
+            <CardContent 
+              ref={scrollRef}
+              className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50/20 custom-scrollbar"
+            >
               {messagesLoading ? (
                 <div className="flex items-center justify-center h-full">
                   <Loader2 className="w-6 h-6 text-teal-600 animate-spin" />
@@ -210,12 +242,10 @@ function ChatsView() {
                   const isAI = msg.sender === 'ai';
                   
                   return (
-                    <motion.div 
+                    <div 
                       key={msg.id || i}
-                      initial={{ opacity: 0, y: 10 }} 
-                      animate={{ opacity: 1, y: 0 }} 
                       className={cn(
-                        "flex gap-4 max-w-[85%]",
+                        "flex gap-4 max-w-[85%]", // Removido motion para evitar bugs de scroll/altura
                         isOutbound ? "ml-auto flex-row-reverse" : ""
                       )}
                     >
@@ -253,7 +283,7 @@ function ChatsView() {
                           </span>
                         </div>
                       </div>
-                    </motion.div>
+                    </div>
                   );
                 })
               )}

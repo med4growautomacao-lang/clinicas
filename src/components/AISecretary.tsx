@@ -19,6 +19,8 @@ import {
   Clock,
   LayoutGrid,
   Loader2,
+  AlertTriangle,
+  X,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -28,18 +30,93 @@ import { useLeads, useChatMessages, useSettings } from "../hooks/useSupabase";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
+function ValidationModal({ isOpen, onClose, missingTags }: { isOpen: boolean, onClose: () => void, missingTags: string[] }) {
+  if (!isOpen) return null;
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4"
+        onClick={onClose}
+      >
+        <motion.div
+          initial={{ scale: 0.9, opacity: 0, y: 20 }}
+          animate={{ scale: 1, opacity: 1, y: 0 }}
+          exit={{ scale: 0.9, opacity: 0, y: 20 }}
+          className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-200"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="h-2 bg-amber-500" />
+          <div className="p-8">
+            <div className="flex items-center gap-4 mb-6">
+              <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center">
+                <AlertTriangle className="w-6 h-6 text-amber-600" />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-slate-900">Variáveis Faltando</h3>
+                <p className="text-sm text-slate-500 font-medium">O template da mensagem está incompleto.</p>
+              </div>
+              <button 
+                onClick={onClose}
+                className="ml-auto p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 mb-8">
+              <p className="text-sm text-slate-600 leading-relaxed font-medium">
+                Para que a confirmação funcione corretamente, as seguintes variáveis precisam estar presentes no texto:
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {missingTags.map(tag => (
+                  <span key={tag} className="px-3 py-1.5 bg-amber-50 border border-amber-100 rounded-lg text-amber-700 text-xs font-bold uppercase tracking-wider">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <Button 
+              onClick={onClose}
+              className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-6 rounded-xl shadow-lg shadow-amber-200 transition-all active:scale-[0.98]"
+            >
+              Entendi, vou ajustar
+            </Button>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
 function ConfirmationsView() {
   const { aiConfig, updateAI, loading } = useSettings();
   const [saving, setSaving] = useState(false);
   const [localConfig, setLocalConfig] = useState<any>(null);
+  const [showValidation, setShowValidation] = useState(false);
+  const [missingTags, setMissingTags] = useState<string[]>([]);
 
   useEffect(() => {
     if (aiConfig) {
       setLocalConfig({ ...aiConfig });
+    } else if (!loading) {
+      // Initialize with defaults if config doesn't exist yet
+      setLocalConfig({
+        confirm_enabled: false,
+        confirm_message: "Olá {paciente}, passando para confirmar sua consulta no dia {data} às {hora}. Podemos confirmar?",
+        confirm_lead_time: 1440,
+        response_style: 'cordial',
+        response_speed: 'instantanea',
+        tone: 3
+      });
     }
-  }, [aiConfig]);
+  }, [aiConfig, loading]);
 
-  if (loading || !localConfig) {
+  if (loading || (!localConfig && aiConfig === undefined)) {
     return (
       <div className="flex items-center justify-center h-64">
         <Loader2 className="w-8 h-8 text-teal-600 animate-spin" />
@@ -49,10 +126,11 @@ function ConfirmationsView() {
 
   const handleSave = async () => {
     const requiredTags = ['{paciente}', '{data}', '{hora}'];
-    const missingTags = requiredTags.filter(tag => !localConfig.confirm_message.toLowerCase().includes(tag));
+    const missing = requiredTags.filter(tag => !localConfig.confirm_message.toLowerCase().includes(tag));
 
-    if (missingTags.length > 0) {
-      alert(`O template precisa conter as variáveis obrigatórias: ${missingTags.join(', ')}`);
+    if (missing.length > 0) {
+      setMissingTags(missing);
+      setShowValidation(true);
       return;
     }
 
@@ -63,6 +141,11 @@ function ConfirmationsView() {
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-8 h-full">
+      <ValidationModal 
+        isOpen={showValidation} 
+        onClose={() => setShowValidation(false)} 
+        missingTags={missingTags} 
+      />
       <Card className="border border-slate-200 shadow-sm relative overflow-hidden">
         <div className="h-1.5 bg-teal-600 absolute top-0 left-0 right-0" />
         <CardHeader className="pb-4">

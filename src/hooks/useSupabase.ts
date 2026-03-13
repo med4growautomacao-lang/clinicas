@@ -771,7 +771,13 @@ export function useSettings() {
 
   const updateAI = async (updates: Partial<AIConfig>) => {
     if (!profile?.clinic_id) return false;
-    const { error } = await supabase.from('ai_config').update(updates).eq('clinic_id', profile.clinic_id);
+    const { error } = await supabase
+      .from('ai_config')
+      .upsert({ 
+        ...updates, 
+        clinic_id: profile.clinic_id,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'clinic_id' });
     if (!error) await fetch();
     return !error;
   };

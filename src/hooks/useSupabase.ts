@@ -704,6 +704,12 @@ export interface AIConfig {
   confirm_enabled: boolean;
   confirm_message: string;
   confirm_lead_time: number;
+  followup_enabled: boolean;
+  followup_message: string;
+  followup_delay: number;
+  handoff_enabled: boolean;
+  handoff_triggers: string[];
+  handoff_message: string;
   updated_at: string;
 }
 

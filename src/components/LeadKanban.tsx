@@ -28,7 +28,7 @@ export function LeadKanban() {
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [selectedLead, setSelectedLead] = useState<any>(null);
-  const [formData, setFormData] = useState({ name: '', phone: '', source: 'manual', stage_id: '', estimated_value: '' });
+  const [formData, setFormData] = useState({ name: '', phone: '', source: 'manual', stage_id: '', estimated_value: '', loss_reason: '' });
   const [submitting, setSubmitting] = useState(false);
   const [chatLead, setChatLead] = useState<any>(null);
   const [localStages, setLocalStages] = useState<any[]>([]);
@@ -64,12 +64,15 @@ export function LeadKanban() {
     if (!formData.name.trim()) return;
     setSubmitting(true);
     
+    const isPerdido = stages.find(s => s.id === formData.stage_id)?.name === 'Perdido';
+
     const payload = {
       name: formData.name,
       phone: formData.phone || null,
       source: formData.source as any,
       stage_id: formData.stage_id || (stages[0]?.id ?? null),
       estimated_value: formData.estimated_value ? Number(formData.estimated_value) : 0,
+      loss_reason: isPerdido ? (formData.loss_reason || null) : null,
     };
 
     if (selectedLead) {
@@ -78,7 +81,7 @@ export function LeadKanban() {
       await create(payload);
     }
 
-    setFormData({ name: '', phone: '', source: 'manual', stage_id: '', estimated_value: '' });
+    setFormData({ name: '', phone: '', source: 'manual', stage_id: '', estimated_value: '', loss_reason: '' });
     setSelectedLead(null);
     setShowModal(false);
     setSubmitting(false);
@@ -100,7 +103,8 @@ export function LeadKanban() {
       phone: lead.phone || '',
       source: lead.source || 'manual',
       stage_id: lead.stage_id || '',
-      estimated_value: lead.estimated_value?.toString() || ''
+      estimated_value: lead.estimated_value?.toString() || '',
+      loss_reason: lead.loss_reason || ''
     });
     setShowModal(true);
   };
@@ -174,51 +178,66 @@ export function LeadKanban() {
                 onDragLeave={() => setDragOverStage(null)}
                 onDrop={(e) => handleDrop(e, stage.id)}
               >
-                {stageLeads.map((lead) => (
-                  <motion.div 
-                    key={lead.id} 
-                    draggable 
+                {stageLeads.map((lead) => {
+                  const isPerdido = stage.name === 'Perdido';
+                  const semMotivo = isPerdido && !lead.loss_reason;
+                  return (
+                  <motion.div
+                    key={lead.id}
+                    draggable
                     onDragStart={(e) => handleDragStart(e, lead)}
-                    whileHover={{ y: -2 }} 
+                    whileHover={{ y: -1 }}
                     className={cn(
-                      "bg-white p-4 rounded-lg border border-slate-200 shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md transition-all group",
-                      draggedLead?.id === lead.id && "opacity-50"
+                      "bg-white px-3 py-2.5 rounded-lg border shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md transition-all group",
+                      draggedLead?.id === lead.id && "opacity-50",
+                      isPerdido ? "border-rose-200" : "border-slate-200"
                     )}
                   >
-                    <div className="flex justify-between items-start mb-3">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{lead.source || 'Manual'}</span>
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => openEditModal(lead)} className="p-1 text-slate-400 hover:text-teal-600 rounded-md transition-colors"><Edit2 className="w-3.5 h-3.5" /></button>
-                        <button onClick={() => openDeleteConfirm(lead)} className="p-1 text-slate-400 hover:text-rose-600 rounded-md transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{lead.source || 'Manual'}</span>
+                      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => openEditModal(lead)} className="p-0.5 text-slate-400 hover:text-teal-600 rounded transition-colors"><Edit2 className="w-3 h-3" /></button>
+                        <button onClick={() => openDeleteConfirm(lead)} className="p-0.5 text-slate-400 hover:text-rose-600 rounded transition-colors"><Trash2 className="w-3 h-3" /></button>
                       </div>
                     </div>
-                    <h4 className="font-bold text-slate-900 text-sm mb-1">{lead.name}</h4>
+                    <h4 className="font-bold text-slate-900 text-sm leading-tight">{lead.name}</h4>
                     {lead.phone && (
-                      <p className="text-[10px] font-medium text-slate-400 mb-2">{lead.phone}</p>
+                      <p className="text-[10px] font-medium text-slate-400 mt-0.5">{lead.phone}</p>
                     )}
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2 text-slate-500">
-                        <MessageSquare className="w-3 h-3" />
-                        <span className="text-[10px] font-medium">Lead ativo</span>
+
+                    {/* Motivo da perda */}
+                    {isPerdido && (
+                      <div className={cn(
+                        "mt-1.5 px-2 py-1 rounded text-[9px] font-bold flex items-center gap-1.5",
+                        semMotivo
+                          ? "bg-amber-50 border border-amber-200 text-amber-700"
+                          : "bg-rose-50 border border-rose-100 text-rose-700"
+                      )}>
+                        <AlertCircle className="w-2.5 h-2.5 shrink-0" />
+                        {semMotivo ? "Motivo da perda não preenchido" : lead.loss_reason}
                       </div>
-                      <button 
-                        onClick={() => setChatLead(lead)}
-                        className="flex items-center gap-1.5 px-2 py-1 bg-teal-50 text-teal-700 rounded-md text-[10px] font-bold border border-teal-100 hover:bg-teal-100 transition-colors"
-                      >
-                        <MessageSquare className="w-3 h-3" />
-                        Chat
-                      </button>
-                    </div>
-                    <div className="flex items-center justify-between pt-3 border-t border-slate-50">
-                      <div className="bg-teal-50 text-teal-700 text-[10px] font-bold px-2 py-0.5 rounded border border-teal-100">
+                    )}
+
+                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-50">
+                      <div className="bg-teal-50 text-teal-700 text-[9px] font-bold px-1.5 py-0.5 rounded border border-teal-100">
                         R$ {Number(lead.estimated_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                       </div>
-                      <span className="text-[10px] font-medium text-slate-400">
-                        {formatDistanceToNow(parseISO(lead.created_at), { addSuffix: true, locale: ptBR })}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[9px] font-medium text-slate-400">
+                          {formatDistanceToNow(parseISO(lead.created_at), { addSuffix: true, locale: ptBR })}
+                        </span>
+                        <button
+                          onClick={() => setChatLead(lead)}
+                          className="flex items-center gap-1 px-1.5 py-0.5 bg-teal-50 text-teal-700 rounded text-[9px] font-bold border border-teal-100 hover:bg-teal-100 transition-colors"
+                        >
+                          <MessageSquare className="w-2.5 h-2.5" />
+                          Chat
+                        </button>
+                      </div>
                     </div>
                   </motion.div>
-                ))}
+                  );
+                })}
 
                 <button onClick={() => { setFormData(p => ({ ...p, stage_id: stage.id })); setShowModal(true); }} className="w-full py-2 border border-dashed border-slate-300 rounded-lg text-slate-400 text-xs font-semibold hover:bg-white hover:border-slate-400 transition-all flex items-center justify-center gap-2 mt-auto">
                   <Plus className="w-3 h-3" />
@@ -272,6 +291,29 @@ export function LeadKanban() {
                     {stages.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 </div>
+                {stages.find(s => s.id === formData.stage_id)?.name === 'Perdido' && (
+                  <div>
+                    <label className="block text-xs font-semibold text-rose-500 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" />
+                      Motivo da Perda
+                    </label>
+                    <select
+                      value={formData.loss_reason}
+                      onChange={e => setFormData(p => ({ ...p, loss_reason: e.target.value }))}
+                      className="w-full px-4 py-2.5 bg-rose-50 border border-rose-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-200 font-medium text-sm"
+                    >
+                      <option value="">Selecione um motivo...</option>
+                      <option value="Preço alto">Preço alto</option>
+                      <option value="Escolheu concorrente">Escolheu concorrente</option>
+                      <option value="Não respondeu">Não respondeu</option>
+                      <option value="Sem interesse">Sem interesse</option>
+                      <option value="Fora do perfil">Fora do perfil</option>
+                      <option value="Agendou e não compareceu">Agendou e não compareceu</option>
+                      <option value="Tentativas de follow-up esgotadas">Tentativas de follow-up esgotadas</option>
+                      <option value="Outro">Outro</option>
+                    </select>
+                  </div>
+                )}
               </div>
               <div className="flex gap-3 p-6 border-t border-slate-100 bg-slate-50">
                 <Button variant="outline" className="flex-1" onClick={() => setShowModal(false)}>Cancelar</Button>

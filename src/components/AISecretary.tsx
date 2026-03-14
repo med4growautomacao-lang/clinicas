@@ -393,6 +393,27 @@ function FollowupsView() {
           </div>
 
           <div className="space-y-2">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1 flex items-center gap-2">
+              <Activity className="w-3 h-3" />
+              Tentativas Máximas
+            </label>
+            <div className="flex items-center gap-4">
+              <input
+                type="number"
+                min={1}
+                max={10}
+                value={localConfig.followup_max_attempts ?? 3}
+                onChange={(e) => setLocalConfig({ ...localConfig, followup_max_attempts: parseInt(e.target.value) || 1 })}
+                className="w-32 px-4 py-2 border border-slate-200 rounded-lg font-bold text-teal-700 focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all"
+                placeholder="Ex: 3"
+              />
+              <div className="flex-1 text-[10px] font-bold text-slate-400 uppercase leading-tight">
+                {localConfig.followup_max_attempts ?? 3} envio{(localConfig.followup_max_attempts ?? 3) !== 1 ? "s" : ""} por lead
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-2">
             <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1 font-sans">
               Mensagem de Reengajamento
             </label>

@@ -807,7 +807,7 @@ export function AISecretary() {
         <div className="flex bg-slate-50 p-1.5 rounded-2xl border border-slate-200 overflow-x-auto scrollbar-hide gap-1 w-full">
           {[
             { id: "chats", label: "Atendimentos" },
-            // { id: "leads", label: "Funil de Leads" },
+            { id: "leads", label: "Funil de Leads" },
             { id: "dashboard", label: "Dashboard" },
             { id: "confirmations", label: "Confirmações" },
             { id: "followups", label: "Acompanhamento" },

@@ -827,6 +827,37 @@ export function useSettings() {
   return { clinic, aiConfig, whatsapp, loading, refetch: fetch, updateClinic, updateAI, updateWhatsapp };
 }
 
+export function useClinics() {
+  const [data, setData] = useState<Clinic[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetch = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase.from('clinics').select('*').order('name');
+    if (error) { setError(error.message); setLoading(false); return; }
+    setData(data || []);
+    setError(null);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { fetch(); }, [fetch]);
+
+  const create = async (clinic: Partial<Clinic>) => {
+    const { data, error } = await supabase.from('clinics').insert(clinic).select().single();
+    if (!error) fetch();
+    return { data, error };
+  };
+
+  const update = async (id: string, updates: Partial<Clinic>) => {
+    const { error } = await supabase.from('clinics').update(updates).eq('id', id);
+    if (!error) fetch();
+    return !error;
+  };
+
+  return { data, loading, error, refetch: fetch, create, update };
+}
+
 
 // ==========================================
 // CHAT MESSAGES

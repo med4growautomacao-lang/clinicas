@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useState, useRef, ReactNod
 import { supabase } from '../lib/supabase';
 import { Session, User } from '@supabase/supabase-js';
 
-export type UserRole = 'gestor' | 'medico' | 'secretaria';
+export type UserRole = 'gestor' | 'medico' | 'secretaria' | 'super-admin';
 
 interface UserProfile {
   id: string;
@@ -110,7 +110,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (userData) {
-        console.log('AuthContext: Profile found:', userData.full_name);
+        console.log('AuthContext: Profile loaded successfully:', userData.email, 'Role:', userData.role);
         setProfile({
           id: userData.id,
           clinic_id: userData.clinic_id,

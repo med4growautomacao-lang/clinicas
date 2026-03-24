@@ -66,17 +66,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // 2. Listen for future auth changes (login, logout, token refresh)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
-      console.log('AuthContext: Auth event:', event);
+      console.log('AuthContext: Auth event received:', event, 'Has session:', !!newSession);
       
       // Skip INITIAL_SESSION since we handled it with getSession above
-      if (event === 'INITIAL_SESSION') return;
+      if (event === 'INITIAL_SESSION') {
+        console.log('AuthContext: Skipping INITIAL_SESSION event');
+        return;
+      }
 
       setSession(newSession);
       setUser(newSession?.user ?? null);
+      console.log('AuthContext: Updated user state to:', newSession?.user?.email ?? 'null');
 
       if (newSession?.user) {
         await fetchProfile(newSession.user.id);
       } else {
+        console.log('AuthContext: No session, clearing profile');
         setProfile(null);
         setClinicName('');
         setLoading(false);
@@ -134,7 +139,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    try {
+      console.log('AuthContext: Attempting to sign out...');
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        console.error('AuthContext: Sign out error from Supabase:', error);
+      } else {
+        console.log('AuthContext: Sign out successful');
+      }
+    } catch (error) {
+      console.error('AuthContext: Sign out unexpected exception:', error);
+    }
   };
 
   return (

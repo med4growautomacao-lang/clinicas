@@ -572,9 +572,10 @@ function IntegrationSettings({ data, onChange, onConnect, onCancel, connecting }
                                 <input
                                     type="text"
                                     value={data.api_id || ''}
+                                    readOnly
                                     onChange={(e) => onChange({ api_id: e.target.value })}
                                     placeholder="Ex: clinica-whatsapp-01"
-                                    className="w-full px-4 py-2.5 border border-slate-200 rounded-lg font-medium text-slate-700 text-sm placeholder:text-slate-300 focus:ring-2 focus:ring-teal-100 focus:border-teal-300 outline-none transition-all"
+                                    className="w-full px-4 py-2.5 border border-slate-200 rounded-lg font-medium text-slate-700 text-sm placeholder:text-slate-300 bg-slate-50 cursor-not-allowed outline-none transition-all"
                                 />
                             </div>
                         </div>
@@ -584,9 +585,10 @@ function IntegrationSettings({ data, onChange, onConnect, onCancel, connecting }
                             <input
                                 type="password"
                                 value={data.api_token || ''}
+                                readOnly
                                 onChange={(e) => onChange({ api_token: e.target.value })}
                                 placeholder="Seu token de autenticação (UaZapi)"
-                                className="w-full px-4 py-2.5 border border-slate-200 rounded-lg font-medium text-slate-700 text-sm placeholder:text-slate-300 focus:ring-2 focus:ring-teal-100 focus:border-teal-300 outline-none transition-all"
+                                className="w-full px-4 py-2.5 border border-slate-200 rounded-lg font-medium text-slate-700 text-sm placeholder:text-slate-300 bg-slate-50 cursor-not-allowed outline-none transition-all"
                             />
                             <p className="text-[10px] text-slate-400">Este token será usado pelo n8n para gerenciar a instância.</p>
                         </div>

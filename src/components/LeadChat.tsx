@@ -191,7 +191,7 @@ export function LeadChat({ lead, onClose }: LeadChatProps) {
                   <div className="flex items-center gap-1.5 mt-1.5 px-1">
                     {isAI && <Bot className="w-3 h-3 text-teal-600" />}
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">
-                      {isAI ? 'Assistente IA' : (isOutbound ? 'Você' : lead.name)} • {format(parseISO(msg.created_at), 'HH:mm')}
+                      {isAI ? 'Comercial' : (isOutbound ? 'Você' : lead.name)} • {format(parseISO(msg.created_at), 'HH:mm')}
                     </span>
                   </div>
                 </div>

@@ -376,8 +376,8 @@ function AISettings({ data, onChange }: { data: Partial<AIConfig>, onChange: (up
                         placeholder="Instruções avançadas para o comportamento da IA..."
                     />
                     <p className="text-[10px] text-slate-400 font-medium leading-relaxed">
-                        Este é o prompt base que define a personalidade e as regras principais da sua assistente. 
-                        Use para definir como ela deve se comportar, o que pode ou não falar.
+                        Este é o prompt base que define a personalidade e as regras principais do seu agente Comercial. 
+                        Use para definir como ele deve se comportar, o que pode ou não falar.
                     </p>
                 </div>
 
@@ -387,7 +387,7 @@ function AISettings({ data, onChange }: { data: Partial<AIConfig>, onChange: (up
                         className="w-full px-4 py-2 border border-slate-200 rounded-lg font-medium text-slate-700 h-24"
                         value={data.bio_text || ''}
                         onChange={(e) => onChange({ bio_text: e.target.value })}
-                        placeholder="Ex: Olá! Sou a assistente IA da clínica..."
+                        placeholder="Ex: Olá! Sou o Comercial da clínica..."
                     />
                 </div>
 

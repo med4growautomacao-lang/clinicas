@@ -1069,3 +1069,64 @@ export function useChatMessages(leadId?: string) {
 
   return { data, loading, error, refetch: fetch, send };
 }
+// ==========================================
+// MARKETING DATA
+// ==========================================
+export interface MarketingData {
+  id: string;
+  clinic_id: string;
+  date: string;
+  platform: 'meta_ads' | 'google_ads' | 'no_track';
+  investment: number;
+  conversions_value: number;
+  manual_leads_count: number | null;
+  manual_conversions_count: number | null;
+  created_at: string;
+}
+
+export function useMarketing() {
+  const { profile } = useAuth();
+  const [data, setData] = useState<MarketingData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetch = useCallback(async (startDate: string, endDate: string) => {
+    if (!profile?.clinic_id) return;
+    setLoading(true);
+    
+    const { data, error } = await supabase
+      .from('marketing_data')
+      .select('*')
+      .eq('clinic_id', profile.clinic_id)
+      .gte('date', startDate)
+      .lte('date', endDate)
+      .order('date', { ascending: true });
+    
+    if (error) {
+      setError(error.message);
+      setLoading(false);
+      return;
+    }
+
+    setData(data || []);
+    setError(null);
+    setLoading(false);
+  }, [profile?.clinic_id]);
+
+  const upsert = async (items: Partial<MarketingData>[]) => {
+    if (!profile?.clinic_id) return false;
+    
+    const prepared = items.map(item => ({
+      ...item,
+      clinic_id: profile.clinic_id
+    }));
+
+    const { error } = await supabase
+      .from('marketing_data')
+      .upsert(prepared, { onConflict: 'clinic_id,date,platform' });
+
+    return !error;
+  };
+
+  return { data, loading, error, fetch, upsert };
+}

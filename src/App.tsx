@@ -8,6 +8,7 @@ import { MedicalRecords } from './components/MedicalRecords';
 import { DoctorsManagement } from './components/DoctorsManagement';
 import { Settings } from './components/Settings';
 import SuperAdmin from './components/SuperAdmin';
+import { MarketingAnalytics } from './components/MarketingAnalytics';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -47,6 +48,8 @@ function AppContent() {
         return <DoctorsManagement />;
       case 'settings':
         return <Settings />;
+      case 'marketing':
+        return <MarketingAnalytics />;
       case 'super-admin':
         return <SuperAdmin />;
       default:

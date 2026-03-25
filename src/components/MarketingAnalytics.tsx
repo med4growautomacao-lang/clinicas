@@ -148,7 +148,7 @@ export function MarketingAnalytics() {
         weeks.push({
           start: s,
           end: e,
-          label: `SEM ${format(s, 'dd/MM')}`
+          label: `${format(s, 'd/M')} - ${format(e, 'd/M')}`
         });
         current = addDays(e, 1);
       }

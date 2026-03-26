@@ -940,7 +940,9 @@ function MetricRow({ label, periods, metrics, compareMetrics, isComparing, platf
 
         const delta = pVal > 0 ? ((val - pVal) / pVal) * 100 : null;
 
-        if (isEditing && period === 'dia' && valueKey) {
+        const isCalculated = ['cpl', 'cpa', 'cpconv'].includes(valueKey);
+
+        if (isEditing && period === 'dia' && valueKey && !isCalculated) {
            return (
              <td key={idx} className="px-4 py-2 border-r border-slate-50 last:border-r-0">
                <input type="number" value={editValues[editKey]} onChange={e => setEditValues((prev: any) => ({...prev, [editKey]: e.target.value}))} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-black text-center text-slate-900 focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all placeholder:text-slate-300" placeholder="0" />

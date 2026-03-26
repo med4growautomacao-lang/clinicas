@@ -27,6 +27,7 @@ import {
   Plus,
   Trash2,
   DollarSign,
+  CheckSquare,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -768,8 +769,135 @@ function HandoffView() {
   );
 }
 
+function FinishServiceView() {
+  const { aiConfig, updateAI, loading } = useSettings();
+  const [saving, setSaving] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const [localConfig, setLocalConfig] = useState<any>(null);
+
+  const setConfig = (updates: any) => { setLocalConfig((p: any) => ({ ...p, ...updates })); setIsDirty(true); };
+
+  useEffect(() => {
+    if (aiConfig) {
+      setLocalConfig({ ...aiConfig });
+      setIsDirty(false);
+    } else if (!loading) {
+      setLocalConfig({
+        finish_service_enabled: false,
+        finish_service_message: "Atendimento finalizado com sucesso. Agradecemos o contato!"
+      });
+    }
+  }, [aiConfig, loading]);
+
+  if (loading || !localConfig) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 text-teal-600 animate-spin" />
+      </div>
+    );
+  }
+
+  const handleSave = async () => {
+    setSaving(true);
+    await updateAI(localConfig);
+    setSaving(false);
+    setIsDirty(false);
+  };
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 h-full font-sans">
+      <Card className="border border-slate-200 shadow-sm relative overflow-hidden">
+        <div className="h-1.5 bg-teal-600 absolute top-0 left-0 right-0" />
+        <CardHeader className="pb-4">
+          <CardTitle className="text-xl font-bold text-slate-900 flex items-center gap-3">
+            <ShieldCheck className="w-6 h-6 text-teal-600" />
+            Encerramento de Atendimento
+          </CardTitle>
+          <CardDescription className="text-slate-500 font-medium">
+            Configure uma mensagem automática para ser enviada quando você encerra um ticket.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-100">
+            <div>
+              <p className="text-sm font-bold text-slate-900">Ativar Mensagem de Encerramento</p>
+              <p className="text-[10px] font-semibold text-slate-500 uppercase pt-0.5">Disparo automático ao finalizar</p>
+            </div>
+            <button
+              onClick={() => { const v = !localConfig.finish_service_enabled; setLocalConfig({ ...localConfig, finish_service_enabled: v }); updateAI({ ...localConfig, finish_service_enabled: v }); }}
+              className={cn(
+                "w-12 h-6 rounded-full relative transition-all",
+                localConfig.finish_service_enabled ? "bg-teal-600" : "bg-slate-300"
+              )}
+            >
+              <div className={cn(
+                "w-4 h-4 bg-white rounded-full absolute top-1 transition-all shadow-sm",
+                localConfig.finish_service_enabled ? "right-1" : "left-1"
+              )}></div>
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1 font-sans">
+              Mensagem de Despedida
+            </label>
+            <textarea
+              rows={5}
+              value={localConfig.finish_service_message || ""}
+              onChange={(e) => setConfig({ finish_service_message: e.target.value })}
+              className="w-full p-4 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all resize-none text-sm leading-relaxed"
+              placeholder="Obrigado pelo contato! Se precisar de algo mais, estamos à disposição."
+            />
+          </div>
+
+          <Button
+            onClick={handleSave}
+            disabled={saving || !isDirty}
+            className={cn("w-full py-6 transition-all", isDirty ? "bg-teal-600 hover:bg-teal-700 text-white shadow-lg shadow-teal-100" : "bg-slate-100 text-slate-400 cursor-default")}
+          >
+            {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : isDirty ? "Salvar Configurações" : "Configuração Salva ✓"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      <div className="flex flex-col gap-6">
+        <div className="p-6 rounded-2xl bg-teal-50 border border-teal-100 relative overflow-hidden">
+          <div className="relative z-10">
+            <h4 className="text-sm font-bold text-teal-900 mb-2 flex items-center gap-2">
+              <Bot className="w-4 h-4" />
+              Como funciona o Encerramento?
+            </h4>
+            <p className="text-xs text-teal-700 leading-relaxed font-medium">
+              Ao resolver ou fechar o atendimento de um lead, a plataforma enviará essa mensagem para formalizar o término da conversa pelo WhatsApp, oferecendo uma experiência mais polida e profissional para o paciente.
+            </p>
+          </div>
+          <CheckSquare className="absolute -right-4 -bottom-4 w-24 h-24 text-teal-200/50 rotate-12" />
+        </div>
+
+        <Card className="border border-slate-100 shadow-sm bg-slate-50/50">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-bold text-slate-500 uppercase tracking-tighter flex items-center gap-2">
+              <MessageSquare className="w-3 h-3" />
+              Preview da Mensagem
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-2">
+            <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 max-w-[85%] relative">
+               <p className="text-sm text-slate-700 leading-relaxed font-medium">
+                 {localConfig.finish_service_message || "Agradecemos o contato!"}
+               </p>
+               <span className="text-[9px] text-slate-400 font-bold uppercase mt-2 block">10:45</span>
+               <div className="absolute -left-2 top-4 w-4 h-4 bg-white border-l border-b border-slate-100 rotate-45" />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
 export function AISecretary() {
-  const [activeTab, setActiveTab] = useState<"chats" | "leads" | "dashboard" | "config" | "confirmations" | "followups" | "handoff">("chats");
+  const [activeTab, setActiveTab] = useState<"chats" | "leads" | "dashboard" | "config" | "confirmations" | "followups" | "handoff" | "finish_service">("chats");
   const { aiConfig, updateAI } = useSettings();
 
   return (
@@ -812,6 +940,7 @@ export function AISecretary() {
             { id: "confirmations", label: "Confirmações" },
             { id: "followups", label: "Follow-up" },
             { id: "handoff", label: "Transbordo" },
+            { id: "finish_service", label: "Encerramento" },
             { id: "config", label: "Configurações" }
           ].map((tab) => (
             <button
@@ -845,6 +974,7 @@ export function AISecretary() {
           {activeTab === "confirmations" && <ConfirmationsView />}
           {activeTab === "followups" && <FollowupsView />}
           {activeTab === "handoff" && <HandoffView />}
+          {activeTab === "finish_service" && <FinishServiceView />}
           {activeTab === "config" && <ConfigView />}
         </motion.div>
       </AnimatePresence>

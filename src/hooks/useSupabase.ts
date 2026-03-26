@@ -68,6 +68,7 @@ export function useDoctors() {
       .select()
       .single();
     if (error) { setError(error.message); return null; }
+    await fetch(true);
     return data;
   };
 
@@ -85,12 +86,14 @@ export function useDoctors() {
   const update = async (id: string, updates: Partial<Doctor>) => {
     const { error } = await supabase.from('doctors').update(updates).eq('id', id);
     if (error) { setError(error.message); return false; }
+    await fetch(true);
     return true;
   };
 
   const remove = async (id: string) => {
     const { error } = await supabase.from('doctors').delete().eq('id', id);
     if (error) { setError(error.message); return false; }
+    await fetch(true);
     return true;
   };
 
@@ -174,18 +177,21 @@ export function usePatients() {
       .select()
       .single();
     if (error) { setError(error.message); return null; }
+    await fetch(true);
     return data;
   };
 
   const update = async (id: string, updates: Partial<Patient>) => {
     const { error } = await supabase.from('patients').update(updates).eq('id', id);
     if (error) { setError(error.message); return false; }
+    await fetch(true);
     return true;
   };
 
   const remove = async (id: string) => {
     const { error } = await supabase.from('patients').delete().eq('id', id);
     if (error) { setError(error.message); return false; }
+    await fetch(true);
     return true;
   };
 
@@ -267,18 +273,21 @@ export function useAppointments() {
       .select('*, patient:patients(name, cpf, phone), doctor:doctors!inner(name, user_id)')
       .single();
     if (error) { setError(error.message); return null; }
+    await fetch(true);
     return data;
   };
 
   const update = async (id: string, updates: Partial<Appointment>) => {
     const { error } = await supabase.from('appointments').update(updates).eq('id', id);
     if (error) { setError(error.message); return false; }
+    await fetch(true);
     return true;
   };
 
   const remove = async (id: string) => {
     const { error } = await supabase.from('appointments').delete().eq('id', id);
     if (error) { setError(error.message); return false; }
+    await fetch(true);
     return true;
   };
 
@@ -357,12 +366,14 @@ export function useFunnelStages() {
   const update = async (id: string, updates: Partial<FunnelStage>) => {
     const { error } = await supabase.from('funnel_stages').update(updates).eq('id', id);
     if (error) return false;
+    await fetch();
     return true;
   };
 
   const remove = async (id: string) => {
     const { error } = await supabase.from('funnel_stages').delete().eq('id', id);
     if (error) return false;
+    await fetch();
     return true;
   };
 
@@ -371,6 +382,7 @@ export function useFunnelStages() {
       supabase.from('funnel_stages').update({ position: idx }).eq('id', s.id)
     );
     await Promise.all(updates);
+    await fetch();
     return true;
   };
 
@@ -391,6 +403,7 @@ export function useFunnelStages() {
       .select()
       .single();
     if (error) return null;
+    await fetch();
     return data;
   };
 
@@ -445,18 +458,21 @@ export function useLeads() {
       .select()
       .single();
     if (error) { setError(error.message); return null; }
+    await fetch(true);
     return data;
   };
 
   const update = async (id: string, updates: Partial<Lead>) => {
     const { error } = await supabase.from('leads').update(updates).eq('id', id);
     if (error) { setError(error.message); return false; }
+    await fetch(true);
     return true;
   };
 
   const remove = async (id: string) => {
     const { error } = await supabase.from('leads').delete().eq('id', id);
     if (error) { setError(error.message); return false; }
+    await fetch(true);
     return true;
   };
 
@@ -597,18 +613,21 @@ export function useFinancial() {
       .select()
       .single();
     if (error) { setError(error.message); return null; }
+    await fetch(true);
     return data;
   };
 
   const update = async (id: string, updates: Partial<FinancialTransaction>) => {
     const { error } = await supabase.from('financial_transactions').update(updates).eq('id', id);
     if (error) { setError(error.message); return false; }
+    await fetch(true);
     return true;
   };
 
   const remove = async (id: string) => {
     const { error } = await supabase.from('financial_transactions').delete().eq('id', id);
     if (error) { setError(error.message); return false; }
+    await fetch(true);
     return true;
   };
 
@@ -682,18 +701,21 @@ export function useMedicalRecords(patientId: string | null) {
       .select('*, doctor:doctors(name)')
       .single();
     if (error) { setError(error.message); return null; }
+    await fetch(true);
     return data;
   };
 
   const update = async (id: string, updates: Partial<MedicalRecord>) => {
     const { error } = await supabase.from('medical_records').update(updates).eq('id', id);
     if (error) { setError(error.message); return false; }
+    await fetch(true);
     return true;
   };
 
   const remove = async (id: string) => {
     const { error } = await supabase.from('medical_records').delete().eq('id', id);
     if (error) { setError(error.message); return false; }
+    await fetch(true);
     return true;
   };
 

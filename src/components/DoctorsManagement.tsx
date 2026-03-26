@@ -18,11 +18,17 @@ import { useDoctors, Doctor } from "../hooks/useSupabase";
 import { DoctorScheduleSettings } from "./DoctorScheduleSettings";
 
 export function DoctorsManagement() {
-    const { data: doctors, loading, error, create, update, remove } = useDoctors();
+    const { data: doctors, loading, error, createWithAuth, update, remove } = useDoctors();
     const [showModal, setShowModal] = useState(false);
     const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
     const [selectedDoctorId, setSelectedDoctorId] = useState<string | null>(null);
-    const [formData, setFormData] = useState({ name: '', specialty: '', crm: '' });
+    const [formData, setFormData] = useState({ 
+        name: '', 
+        specialty: '', 
+        crm: '',
+        email: '',
+        password: ''
+    });
     const [submitting, setSubmitting] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
     const [showScheduleSettings, setShowScheduleSettings] = useState(false);
@@ -30,7 +36,7 @@ export function DoctorsManagement() {
 
     const openCreateModal = () => {
         setModalMode('create');
-        setFormData({ name: '', specialty: '', crm: '' });
+        setFormData({ name: '', specialty: '', crm: '', email: '', password: '' });
         setSelectedDoctorId(null);
         setShowModal(true);
     };
@@ -44,26 +50,36 @@ export function DoctorsManagement() {
 
     const handleSubmit = async () => {
         if (!formData.name.trim()) return;
+        if (modalMode === 'create' && !formData.email.trim()) {
+            alert("O e-mail é obrigatório para cadastrar um profissional.");
+            return;
+        }
         setSubmitting(true);
         
-        if (modalMode === 'create') {
-            await create({ 
-                name: formData.name, 
-                specialty: formData.specialty || null, 
-                crm: formData.crm || null, 
-                status: 'atendendo' 
-            });
-        } else if (selectedDoctorId) {
-            await update(selectedDoctorId, { 
-                name: formData.name, 
-                specialty: formData.specialty || null, 
-                crm: formData.crm || null 
-            });
-        }
+        try {
+            if (modalMode === 'create') {
+                await createWithAuth({ 
+                    name: formData.name, 
+                    email: formData.email,
+                    password: formData.password,
+                    specialty: formData.specialty || null, 
+                    crm: formData.crm || null
+                });
+            } else if (selectedDoctorId) {
+                await update(selectedDoctorId, { 
+                    name: formData.name, 
+                    specialty: formData.specialty || null, 
+                    crm: formData.crm || null 
+                });
+            }
 
-        setFormData({ name: '', specialty: '', crm: '' });
-        setShowModal(false);
-        setSubmitting(false);
+            setFormData({ name: '', specialty: '', crm: '', email: '', password: '' });
+            setShowModal(false);
+        } catch (err: any) {
+            alert("Erro ao salvar: " + err.message);
+        } finally {
+            setSubmitting(false);
+        }
     };
 
     const handleDelete = async (id: string) => {
@@ -316,6 +332,31 @@ export function DoctorsManagement() {
                                         placeholder="CRM 12345-SP"
                                     />
                                 </div>
+
+                                {modalMode === 'create' && (
+                                    <>
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 font-bold">E-mail de Login *</label>
+                                            <input
+                                                type="email"
+                                                value={formData.email}
+                                                onChange={e => setFormData(p => ({ ...p, email: e.target.value }))}
+                                                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-300 font-medium text-sm transition-all"
+                                                placeholder="email@clinica.com"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 font-bold">Senha Inicial *</label>
+                                            <input
+                                                type="password"
+                                                value={formData.password}
+                                                onChange={e => setFormData(p => ({ ...p, password: e.target.value }))}
+                                                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-300 font-medium text-sm transition-all"
+                                                placeholder="••••••••"
+                                            />
+                                        </div>
+                                    </>
+                                )}
                             </div>
 
                             <div className="flex gap-3 p-6 border-t border-slate-100 bg-slate-50">

@@ -71,6 +71,17 @@ export function useDoctors() {
     return data;
   };
 
+  const createWithAuth = async (params: any) => {
+    if (!profile?.clinic_id) return null;
+    const { data, error } = await supabase.functions.invoke('create-professional', {
+      body: { ...params, clinic_id: profile.clinic_id }
+    });
+    if (error) { setError(error.message); return null; }
+    if (data.error) { setError(data.error); return null; }
+    await fetch(true);
+    return data;
+  };
+
   const update = async (id: string, updates: Partial<Doctor>) => {
     const { error } = await supabase.from('doctors').update(updates).eq('id', id);
     if (error) { setError(error.message); return false; }
@@ -83,7 +94,16 @@ export function useDoctors() {
     return true;
   };
 
-  return { data, loading, error, refetch: fetch, create, update, remove };
+  return { 
+    data, 
+    loading, 
+    error, 
+    refetch: fetch, 
+    create, 
+    createWithAuth, 
+    update, 
+    remove 
+  };
 }
 
 // ==========================================

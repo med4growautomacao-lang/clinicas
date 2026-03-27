@@ -1047,7 +1047,15 @@ export function useChatMessages(leadId?: string) {
   const send = async (msg: Partial<ChatMessage>) => {
     if (!profile?.clinic_id) return null;
     
-    const leadPhone = msg.phone;
+    let rawPhone = msg.phone || null;
+
+    // If the phone is actually a session_id (clinicPhone + leadPhone concatenated),
+    // extract only the lead phone by stripping the clinic phone prefix
+    if (rawPhone && clinicPhone && rawPhone.startsWith(clinicPhone) && rawPhone.length > clinicPhone.length) {
+      rawPhone = rawPhone.slice(clinicPhone.length);
+    }
+
+    const leadPhone = rawPhone;
     const finalSessionId = msg.session_id || (clinicPhone && leadPhone ? `${clinicPhone}${leadPhone}` : null);
 
     // Prepare message object to ensure it matches the JSONB structure

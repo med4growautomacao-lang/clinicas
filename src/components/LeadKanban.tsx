@@ -13,6 +13,7 @@ import {
   Edit2,
   Trash2,
   AlertCircle,
+  Zap,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -57,7 +58,7 @@ import { LeadChat } from "./LeadChat";
 export function LeadKanban() {
   const { data: stages, loading: stagesLoading, reorder: reorderStages, update: updateStage, create: createStage, remove: removeStage } = useFunnelStages();
   const { data: leads, loading: leadsLoading, create, update, remove } = useLeads();
-  const { aiConfig } = useSettings();
+  const { aiConfig, updateAI } = useSettings();
   const [showModal, setShowModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -68,6 +69,10 @@ export function LeadKanban() {
   const [localStages, setLocalStages] = useState<any[]>([]);
   const [isAddingStage, setIsAddingStage] = useState(false);
   const [newStageName, setNewStageName] = useState("");
+  const [showAutomationModal, setShowAutomationModal] = useState(false);
+  const [localRules, setLocalRules] = useState<any[]>([]);
+  const [isAddingRule, setIsAddingRule] = useState(false);
+  const [newRule, setNewRule] = useState({ keywords: '', target_stage_id: '' });
 
   const [draggedLead, setDraggedLead] = useState<any>(null);
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
@@ -177,6 +182,9 @@ export function LeadKanban() {
           <p className="text-slate-500 font-medium text-base">Gerencie a jornada dos seus leads.</p>
         </div>
         <div className="flex items-center gap-3">
+          <Button variant="outline" size="icon" className="h-10 w-10 text-slate-400 hover:text-teal-600" onClick={() => { setLocalRules(aiConfig?.transition_rules || []); setShowAutomationModal(true); }}>
+            <Zap className="w-5 h-5" />
+          </Button>
           <Button variant="outline" size="icon" className="h-10 w-10 text-slate-400 hover:text-teal-600" onClick={() => { setLocalStages([...stages]); setShowSettingsModal(true); }}>
             <Settings className="w-5 h-5" />
           </Button>
@@ -582,6 +590,123 @@ export function LeadKanban() {
                 }} disabled={submitting}>
                   {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
                   Salvar Ordem
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Automation Rules Modal */}
+      <AnimatePresence>
+        {showAutomationModal && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4" onClick={() => setShowAutomationModal(false)}>
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between p-6 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-teal-50 rounded-lg">
+                    <Zap className="w-5 h-5 text-teal-600" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-900">Automação de Etapas</h3>
+                    <p className="text-xs text-slate-500">Mude o lead de etapa automaticamente por palavras-chave.</p>
+                  </div>
+                </div>
+                <button onClick={() => setShowAutomationModal(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+              </div>
+
+              <div className="p-6 max-h-[400px] overflow-y-auto space-y-4 custom-scrollbar">
+                <div className="space-y-3">
+                  {localRules.map((rule, idx) => (
+                    <div key={idx} className="p-4 bg-slate-50 rounded-xl border border-slate-200 relative group">
+                      <button 
+                        onClick={() => setLocalRules(p => p.filter((_, i) => i !== idx))}
+                        className="absolute top-2 right-2 p-1 text-slate-400 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                      <div className="space-y-2">
+                        <div>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Palavras-chave</p>
+                          <p className="text-sm font-medium text-slate-700">{rule.keywords}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Mover para</p>
+                          <div className="flex items-center gap-2">
+                            <div className={cn("w-2 h-2 rounded-full", stages.find(s => s.id === rule.target_stage_id)?.color || 'bg-slate-400')} />
+                            <p className="text-sm font-bold text-slate-900">
+                              {stages.find(s => s.id === rule.target_stage_id)?.name || 'Etapa não encontrada'}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+
+                  {isAddingRule ? (
+                    <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="p-4 bg-teal-50/50 rounded-xl border border-teal-100 space-y-4">
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Palavras-chave (separadas por vírgula)</label>
+                        <input 
+                          autoFocus
+                          type="text" 
+                          value={newRule.keywords} 
+                          onChange={e => setNewRule(p => ({ ...p, keywords: e.target.value }))}
+                          placeholder="Ex: agendar, consulta, marcar"
+                          className="w-full px-3 py-2 text-sm bg-white border border-teal-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 font-medium"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Etapa Destino</label>
+                        <select 
+                          value={newRule.target_stage_id}
+                          onChange={e => setNewRule(p => ({ ...p, target_stage_id: e.target.value }))}
+                          className="w-full px-3 py-2 text-sm bg-white border border-teal-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 font-medium"
+                        >
+                          <option value="">Selecione uma etapa...</option>
+                          {stages.map(s => (
+                            <option key={s.id} value={s.id}>{s.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button 
+                          size="sm" 
+                          className="flex-1 bg-teal-600 hover:bg-teal-700"
+                          disabled={!newRule.keywords.trim() || !newRule.target_stage_id}
+                          onClick={() => {
+                            setLocalRules(p => [...p, newRule]);
+                            setNewRule({ keywords: '', target_stage_id: '' });
+                            setIsAddingRule(false);
+                          }}
+                        >
+                          Confirmar
+                        </Button>
+                        <Button size="sm" variant="ghost" className="flex-1" onClick={() => setIsAddingRule(false)}>Cancelar</Button>
+                      </div>
+                    </motion.div>
+                  ) : (
+                    <button 
+                      onClick={() => setIsAddingRule(true)}
+                      className="w-full py-3 border border-dashed border-slate-300 rounded-xl text-slate-400 text-sm font-bold hover:bg-slate-50 hover:border-slate-400 transition-all flex items-center justify-center gap-2"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Nova Regra
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex gap-3 p-6 border-t border-slate-100 bg-slate-50">
+                <Button variant="outline" className="flex-1" onClick={() => setShowAutomationModal(false)}>Fechar</Button>
+                <Button className="flex-1 bg-teal-600 hover:bg-teal-700" onClick={async () => {
+                  setSubmitting(true);
+                  await updateAI({ transition_rules: localRules });
+                  setSubmitting(false);
+                  setShowAutomationModal(false);
+                }} disabled={submitting}>
+                  {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                  Salvar Automações
                 </Button>
               </div>
             </motion.div>

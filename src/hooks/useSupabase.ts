@@ -754,7 +754,8 @@ export interface AIConfig {
   followup_enabled: boolean;
   followup_message: string;
   followup_delay: number;
-  handoff_enabled: boolean;
+  handoff_rules: any[] | null;
+  transition_rules: any[] | null;
   finish_service_enabled: boolean;
   finish_service_message: string;
   sla_minutes: number;

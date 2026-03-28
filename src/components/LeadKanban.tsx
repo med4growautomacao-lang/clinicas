@@ -14,10 +14,11 @@ import {
   Trash2,
   AlertCircle,
   Zap,
+  Pencil,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { useFunnelStages, useLeads, useSettings } from "../hooks/useSupabase";
+import { useFunnelStages, useLeads, useSettings, useTransitionRules } from "../hooks/useSupabase";
 
 function calcBusinessMinutes(since: Date, bh: { start: string; end: string; days: number[] }, endDate?: Date): number {
   const now = endDate || new Date();
@@ -59,6 +60,7 @@ export function LeadKanban() {
   const { data: stages, loading: stagesLoading, reorder: reorderStages, update: updateStage, create: createStage, remove: removeStage } = useFunnelStages();
   const { data: leads, loading: leadsLoading, create, update, remove } = useLeads();
   const { aiConfig, updateAI } = useSettings();
+  const { data: transitionRules, create: createRule, remove: removeRule, update: updateRule } = useTransitionRules();
   const [showModal, setShowModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -70,9 +72,9 @@ export function LeadKanban() {
   const [isAddingStage, setIsAddingStage] = useState(false);
   const [newStageName, setNewStageName] = useState("");
   const [showAutomationModal, setShowAutomationModal] = useState(false);
-  const [localRules, setLocalRules] = useState<any[]>([]);
+  const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [isAddingRule, setIsAddingRule] = useState(false);
-  const [newRule, setNewRule] = useState({ keywords: '', target_stage_id: '' });
+  const [newRule, setNewRule] = useState({ keywords: '', target_stage_id: '', context: '', lead_response: '', message_to_send: '' });
 
   const [draggedLead, setDraggedLead] = useState<any>(null);
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
@@ -182,7 +184,7 @@ export function LeadKanban() {
           <p className="text-slate-500 font-medium text-base">Gerencie a jornada dos seus leads.</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="outline" size="icon" className="h-10 w-10 text-slate-400 hover:text-teal-600" onClick={() => { setLocalRules(aiConfig?.transition_rules || []); setShowAutomationModal(true); }}>
+          <Button variant="outline" size="icon" className="h-10 w-10 text-slate-400 hover:text-teal-600" onClick={() => { setShowAutomationModal(true); }}>
             <Zap className="w-5 h-5" />
           </Button>
           <Button variant="outline" size="icon" className="h-10 w-10 text-slate-400 hover:text-teal-600" onClick={() => { setLocalStages([...stages]); setShowSettingsModal(true); }}>
@@ -617,17 +619,53 @@ export function LeadKanban() {
 
               <div className="p-6 max-h-[400px] overflow-y-auto space-y-4 custom-scrollbar">
                 <div className="space-y-3">
-                  {localRules.map((rule, idx) => (
-                    <div key={idx} className="p-4 bg-slate-50 rounded-xl border border-slate-200 relative group">
-                      <button 
-                        onClick={() => setLocalRules(p => p.filter((_, i) => i !== idx))}
-                        className="absolute top-2 right-2 p-1 text-slate-400 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                  {transitionRules.map((rule, idx) => (
+                    <div key={rule.id} className="p-4 bg-slate-50 rounded-xl border border-slate-200 relative group">
+                      <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button 
+                          onClick={() => {
+                            setEditingRuleId(rule.id);
+                            setNewRule({
+                              keywords: rule.keywords || '',
+                              target_stage_id: rule.target_stage_id || '',
+                              context: rule.context || '',
+                              lead_response: rule.lead_response || '',
+                              message_to_send: rule.message_to_send || ''
+                            });
+                            setIsAddingRule(true);
+                          }}
+                          className="p-1 text-slate-400 hover:text-teal-600 transition-colors"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button 
+                          onClick={() => removeRule(rule.id)}
+                          className="p-1 text-slate-400 hover:text-rose-500 transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                       <div className="space-y-2">
+                        {rule.context && (
+                          <div>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Contexto</p>
+                            <p className="text-xs text-slate-600 italic">"{rule.context}"</p>
+                          </div>
+                        )}
+                        {rule.lead_response && (
+                          <div>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Resposta do Lead</p>
+                            <p className="text-xs text-slate-600 italic">"{rule.lead_response}"</p>
+                          </div>
+                        )}
+                        {rule.message_to_send && (
+                          <div>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Mensagem a ser enviada</p>
+                            <p className="text-xs text-slate-600 italic">"{rule.message_to_send}"</p>
+                          </div>
+                        )}
                         <div>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Palavras-chave</p>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Gatilho a ser enviado</p>
                           <p className="text-sm font-medium text-slate-700">{rule.keywords}</p>
                         </div>
                         <div>
@@ -646,13 +684,42 @@ export function LeadKanban() {
                   {isAddingRule ? (
                     <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="p-4 bg-teal-50/50 rounded-xl border border-teal-100 space-y-4">
                       <div className="space-y-2">
-                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Palavras-chave (separadas por vírgula)</label>
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Contexto</label>
                         <input 
-                          autoFocus
+                          type="text" 
+                          value={newRule.context} 
+                          onChange={e => setNewRule(p => ({ ...p, context: e.target.value }))}
+                          placeholder="Ex: Lead deseja agendar uma avaliação"
+                          className="w-full px-3 py-2 text-sm bg-white border border-teal-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 font-medium"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Resposta do Lead</label>
+                        <input 
+                          type="text" 
+                          value={newRule.lead_response} 
+                          onChange={e => setNewRule(p => ({ ...p, lead_response: e.target.value }))}
+                          placeholder="Ex: Sim, gostaria de marcar"
+                          className="w-full px-3 py-2 text-sm bg-white border border-teal-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 font-medium"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Mensagem a ser enviada</label>
+                        <textarea 
+                          rows={3}
+                          value={newRule.message_to_send} 
+                          onChange={e => setNewRule(p => ({ ...p, message_to_send: e.target.value }))}
+                          placeholder="Digite a mensagem que o sistema deve considerar..."
+                          className="w-full px-3 py-2 text-sm bg-white border border-teal-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 font-medium resize-none"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Gatilho a ser enviado (separados por vírgula)</label>
+                        <input 
                           type="text" 
                           value={newRule.keywords} 
                           onChange={e => setNewRule(p => ({ ...p, keywords: e.target.value }))}
-                          placeholder="Ex: agendar, consulta, marcar"
+                          placeholder="Ex: [AGENDAR_CONSULTA]"
                           className="w-full px-3 py-2 text-sm bg-white border border-teal-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 font-medium"
                         />
                       </div>
@@ -673,16 +740,24 @@ export function LeadKanban() {
                         <Button 
                           size="sm" 
                           className="flex-1 bg-teal-600 hover:bg-teal-700"
-                          disabled={!newRule.keywords.trim() || !newRule.target_stage_id}
-                          onClick={() => {
-                            setLocalRules(p => [...p, newRule]);
-                            setNewRule({ keywords: '', target_stage_id: '' });
+                          disabled={!newRule.keywords.trim() || !newRule.target_stage_id || submitting}
+                          onClick={async () => {
+                            setSubmitting(true);
+                            if (editingRuleId) {
+                              await updateRule(editingRuleId, newRule);
+                            } else {
+                              await createRule(newRule);
+                            }
+                            setNewRule({ keywords: '', target_stage_id: '', context: '', lead_response: '', message_to_send: '' });
+                            setSubmitting(false);
                             setIsAddingRule(false);
+                            setEditingRuleId(null);
                           }}
                         >
-                          Confirmar
+                          {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
+                          {editingRuleId ? 'Salvar Edição' : 'Confirmar'}
                         </Button>
-                        <Button size="sm" variant="ghost" className="flex-1" onClick={() => setIsAddingRule(false)}>Cancelar</Button>
+                        <Button size="sm" variant="ghost" className="flex-1" onClick={() => { setIsAddingRule(false); setEditingRuleId(null); }}>Cancelar</Button>
                       </div>
                     </motion.div>
                   ) : (
@@ -698,15 +773,8 @@ export function LeadKanban() {
               </div>
 
               <div className="flex gap-3 p-6 border-t border-slate-100 bg-slate-50">
-                <Button variant="outline" className="flex-1" onClick={() => setShowAutomationModal(false)}>Fechar</Button>
-                <Button className="flex-1 bg-teal-600 hover:bg-teal-700" onClick={async () => {
-                  setSubmitting(true);
-                  await updateAI({ transition_rules: localRules });
-                  setSubmitting(false);
-                  setShowAutomationModal(false);
-                }} disabled={submitting}>
-                  {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                  Salvar Automações
+                <Button className="flex-1 bg-teal-600 hover:bg-teal-700" onClick={() => setShowAutomationModal(false)}>
+                  Fechar
                 </Button>
               </div>
             </motion.div>

@@ -1184,3 +1184,71 @@ export function useMarketing() {
 
   return { data, loading, error, fetch, upsert };
 }
+
+// ==========================================
+// TRANSITION RULES
+// ==========================================
+export interface TransitionRule {
+  id: string;
+  clinic_id: string;
+  keywords: string;
+  target_stage_id: string;
+  context?: string | null;
+  lead_response?: string | null;
+  message_to_send?: string | null;
+  created_at: string;
+}
+
+export function useTransitionRules() {
+  const { profile } = useAuth();
+  const [data, setData] = useState<TransitionRule[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetch = useCallback(async () => {
+    if (!profile?.clinic_id) return;
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('stage_transition_rules')
+      .select('*')
+      .eq('clinic_id', profile.clinic_id)
+      .order('created_at');
+    
+    if (error) { setError(error.message); setLoading(false); return; }
+    setData(data || []);
+    setError(null);
+    setLoading(false);
+  }, [profile?.clinic_id]);
+
+  useEffect(() => { fetch(); }, [fetch]);
+
+  const create = async (rule: Partial<TransitionRule>) => {
+    if (!profile?.clinic_id) return null;
+    const { data, error } = await supabase
+      .from('stage_transition_rules')
+      .insert({ ...rule, clinic_id: profile.clinic_id })
+      .select()
+      .single();
+    if (!error) await fetch();
+    return data;
+  };
+
+  const remove = async (id: string) => {
+    const { error } = await supabase.from('stage_transition_rules').delete().eq('id', id);
+    if (!error) await fetch();
+    return !error;
+  };
+
+  const update = async (id: string, rule: Partial<TransitionRule>) => {
+    const { data, error } = await supabase
+      .from('stage_transition_rules')
+      .update(rule)
+      .eq('id', id)
+      .select()
+      .single();
+    if (!error) await fetch();
+    return data;
+  };
+
+  return { data, loading, error, refetch: fetch, create, remove, update };
+}

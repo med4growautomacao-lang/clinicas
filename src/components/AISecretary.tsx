@@ -34,7 +34,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { LeadKanban } from "./LeadKanban";
 import { ServiceDashboard } from "./ServiceDashboard";
 import { useLeads, useChatMessages, useSettings, useFunnelStages, FunnelStage } from "../hooks/useSupabase";
-import { format, parseISO } from "date-fns";
+import { format, parseISO, isToday, isYesterday, isSameDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 function ValidationModal({ isOpen, onClose, missingTags }: { isOpen: boolean, onClose: () => void, missingTags: string[] }) {
@@ -1179,14 +1179,31 @@ function ChatsView() {
                   const isOutbound = msg.direction === 'outbound';
                   const isAI = msg.sender === 'ai';
                   
+                  const currentDate = parseISO(msg.created_at);
+                  const prevDate = i > 0 ? parseISO(messages[i - 1].created_at) : null;
+                  const showDateSeparator = !prevDate || !isSameDay(currentDate, prevDate);
+
+                  const getDateLabel = (date: Date) => {
+                    if (isToday(date)) return 'Hoje';
+                    if (isYesterday(date)) return 'Ontem';
+                    return format(date, "d 'de' MMMM", { locale: ptBR });
+                  };
+
                   return (
-                    <div 
-                      key={msg.id || i}
-                      className={cn(
-                        "flex gap-4 max-w-[85%] min-w-0", // Adicionado min-w-0 aqui
-                        isOutbound ? "ml-auto flex-row-reverse" : ""
+                    <React.Fragment key={msg.id || i}>
+                      {showDateSeparator && (
+                        <div className="flex justify-center my-8 sticky top-2 z-10 pointer-events-none">
+                          <span className="bg-white/95 backdrop-blur-sm border border-slate-100 text-[10px] font-bold text-slate-500 uppercase tracking-widest px-4 py-1.5 rounded-full shadow-sm">
+                            {getDateLabel(currentDate)}
+                          </span>
+                        </div>
                       )}
-                    >
+                      <div 
+                        className={cn(
+                          "flex gap-4 max-w-[85%] min-w-0",
+                          isOutbound ? "ml-auto flex-row-reverse" : ""
+                        )}
+                      >
                       <div className={cn(
                         "w-8 h-8 rounded-lg shadow-sm flex-shrink-0 flex items-center justify-center",
                         isAI ? "bg-teal-600 shadow-md" : 
@@ -1222,9 +1239,11 @@ function ChatsView() {
                         </div>
                       </div>
                     </div>
-                  );
-                })
-              )}
+                  </React.Fragment>
+                );
+              })
+            )
+          }
             </CardContent>
           </>
         )}

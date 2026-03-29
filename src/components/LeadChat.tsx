@@ -3,7 +3,7 @@ import { X, Send, Bot, User, Loader2, MessageSquare, Phone } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "./ui/button";
 import { useChatMessages, ChatMessage, Lead, useLeads } from "../hooks/useSupabase";
-import { format, parseISO } from "date-fns";
+import { format, parseISO, isToday, isYesterday, isSameDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/src/lib/utils";
 
@@ -172,14 +172,31 @@ export function LeadChat({ lead, onClose }: LeadChatProps) {
               const isOutbound = msg.direction === 'outbound';
               const isAI = msg.sender === 'ai';
               
+              const currentDate = parseISO(msg.created_at);
+              const prevDate = idx > 0 ? parseISO(messages[idx - 1].created_at) : null;
+              const showDateSeparator = !prevDate || !isSameDay(currentDate, prevDate);
+
+              const getDateLabel = (date: Date) => {
+                if (isToday(date)) return 'Hoje';
+                if (isYesterday(date)) return 'Ontem';
+                return format(date, "d 'de' MMMM", { locale: ptBR });
+              };
+              
               return (
-                <div
-                  key={msg.id}
-                  className={cn(
-                    "flex flex-col max-w-[85%] min-w-0",
-                    isOutbound ? "ml-auto items-end" : "mr-auto items-start"
+                <React.Fragment key={msg.id}>
+                  {showDateSeparator && (
+                    <div className="flex justify-center my-8 sticky top-2 z-10 pointer-events-none">
+                      <span className="bg-white/90 backdrop-blur-sm border border-slate-100 text-[10px] font-bold text-slate-500 uppercase tracking-widest px-4 py-1.5 rounded-full shadow-sm">
+                        {getDateLabel(currentDate)}
+                      </span>
+                    </div>
                   )}
-                >
+                  <div
+                    className={cn(
+                      "flex flex-col max-w-[85%] min-w-0",
+                      isOutbound ? "ml-auto items-end" : "mr-auto items-start"
+                    )}
+                  >
                   <div className={cn(
                     "px-4 py-3 rounded-2xl text-sm shadow-sm max-w-full overflow-hidden break-words",
                     isOutbound 
@@ -195,29 +212,30 @@ export function LeadChat({ lead, onClose }: LeadChatProps) {
                     </span>
                   </div>
                 </div>
-              );
-            })}
-            {/* Elemento âncora invisível no final exato do container */}
-            <div ref={endRef} className="h-1 opacity-0 pointer-events-none" />
-          </div>
-        )}
-      </div>
+              </React.Fragment>
+            );
+          })}
+          {/* Elemento âncora invisível no final exato do container */}
+          <div ref={endRef} className="h-1 opacity-0 pointer-events-none" />
+        </div>
+      )}
+    </div>
 
-      {/* Input Area */}
-      <div className="p-6 border-t border-slate-100 bg-white">
-        <div className="relative group">
-          <textarea
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSend();
-              }
-            }}
-            placeholder="Digite uma mensagem..."
-            className="w-full pl-4 pr-14 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-200 font-medium text-sm min-h-[50px] max-h-[150px] resize-none transition-all group-hover:bg-white"
-          />
+    {/* Input Area */}
+    <div className="p-6 border-t border-slate-100 bg-white">
+      <div className="relative group">
+        <textarea
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              handleSend();
+            }
+          }}
+          placeholder="Digite uma mensagem..."
+          className="w-full pl-4 pr-14 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-200 font-medium text-sm min-h-[50px] max-h-[150px] resize-none transition-all group-hover:bg-white"
+        />
           <button
             onClick={handleSend}
             disabled={!content.trim() || sending}

@@ -604,14 +604,16 @@ export function MarketingAnalytics() {
                   Comparar
                 </Button>
 
-                <Button
-                  onClick={handleEditData}
-                  variant="outline"
-                  className="rounded-xl border-slate-200 bg-white hover:bg-slate-50 h-9 gap-2 text-[10px] font-bold uppercase transition-all shadow-sm"
-                >
-                  <Edit3 className="w-3.5 h-3.5 text-teal-600" />
-                  Editar Dados
-                </Button>
+                {viewMode === 'table' && (
+                  <Button
+                    onClick={handleEditData}
+                    variant="outline"
+                    className="rounded-xl border-slate-200 bg-white hover:bg-slate-50 h-9 gap-2 text-[10px] font-bold uppercase transition-all shadow-sm"
+                  >
+                    <Edit3 className="w-3.5 h-3.5 text-teal-600" />
+                    Editar Dados
+                  </Button>
+                )}
               </>
             ) : (
               <div className="flex items-center gap-2">

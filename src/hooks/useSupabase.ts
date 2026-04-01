@@ -315,6 +315,7 @@ export interface Lead {
   phone: string | null;
   email: string | null;
   source: string | null;
+  capture_channel: string | null;
   stage_id: string | null;
   estimated_value: number | null;
   notes: string | null;

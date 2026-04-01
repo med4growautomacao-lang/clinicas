@@ -48,7 +48,7 @@ import {
 } from 'recharts';
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { useLeads, useMarketing, MarketingData, Lead, useAppointments } from "../hooks/useSupabase";
+import { useLeads, useMarketing, MarketingData, Lead, useAppointments, useFunnelStages } from "../hooks/useSupabase";
 import {
   format,
   startOfDay,
@@ -108,6 +108,8 @@ export function MarketingAnalytics() {
   const { data: leads, loading: leadsLoading } = useLeads();
   const { data: appointments, loading: aptsLoading } = useAppointments();
   const { data: marketingData, loading: mktLoading, fetch: fetchMkt, upsert: upsertMkt } = useMarketing();
+  const { data: stages } = useFunnelStages();
+  const conversionStageId = stages.find(s => s.name.toLowerCase().includes('convers'))?.id || null;
   const [isEditing, setIsEditing] = useState(false);
   const [isComparing, setIsComparing] = useState(false);
   const [compareDateRange, setCompareDateRange] = useState<{ start: Date, end: Date }>({
@@ -303,8 +305,8 @@ export function MarketingAnalytics() {
 
   const getPlatformForLead = (lead: Lead): Platform => {
     const source = lead.source?.toLowerCase() || '';
-    if (source.includes('facebook') || source.includes('instagram') || source.includes('meta')) return 'meta_ads';
-    if (source.includes('google')) return 'google_ads';
+    if (source === 'meta_ads') return 'meta_ads';
+    if (source === 'google_ads') return 'google_ads';
     return 'no_track';
   };
 
@@ -333,14 +335,15 @@ export function MarketingAnalytics() {
           const platform = m.platform as Platform;
           if (stats[pKey][platform]) {
             stats[pKey][platform].investment += m.investment;
-            stats[pKey][platform].conv_value += m.conversions_value;
             if (m.manual_leads_count !== null) stats[pKey][platform].leads += m.manual_leads_count;
             if (m.manual_appointments_count !== null) stats[pKey][platform].appointments += (m as any).manual_appointments_count;
             if (m.manual_conversions_count !== null) stats[pKey][platform].convs += m.manual_conversions_count;
+            if (m.conversions_value) stats[pKey][platform].conv_value += m.conversions_value;
           }
         }
       });
 
+      // Count leads by created_at
       leads.forEach(lead => {
         const leadDate = lead.created_at ? parseISO(lead.created_at) : null;
         if (leadDate && leadDate >= p.start && leadDate <= p.end) {
@@ -351,15 +354,30 @@ export function MarketingAnalytics() {
           if (manualLeads === null || manualLeads === undefined) {
             stats[pKey][platform].leads += 1;
           }
+        }
+      });
 
-          if (lead.converted_patient_id) {
+      // Count conversions by updated_at (when lead moved to Conversão stage)
+      if (conversionStageId) {
+        leads.forEach(lead => {
+          if (lead.stage_id !== conversionStageId) return;
+          const convDate = lead.updated_at ? parseISO(lead.updated_at) : null;
+          if (convDate && convDate >= p.start && convDate <= p.end) {
+            const platform = getPlatformForLead(lead);
+            const dateStr = format(convDate, 'yyyy-MM-dd');
             const manualConvs = marketingData.find(d => d.date === dateStr && d.platform === platform)?.manual_conversions_count;
+
             if (manualConvs === null || manualConvs === undefined) {
               stats[pKey][platform].convs += 1;
             }
+            // Auto-sum estimated_value if no manual conv_value
+            const manualConvValue = marketingData.find(d => d.date === dateStr && d.platform === platform)?.conversions_value;
+            if (!manualConvValue) {
+              stats[pKey][platform].conv_value += Number(lead.estimated_value || 0);
+            }
           }
-        }
-      });
+        });
+      }
 
       appointments.forEach(apt => {
         const aptDate = parseISO(apt.date);
@@ -378,7 +396,7 @@ export function MarketingAnalytics() {
     return stats;
   };
 
-  const metricsByPeriod = useMemo(() => calculateStats(periods), [periods, leads, marketingData, appointments]);
+  const metricsByPeriod = useMemo(() => calculateStats(periods), [periods, leads, marketingData, appointments, conversionStageId]);
 
   const comparisonMetricsByPeriod = useMemo(() => {
     if (!isComparing) return {};
@@ -399,7 +417,7 @@ export function MarketingAnalytics() {
     });
 
     return calculateStats(compPeriods as any);
-  }, [isComparing, periods, dateRange, compareDateRange, leads, marketingData, appointments]);
+  }, [isComparing, periods, dateRange, compareDateRange, leads, marketingData, appointments, conversionStageId]);
 
   const handleEditData = () => {
     const initial: Record<string, any> = {};

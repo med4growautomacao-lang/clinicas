@@ -67,7 +67,7 @@ export function LeadKanban() {
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [selectedLead, setSelectedLead] = useState<any>(null);
-  const [formData, setFormData] = useState({ name: '', phone: '', source: 'manual', stage_id: '', estimated_value: '', loss_reason: '' });
+  const [formData, setFormData] = useState({ name: '', phone: '', source: '', capture_channel: 'whatsapp', stage_id: '', estimated_value: '', loss_reason: '' });
   const [submitting, setSubmitting] = useState(false);
   const [chatLead, setChatLead] = useState<any>(null);
   const [localStages, setLocalStages] = useState<any[]>([]);
@@ -112,7 +112,8 @@ export function LeadKanban() {
     const payload = {
       name: formData.name,
       phone: formData.phone || null,
-      source: formData.source as any,
+      source: formData.source || null,
+      capture_channel: formData.capture_channel || 'whatsapp',
       stage_id: formData.stage_id || (stages[0]?.id ?? null),
       estimated_value: formData.estimated_value ? Number(formData.estimated_value) : 0,
       loss_reason: isPerdido ? (formData.loss_reason || null) : null,
@@ -124,7 +125,7 @@ export function LeadKanban() {
       await create(payload);
     }
 
-    setFormData({ name: '', phone: '', source: 'manual', stage_id: '', estimated_value: '', loss_reason: '' });
+    setFormData({ name: '', phone: '', source: '', capture_channel: 'whatsapp', stage_id: '', estimated_value: '', loss_reason: '' });
     setSelectedLead(null);
     setShowModal(false);
     setSubmitting(false);
@@ -144,7 +145,8 @@ export function LeadKanban() {
     setFormData({
       name: lead.name,
       phone: lead.phone || '',
-      source: lead.source || 'manual',
+      source: lead.source || '',
+      capture_channel: lead.capture_channel || 'whatsapp',
       stage_id: lead.stage_id || '',
       estimated_value: lead.estimated_value?.toString() || '',
       loss_reason: lead.loss_reason || ''
@@ -536,7 +538,7 @@ export function LeadKanban() {
           <Button variant="outline" size="icon" className="h-10 w-10 text-slate-400 hover:text-teal-600" onClick={() => { setLocalStages([...stages]); setShowSettingsModal(true); }}>
             <Settings className="w-5 h-5" />
           </Button>
-          <Button className="py-5 px-6 group" onClick={() => { setSelectedLead(null); setFormData({ name: '', phone: '', source: 'manual', stage_id: stages[0]?.id || '', estimated_value: String(aiConfig?.default_ticket_value ?? ''), loss_reason: '' }); setShowModal(true); }}>
+          <Button className="py-5 px-6 group" onClick={() => { setSelectedLead(null); setFormData({ name: '', phone: '', source: '', capture_channel: 'whatsapp', stage_id: stages[0]?.id || '', estimated_value: String(aiConfig?.default_ticket_value ?? ''), loss_reason: '' }); setShowModal(true); }}>
             <Plus className="w-5 h-5 mr-2 group-hover:rotate-90 transition-transform" />
             Novo Lead
           </Button>
@@ -556,7 +558,7 @@ export function LeadKanban() {
                 <span className="text-[10px] font-bold text-slate-400 shrink-0">
                   R$ {stageTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                 </span>
-                <button className="text-slate-400 hover:text-slate-600 shrink-0" onClick={() => { setSelectedLead(null); setFormData({ name: '', phone: '', source: 'manual', stage_id: stage.id, estimated_value: String(aiConfig?.default_ticket_value ?? ''), loss_reason: '' }); setShowModal(true); }}>
+                <button className="text-slate-400 hover:text-slate-600 shrink-0" onClick={() => { setSelectedLead(null); setFormData({ name: '', phone: '', source: '', capture_channel: 'whatsapp', stage_id: stage.id, estimated_value: String(aiConfig?.default_ticket_value ?? ''), loss_reason: '' }); setShowModal(true); }}>
                   <Plus className="w-4 h-4" />
                 </button>
               </div>
@@ -605,7 +607,7 @@ export function LeadKanban() {
                   >
                     {/* Header: fonte + acoes */}
                     <div className="flex justify-between items-center mb-1.5">
-                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{lead.source || 'Manual'}</span>
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{lead.source === 'meta_ads' ? 'Meta Ads' : lead.source === 'google_ads' ? 'Google Ads' : (lead.capture_channel === 'forms' ? 'Formulário' : 'WhatsApp')}</span>
                       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button onClick={() => openEditModal(lead)} className="p-0.5 text-slate-400 hover:text-teal-600 rounded transition-colors"><Edit2 className="w-3 h-3" /></button>
                         <button onClick={() => openDeleteConfirm(lead)} className="p-0.5 text-slate-400 hover:text-rose-600 rounded transition-colors"><Trash2 className="w-3 h-3" /></button>
@@ -723,17 +725,22 @@ export function LeadKanban() {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Origem</label>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Plataforma</label>
                     <select value={formData.source} onChange={e => setFormData(p => ({ ...p, source: e.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 font-medium text-sm">
-                      <option value="manual">Manual</option>
-                      <option value="whatsapp">WhatsApp</option>
-                      <option value="facebook_ads">Facebook Ads</option>
-                      <option value="google">Google</option>
-                      <option value="instagram">Instagram</option>
-                      <option value="indicacao">Indicacao</option>
-                      <option value="site">Site</option>
+                      <option value="">Sem Origem</option>
+                      <option value="meta_ads">Meta Ads</option>
+                      <option value="google_ads">Google Ads</option>
                     </select>
                   </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Meio de Captação</label>
+                    <select value={formData.capture_channel} onChange={e => setFormData(p => ({ ...p, capture_channel: e.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 font-medium text-sm">
+                      <option value="whatsapp">WhatsApp</option>
+                      <option value="forms">Formulário</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Valor estimado</label>
                     <input type="number" value={formData.estimated_value} onChange={e => setFormData(p => ({ ...p, estimated_value: e.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 font-medium text-sm" placeholder="0.00" />

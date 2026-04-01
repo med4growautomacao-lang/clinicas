@@ -41,7 +41,7 @@ export function Login() {
           <div className="w-16 h-16 rounded-2xl bg-teal-600 flex items-center justify-center text-white shadow-lg shadow-teal-100 mb-4">
             <Stethoscope className="w-10 h-10" />
           </div>
-          <h1 className="text-2xl font-black text-slate-900 tracking-tight">ClínicaPro</h1>
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight">MinhaClínica</h1>
           <p className="text-slate-500 text-sm font-medium">Gestão inteligente para sua clínica</p>
         </div>
 
@@ -105,7 +105,7 @@ export function Login() {
 
         <div className="mt-8 text-center">
           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-            Exclusivo para parceiros ClínicaPro
+            Exclusivo para parceiros MinhaClínica
           </p>
         </div>
       </motion.div>

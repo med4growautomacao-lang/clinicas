@@ -964,22 +964,14 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
   const activeMetric = METRICS_CONFIG.find(m => m.id === selectedMetric) || METRICS_CONFIG[0];
 
   const platformData = useMemo(() => {
-    if (selectedPlatform === 'all') {
-      return [
-        { name: 'Meta Ads', value: currentTotals.breakdown.meta_ads.leads, color: '#4f46e5' },
-        { name: 'Google Ads', value: currentTotals.breakdown.google_ads.leads, color: '#f59e0b' },
-        { name: 'Sem Origem', value: currentTotals.breakdown.no_track.leads, color: '#94a3b8' },
-      ].filter(d => d.value > 0);
-    } else {
-      // If a platform is selected, show capture channel breakdown (WhatsApp vs Forms)
-      return [
-        { name: 'WhatsApp', value: currentTotals.whatsapp, color: '#25d366' },
-        { name: 'Formulário', value: currentTotals.forms, color: '#0ea5e9' },
-      ].filter(d => d.value > 0);
-    }
-  }, [selectedPlatform, currentTotals]);
+    return [
+      { id: 'meta_ads', name: 'Meta Ads', label: 'META', value: currentTotals.breakdown.meta_ads.leads, color: '#4f46e5', logo: MetaLogo },
+      { id: 'google_ads', name: 'Google Ads', label: 'GOOGLE', value: currentTotals.breakdown.google_ads.leads, color: '#10b981', logo: GoogleLogo },
+      { id: 'no_track', name: 'Sem Origem', label: 'SEM ORIGEM', value: currentTotals.breakdown.no_track.leads, color: '#94a3b8', logo: SemOrigemLogo },
+    ].filter(d => d.value > 0 && (selectedPlatform === 'all' || selectedPlatform === d.id));
+  }, [currentTotals, selectedPlatform]);
 
-  const platformTitle = selectedPlatform === 'all' ? 'Origem dos Leads' : `Captação: ${PLATFORM_LABELS[selectedPlatform as Platform].split(' ')[0]}`;
+  const platformTitle = "Origem dos Leads";
 
   const funnelData = [
     { name: 'Leads', value: currentTotals.leads, color: '#0d9488', subLabel: 'Total de leads' },
@@ -1010,7 +1002,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
               className={cn(
                 "flex items-center gap-2 px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all",
                 selectedPlatform === plat.id 
-                  ? "bg-slate-910 text-white shadow-md shadow-slate-200" 
+                  ? "bg-slate-900 text-white shadow-md shadow-slate-200" 
                   : "text-slate-400 hover:text-slate-600 hover:bg-slate-50"
               )}
               style={selectedPlatform === plat.id ? { backgroundColor: '#1e293b' } : {}}
@@ -1152,13 +1144,13 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
                   <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Leads</span>
                 </div>
                 <div className="flex flex-col gap-2 pt-2 border-t border-slate-50">
-                  {platformData.map((item, i) => (
+                  {platformData.map((item: any, i) => (
                     <div key={i} className="flex items-center justify-between px-2">
                        <div className="flex items-center gap-2">
-                          {(item.name === 'Meta Ads' || item.name === 'Google Ads' || item.name === 'Sem Origem') ? (
+                          {item.logo ? (
                             <div className="w-4 h-4 flex items-center justify-center">
                               <img 
-                                src={item.name === 'Meta Ads' ? MetaLogo : item.name === 'Google Ads' ? GoogleLogo : SemOrigemLogo} 
+                                src={item.logo} 
                                 alt={item.name} 
                                 className="w-full h-full object-contain" 
                               />
@@ -1166,7 +1158,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
                           ) : (
                             <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
                           )}
-                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight">{item.name === 'Meta Ads' ? 'META' : item.name === 'Google Ads' ? 'GOOGLE' : item.name}</span>
+                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight">{item.label || item.name}</span>
                        </div>
                        <span className="text-[11px] font-black text-slate-700 font-sans">{item.value}</span>
                     </div>

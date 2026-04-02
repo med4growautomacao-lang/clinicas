@@ -618,8 +618,11 @@ export function LeadKanban() {
                       const isMeta = !!lead.fb_campaign_name || lead.source === 'meta_ads';
                       const isGoogle = !!lead.g_campaign_name || lead.source === 'google_ads';
                       const campaignName = lead.fb_campaign_name || lead.g_campaign_name;
-                      const adsetName = lead.fb_adset_name || lead.g_adset_name;
-                      const adName = lead.fb_ad_name || lead.g_ad_name;
+                      
+                      const hasUtms = isMeta 
+                        ? (lead.fb_campaign_name || lead.fb_adset_name || lead.fb_ad_name)
+                        : (lead.g_campaign_name || lead.g_term_name || lead.g_source_name);
+
                       return (
                     <div className="flex justify-between items-start mb-2">
                       <div className="flex flex-col gap-1.5 flex-1 min-w-0">
@@ -641,7 +644,7 @@ export function LeadKanban() {
                           </span>
                         </div>
                         
-                        {(campaignName || adsetName || adName) && (
+                        {hasUtms && (
                           <div className="flex flex-wrap gap-1">
                             {campaignName && (
                               <span className={cn(
@@ -651,20 +654,24 @@ export function LeadKanban() {
                                 {campaignName}
                               </span>
                             )}
-                            {adsetName && (
-                              <span className={cn(
-                                "inline-flex items-center px-1.5 py-0.5 rounded-full text-[8px] font-medium truncate max-w-full border",
-                                isMeta ? "bg-blue-50 border-blue-100 text-blue-600" : isGoogle ? "bg-emerald-50 border-emerald-100 text-emerald-600" : "bg-slate-50 border-slate-100 text-slate-500"
-                              )} title={adsetName}>
-                                {adsetName}
+                            {isMeta && lead.fb_adset_name && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[8px] font-medium truncate max-w-full border bg-blue-50 border-blue-100 text-blue-600" title={lead.fb_adset_name}>
+                                {lead.fb_adset_name}
                               </span>
                             )}
-                            {adName && (
-                              <span className={cn(
-                                "inline-flex items-center px-1.5 py-0.5 rounded-full text-[8px] font-medium truncate max-w-full border",
-                                isMeta ? "bg-white/80 border-blue-100 text-blue-500" : isGoogle ? "bg-white/80 border-emerald-100 text-emerald-500" : "bg-white border-slate-100 text-slate-400"
-                              )} title={adName}>
-                                {adName}
+                            {isMeta && lead.fb_ad_name && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[8px] font-medium truncate max-w-full border bg-white/80 border-blue-100 text-blue-500" title={lead.fb_ad_name}>
+                                {lead.fb_ad_name}
+                              </span>
+                            )}
+                            {isGoogle && lead.g_term_name && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[8px] font-medium truncate max-w-full border bg-emerald-50 border-emerald-100 text-emerald-600" title={lead.g_term_name}>
+                                {lead.g_term_name}
+                              </span>
+                            )}
+                            {isGoogle && lead.g_source_name && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[8px] font-medium truncate max-w-full border bg-white/80 border-emerald-100 text-emerald-500" title={lead.g_source_name}>
+                                {lead.g_source_name}
                               </span>
                             )}
                           </div>

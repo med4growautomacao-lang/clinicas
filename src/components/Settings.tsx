@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import {
@@ -29,6 +29,7 @@ import {
     Loader2,
     X,
     Plus,
+    UserCircle,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -58,6 +59,20 @@ export function Settings() {
             setLocalWA(whatsapp);
         }
     }, [clinic, aiConfig, whatsapp]);
+
+    const hasChanges = useMemo(() => {
+        if (!clinic || !aiConfig) return false;
+        const isDifferent = (a: any, b: any) => JSON.stringify(a) !== JSON.stringify(b);
+        return isDifferent(clinic, localClinic) || 
+               isDifferent(aiConfig, localAI) || 
+               (whatsapp && isDifferent(whatsapp, localWA));
+    }, [clinic, aiConfig, whatsapp, localClinic, localAI, localWA]);
+
+    const handleDiscard = () => {
+        if (clinic) setLocalClinic(clinic);
+        if (aiConfig) setLocalAI(aiConfig);
+        if (whatsapp) setLocalWA(whatsapp);
+    };
 
     const handleSave = async () => {
         setSaving(true);
@@ -229,10 +244,19 @@ export function Settings() {
             </div>
 
             <div className="pt-6 border-t border-slate-200 flex justify-end gap-3 bg-slate-50/80 backdrop-blur-md sticky bottom-0 z-20">
-                <Button variant="outline" className="px-8 h-10" disabled={saving}>
+                <Button 
+                    variant="outline" 
+                    onClick={handleDiscard}
+                    className="px-8 h-10" 
+                    disabled={saving || !hasChanges}
+                >
                     Descartar
                 </Button>
-                <Button onClick={handleSave} className="px-8 h-10 bg-teal-600 hover:bg-teal-700" disabled={saving}>
+                <Button 
+                    onClick={handleSave} 
+                    className="px-8 h-10 bg-teal-600 hover:bg-teal-700 transition-all font-semibold" 
+                    disabled={saving || !hasChanges}
+                >
                     {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
                     {saving ? 'Salvando...' : 'Salvar Alterações'}
                 </Button>
@@ -492,11 +516,13 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onCon
     onCancel: () => void,
     connecting: boolean
 }) {
-    const { clinic, refetch } = useSettings();
+    const { clinic, refetch, systemSettings } = useSettings();
     const [groupName, setGroupName] = useState('Informativos do Agente IA');
     const [participants, setParticipants] = useState<{ name: string; phone: string }[]>([{ name: '', phone: '' }]);
     const [creatingGroup, setCreatingGroup] = useState(false);
     const [groupResult, setGroupResult] = useState<'success' | 'error' | null>(null);
+    const [showScripts, setShowScripts] = useState(false);
+    const [activeIntTab, setActiveIntTab] = useState<'whatsapp' | 'meta' | 'google'>('whatsapp');
 
     const addParticipant = () => setParticipants(p => [...p, { name: '', phone: '' }]);
     const removeParticipant = (i: number) => setParticipants(p => p.filter((_, idx) => idx !== i));
@@ -532,34 +558,66 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onCon
 
     return (
         <div className="max-w-4xl mx-auto space-y-6">
-            <Card className="border border-slate-200 shadow-sm overflow-hidden">
-                <CardHeader className="bg-gradient-to-r from-emerald-600 to-teal-600 pb-6 px-8">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-5">
-                            <div className="w-14 h-14 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center shadow-lg">
-                                <MessageCircle className="w-7 h-7 text-white" />
-                            </div>
-                            <div>
-                                <CardTitle className="text-2xl font-bold text-white">WhatsApp Business</CardTitle>
-                                <p className="text-white/80 font-medium text-sm">Integração simplificada via n8n Bridge</p>
-                            </div>
-                        </div>
-                        <div className={cn(
-                            "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold",
-                            data.status === "connected" 
-                                ? "bg-white/20 text-white" 
-                                : "bg-white/10 text-white/60"
-                        )}>
-                            {data.status === "connected" ? (
-                                <><Wifi className="w-4 h-4" /> Conectado</>
-                            ) : (
-                                <><WifiOff className="w-4 h-4" /> Desconectado</>
-                            )}
-                        </div>
-                    </div>
-                </CardHeader>
+            <div className="flex bg-slate-100 p-1 rounded-lg w-full sm:w-fit shadow-sm border border-slate-200">
+                <button
+                    onClick={() => setActiveIntTab('whatsapp')}
+                    className={cn(
+                        "flex items-center gap-2 px-5 py-2 text-sm font-semibold rounded-md transition-all",
+                        activeIntTab === 'whatsapp' ? "bg-emerald-600 text-white shadow-sm" : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
+                    )}
+                >
+                    <MessageCircle className="w-4 h-4" /> WhatsApp
+                </button>
+                <button
+                    onClick={() => setActiveIntTab('meta')}
+                    className={cn(
+                        "flex items-center gap-2 px-5 py-2 text-sm font-semibold rounded-md transition-all",
+                        activeIntTab === 'meta' ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
+                    )}
+                >
+                    <img src={MetaLogo} alt="Meta" className={cn("w-4 h-4 object-contain filter transition-all", activeIntTab === 'meta' ? 'brightness-0 invert' : 'brightness-0 opacity-50')} /> Meta Ads
+                </button>
+                <button
+                    onClick={() => setActiveIntTab('google')}
+                    className={cn(
+                        "flex items-center gap-2 px-5 py-2 text-sm font-semibold rounded-md transition-all",
+                        activeIntTab === 'google' ? "bg-amber-500 text-white shadow-sm" : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
+                    )}
+                >
+                    <img src={GoogleLogo} alt="Google" className={cn("w-4 h-4 object-contain filter transition-all", activeIntTab === 'google' ? 'brightness-0 invert' : 'brightness-0 opacity-50')} /> Google Ads
+                </button>
+            </div>
 
-                <CardContent className="p-8 space-y-8">
+            {activeIntTab === 'whatsapp' && (
+                <div className="space-y-6">
+                    <Card className="border border-emerald-200 shadow-sm bg-white overflow-hidden">
+                        <CardHeader className="bg-emerald-100 border-b border-emerald-200 pb-6 px-8">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm border border-emerald-200">
+                                        <MessageCircle className="w-6 h-6 text-emerald-600" />
+                                    </div>
+                                    <div>
+                                        <CardTitle className="text-xl font-bold text-slate-800">WhatsApp Business API</CardTitle>
+                                        <p className="text-slate-600 font-medium text-sm">Integração simplificada via n8n Bridge</p>
+                                    </div>
+                                </div>
+                                <div className={cn(
+                                    "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border bg-white",
+                                    data.status === "connected" 
+                                        ? "text-emerald-700 border-emerald-300 shadow-sm" 
+                                        : "bg-slate-100 text-slate-500 border-slate-200"
+                                )}>
+                                    {data.status === "connected" ? (
+                                        <><Wifi className="w-3.5 h-3.5" /> Conectado</>
+                                    ) : (
+                                        <><WifiOff className="w-3.5 h-3.5" /> Desconectado</>
+                                    )}
+                                </div>
+                            </div>
+                        </CardHeader>
+
+                        <CardContent className="p-8 space-y-8">
                     <div className="space-y-4">
                         <div className="flex items-center justify-between">
                             <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Status da Conexão</label>
@@ -581,7 +639,7 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onCon
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-1 gap-4">
+                        <div className="bg-slate-50 border border-slate-100 rounded-2xl p-5 space-y-4 shadow-sm">
                             <div className="space-y-2">
                                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">ID da API (Instance Name)</label>
                                 <input
@@ -590,22 +648,26 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onCon
                                     readOnly
                                     onChange={(e) => onChange({ api_id: e.target.value })}
                                     placeholder="Ex: clinica-whatsapp-01"
-                                    className="w-full px-4 py-2.5 border border-slate-200 rounded-lg font-medium text-slate-700 text-sm placeholder:text-slate-300 bg-slate-50 cursor-not-allowed outline-none transition-all"
+                                    className="w-full px-4 py-3 border border-slate-200 rounded-xl font-medium text-slate-600 text-sm bg-slate-100/50 cursor-not-allowed outline-none select-all"
                                 />
                             </div>
-                        </div>
 
-                        <div className="space-y-2">
-                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Token da API</label>
-                            <input
-                                type="password"
-                                value={data.api_token || ''}
-                                readOnly
-                                onChange={(e) => onChange({ api_token: e.target.value })}
-                                placeholder="Seu token de autenticação (UaZapi)"
-                                className="w-full px-4 py-2.5 border border-slate-200 rounded-lg font-medium text-slate-700 text-sm placeholder:text-slate-300 bg-slate-50 cursor-not-allowed outline-none transition-all"
-                            />
-                            <p className="text-[10px] text-slate-400">Este token será usado pelo n8n para gerenciar a instância.</p>
+                            <div className="space-y-2">
+                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                                    <Lock className="w-3.5 h-3.5" /> Token da API UaZapi
+                                </label>
+                                <div className="relative">
+                                    <input
+                                        type="password"
+                                        value={data.api_token || ''}
+                                        readOnly
+                                        onChange={(e) => onChange({ api_token: e.target.value })}
+                                        placeholder="Seu token de autenticação"
+                                        className="w-full px-4 py-3 border border-slate-200 rounded-xl font-medium text-slate-600 text-sm bg-slate-100/50 cursor-not-allowed outline-none select-all font-mono tracking-tight"
+                                    />
+                                </div>
+                                <p className="text-[10px] text-slate-400 pl-1">Este token garante com segurança a comunicação server-to-server com o n8n.</p>
+                            </div>
                         </div>
                     </div>
 
@@ -617,14 +679,15 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onCon
                                         <div className="absolute -inset-4 bg-gradient-to-tr from-teal-500/10 to-teal-500/5 rounded-3xl blur-xl group-hover:blur-2xl transition-all opacity-0 group-hover:opacity-100"></div>
                                         <motion.div 
                                             key={data.qr_code}
-                                            initial={{ opacity: 0, scale: 0.9 }}
-                                            animate={{ opacity: 1, scale: 1 }}
-                                            className="relative p-6 bg-white rounded-2xl border border-teal-100 shadow-xl"
+                                            initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                                            className="relative p-6 bg-white rounded-3xl border border-teal-100 shadow-2xl shadow-teal-500/10"
                                         >
+                                            <div className="absolute inset-0 bg-gradient-to-tr from-teal-50 to-white rounded-3xl pointer-events-none" />
                                             <img 
                                                 src={data.qr_code.startsWith('data:') ? data.qr_code : `data:image/png;base64,${data.qr_code}`} 
                                                 alt="WhatsApp QR Code" 
-                                                className="w-48 h-48 rounded-lg"
+                                                className="w-52 h-52 rounded-xl relative z-10 mx-auto border border-slate-100"
                                             />
                                             <div className="mt-4 text-center">
                                                 <p className="text-sm font-bold text-teal-600">Escaneie o QR Code</p>
@@ -657,9 +720,9 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onCon
                                         <Button 
                                             onClick={onConnect} 
                                             disabled={connecting || data.status === 'qr_pending' || data.status === 'connecting'}
-                                            className="bg-teal-600 hover:bg-teal-700 text-white gap-2 h-12 px-10 font-bold shadow-lg shadow-teal-100 transition-all active:scale-95 disabled:opacity-50"
+                                            className="bg-gradient-to-r from-teal-600 to-teal-500 hover:from-teal-700 hover:to-teal-600 text-white gap-2 h-12 px-10 font-bold shadow-xl shadow-teal-500/20 transition-all active:scale-[0.98] disabled:opacity-50 rounded-xl"
                                         >
-                                            {(connecting || data.status === 'connecting') ? <Loader2 className="w-5 h-5 animate-spin" /> : <Wifi className="w-4 h-4" />}
+                                            {(connecting || data.status === 'connecting') ? <Loader2 className="w-5 h-5 animate-spin" /> : <Wifi className="w-5 h-5" />}
                                             {(connecting || data.status === 'connecting') ? 'Processando...' : (data.status === 'qr_pending' ? 'Aguardando QR Code...' : 'Conectar Agora')}
                                         </Button>
 
@@ -709,72 +772,402 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onCon
                     </div>
                 </CardContent>
             </Card>
+                </div>
+            )}
 
             {/* Meta Ads Settings */}
-            <Card className="border border-slate-200 shadow-sm overflow-hidden">
-                <CardHeader className="bg-gradient-to-r from-blue-700 to-blue-600 pb-6 px-8">
-                    <div className="flex items-center gap-5">
-                        <div className="w-14 h-14 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center shadow-lg overflow-hidden p-3">
-                            <img src={MetaLogo} alt="Meta" className="w-full h-full object-contain filter brightness-0 invert" />
-                        </div>
-                        <div>
-                            <CardTitle className="text-2xl font-bold text-white">Meta Ads</CardTitle>
-                            <p className="text-white/80 font-medium text-sm">Integração com Conversões do Pixel e API de Conversão</p>
-                        </div>
-                    </div>
-                </CardHeader>
+            {activeIntTab === 'meta' && (
+                <div className="space-y-6">
+                    <Card className="border border-blue-200 shadow-sm bg-white overflow-hidden">
+                        <CardHeader className="bg-blue-100 border-b border-blue-200 pb-6 px-8">
+                            <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm border border-blue-200 p-2">
+                                    <img src={MetaLogo} alt="Meta" className="w-full h-full object-contain opacity-90" />
+                                </div>
+                                <div>
+                                    <CardTitle className="text-xl font-bold text-slate-800">Meta Ads</CardTitle>
+                                    <p className="text-slate-600 font-medium text-sm">Integração com Conversões do Pixel e API de Conversão</p>
+                                </div>
+                            </div>
+                        </CardHeader>
                 <CardContent className="p-8 grid gap-6 md:grid-cols-2">
-                    <div className="space-y-2 md:col-span-2">
-                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Token de Acesso (CAPI)</label>
-                        <input
-                            type="password"
-                            value={clinicData.meta_token || ''}
-                            onChange={(e) => onClinicChange({ meta_token: e.target.value })}
-                            placeholder="EAA... seu access token"
-                            className="w-full px-4 py-2.5 border border-slate-200 rounded-lg font-medium text-slate-700 text-sm placeholder:text-slate-300 focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all"
-                        />
-                        <p className="text-[10px] text-slate-400 font-medium leading-relaxed">
-                            O token de acesso é gerado no Gerenciador de Negócios e permite o envio de conversões via API.
+                    <div className="space-y-2 md:col-span-2 group/input">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                            <Lock className="w-3.5 h-3.5 text-blue-500" /> Token de Acesso (CAPI)
+                        </label>
+                        <div className="relative">
+                            <input
+                                type="password"
+                                value={clinicData.meta_token || ''}
+                                onChange={(e) => onClinicChange({ meta_token: e.target.value })}
+                                placeholder="EAA... seu access token"
+                                className="w-full pl-4 pr-10 py-3 border border-slate-200 rounded-xl font-medium text-slate-700 text-sm placeholder:text-slate-300 focus:ring-4 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all shadow-sm hover:border-blue-200"
+                            />
+                            <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within/input:text-blue-500 transition-colors">
+                                <Shield className="w-4 h-4" />
+                            </div>
+                        </div>
+                        <p className="text-[10px] text-slate-400 font-medium leading-relaxed pl-1">
+                            O token de acesso é gerado no Gerenciador de Negócios e permite o envio de conversões via API com máxima segurança.
                         </p>
                     </div>
 
-                    <div className="space-y-2">
-                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">ID da Conta de Anúncios</label>
+                    <div className="space-y-2 group/input">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                            ID da Conta de Anúncios
+                        </label>
                         <input
                             type="text"
                             value={clinicData.meta_ad_account_id || ''}
                             onChange={(e) => onClinicChange({ meta_ad_account_id: e.target.value })}
                             placeholder="act_123456789"
-                            className="w-full px-4 py-2.5 border border-slate-200 rounded-lg font-medium text-slate-700 text-sm placeholder:text-slate-300 focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all"
+                            className="w-full px-4 py-3 border border-slate-200 rounded-xl font-medium text-slate-700 text-sm placeholder:text-slate-300 focus:ring-4 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all shadow-sm hover:border-blue-200"
                         />
                     </div>
 
-                    <div className="space-y-2">
-                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">ID do Pixel</label>
+                    <div className="space-y-2 group/input">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                            ID do Pixel
+                        </label>
                         <input
                             type="text"
                             value={clinicData.meta_pixel_id || ''}
                             onChange={(e) => onClinicChange({ meta_pixel_id: e.target.value })}
                             placeholder="Ex: 123456789012345"
-                            className="w-full px-4 py-2.5 border border-slate-200 rounded-lg font-medium text-slate-700 text-sm placeholder:text-slate-300 focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all"
+                            className="w-full px-4 py-3 border border-slate-200 rounded-xl font-medium text-slate-700 text-sm placeholder:text-slate-300 focus:ring-4 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all shadow-sm hover:border-blue-200"
                         />
                     </div>
                 </CardContent>
             </Card>
+                </div>
+            )}
+
+            {/* Google Ads & Links */}
+            {activeIntTab === 'google' && (
+                <div className="space-y-6">
+                    <Card className="border border-amber-200 shadow-sm bg-white overflow-hidden">
+                        <CardHeader className="bg-amber-100 border-b border-amber-200 pb-6 px-8">
+                            <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm border border-amber-200 p-2">
+                                    <img src={GoogleLogo} alt="Google" className="w-full h-full object-contain opacity-90" />
+                                </div>
+                                <div>
+                                    <CardTitle className="text-xl font-bold text-slate-800">Rastreamento Google & Captação</CardTitle>
+                                    <p className="text-slate-600 font-medium text-sm">Scripts e URLs para suas Campanhas e Landing Pages</p>
+                                </div>
+                            </div>
+                        </CardHeader>
+                <CardContent className="p-8 space-y-8">
+                    {/* Mensagem Padrão WA */}
+                    <div className="space-y-3 group/input">
+                        <label className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                            Mensagem Inicial que será enviada ao WhatsApp de Atendimento
+                        </label>
+                        <input
+                            type="text"
+                            value={clinicData.wa_pre_msg || ''}
+                            onChange={(e) => onClinicChange({ wa_pre_msg: e.target.value })}
+                            placeholder="Olá! Vi o anúncio e me interessei pelos produtos Apple importados! Quais modelos estão disponíveis? E tem alguma oferta especial hoje?"
+                            className="w-full px-4 py-3 border border-slate-200 rounded-xl font-medium text-slate-700 text-sm placeholder:text-slate-400 focus:ring-4 focus:ring-amber-100 focus:border-amber-400 outline-none transition-all shadow-sm hover:border-amber-200"
+                        />
+                        <p className="text-[12px] text-slate-400 font-medium leading-relaxed">
+                            Essa é a mensagem padrão que virá pré-pronta para ser enviada na conversa com o whatsapp do seu cliente.
+                        </p>
+                    </div>
+                    {!showScripts ? (
+                        <motion.div
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="pt-4"
+                        >
+                            <Button 
+                                onClick={() => setShowScripts(true)}
+                                className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white shadow-lg shadow-amber-500/20 py-7 text-[15px] font-bold tracking-wide rounded-xl border border-white/20 transition-all active:scale-[0.98] group relative overflow-hidden"
+                            >
+                                <div className="absolute inset-0 bg-white/20 w-1/2 -skew-x-12 -translate-x-[150%] group-hover:translate-x-[250%] transition-transform duration-1000 ease-in-out" />
+                                <CheckCircle2 className="w-5 h-5 mr-2 opacity-90" />
+                                Validar Configuração e Gerar Código de Integração
+                            </Button>
+                        </motion.div>
+                    ) : (
+                        <motion.div 
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="space-y-8"
+                        >
+                            {/* Webhook */}
+                            <div className="space-y-3 p-5 bg-slate-50 border border-slate-100 rounded-2xl relative overflow-hidden group/item">
+                                <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
+                                <label className="text-xs font-bold text-slate-700 flex items-center gap-2">
+                                    <Globe className="w-4 h-4 text-blue-500" />
+                                    Endereço do Webhook <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-md text-[9px] uppercase tracking-wider ml-2">Typeform/N8N</span>
+                                </label>
+                                <p className="text-[12px] text-slate-500 font-medium leading-relaxed max-w-2xl">
+                                    Envie os dados do Lead (Nome, Telefone, rast_id) e UTMs originais para este webhook.
+                                </p>
+                                <div className="flex flex-col sm:flex-row gap-3 pt-1">
+                                    <div className="flex-1 px-4 py-3 bg-[#0d1117] border border-slate-800 rounded-xl flex items-center shadow-inner overflow-x-auto custom-scrollbar">
+                                        <code className="text-[13px] font-mono text-blue-400 whitespace-nowrap">
+                                            {systemSettings?.webhook_lead_catch_url || `https://n8n.webhook.com/webhook/lead-catch/${clinic?.id || 'SEU_CLINIC_ID'}`}
+                                        </code>
+                                    </div>
+                                    <Button 
+                                        variant="outline" 
+                                        onClick={(e) => {
+                                            const url = systemSettings?.webhook_lead_catch_url || `https://n8n.webhook.com/webhook/lead-catch/${clinic?.id || 'SEU_CLINIC_ID'}`;
+                                            navigator.clipboard.writeText(url);
+                                            const btn = e.currentTarget;
+                                            const orig = btn.innerHTML;
+                                            btn.innerHTML = '<svg class="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg> Copiado!';
+                                            btn.classList.add('bg-blue-600', 'text-white', 'border-blue-600');
+                                            btn.classList.remove('bg-white', 'text-slate-700');
+                                            setTimeout(() => {
+                                                btn.innerHTML = orig;
+                                                btn.classList.remove('bg-blue-600', 'text-white', 'border-blue-600');
+                                                btn.classList.add('bg-white', 'text-slate-700');
+                                            }, 2000);
+                                        }}
+                                        className="bg-white border-slate-200 text-slate-700 hover:bg-slate-50 gap-2 shrink-0 h-10 sm:h-auto rounded-xl shadow-sm transition-all font-bold"
+                                    >
+                                        <Copy className="w-4 h-4" /> Copiar Link
+                                    </Button>
+                                </div>
+                            </div>
+
+                            {/* Botão WA */}
+                            <div className="space-y-3 p-5 bg-emerald-50/50 border border-emerald-100 rounded-2xl relative overflow-hidden group/item">
+                                <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
+                                <label className="text-xs font-bold text-slate-700 flex items-center gap-2">
+                                    <MessageCircle className="w-4 h-4 text-emerald-500" />
+                                    URL Dinâmica do WhatsApp <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-md text-[9px] uppercase tracking-wider ml-2">Smart Link</span>
+                                </label>
+                                <p className="text-[12px] text-slate-500 font-medium leading-relaxed max-w-2xl">
+                                    Link customizado para seus botões de contato. O <code>rast_id</code> na URL permite ao N8N linkar a origem no CRM.
+                                </p>
+                                <div className="flex flex-col sm:flex-row gap-3 pt-1">
+                                    <div className="flex-1 px-4 py-3 bg-[#0d1117] border border-slate-800 rounded-xl flex items-center shadow-inner overflow-x-auto custom-scrollbar">
+                                        <code className="text-[13px] font-mono text-emerald-400 whitespace-nowrap">
+                                            {
+                                                (systemSettings?.whatsapp_button_template || `https://api.whatsapp.com/send?phone=SEUNUMERO&text=Olá! Vim pelo site. [ID:${clinic?.id || 'ID'}]`)
+                                                .replace(/(wa\.me\/|phone=)\d+/, `$1${clinicData.phone?.replace(/\D/g, '') || 'SEUNUMERO'}`)
+                                            }
+                                        </code>
+                                    </div>
+                                    <Button 
+                                        variant="outline" 
+                                        onClick={(e) => {
+                                            const waLink = (systemSettings?.whatsapp_button_template || `https://api.whatsapp.com/send?phone=SEUNUMERO&text=Olá! Vim pelo site. [ID:${clinic?.id || 'ID'}]`)
+                                                           .replace(/(wa\.me\/|phone=)\d+/, `$1${clinicData.phone?.replace(/\D/g, '') || 'SEUNUMERO'}`);
+                                            navigator.clipboard.writeText(waLink);
+                                            const btn = e.currentTarget;
+                                            const orig = btn.innerHTML;
+                                            btn.innerHTML = '<svg class="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg> Copiado!';
+                                            btn.classList.add('bg-emerald-600', 'text-white', 'border-emerald-600');
+                                            btn.classList.remove('bg-white', 'text-slate-700');
+                                            setTimeout(() => {
+                                                btn.innerHTML = orig;
+                                                btn.classList.remove('bg-emerald-600', 'text-white', 'border-emerald-600');
+                                                btn.classList.add('bg-white', 'text-slate-700');
+                                            }, 2000);
+                                        }}
+                                        className="bg-white border-emerald-200 text-slate-700 hover:bg-emerald-50 gap-2 shrink-0 h-10 sm:h-auto rounded-xl shadow-sm transition-all font-bold"
+                                    >
+                                        <Copy className="w-4 h-4" /> Copiar Link
+                                    </Button>
+                                </div>
+                            </div>
+
+                            {/* Script Global Navstracking */}
+                            <div className="space-y-3 p-5 bg-slate-50 border border-slate-100 rounded-2xl relative overflow-hidden group/item">
+                                <div className="absolute top-0 left-0 w-1 h-full bg-slate-400"></div>
+                                <label className="text-xs font-bold text-slate-700 flex items-center gap-2">
+                                    <Shield className="w-4 h-4 text-slate-500" />
+                                    Script Global de Rastreamento <span className="px-2 py-0.5 bg-slate-200 text-slate-600 rounded-md text-[9px] uppercase tracking-wider ml-2">Navstracking Core v1.0</span>
+                                </label>
+                                <p className="text-[12px] text-slate-500 font-medium leading-relaxed max-w-3xl">
+                                    Copie este código e insira no <strong>Header/Body</strong> de todas as suas Landing Pages (Elementor, Wordpress, etc). Ele blinda as UTMs, GCLID e captura magicamente os cliques injetando a sua mensagem padrão.
+                                </p>
+                                <div className="relative group mt-3 rounded-xl overflow-hidden border border-slate-800 bg-[#0d1117] shadow-xl">
+                                    {/* Mac OS Window Header */}
+                                    <div className="bg-[#161b22] px-4 py-2.5 flex items-center justify-between border-b border-slate-800">
+                                        <div className="flex gap-1.5">
+                                            <div className="w-3 h-3 rounded-full bg-rose-500/80"></div>
+                                            <div className="w-3 h-3 rounded-full bg-amber-500/80"></div>
+                                            <div className="w-3 h-3 rounded-full bg-emerald-500/80"></div>
+                                        </div>
+                                        <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">navstracking.js</div>
+                                        <div className="w-10"></div>
+                                    </div>
+                                    <pre className="p-5 text-slate-300 text-[12px] font-mono overflow-x-auto whitespace-pre-wrap max-h-[350px] custom-scrollbar leading-relaxed">
+{`<script>
+// ==========================================
+// 1. BLINDAGEM DO GCLID (Navstracking Core)
+// ==========================================
+const urlParamsGlobal = new URLSearchParams(window.location.search);
+if(urlParamsGlobal.has('gclid')) {
+    localStorage.setItem('meu_gclid_salvo', urlParamsGlobal.get('gclid'));
+}
+
+// ==========================================
+// 2. MOTOR DE RASTREAMENTO (Navstracking Engine)
+// ==========================================
+console.log("%c🚀 Navstracking v1.0 | Inteligência Minhaclinica", "color:#007bff;font-size:16px;font-weight:bold");
+(function () {
+  const navstracking = {
+    version: "1.0.0", cookieTTL: 63072000, visitorIdParam: "rast_id",
+    paidParams: ["fbclid", "gclid", "msclkid", "ttclid", "wbraid", "gbraid"],
+    formTracking: { enabled: true, autoDetect: true }
+  };
+  
+  function setVal(k, v) { 
+    const d = new Date(Date.now() + navstracking.cookieTTL * 1000);
+    document.cookie = k + "=" + encodeURIComponent(v) + ";expires=" + d.toUTCString() + ";path=/;SameSite=Lax";
+    try { localStorage.setItem(k, v); } catch(e) {}
+  }
+  function getVal(k) { 
+    const c = document.cookie.split("; ").find(x => x.startsWith(k + "="))?.split("=")[1];
+    return c ? decodeURIComponent(c) : localStorage.getItem(k);
+  }
+  function genID() { return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16); }); }
+
+  let rastracking_visitor_id = getVal("rastracking_visitor_id");
+  if (!rastracking_visitor_id) { 
+    rastracking_visitor_id = genID(); 
+    setVal("rastracking_visitor_id", rastracking_visitor_id); 
+  }
+
+  const qs = new URLSearchParams(location.search);
+  const utms = ["source", "medium", "campaign", "content", "term"];
+  const isPaid = navstracking.paidParams.some(p => qs.has(p));
+
+  utms.forEach(u => {
+    const v = qs.get("utm_" + u);
+    if(v) {
+      setVal("cookieUtm" + u.charAt(0).toUpperCase() + u.slice(1), v);
+      if(isPaid) setVal("cookiePaidUtm" + u.charAt(0).toUpperCase() + u.slice(1), v);
+    }
+  });
+
+  function updateLinks(root = document) {
+    root.querySelectorAll("a").forEach(a => {
+      if (!a.href || a.href.startsWith("#") || a.href.includes("javascript:")) return;
+      try {
+        const u = new URL(a.href, location.origin);
+        if (u.protocol !== "http:" && u.protocol !== "https:") return;
+        u.searchParams.set("rast_id", rastracking_visitor_id);
+        a.href = u.toString();
+      } catch(e) {}
+    });
+  }
+
+  if (document.body) updateLinks(); else document.addEventListener("DOMContentLoaded", () => updateLinks());
+  new MutationObserver(m => m.forEach(n => n.addedNodes.forEach(an => an.nodeType === 1 && updateLinks(an)))).observe(document.body || document.documentElement, { childList: true, subtree: true });
+})();
+
+// ==========================================
+// 3. GATILHO WHATSAPP (Navstracking Hook)
+// ==========================================
+document.addEventListener("DOMContentLoaded", function() {
+    const botoesWhats = document.querySelectorAll('a[href*="wa.me"], a[href*="api.whatsapp.com"]');
+    const msgPadrao = "${clinicData.wa_pre_msg || 'Olá! Vim do site e quero saber mais informações.'}";
+    const numeroWhatsFixo = "${clinicData.phone ? clinicData.phone.replace(/\D/g, '') : 'SEUNUMERO'}";
+
+    botoesWhats.forEach(botao => {
+        botao.addEventListener("click", async function(event) {
+            event.preventDefault(); 
+            
+            // O número vem dinamicamente das suas configurações. Se houver falha na leitura, faz um fallback.
+            const urlBotao = new URL(botao.href);
+            const numeroWhats = numeroWhatsFixo !== "SEUNUMERO" ? numeroWhatsFixo : (urlBotao.pathname.replace('/', '') || urlBotao.searchParams.get("phone"));
+
+            const payload = {
+                telefone_destino: numeroWhats,
+                utm_source: localStorage.getItem('cookiePaidUtmSource') || localStorage.getItem('cookieUtmSource') || "direto",
+                utm_medium: localStorage.getItem('cookiePaidUtmMedium') || localStorage.getItem('cookieUtmMedium') || "",
+                utm_campaign: localStorage.getItem('cookiePaidUtmCampaign') || localStorage.getItem('cookieUtmCampaign') || "",
+                utm_term: localStorage.getItem('cookiePaidUtmTerm') || localStorage.getItem('cookieUtmTerm') || "",
+                utm_content: localStorage.getItem('cookiePaidUtmContent') || localStorage.getItem('cookieUtmContent') || "",
+                gclid: localStorage.getItem('meu_gclid_salvo') || urlParamsGlobal.get('gclid') || "",
+                rast_id: localStorage.getItem('rastracking_visitor_id') || "",
+                pagina: window.location.href
+            };
+
+            const textoOriginal = botao.innerText;
+            if(botao.innerText) botao.innerText = "Gerando protocolo...";
+
+            try {
+                const resposta = await fetch('https://webhook.med4growautomacao.com.br/webhook/clinica/webhook_redirecionamento', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const dados = await resposta.json();
+                const protocolo = dados.id_protocolo || "0000"; 
+
+                // MENSAGEM CONFIGURÁVEL
+                const mensagemFinal = msgPadrao + " [Protocolo " + protocolo + "]";
+
+                window.location.href = "https://wa.me/" + numeroWhats + "?text=" + encodeURIComponent(mensagemFinal);
+
+            } catch (erro) {
+                console.error("Erro Navstracking:", erro);
+                window.location.href = "https://wa.me/" + numeroWhats + "?text=" + encodeURIComponent(msgPadrao);
+                if(botao.innerText) botao.innerText = textoOriginal;
+            }
+        });
+    });
+});
+</script>`}
+                                    </pre>
+                                    <div className="absolute top-12 right-6 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                                        <Button 
+                                            variant="outline" 
+                                            size="sm"
+                                            onClick={(e) => {
+                                                const text = `<script>\n// ==========================================\n// 1. BLINDAGEM DO GCLID (Navstracking Core)\n// ==========================================\nconst urlParamsGlobal = new URLSearchParams(window.location.search);\nif(urlParamsGlobal.has('gclid')) {\n    localStorage.setItem('meu_gclid_salvo', urlParamsGlobal.get('gclid'));\n}\n\n// ==========================================\n// 2. MOTOR DE RASTREAMENTO (Navstracking Engine)\n// ==========================================\nconsole.log("%c🚀 Navstracking v1.0 | Inteligência Minhaclinica", "color:#007bff;font-size:16px;font-weight:bold");\n(function () {\n  const navstracking = {\n    version: "1.0.0", cookieTTL: 63072000, visitorIdParam: "rast_id",\n    paidParams: ["fbclid", "gclid", "msclkid", "ttclid", "wbraid", "gbraid"],\n    formTracking: { enabled: true, autoDetect: true }\n  };\n  \n  function setVal(k, v) { \n    const d = new Date(Date.now() + navstracking.cookieTTL * 1000);\n    document.cookie = k + "=" + encodeURIComponent(v) + ";expires=" + d.toUTCString() + ";path=/;SameSite=Lax";\n    try { localStorage.setItem(k, v); } catch(e) {}\n  }\n  function getVal(k) { \n    const c = document.cookie.split("; ").find(x => x.startsWith(k + "="))?.split("=")[1];\n    return c ? decodeURIComponent(c) : localStorage.getItem(k);\n  }\n  function genID() { return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16); }); }\n\n  let rastracking_visitor_id = getVal("rastracking_visitor_id");\n  if (!rastracking_visitor_id) { \n    rastracking_visitor_id = genID(); \n    setVal("rastracking_visitor_id", rastracking_visitor_id); \n  }\n\n  const qs = new URLSearchParams(location.search);\n  const utms = ["source", "medium", "campaign", "content", "term"];\n  const isPaid = navstracking.paidParams.some(p => qs.has(p));\n\n  utms.forEach(u => {\n    const v = qs.get("utm_" + u);\n    if(v) {\n      setVal("cookieUtm" + u.charAt(0).toUpperCase() + u.slice(1), v);\n      if(isPaid) setVal("cookiePaidUtm" + u.charAt(0).toUpperCase() + u.slice(1), v);\n    }\n  });\n\n  function updateLinks(root = document) {\n    root.querySelectorAll("a").forEach(a => {\n      if (!a.href || a.href.startsWith("#") || a.href.includes("javascript:")) return;\n      try {\n        const u = new URL(a.href, location.origin);\n        if (u.protocol !== "http:" && u.protocol !== "https:") return;\n        u.searchParams.set("rast_id", rastracking_visitor_id);\n        a.href = u.toString();\n      } catch(e) {}\n    });\n  }\n\n  if (document.body) updateLinks(); else document.addEventListener("DOMContentLoaded", () => updateLinks());\n  new MutationObserver(m => m.forEach(n => n.addedNodes.forEach(an => an.nodeType === 1 && updateLinks(an)))).observe(document.body || document.documentElement, { childList: true, subtree: true });\n})();\n\n// ==========================================\n// 3. GATILHO WHATSAPP (Navstracking Hook)\n// ==========================================\ndocument.addEventListener("DOMContentLoaded", function() {\n    const botoesWhats = document.querySelectorAll('a[href*="wa.me"], a[href*="api.whatsapp.com"]');\n    const msgPadrao = "${clinicData.wa_pre_msg || 'Olá! Vim do site e quero saber mais informações.'}";\n    const numeroWhatsFixo = "${clinicData.phone ? clinicData.phone.replace(/\D/g, '') : 'SEUNUMERO'}";\n\n    botoesWhats.forEach(botao => {\n        botao.addEventListener("click", async function(event) {\n            event.preventDefault(); \n            \n            const urlBotao = new URL(botao.href);\n            const numeroWhats = numeroWhatsFixo !== "SEUNUMERO" ? numeroWhatsFixo : (urlBotao.pathname.replace('/', '') || urlBotao.searchParams.get("phone"));\n\n            const payload = {\n                telefone_destino: numeroWhats,\n                utm_source: localStorage.getItem('cookiePaidUtmSource') || localStorage.getItem('cookieUtmSource') || "direto",\n                utm_medium: localStorage.getItem('cookiePaidUtmMedium') || localStorage.getItem('cookieUtmMedium') || "",\n                utm_campaign: localStorage.getItem('cookiePaidUtmCampaign') || localStorage.getItem('cookieUtmCampaign') || "",\n                utm_term: localStorage.getItem('cookiePaidUtmTerm') || localStorage.getItem('cookieUtmTerm') || "",\n                utm_content: localStorage.getItem('cookiePaidUtmContent') || localStorage.getItem('cookieUtmContent') || "",\n                gclid: localStorage.getItem('meu_gclid_salvo') || urlParamsGlobal.get('gclid') || "",\n                rast_id: localStorage.getItem('rastracking_visitor_id') || "",\n                pagina: window.location.href\n            };\n\n            const textoOriginal = botao.innerText;\n            if(botao.innerText) botao.innerText = "Gerando protocolo...";\n\n            try {\n                const resposta = await fetch('https://webhook.med4growautomacao.com.br/webhook/clinica/webhook_redirecionamento', {\n                    method: 'POST',\n                    headers: { 'Content-Type': 'application/json' },\n                    body: JSON.stringify(payload)\n                });\n\n                const dados = await resposta.json();\n                const protocolo = dados.id_protocolo || "0000"; \n\n                // MENSAGEM CONFIGURÁVEL\n                const mensagemFinal = msgPadrao + " [Protocolo " + protocolo + "]";\n\n                window.location.href = "https://wa.me/" + numeroWhats + "?text=" + encodeURIComponent(mensagemFinal);\n\n            } catch (erro) {\n                console.error("Erro Navstracking:", erro);\n                window.location.href = "https://wa.me/" + numeroWhats + "?text=" + encodeURIComponent(msgPadrao);\n                if(botao.innerText) botao.innerText = textoOriginal;\n            }\n        });\n    });\n});\n</script>`;
+                                                navigator.clipboard.writeText(text);
+                                                const btn = e.currentTarget;
+                                                const orig = btn.innerHTML;
+                                                btn.innerHTML = '<svg class="w-4 h-4 mr-2 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg> Copiado!';
+                                                btn.classList.add('bg-emerald-500', 'border-emerald-500');
+                                                btn.classList.remove('bg-white/10', 'border-white/20');
+                                                setTimeout(() => {
+                                                    btn.innerHTML = orig;
+                                                    btn.classList.remove('bg-emerald-500', 'border-emerald-500');
+                                                    btn.classList.add('bg-white/10', 'border-white/20');
+                                                }, 2000);
+                                            }}
+                                            className="bg-white/10 hover:bg-white/20 border border-white/20 text-white backdrop-blur-md transition-all shadow-lg shadow-black/20 font-bold px-4 h-10 rounded-lg"
+                                        >
+                                            <Copy className="w-4 h-4 mr-2" /> Copiar Script
+                                        </Button>
+                                    </div>
+                                </div>
+                            </div>
+                        </motion.div>
+                    )}
+                </CardContent>
+            </Card>
+                </div>
+            )}
+
 
             {/* Grupo de Notificação */}
-            <Card className="border border-slate-200 shadow-sm overflow-hidden">
-                <CardHeader className="bg-gradient-to-r from-emerald-600 to-teal-600 pb-6 px-8">
-                    <div className="flex items-center gap-5">
-                        <div className="w-14 h-14 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center shadow-lg">
-                            <Bell className="w-7 h-7 text-white" />
-                        </div>
-                        <div>
-                            <CardTitle className="text-2xl font-bold text-white">Grupo de Notificações</CardTitle>
-                            <p className="text-white/80 font-medium text-sm">Crie um grupo no WhatsApp para receber alertas do Agente IA</p>
-                        </div>
-                    </div>
-                </CardHeader>
+            {activeIntTab === 'whatsapp' && (
+                <div className="space-y-6">
+                    <Card className="border border-emerald-200 shadow-sm bg-white overflow-hidden">
+                        <CardHeader className="bg-emerald-100 border-b border-emerald-200 pb-6 px-8">
+                            <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm border border-emerald-200">
+                                    <Bell className="w-6 h-6 text-emerald-600" />
+                                </div>
+                                <div>
+                                    <CardTitle className="text-xl font-bold text-slate-800">Grupo de Notificações</CardTitle>
+                                    <p className="text-slate-600 font-medium text-sm">Crie um grupo no WhatsApp para receber alertas do Agente IA</p>
+                                </div>
+                            </div>
+                        </CardHeader>
                 <CardContent className="p-8 space-y-6">
                     {clinic?.notification_group_id ? (
                         <div className="flex items-center gap-3 px-4 py-3 bg-white border border-slate-200 rounded-lg">
@@ -786,48 +1179,58 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onCon
                         </div>
                     ) : (
                         /* Sem grupo — criar */
-                        <>
-                            <div className="space-y-2">
-                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Nome do Grupo</label>
+                        <div className="grid gap-6">
+                            <div className="space-y-2 group/input">
+                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                                    <Bell className="w-3.5 h-3.5 text-teal-500" /> Nome do Grupo
+                                </label>
                                 <input type="text" value={groupName} onChange={e => setGroupName(e.target.value)} placeholder="Informativos do Agente IA"
-                                    className="w-full px-4 py-2.5 border border-slate-200 rounded-lg font-medium text-slate-700 text-sm placeholder:text-slate-300 focus:ring-2 focus:ring-teal-100 focus:border-teal-300 outline-none transition-all" />
+                                    className="w-full px-4 py-3 border border-slate-200 rounded-xl font-medium text-slate-700 text-sm placeholder:text-slate-300 focus:ring-4 focus:ring-teal-100 focus:border-teal-400 outline-none transition-all shadow-sm hover:border-teal-200" />
                             </div>
 
-                            <div className="space-y-3">
+                            <div className="space-y-3 p-5 bg-slate-50 border border-slate-100 rounded-2xl">
                                 <div className="flex items-center justify-between">
-                                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Participantes</label>
-                                    <Button variant="outline" size="sm" onClick={addParticipant} className="text-teal-600 border-teal-200 hover:bg-teal-50 gap-1 h-8 text-xs font-bold">
-                                        <Plus className="w-3.5 h-3.5" /> Adicionar
+                                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                                        <UserCircle className="w-4 h-4 text-slate-400" /> Participantes
+                                    </label>
+                                    <Button variant="outline" size="sm" onClick={addParticipant} className="bg-white text-teal-600 border-teal-200 hover:bg-teal-50 gap-1 h-8 text-xs font-bold shadow-sm rounded-lg">
+                                        <Plus className="w-3.5 h-3.5" /> Adicionar Pessoal
                                     </Button>
                                 </div>
-                                <div className="space-y-2">
+                                <div className="space-y-3 mt-2">
                                     {participants.map((p, i) => (
-                                        <div key={i} className="flex gap-2 items-center">
-                                            <input type="text" value={p.name} onChange={e => updateParticipant(i, 'name', e.target.value)} placeholder="Nome"
-                                                className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 placeholder:text-slate-300 focus:ring-2 focus:ring-teal-100 focus:border-teal-300 outline-none" />
-                                            <input type="text" value={p.phone} onChange={e => updateParticipant(i, 'phone', e.target.value)} placeholder="Telefone (5511999999999)"
-                                                className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 placeholder:text-slate-300 focus:ring-2 focus:ring-teal-100 focus:border-teal-300 outline-none" />
+                                        <div key={i} className="flex gap-2 items-center relative group/person">
+                                            <div className="flex-1">
+                                                <input type="text" value={p.name} onChange={e => updateParticipant(i, 'name', e.target.value)} placeholder="Nome"
+                                                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 placeholder:text-slate-300 focus:ring-2 focus:ring-teal-100 focus:border-teal-300 outline-none shadow-sm transition-all" />
+                                            </div>
+                                            <div className="flex-1">
+                                                <input type="text" value={p.phone} onChange={e => updateParticipant(i, 'phone', e.target.value)} placeholder="Telefone (5511999999999)"
+                                                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 placeholder:text-slate-300 focus:ring-2 focus:ring-teal-100 focus:border-teal-300 outline-none shadow-sm transition-all" />
+                                            </div>
                                             {participants.length > 1 && (
-                                                <button onClick={() => removeParticipant(i)} className="text-slate-400 hover:text-rose-500 transition-colors p-1"><X className="w-4 h-4" /></button>
+                                                <button onClick={() => removeParticipant(i)} className="text-slate-300 hover:text-rose-500 transition-colors p-2 bg-white border border-slate-100 shadow-sm rounded-lg hover:border-rose-200"><X className="w-4 h-4" /></button>
                                             )}
                                         </div>
                                     ))}
                                 </div>
                             </div>
 
-                            <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-4 mt-2">
                                 <Button onClick={handleCreateGroup} disabled={creatingGroup || !groupName.trim()}
-                                    className="bg-teal-600 hover:bg-teal-700 text-white gap-2 h-11 px-8 font-bold shadow-lg shadow-teal-100 transition-all active:scale-95 disabled:opacity-50">
+                                    className="bg-gradient-to-r from-teal-600 to-teal-500 hover:from-teal-700 hover:to-teal-600 text-white gap-2 h-12 px-10 font-bold shadow-xl shadow-teal-500/20 transition-all active:scale-[0.98] disabled:opacity-50 rounded-xl border border-teal-400/50">
                                     {creatingGroup ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bell className="w-4 h-4" />}
-                                    {creatingGroup ? 'Criando...' : 'Criar Grupo'}
+                                    {creatingGroup ? 'Criando Grupo...' : 'Criar Grupo Agora'}
                                 </Button>
-                                {groupResult === 'success' && <span className="text-sm font-bold text-emerald-600 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" /> Grupo criado com sucesso!</span>}
-                                {groupResult === 'error' && <span className="text-sm font-bold text-rose-600 flex items-center gap-1"><X className="w-4 h-4" /> Erro ao criar grupo. Verifique a conexão.</span>}
+                                {groupResult === 'success' && <span className="text-sm font-bold text-emerald-600 flex items-center gap-1 bg-emerald-50 px-3 py-2 rounded-lg border border-emerald-100"><CheckCircle2 className="w-4 h-4" /> Sucesso!</span>}
+                                {groupResult === 'error' && <span className="text-sm font-bold text-rose-600 flex items-center gap-1 bg-rose-50 px-3 py-2 rounded-lg border border-rose-100"><X className="w-4 h-4" /> Erro na criação</span>}
                             </div>
-                        </>
+                        </div>
                     )}
                 </CardContent>
             </Card>
+                </div>
+            )}
         </div>
     );
 }

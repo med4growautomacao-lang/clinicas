@@ -334,6 +334,8 @@ export interface Lead {
   g_adset_name: string | null;
   g_ad_name: string | null;
   g_term_name: string | null;
+  g_source_name: string | null;
+  rast_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -749,6 +751,7 @@ export interface Clinic {
   meta_token?: string | null;
   meta_ad_account_id?: string | null;
   meta_pixel_id?: string | null;
+  wa_pre_msg?: string | null;
 }
 
 export interface AIConfig {
@@ -794,21 +797,30 @@ export function useSettings() {
   const [clinic, setClinic] = useState<Clinic | null>(null);
   const [aiConfig, setAIConfig] = useState<AIConfig | null>(null);
   const [whatsapp, setWhatsapp] = useState<WhatsappInstance | null>(null);
+  const [systemSettings, setSystemSettings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
   const fetch = useCallback(async (silent = false) => {
     if (!profile?.clinic_id) return;
     if (!silent) setLoading(true);
 
-    const [clinicRes, aiRes, waRes] = await Promise.all([
+    const [clinicRes, aiRes, waRes, sysRes] = await Promise.all([
       supabase.from('clinics').select('*').eq('id', profile.clinic_id).maybeSingle(),
       supabase.from('ai_config').select('*').eq('clinic_id', profile.clinic_id).maybeSingle(),
       supabase.from('whatsapp_instances').select('*').eq('clinic_id', profile.clinic_id).maybeSingle(),
+      supabase.from('system_settings').select('*')
     ]);
 
     setClinic(clinicRes.data);
     setAIConfig(aiRes.data);
     setWhatsapp(waRes.data);
+    
+    if (sysRes.data) {
+      const sysMap: Record<string, string> = {};
+      sysRes.data.forEach(s => { sysMap[s.id] = s.value; });
+      setSystemSettings(sysMap);
+    }
+    
     setLoading(false);
   }, [profile?.clinic_id]);
 
@@ -883,7 +895,7 @@ export function useSettings() {
     }
   };
 
-  return { clinic, aiConfig, whatsapp, loading, refetch: fetch, updateClinic, updateAI, updateWhatsapp };
+  return { clinic, aiConfig, whatsapp, systemSettings, loading, refetch: fetch, updateClinic, updateAI, updateWhatsapp };
 }
 
 export function useClinics() {

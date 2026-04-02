@@ -37,6 +37,7 @@ import { extractMessageText } from "./LeadChat";
 import { useLeads, useChatMessages, useSettings, useFunnelStages, FunnelStage } from "../hooks/useSupabase";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
+import SemOrigemLogo from "../assets/logos/Logo Sem origem.png";
 import { format, parseISO, isToday, isYesterday, isSameDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -1086,6 +1087,9 @@ function ChatsView() {
                     )}
                     {isGoogle && !isMeta && (
                       <img src={GoogleLogo} alt="Google" className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white shadow-sm" />
+                    )}
+                    {!isMeta && !isGoogle && (
+                      <img src={SemOrigemLogo} alt="Sem Origem" className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white shadow-sm opacity-60" />
                     )}
                   </div>
                   <div className="flex-1 min-w-0">

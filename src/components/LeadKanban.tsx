@@ -24,6 +24,7 @@ import { useFunnelStages, useLeads, useSettings, useTransitionRules } from "../h
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
 import WhatsAppLogo from "../assets/logos/Logo Whatsapp.png";
+import SemOrigemLogo from "../assets/logos/Logo Sem origem.png";
 import { Share2, Globe, Layout, Smartphone } from "lucide-react";
 
 function calcBusinessMinutes(since: Date, bh: { start: string; end: string; days: number[] }, endDate?: Date): number {
@@ -628,6 +629,9 @@ export function LeadKanban() {
                           )}
                           {isGoogle && !isMeta && (
                             <img src={GoogleLogo} alt="Google" className="w-3.5 h-3.5 rounded shrink-0" />
+                          )}
+                          {!isMeta && !isGoogle && (
+                            <img src={SemOrigemLogo} alt="Sem Origem" className="w-3.5 h-3.5 rounded shrink-0 opacity-40" />
                           )}
                           <span className={cn(
                             "text-[9px] font-black uppercase tracking-[0.1em] truncate",

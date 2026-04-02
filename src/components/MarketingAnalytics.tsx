@@ -67,6 +67,9 @@ import {
   differenceInDays
 } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import MetaLogo from "../assets/logos/Logo Metaads.png";
+import GoogleLogo from "../assets/logos/Logo Googleads.png";
+import SemOrigemLogo from "../assets/logos/Logo Sem origem.png";
 
 type Period = 'dia' | 'sem' | 'mês';
 type Platform = 'meta_ads' | 'google_ads' | 'no_track';
@@ -74,7 +77,7 @@ type Platform = 'meta_ads' | 'google_ads' | 'no_track';
 const PLATFORM_LABELS: Record<Platform, string> = {
   meta_ads: 'META ADS',
   google_ads: 'GOOGLE ADS',
-  no_track: 'SEM RASTREIO'
+  no_track: 'SEM ORIGEM'
 };
 
 const PLATFORM_COLORS: Record<Platform, string> = {
@@ -965,7 +968,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
       return [
         { name: 'Meta Ads', value: currentTotals.breakdown.meta_ads.leads, color: '#4f46e5' },
         { name: 'Google Ads', value: currentTotals.breakdown.google_ads.leads, color: '#f59e0b' },
-        { name: 'Direto', value: currentTotals.breakdown.no_track.leads, color: '#94a3b8' },
+        { name: 'Sem Origem', value: currentTotals.breakdown.no_track.leads, color: '#94a3b8' },
       ].filter(d => d.value > 0);
     } else {
       // If a platform is selected, show capture channel breakdown (WhatsApp vs Forms)
@@ -996,21 +999,29 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
 
         <div className="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
           {[
-            { id: 'all', label: 'Todos' },
-            { id: 'meta_ads', label: 'Meta' },
-            { id: 'google_ads', label: 'Google' },
-            { id: 'no_track', label: 'Direto' }
+            { id: 'all', label: 'Todos', logo: null },
+            { id: 'meta_ads', label: 'Meta', logo: MetaLogo },
+            { id: 'google_ads', label: 'Google', logo: GoogleLogo },
+            { id: 'no_track', label: 'Sem Origem', logo: SemOrigemLogo }
           ].map((plat) => (
             <button
               key={plat.id}
               onClick={() => setSelectedPlatform(plat.id as any)}
               className={cn(
-                "px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all",
+                "flex items-center gap-2 px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all",
                 selectedPlatform === plat.id 
-                  ? "bg-slate-900 text-white shadow-md shadow-slate-200" 
+                  ? "bg-slate-910 text-white shadow-md shadow-slate-200" 
                   : "text-slate-400 hover:text-slate-600 hover:bg-slate-50"
               )}
+              style={selectedPlatform === plat.id ? { backgroundColor: '#1e293b' } : {}}
             >
+              {plat.logo && (
+                <img 
+                   src={plat.logo} 
+                   alt={plat.label} 
+                   className={cn("w-3 h-3 object-contain", selectedPlatform === plat.id ? "brightness-0 invert" : "")} 
+                />
+              )}
               {plat.label}
             </button>
           ))}
@@ -1144,10 +1155,20 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
                   {platformData.map((item, i) => (
                     <div key={i} className="flex items-center justify-between px-2">
                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
-                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight">{item.name}</span>
+                          {(item.name === 'Meta Ads' || item.name === 'Google Ads' || item.name === 'Sem Origem') ? (
+                            <div className="w-4 h-4 flex items-center justify-center">
+                              <img 
+                                src={item.name === 'Meta Ads' ? MetaLogo : item.name === 'Google Ads' ? GoogleLogo : SemOrigemLogo} 
+                                alt={item.name} 
+                                className="w-full h-full object-contain" 
+                              />
+                            </div>
+                          ) : (
+                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
+                          )}
+                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight">{item.name === 'Meta Ads' ? 'META' : item.name === 'Google Ads' ? 'GOOGLE' : item.name}</span>
                        </div>
-                       <span className="text-[11px] font-black text-slate-700">{item.value}</span>
+                       <span className="text-[11px] font-black text-slate-700 font-sans">{item.value}</span>
                     </div>
                   ))}
                 </div>
@@ -1263,9 +1284,32 @@ function PeriodOption({ label, onClick, active }: { label: string, onClick: () =
 function PlatformRows({ platform, periods, metricsByPeriod, comparisonMetricsByPeriod, isComparing, isEditing, editValues, setEditValues, period, visibleMetrics, metricsOrder }: any) {
   return (
     <>
-      <tr className="bg-slate-50/50">
-        <td className={cn("px-6 py-4 text-[10px] font-black tracking-[3px] border-r border-slate-100", PLATFORM_COLORS[platform])}>
-          {PLATFORM_LABELS[platform]}
+      <tr className={cn(
+        platform === 'meta_ads' ? "bg-blue-50/60" : 
+        platform === 'google_ads' ? "bg-emerald-50/60" : 
+        "bg-slate-50/50"
+      )}>
+        <td className={cn("px-6 py-4 border-r border-slate-100")}>
+          <div className="flex items-center gap-3">
+            {platform === 'meta_ads' && (
+              <div className="w-5 h-5 rounded flex items-center justify-center bg-blue-100/50 p-1">
+                <img src={MetaLogo} alt="Meta" className="w-full h-full object-contain" />
+              </div>
+            )}
+            {platform === 'google_ads' && (
+              <div className="w-5 h-5 rounded flex items-center justify-center bg-emerald-100/50 p-1">
+                <img src={GoogleLogo} alt="Google" className="w-full h-full object-contain" />
+              </div>
+            )}
+            {platform === 'no_track' && (
+              <div className="w-5 h-5 rounded flex items-center justify-center bg-slate-100/50 p-1">
+                <img src={SemOrigemLogo} alt="Sem Origem" className="w-full h-full object-contain opacity-50" />
+              </div>
+            )}
+            <span className={cn("text-[10px] font-black tracking-[3px]", PLATFORM_COLORS[platform as Platform])}>
+              {PLATFORM_LABELS[platform as Platform]}
+            </span>
+          </div>
         </td>
         {periods.map((_: any, idx: number) => <td key={idx} className="px-6 py-4 bg-slate-50/30" />)}
       </tr>

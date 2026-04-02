@@ -34,6 +34,9 @@ import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSettings, Clinic, AIConfig, WhatsappInstance } from "../hooks/useSupabase";
 import { supabase } from "../lib/supabase";
+import MetaLogo from "../assets/logos/Logo Metaads.png";
+import GoogleLogo from "../assets/logos/Logo Googleads.png";
+import WhatsappLogo from "../assets/logos/Logo Whatsapp.png";
 
 export function Settings() {
     const { clinic, aiConfig, whatsapp, loading, updateClinic, updateAI, updateWhatsapp } = useSettings();
@@ -64,7 +67,11 @@ export function Settings() {
             } else if (activeTab === 'ai') {
                 await updateAI(localAI);
             } else if (activeTab === 'integrations') {
-                await updateWhatsapp(localWA);
+                // Salva tanto WhatsApp quanto as novas configurações do Meta no Clinic
+                await Promise.all([
+                    updateWhatsapp(localWA),
+                    updateClinic(localClinic)
+                ]);
             }
         } finally {
             setSaving(false);
@@ -210,6 +217,8 @@ export function Settings() {
                             <IntegrationSettings 
                                 data={localWA} 
                                 onChange={(updates) => setLocalWA(prev => ({ ...prev, ...updates }))} 
+                                clinicData={localClinic}
+                                onClinicChange={(updates) => setLocalClinic(prev => ({ ...prev, ...updates }))}
                                 onConnect={handleWhatsappConnect}
                                 onCancel={handleWhatsappCancel}
                                 connecting={connecting}
@@ -474,9 +483,11 @@ function ClinicSettings({ data, onChange }: { data: Partial<Clinic>, onChange: (
     );
 }
 
-function IntegrationSettings({ data, onChange, onConnect, onCancel, connecting }: {
+function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onConnect, onCancel, connecting }: {
     data: Partial<WhatsappInstance>,
     onChange: (updates: Partial<WhatsappInstance>) => void,
+    clinicData: Partial<Clinic>,
+    onClinicChange: (updates: Partial<Clinic>) => void,
     onConnect: () => void,
     onCancel: () => void,
     connecting: boolean
@@ -695,6 +706,58 @@ function IntegrationSettings({ data, onChange, onConnect, onCancel, connecting }
                                 </div>
                             </div>
                         )}
+                    </div>
+                </CardContent>
+            </Card>
+
+            {/* Meta Ads Settings */}
+            <Card className="border border-slate-200 shadow-sm overflow-hidden">
+                <CardHeader className="bg-gradient-to-r from-blue-700 to-blue-600 pb-6 px-8">
+                    <div className="flex items-center gap-5">
+                        <div className="w-14 h-14 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center shadow-lg overflow-hidden p-3">
+                            <img src={MetaLogo} alt="Meta" className="w-full h-full object-contain filter brightness-0 invert" />
+                        </div>
+                        <div>
+                            <CardTitle className="text-2xl font-bold text-white">Meta Ads</CardTitle>
+                            <p className="text-white/80 font-medium text-sm">Integração com Conversões do Pixel e API de Conversão</p>
+                        </div>
+                    </div>
+                </CardHeader>
+                <CardContent className="p-8 grid gap-6 md:grid-cols-2">
+                    <div className="space-y-2 md:col-span-2">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Token de Acesso (CAPI)</label>
+                        <input
+                            type="password"
+                            value={clinicData.meta_token || ''}
+                            onChange={(e) => onClinicChange({ meta_token: e.target.value })}
+                            placeholder="EAA... seu access token"
+                            className="w-full px-4 py-2.5 border border-slate-200 rounded-lg font-medium text-slate-700 text-sm placeholder:text-slate-300 focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all"
+                        />
+                        <p className="text-[10px] text-slate-400 font-medium leading-relaxed">
+                            O token de acesso é gerado no Gerenciador de Negócios e permite o envio de conversões via API.
+                        </p>
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">ID da Conta de Anúncios</label>
+                        <input
+                            type="text"
+                            value={clinicData.meta_ad_account_id || ''}
+                            onChange={(e) => onClinicChange({ meta_ad_account_id: e.target.value })}
+                            placeholder="act_123456789"
+                            className="w-full px-4 py-2.5 border border-slate-200 rounded-lg font-medium text-slate-700 text-sm placeholder:text-slate-300 focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all"
+                        />
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">ID do Pixel</label>
+                        <input
+                            type="text"
+                            value={clinicData.meta_pixel_id || ''}
+                            onChange={(e) => onClinicChange({ meta_pixel_id: e.target.value })}
+                            placeholder="Ex: 123456789012345"
+                            className="w-full px-4 py-2.5 border border-slate-200 rounded-lg font-medium text-slate-700 text-sm placeholder:text-slate-300 focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all"
+                        />
                     </div>
                 </CardContent>
             </Card>

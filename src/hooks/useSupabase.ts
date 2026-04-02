@@ -746,6 +746,9 @@ export interface Clinic {
   primary_color: string | null;
   plan: 'free' | 'pro' | 'enterprise';
   notification_group_id: string | null;
+  meta_token?: string | null;
+  meta_ad_account_id?: string | null;
+  meta_pixel_id?: string | null;
 }
 
 export interface AIConfig {

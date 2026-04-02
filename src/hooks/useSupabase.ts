@@ -324,6 +324,12 @@ export interface Lead {
   sla_breach_count: number;
   last_message_at: string | null;
   last_outbound_at: string | null;
+  ctwa_clid: string | null;
+  fb_clid: string | null;
+  g_clid: string | null;
+  campaign_name: string | null;
+  adset_name: string | null;
+  ad_name: string | null;
   created_at: string;
   updated_at: string;
 }

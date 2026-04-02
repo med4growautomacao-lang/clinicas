@@ -324,9 +324,9 @@ export function MarketingAnalytics() {
     targetPeriods.forEach((p, idx) => {
       const pKey = targetPeriods[idx].label;
       stats[pKey] = {
-        meta_ads: { leads: 0, convs: 0, investment: 0, conv_value: 0, appointments: 0 },
-        google_ads: { leads: 0, convs: 0, investment: 0, conv_value: 0, appointments: 0 },
-        no_track: { leads: 0, convs: 0, investment: 0, conv_value: 0, appointments: 0 }
+        meta_ads: { leads: 0, convs: 0, investment: 0, conv_value: 0, appointments: 0, whatsapp_leads: 0, forms_leads: 0 },
+        google_ads: { leads: 0, convs: 0, investment: 0, conv_value: 0, appointments: 0, whatsapp_leads: 0, forms_leads: 0 },
+        no_track: { leads: 0, convs: 0, investment: 0, conv_value: 0, appointments: 0, whatsapp_leads: 0, forms_leads: 0 }
       };
 
       marketingData.forEach(m => {
@@ -353,6 +353,8 @@ export function MarketingAnalytics() {
 
           if (manualLeads === null || manualLeads === undefined) {
             stats[pKey][platform].leads += 1;
+            if (lead.capture_channel === 'forms') stats[pKey][platform].forms_leads += 1;
+            else stats[pKey][platform].whatsapp_leads += 1;
           }
         }
       });
@@ -512,6 +514,7 @@ export function MarketingAnalytics() {
               >
                 <Calendar className={cn("w-4 h-4 transition-colors", isPeriodOpen ? "text-teal-600" : "text-slate-400 group-hover:text-teal-600")} />
                 <span className="text-xs font-bold text-slate-600 uppercase tracking-tight">{activeRangeLabel}</span>
+                <span className="text-[10px] font-medium text-slate-400">{format(dateRange.start, 'dd/MM')} - {format(dateRange.end, 'dd/MM')}</span>
                 <ChevronRight className={cn("w-3.5 h-3.5 text-slate-300 transition-transform", isPeriodOpen ? "rotate-90 text-teal-600" : "")} />
               </div>
 
@@ -695,10 +698,10 @@ export function MarketingAnalytics() {
                     <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest">Tabela de Métricas</h2>
                   </div>
 
-                  <MetricsConfigButton 
-                    metricsOrder={tableMetricsOrder} 
-                    visibleMetrics={tableVisibleMetrics} 
-                    toggleMetric={(id: string) => toggleMetric(id, 'table')} 
+                  <MetricsConfigButton
+                    metricsOrder={tableMetricsOrder}
+                    visibleMetrics={tableVisibleMetrics}
+                    toggleMetric={(id: string) => toggleMetric(id, 'table')}
                     moveMetric={(id: string, dir) => moveMetric(id, dir as any, 'table')}
                     variant="ghost"
                     className="h-8 px-3 rounded-xl hover:bg-slate-100 text-slate-400"
@@ -836,6 +839,7 @@ function MetricsConfigButton({ metricsOrder, visibleMetrics, toggleMetric, moveM
 function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, isComparing, visibleMetrics, metricsOrder, toggleMetric, moveMetric }: any) {
 
   const [selectedMetric, setSelectedMetric] = useState('leads');
+  const [selectedPlatform, setSelectedPlatform] = useState<Platform | 'all'>('all');
   const latestPeriod = periods[periods.length - 1]?.label || '';
 
   const getTotals = useCallback((metricSet: any) => {
@@ -851,13 +855,79 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
     return res;
   }, []);
 
-  const currentTotals = getTotals(metricsByPeriod[latestPeriod]);
-  const prevTotals = getTotals(comparisonMetricsByPeriod[latestPeriod]);
+  // Sum across ALL periods in the range, respecting the selected platform
+  const currentTotals = useMemo(() => {
+    const res = { 
+      investment: 0, leads: 0, convs: 0, conv_value: 0, appointments: 0,
+      whatsapp: 0, forms: 0,
+      breakdown: {
+        meta_ads: { leads: 0, whatsapp: 0, forms: 0 },
+        google_ads: { leads: 0, whatsapp: 0, forms: 0 },
+        no_track: { leads: 0, whatsapp: 0, forms: 0 }
+      }
+    };
+    periods.forEach((p: any) => {
+      const dayStats = metricsByPeriod[p.label];
+      if (!dayStats) return;
+
+      ['meta_ads', 'google_ads', 'no_track'].forEach((pKey) => {
+        const platform = pKey as Platform;
+        const s = dayStats[platform];
+        
+        res.breakdown[platform].leads += s.leads;
+        res.breakdown[platform].whatsapp += s.whatsapp_leads || 0;
+        res.breakdown[platform].forms += s.forms_leads || 0;
+
+        if (selectedPlatform === 'all' || selectedPlatform === platform) {
+          res.investment += s.investment || 0;
+          res.leads += s.leads || 0;
+          res.convs += s.convs || 0;
+          res.conv_value += s.conv_value || 0;
+          res.appointments += s.appointments || 0;
+          res.whatsapp += s.whatsapp_leads || 0;
+          res.forms += s.forms_leads || 0;
+        }
+      });
+    });
+    return res;
+  }, [periods, metricsByPeriod, selectedPlatform]);
+
+  const prevTotals = useMemo(() => {
+    const res = { investment: 0, leads: 0, convs: 0, conv_value: 0, appointments: 0 };
+    if (!isComparing) return res;
+    periods.forEach((p: any) => {
+      const dayStats = comparisonMetricsByPeriod[p.label];
+      if (!dayStats) return;
+
+      ['meta_ads', 'google_ads', 'no_track'].forEach((pKey) => {
+        const platform = pKey as Platform;
+        const s = dayStats[platform];
+        
+        if (selectedPlatform === 'all' || selectedPlatform === platform) {
+          res.investment += s.investment || 0;
+          res.leads += s.leads || 0;
+          res.convs += s.convs || 0;
+          res.conv_value += s.conv_value || 0;
+          res.appointments += s.appointments || 0;
+        }
+      });
+    });
+    return res;
+  }, [periods, comparisonMetricsByPeriod, isComparing, selectedPlatform]);
 
   const chartData = useMemo(() => {
     return periods.map((p: any) => {
-      const stats = getTotals(metricsByPeriod[p.label]);
-      const compStats = getTotals(comparisonMetricsByPeriod[p.label]);
+      const dayStats = metricsByPeriod[p.label];
+      const compDayStats = comparisonMetricsByPeriod[p.label];
+      
+      let stats, compStats;
+      if (selectedPlatform === 'all') {
+         stats = getTotals(dayStats);
+         compStats = getTotals(compDayStats);
+      } else {
+         stats = dayStats?.[selectedPlatform] || { investment: 0, leads: 0, convs: 0, conv_value: 0, appointments: 0 };
+         compStats = compDayStats?.[selectedPlatform] || { investment: 0, leads: 0, convs: 0, conv_value: 0, appointments: 0 };
+      }
 
       return {
         name: p.label,
@@ -890,11 +960,23 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
 
   const activeMetric = METRICS_CONFIG.find(m => m.id === selectedMetric) || METRICS_CONFIG[0];
 
-  const platformData = [
-    { name: 'Meta Ads', value: metricsByPeriod[latestPeriod]?.['meta_ads']?.leads || 0, color: '#4f46e5' },
-    { name: 'Google Ads', value: metricsByPeriod[latestPeriod]?.['google_ads']?.leads || 0, color: '#f59e0b' },
-    { name: 'Sem Rastreio', value: metricsByPeriod[latestPeriod]?.['no_track']?.leads || 0, color: '#94a3b8' },
-  ].filter(d => d.value > 0);
+  const platformData = useMemo(() => {
+    if (selectedPlatform === 'all') {
+      return [
+        { name: 'Meta Ads', value: currentTotals.breakdown.meta_ads.leads, color: '#4f46e5' },
+        { name: 'Google Ads', value: currentTotals.breakdown.google_ads.leads, color: '#f59e0b' },
+        { name: 'Direto', value: currentTotals.breakdown.no_track.leads, color: '#94a3b8' },
+      ].filter(d => d.value > 0);
+    } else {
+      // If a platform is selected, show capture channel breakdown (WhatsApp vs Forms)
+      return [
+        { name: 'WhatsApp', value: currentTotals.whatsapp, color: '#25d366' },
+        { name: 'Formulário', value: currentTotals.forms, color: '#0ea5e9' },
+      ].filter(d => d.value > 0);
+    }
+  }, [selectedPlatform, currentTotals]);
+
+  const platformTitle = selectedPlatform === 'all' ? 'Origem dos Leads' : `Captação: ${PLATFORM_LABELS[selectedPlatform as Platform].split(' ')[0]}`;
 
   const funnelData = [
     { name: 'Leads', value: currentTotals.leads, color: '#0d9488', subLabel: 'Total de leads' },
@@ -912,7 +994,29 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
           <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest">Resumo de Performance</h2>
         </div>
 
-        <MetricsConfigButton 
+        <div className="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
+          {[
+            { id: 'all', label: 'Todos' },
+            { id: 'meta_ads', label: 'Meta' },
+            { id: 'google_ads', label: 'Google' },
+            { id: 'no_track', label: 'Direto' }
+          ].map((plat) => (
+            <button
+              key={plat.id}
+              onClick={() => setSelectedPlatform(plat.id as any)}
+              className={cn(
+                "px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all",
+                selectedPlatform === plat.id 
+                  ? "bg-slate-900 text-white shadow-md shadow-slate-200" 
+                  : "text-slate-400 hover:text-slate-600 hover:bg-slate-50"
+              )}
+            >
+              {plat.label}
+            </button>
+          ))}
+        </div>
+
+        <MetricsConfigButton
           metricsOrder={metricsOrder} 
           visibleMetrics={visibleMetrics} 
           toggleMetric={toggleMetric} 
@@ -974,8 +1078,8 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
         })}
       </div>
 
-      <div className="grid grid-cols-1 gap-6">
-        <Card className="bg-white border-slate-200 shadow-xl rounded-3xl p-8 overflow-hidden">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <Card className="lg:col-span-2 bg-white border-slate-200 shadow-xl rounded-3xl p-8 overflow-hidden">
           <CardHeader className="p-0 pb-8">
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded-lg bg-teal-50 flex items-center justify-center">
@@ -1018,10 +1122,43 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
             ))}
           </div>
         </Card>
+
+        <Card className="bg-white border-slate-200 shadow-xl rounded-3xl p-6 overflow-hidden">
+          <CardHeader className="p-0 pb-6"><CardTitle className="text-xs font-black text-slate-400 uppercase tracking-widest">{platformTitle}</CardTitle></CardHeader>
+          <div className="h-[280px] w-full flex items-center justify-center">
+            {platformData.length > 0 ? (
+              <div className="relative w-full h-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={platformData} cx="50%" cy="45%" innerRadius={60} outerRadius={85} paddingAngle={8} dataKey="value" stroke="none">
+                      {platformData.map((e, i) => <Cell key={i} fill={e.color} />)}
+                    </Pie>
+                    <Tooltip contentStyle={{ borderRadius: '20px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none pb-4">
+                  <span className="text-[20px] font-black text-slate-700 leading-none">{currentTotals.leads}</span>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Leads</span>
+                </div>
+                <div className="flex flex-col gap-2 pt-2 border-t border-slate-50">
+                  {platformData.map((item, i) => (
+                    <div key={i} className="flex items-center justify-between px-2">
+                       <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
+                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight">{item.name}</span>
+                       </div>
+                       <span className="text-[11px] font-black text-slate-700">{item.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : <div className="text-slate-300 text-[10px] font-bold uppercase tracking-widest">Sem dados</div>}
+          </div>
+        </Card>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card className="lg:col-span-2 bg-white border-slate-200 shadow-xl rounded-3xl p-6 overflow-hidden">
+      <div className="grid grid-cols-1 gap-6">
+        <Card className="bg-white border-slate-200 shadow-xl rounded-3xl p-6 overflow-hidden">
           <CardHeader className="p-0 pb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <CardTitle className="text-xs font-black text-slate-400 uppercase tracking-widest">Tendência de Performance</CardTitle>
             <div className="flex flex-wrap bg-slate-50 p-1 rounded-xl border border-slate-100 shadow-inner">
@@ -1082,26 +1219,8 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
                     name={`${activeMetric.label} (Anterior)`}
                   />
                 )}
-                <Legend iconType="circle" />
               </AreaChart>
             </ResponsiveContainer>
-          </div>
-        </Card>
-
-        <Card className="bg-white border-slate-200 shadow-xl rounded-2xl p-6 overflow-hidden">
-          <CardHeader className="p-0 pb-6"><CardTitle className="text-xs font-black text-slate-400 uppercase tracking-widest">Origem dos Leads</CardTitle></CardHeader>
-          <div className="h-[240px] w-full flex items-center justify-center">
-            {platformData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={platformData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
-                    {platformData.map((e, i) => <Cell key={i} fill={e.color} />)}
-                  </Pie>
-                  <Tooltip contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
-                  <Legend verticalAlign="bottom" height={36} />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : <div className="text-slate-300 text-[10px] font-bold uppercase tracking-widest">Sem dados</div>}
           </div>
         </Card>
       </div>

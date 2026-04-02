@@ -21,6 +21,10 @@ import {
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { useFunnelStages, useLeads, useSettings, useTransitionRules } from "../hooks/useSupabase";
+import GoogleLogo from "../assets/logos/Logo Googleads.png";
+import MetaLogo from "../assets/logos/Logo Metaads.png";
+import WhatsAppLogo from "../assets/logos/Logo Whatsapp.png";
+import { Share2, Globe, Layout, Smartphone } from "lucide-react";
 
 function calcBusinessMinutes(since: Date, bh: { start: string; end: string; days: number[] }, endDate?: Date): number {
   const now = endDate || new Date();
@@ -600,19 +604,75 @@ export function LeadKanban() {
                     onDragStart={(e) => handleDragStart(e, lead)}
                     whileHover={{ y: -1 }}
                     className={cn(
-                      "bg-white px-3 py-2.5 rounded-lg border shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md transition-all group",
+                      "px-3 py-2.5 rounded-lg border shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md transition-all group",
                       draggedLead?.id === lead.id && "opacity-50",
-                      isPerdido ? "border-rose-200" : "border-slate-200"
+                      isPerdido ? "bg-white border-rose-200" 
+                        : (!!lead.fb_campaign_name || lead.source === 'meta_ads') ? "bg-blue-50/60 border-blue-200/80"
+                        : (!!lead.g_campaign_name || lead.source === 'google_ads') ? "bg-emerald-50/60 border-emerald-200/80"
+                        : "bg-white border-slate-200"
                     )}
                   >
                     {/* Header: fonte + acoes */}
-                    <div className="flex justify-between items-center mb-1.5">
-                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{lead.source === 'meta_ads' ? 'Meta Ads' : lead.source === 'google_ads' ? 'Google Ads' : (lead.capture_channel === 'forms' ? 'Formulário' : 'WhatsApp')}</span>
-                      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {(() => {
+                      const isMeta = !!lead.fb_campaign_name || lead.source === 'meta_ads';
+                      const isGoogle = !!lead.g_campaign_name || lead.source === 'google_ads';
+                      const campaignName = lead.fb_campaign_name || lead.g_campaign_name;
+                      const adsetName = lead.fb_adset_name || lead.g_adset_name;
+                      const adName = lead.fb_ad_name || lead.g_ad_name;
+                      return (
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="flex flex-col gap-1.5 flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          {isMeta && (
+                            <img src={MetaLogo} alt="Meta" className="w-3.5 h-3.5 rounded shrink-0" />
+                          )}
+                          {isGoogle && !isMeta && (
+                            <img src={GoogleLogo} alt="Google" className="w-3.5 h-3.5 rounded shrink-0" />
+                          )}
+                          <span className={cn(
+                            "text-[9px] font-black uppercase tracking-[0.1em] truncate",
+                            isMeta ? "text-blue-500" : isGoogle ? "text-emerald-500" : "text-slate-400"
+                          )}>
+                            {isMeta ? 'Meta Ads' : isGoogle ? 'Google Ads' : 'Sem Origem'}
+                          </span>
+                        </div>
+                        
+                        {(campaignName || adsetName || adName) && (
+                          <div className="flex flex-wrap gap-1">
+                            {campaignName && (
+                              <span className={cn(
+                                "inline-flex items-center px-1.5 py-0.5 rounded-full text-[8px] font-bold truncate max-w-full",
+                                isMeta ? "bg-blue-100/80 text-blue-700" : isGoogle ? "bg-emerald-100/80 text-emerald-700" : "bg-slate-100 text-slate-600"
+                              )} title={campaignName}>
+                                {campaignName}
+                              </span>
+                            )}
+                            {adsetName && (
+                              <span className={cn(
+                                "inline-flex items-center px-1.5 py-0.5 rounded-full text-[8px] font-medium truncate max-w-full border",
+                                isMeta ? "bg-blue-50 border-blue-100 text-blue-600" : isGoogle ? "bg-emerald-50 border-emerald-100 text-emerald-600" : "bg-slate-50 border-slate-100 text-slate-500"
+                              )} title={adsetName}>
+                                {adsetName}
+                              </span>
+                            )}
+                            {adName && (
+                              <span className={cn(
+                                "inline-flex items-center px-1.5 py-0.5 rounded-full text-[8px] font-medium truncate max-w-full border",
+                                isMeta ? "bg-white/80 border-blue-100 text-blue-500" : isGoogle ? "bg-white/80 border-emerald-100 text-emerald-500" : "bg-white border-slate-100 text-slate-400"
+                              )} title={adName}>
+                                {adName}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-2">
                         <button onClick={() => openEditModal(lead)} className="p-0.5 text-slate-400 hover:text-teal-600 rounded transition-colors"><Edit2 className="w-3 h-3" /></button>
                         <button onClick={() => openDeleteConfirm(lead)} className="p-0.5 text-slate-400 hover:text-rose-600 rounded transition-colors"><Trash2 className="w-3 h-3" /></button>
                       </div>
                     </div>
+                      );
+                    })()}
 
                     {/* Nome + telefone */}
                     <h4 className="font-bold text-slate-900 text-sm leading-tight">{lead.name}</h4>

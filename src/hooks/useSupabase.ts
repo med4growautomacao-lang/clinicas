@@ -327,9 +327,13 @@ export interface Lead {
   ctwa_clid: string | null;
   fb_clid: string | null;
   g_clid: string | null;
-  campaign_name: string | null;
-  adset_name: string | null;
-  ad_name: string | null;
+  fb_campaign_name: string | null;
+  fb_adset_name: string | null;
+  fb_ad_name: string | null;
+  g_campaign_name: string | null;
+  g_adset_name: string | null;
+  g_ad_name: string | null;
+  g_term_name: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -35,6 +35,8 @@ import { LeadKanban } from "./LeadKanban";
 import { ServiceDashboard } from "./ServiceDashboard";
 import { extractMessageText } from "./LeadChat";
 import { useLeads, useChatMessages, useSettings, useFunnelStages, FunnelStage } from "../hooks/useSupabase";
+import GoogleLogo from "../assets/logos/Logo Googleads.png";
+import MetaLogo from "../assets/logos/Logo Metaads.png";
 import { format, parseISO, isToday, isYesterday, isSameDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -1057,7 +1059,10 @@ function ChatsView() {
               <p className="text-sm font-medium">Nenhum atendimento ativo no momento.</p>
             </div>
           ) : (
-            leads.map((lead) => (
+            leads.map((lead) => {
+              const isMeta = !!lead.fb_campaign_name || lead.source === 'meta_ads';
+              const isGoogle = !!lead.g_campaign_name || lead.source === 'google_ads';
+              return (
               <motion.div
                 key={lead.id}
                 whileHover={{ x: 2 }}
@@ -1066,12 +1071,22 @@ function ChatsView() {
                   "p-3 rounded-lg cursor-pointer transition-all border",
                   selectedLeadId === lead.id
                     ? "bg-teal-50 border-teal-100 shadow-sm"
+                    : isMeta ? "bg-blue-50/50 border-blue-100/60 hover:bg-blue-50"
+                    : isGoogle ? "bg-emerald-50/50 border-emerald-100/60 hover:bg-emerald-50"
                     : "border-transparent hover:bg-slate-50"
                 )}
               >
                 <div className="flex items-center gap-3">
-                  <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center font-bold text-slate-700 bg-slate-100")}>
-                    {lead.name[0]}
+                  <div className="relative">
+                    <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center font-bold text-slate-700 bg-slate-100")}>
+                      {lead.name[0]}
+                    </div>
+                    {isMeta && (
+                      <img src={MetaLogo} alt="Meta" className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white shadow-sm" />
+                    )}
+                    {isGoogle && !isMeta && (
+                      <img src={GoogleLogo} alt="Google" className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white shadow-sm" />
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex justify-between items-center mb-0.5">
@@ -1115,7 +1130,8 @@ function ChatsView() {
                   </div>
                 </div>
               </motion.div>
-            ))
+              );
+            })
           )}
         </CardContent>
       </Card>

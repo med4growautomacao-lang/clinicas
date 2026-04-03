@@ -785,7 +785,7 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onCon
                                     <img src={MetaLogo} alt="Meta" className="w-full h-full object-contain opacity-90" />
                                 </div>
                                 <div>
-                                    <CardTitle className="text-xl font-bold text-slate-800">Meta Ads</CardTitle>
+                                    <CardTitle className="text-xl font-bold text-slate-800">Rastreamento Meta Ads</CardTitle>
                                     <p className="text-slate-600 font-medium text-sm">Integração com Conversões do Pixel e API de Conversão</p>
                                 </div>
                             </div>
@@ -852,7 +852,7 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onCon
                                     <img src={GoogleLogo} alt="Google" className="w-full h-full object-contain opacity-90" />
                                 </div>
                                 <div>
-                                    <CardTitle className="text-xl font-bold text-slate-800">Rastreamento Google & Captação</CardTitle>
+                                    <CardTitle className="text-xl font-bold text-slate-800">Rastreamento Google Ads</CardTitle>
                                     <p className="text-slate-600 font-medium text-sm">Scripts e URLs para suas Campanhas e Landing Pages</p>
                                 </div>
                             </div>

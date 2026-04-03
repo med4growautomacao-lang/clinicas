@@ -599,7 +599,6 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onCon
                                     </div>
                                     <div>
                                         <CardTitle className="text-xl font-bold text-slate-800">WhatsApp Business API</CardTitle>
-                                        <p className="text-slate-600 font-medium text-sm">Integração simplificada via n8n Bridge</p>
                                     </div>
                                 </div>
                                 <div className={cn(
@@ -786,7 +785,6 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onCon
                                 </div>
                                 <div>
                                     <CardTitle className="text-xl font-bold text-slate-800">Rastreamento Meta Ads</CardTitle>
-                                    <p className="text-slate-600 font-medium text-sm">Integração com Conversões do Pixel e API de Conversão</p>
                                 </div>
                             </div>
                         </CardHeader>
@@ -853,7 +851,6 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onCon
                                 </div>
                                 <div>
                                     <CardTitle className="text-xl font-bold text-slate-800">Rastreamento Google Ads</CardTitle>
-                                    <p className="text-slate-600 font-medium text-sm">Scripts e URLs para suas Campanhas e Landing Pages</p>
                                 </div>
                             </div>
                         </CardHeader>
@@ -1164,7 +1161,6 @@ document.addEventListener("DOMContentLoaded", function() {
                                 </div>
                                 <div>
                                     <CardTitle className="text-xl font-bold text-slate-800">Grupo de Notificações</CardTitle>
-                                    <p className="text-slate-600 font-medium text-sm">Crie um grupo no WhatsApp para receber alertas do Agente IA</p>
                                 </div>
                             </div>
                         </CardHeader>

@@ -645,34 +645,22 @@ export function LeadKanban() {
                         </div>
                         
                         {hasUtms && (
-                          <div className="flex flex-wrap gap-1">
+                          <div className="mt-1 space-y-0.5">
                             {campaignName && (
-                              <span className={cn(
-                                "inline-flex items-center px-1.5 py-0.5 rounded-full text-[8px] font-bold truncate max-w-full",
-                                isMeta ? "bg-blue-100/80 text-blue-700" : isGoogle ? "bg-emerald-100/80 text-emerald-700" : "bg-slate-100 text-slate-600"
-                              )} title={campaignName}>
-                                {campaignName}
-                              </span>
+                              <p className={cn(
+                                "text-[9px] leading-tight truncate max-w-full font-medium",
+                                isMeta ? "text-blue-600/80" : isGoogle ? "text-emerald-600/80" : "text-slate-500"
+                              )}>
+                                <span className="font-bold opacity-70">Campanha:</span> {campaignName}
+                              </p>
                             )}
-                            {isMeta && lead.fb_adset_name && (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[8px] font-medium truncate max-w-full border bg-blue-50 border-blue-100 text-blue-600" title={lead.fb_adset_name}>
-                                {lead.fb_adset_name}
-                              </span>
-                            )}
-                            {isMeta && lead.fb_ad_name && (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[8px] font-medium truncate max-w-full border bg-white/80 border-blue-100 text-blue-500" title={lead.fb_ad_name}>
-                                {lead.fb_ad_name}
-                              </span>
-                            )}
-                            {isGoogle && lead.g_term_name && (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[8px] font-medium truncate max-w-full border bg-emerald-50 border-emerald-100 text-emerald-600" title={lead.g_term_name}>
-                                {lead.g_term_name}
-                              </span>
-                            )}
-                            {isGoogle && lead.g_source_name && (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[8px] font-medium truncate max-w-full border bg-white/80 border-emerald-100 text-emerald-500" title={lead.g_source_name}>
-                                {lead.g_source_name}
-                              </span>
+                            {(lead.g_term_name || lead.fb_adset_name) && (
+                              <p className={cn(
+                                "text-[9px] leading-tight truncate max-w-full font-medium",
+                                isMeta ? "text-blue-500/70" : isGoogle ? "text-emerald-500/70" : "text-slate-400"
+                              )}>
+                                <span className="font-bold opacity-70">Termo:</span> {lead.g_term_name || lead.fb_adset_name}
+                              </p>
                             )}
                           </div>
                         )}

@@ -905,13 +905,13 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onCon
                                 <div className="flex flex-col sm:flex-row gap-3 pt-1">
                                     <div className="flex-1 px-4 py-3 bg-[#0d1117] border border-slate-800 rounded-xl flex items-center shadow-inner overflow-x-auto custom-scrollbar">
                                         <code className="text-[13px] font-mono text-blue-400 whitespace-nowrap">
-                                            https://webhook.med4growautomacao.com.br/webhook/clinica/forms_tracking
+                                            {systemSettings?.webhook_lead_catch_url || "https://webhook.med4growautomacao.com.br/webhook/clinica/forms_tracking"}
                                         </code>
                                     </div>
                                     <Button 
                                         variant="outline" 
                                         onClick={(e) => {
-                                            const url = "https://webhook.med4growautomacao.com.br/webhook/clinica/forms_tracking";
+                                            const url = systemSettings?.webhook_lead_catch_url || "https://webhook.med4growautomacao.com.br/webhook/clinica/forms_tracking";
                                             navigator.clipboard.writeText(url);
                                             const btn = e.currentTarget;
                                             const orig = btn.innerHTML;
@@ -944,13 +944,15 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onCon
                                 <div className="flex flex-col sm:flex-row gap-3 pt-1">
                                     <div className="flex-1 px-4 py-3 bg-[#0d1117] border border-slate-800 rounded-xl flex items-center shadow-inner overflow-x-auto custom-scrollbar">
                                         <code className="text-[13px] font-mono text-emerald-400 whitespace-nowrap">
-                                            https://wa.me/{clinicData.phone?.replace(/\D/g, '') || 'NUMERO'}
+                                            {(systemSettings?.whatsapp_button_template || "https://wa.me/{{PHONE}}")
+                                              .replace(/{{PHONE}}/g, clinicData.phone?.replace(/\D/g, '') || 'NUMERO')}
                                         </code>
                                     </div>
                                     <Button 
                                         variant="outline" 
                                         onClick={(e) => {
-                                            const waLink = `https://wa.me/${clinicData.phone?.replace(/\D/g, '') || 'NUMERO'}`;
+                                            const waLink = (systemSettings?.whatsapp_button_template || "https://wa.me/{{PHONE}}")
+                                                           .replace(/{{PHONE}}/g, clinicData.phone?.replace(/\D/g, '') || 'NUMERO');
                                             navigator.clipboard.writeText(waLink);
                                             const btn = e.currentTarget;
                                             const orig = btn.innerHTML;
@@ -992,134 +994,21 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onCon
                                         <div className="w-10"></div>
                                     </div>
                                     <pre className="p-5 text-slate-300 text-[12px] font-mono overflow-x-auto whitespace-pre-wrap max-h-[350px] custom-scrollbar leading-relaxed">
-{`<script>
-// ==========================================
-// 1. BLINDAGEM DO GCLID (Navstracking Core)
-// ==========================================
-const urlParamsGlobal = new URLSearchParams(window.location.search);
-if(urlParamsGlobal.has('gclid')) {
-    localStorage.setItem('meu_gclid_salvo', urlParamsGlobal.get('gclid'));
-}
-
-// ==========================================
-// 2. MOTOR DE RASTREAMENTO (Navstracking Engine)
-// ==========================================
-console.log("%c🚀 Navstracking v1.0 | Inteligência Minhaclinica", "color:#007bff;font-size:16px;font-weight:bold");
-(function () {
-  const navstracking = {
-    version: "1.0.0", cookieTTL: 63072000, visitorIdParam: "rast_id",
-    paidParams: ["fbclid", "gclid", "msclkid", "ttclid", "wbraid", "gbraid"],
-    formTracking: { enabled: true, autoDetect: true }
-  };
-  
-  function setVal(k, v) { 
-    const d = new Date(Date.now() + navstracking.cookieTTL * 1000);
-    document.cookie = k + "=" + encodeURIComponent(v) + ";expires=" + d.toUTCString() + ";path=/;SameSite=Lax";
-    try { localStorage.setItem(k, v); } catch(e) {}
-  }
-  function getVal(k) { 
-    const c = document.cookie.split("; ").find(x => x.startsWith(k + "="))?.split("=")[1];
-    return c ? decodeURIComponent(c) : localStorage.getItem(k);
-  }
-  function genID() { return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16); }); }
-
-  let rastracking_visitor_id = getVal("rastracking_visitor_id");
-  if (!rastracking_visitor_id) { 
-    rastracking_visitor_id = genID(); 
-    setVal("rastracking_visitor_id", rastracking_visitor_id); 
-  }
-
-  const qs = new URLSearchParams(location.search);
-  const utms = ["source", "medium", "campaign", "content", "term"];
-  const isPaid = navstracking.paidParams.some(p => qs.has(p));
-
-  utms.forEach(u => {
-    const v = qs.get("utm_" + u);
-    if(v) {
-      setVal("cookieUtm" + u.charAt(0).toUpperCase() + u.slice(1), v);
-      if(isPaid) setVal("cookiePaidUtm" + u.charAt(0).toUpperCase() + u.slice(1), v);
-    }
-  });
-
-  function updateLinks(root = document) {
-    root.querySelectorAll("a").forEach(a => {
-      if (!a.href || a.href.startsWith("#") || a.href.includes("javascript:")) return;
-      try {
-        const u = new URL(a.href, location.origin);
-        if (u.protocol !== "http:" && u.protocol !== "https:") return;
-        u.searchParams.set("rast_id", rastracking_visitor_id);
-        a.href = u.toString();
-      } catch(e) {}
-    });
-  }
-
-  if (document.body) updateLinks(); else document.addEventListener("DOMContentLoaded", () => updateLinks());
-  new MutationObserver(m => m.forEach(n => n.addedNodes.forEach(an => an.nodeType === 1 && updateLinks(an)))).observe(document.body || document.documentElement, { childList: true, subtree: true });
-})();
-
-// ==========================================
-// 3. GATILHO WHATSAPP (Navstracking Hook)
-// ==========================================
-document.addEventListener("DOMContentLoaded", function() {
-    const botoesWhats = document.querySelectorAll('a[href*="wa.me"], a[href*="api.whatsapp.com"]');
-    const msgPadrao = "${clinicData.wa_pre_msg || 'Olá! Vim do site e quero saber mais informações.'}";
-    const numeroWhatsFixo = "${clinicData.phone ? clinicData.phone.replace(/\D/g, '') : 'SEUNUMERO'}";
-
-    botoesWhats.forEach(botao => {
-        botao.addEventListener("click", async function(event) {
-            event.preventDefault(); 
-            
-            // O número vem dinamicamente das suas configurações. Se houver falha na leitura, faz um fallback.
-            const urlBotao = new URL(botao.href);
-            const numeroWhats = numeroWhatsFixo !== "SEUNUMERO" ? numeroWhatsFixo : (urlBotao.pathname.replace('/', '') || urlBotao.searchParams.get("phone"));
-
-            const payload = {
-                telefone_destino: numeroWhats,
-                utm_source: localStorage.getItem('cookiePaidUtmSource') || localStorage.getItem('cookieUtmSource') || "direto",
-                utm_medium: localStorage.getItem('cookiePaidUtmMedium') || localStorage.getItem('cookieUtmMedium') || "",
-                utm_campaign: localStorage.getItem('cookiePaidUtmCampaign') || localStorage.getItem('cookieUtmCampaign') || "",
-                utm_term: localStorage.getItem('cookiePaidUtmTerm') || localStorage.getItem('cookieUtmTerm') || "",
-                utm_content: localStorage.getItem('cookiePaidUtmContent') || localStorage.getItem('cookieUtmContent') || "",
-                gclid: localStorage.getItem('meu_gclid_salvo') || urlParamsGlobal.get('gclid') || "",
-                rast_id: localStorage.getItem('rastracking_visitor_id') || "",
-                pagina: window.location.href
-            };
-
-            const textoOriginal = botao.innerText;
-            if(botao.innerText) botao.innerText = "Gerando protocolo...";
-
-            try {
-                const resposta = await fetch('https://webhook.med4growautomacao.com.br/webhook/clinica/webhook_redirecionamento', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-
-                const dados = await resposta.json();
-                const protocolo = dados.id_protocolo || "0000"; 
-
-                // MENSAGEM CONFIGURÁVEL
-                const mensagemFinal = msgPadrao + " [Protocolo " + protocolo + "]";
-
-                window.location.href = "https://wa.me/" + numeroWhats + "?text=" + encodeURIComponent(mensagemFinal);
-
-            } catch (erro) {
-                console.error("Erro Navstracking:", erro);
-                window.location.href = "https://wa.me/" + numeroWhats + "?text=" + encodeURIComponent(msgPadrao);
-                if(botao.innerText) botao.innerText = textoOriginal;
-            }
-        });
-    });
-});
-</script>`}
+{(() => {
+    let script = systemSettings?.global_tracking_script || '<!-- Script Global não configurado no banco system_settings -->';
+    script = script.replace(/{{WA_PRE_MSG}}/g, clinicData.wa_pre_msg || 'Olá! Vim do site.');
+    script = script.replace(/{{PHONE}}/g, clinicData.phone ? clinicData.phone.replace(/\D/g, '') : 'SEUNUMERO');
+    return script;
+})()}
                                     </pre>
                                     <div className="absolute top-12 right-6 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                                         <Button 
-                                            variant="outline" 
-                                            size="sm"
-                                            onClick={(e) => {
-                                                const text = `<script>\n// ==========================================\n// 1. BLINDAGEM DO GCLID (Navstracking Core)\n// ==========================================\nconst urlParamsGlobal = new URLSearchParams(window.location.search);\nif(urlParamsGlobal.has('gclid')) {\n    localStorage.setItem('meu_gclid_salvo', urlParamsGlobal.get('gclid'));\n}\n\n// ==========================================\n// 2. MOTOR DE RASTREAMENTO (Navstracking Engine)\n// ==========================================\nconsole.log("%c🚀 Navstracking v1.0 | Inteligência Minhaclinica", "color:#007bff;font-size:16px;font-weight:bold");\n(function () {\n  const navstracking = {\n    version: "1.0.0", cookieTTL: 63072000, visitorIdParam: "rast_id",\n    paidParams: ["fbclid", "gclid", "msclkid", "ttclid", "wbraid", "gbraid"],\n    formTracking: { enabled: true, autoDetect: true }\n  };\n  \n  function setVal(k, v) { \n    const d = new Date(Date.now() + navstracking.cookieTTL * 1000);\n    document.cookie = k + "=" + encodeURIComponent(v) + ";expires=" + d.toUTCString() + ";path=/;SameSite=Lax";\n    try { localStorage.setItem(k, v); } catch(e) {}\n  }\n  function getVal(k) { \n    const c = document.cookie.split("; ").find(x => x.startsWith(k + "="))?.split("=")[1];\n    return c ? decodeURIComponent(c) : localStorage.getItem(k);\n  }\n  function genID() { return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16); }); }\n\n  let rastracking_visitor_id = getVal("rastracking_visitor_id");\n  if (!rastracking_visitor_id) { \n    rastracking_visitor_id = genID(); \n    setVal("rastracking_visitor_id", rastracking_visitor_id); \n  }\n\n  const qs = new URLSearchParams(location.search);\n  const utms = ["source", "medium", "campaign", "content", "term"];\n  const isPaid = navstracking.paidParams.some(p => qs.has(p));\n\n  utms.forEach(u => {\n    const v = qs.get("utm_" + u);\n    if(v) {\n      setVal("cookieUtm" + u.charAt(0).toUpperCase() + u.slice(1), v);\n      if(isPaid) setVal("cookiePaidUtm" + u.charAt(0).toUpperCase() + u.slice(1), v);\n    }\n  });\n\n  function updateLinks(root = document) {\n    root.querySelectorAll("a").forEach(a => {\n      if (!a.href || a.href.startsWith("#") || a.href.includes("javascript:")) return;\n      try {\n        const u = new URL(a.href, location.origin);\n        if (u.protocol !== "http:" && u.protocol !== "https:") return;\n        u.searchParams.set("rast_id", rastracking_visitor_id);\n        a.href = u.toString();\n      } catch(e) {}\n    });\n  }\n\n  if (document.body) updateLinks(); else document.addEventListener("DOMContentLoaded", () => updateLinks());\n  new MutationObserver(m => m.forEach(n => n.addedNodes.forEach(an => an.nodeType === 1 && updateLinks(an)))).observe(document.body || document.documentElement, { childList: true, subtree: true });\n})();\n\n// ==========================================\n// 3. GATILHO WHATSAPP (Navstracking Hook)\n// ==========================================\ndocument.addEventListener("DOMContentLoaded", function() {\n    const botoesWhats = document.querySelectorAll('a[href*="wa.me"], a[href*="api.whatsapp.com"]');\n    const msgPadrao = "${clinicData.wa_pre_msg || 'Olá! Vim do site e quero saber mais informações.'}";\n    const numeroWhatsFixo = "${clinicData.phone ? clinicData.phone.replace(/\D/g, '') : 'SEUNUMERO'}";\n\n    botoesWhats.forEach(botao => {\n        botao.addEventListener("click", async function(event) {\n            event.preventDefault(); \n            \n            const urlBotao = new URL(botao.href);\n            const numeroWhats = numeroWhatsFixo !== "SEUNUMERO" ? numeroWhatsFixo : (urlBotao.pathname.replace('/', '') || urlBotao.searchParams.get("phone"));\n\n            const payload = {\n                telefone_destino: numeroWhats,\n                utm_source: localStorage.getItem('cookiePaidUtmSource') || localStorage.getItem('cookieUtmSource') || "direto",\n                utm_medium: localStorage.getItem('cookiePaidUtmMedium') || localStorage.getItem('cookieUtmMedium') || "",\n                utm_campaign: localStorage.getItem('cookiePaidUtmCampaign') || localStorage.getItem('cookieUtmCampaign') || "",\n                utm_term: localStorage.getItem('cookiePaidUtmTerm') || localStorage.getItem('cookieUtmTerm') || "",\n                utm_content: localStorage.getItem('cookiePaidUtmContent') || localStorage.getItem('cookieUtmContent') || "",\n                gclid: localStorage.getItem('meu_gclid_salvo') || urlParamsGlobal.get('gclid') || "",\n                rast_id: localStorage.getItem('rastracking_visitor_id') || "",\n                pagina: window.location.href\n            };\n\n            const textoOriginal = botao.innerText;\n            if(botao.innerText) botao.innerText = "Gerando protocolo...";\n\n            try {\n                const resposta = await fetch('https://webhook.med4growautomacao.com.br/webhook/clinica/webhook_redirecionamento', {\n                    method: 'POST',\n                    headers: { 'Content-Type': 'application/json' },\n                    body: JSON.stringify(payload)\n                });\n\n                const dados = await resposta.json();\n                const protocolo = dados.id_protocolo || "0000"; \n\n                // MENSAGEM CONFIGURÁVEL\n                const mensagemFinal = msgPadrao + " [Protocolo " + protocolo + "]";\n\n                window.location.href = "https://wa.me/" + numeroWhats + "?text=" + encodeURIComponent(mensagemFinal);\n\n            } catch (erro) {\n                console.error("Erro Navstracking:", erro);\n                window.location.href = "https://wa.me/" + numeroWhats + "?text=" + encodeURIComponent(msgPadrao);\n                if(botao.innerText) botao.innerText = textoOriginal;\n            }\n        });\n    });\n});\n</script>`;
-                                                navigator.clipboard.writeText(text);
+                                            vari                                            onClick={(e) => {
+                                                const script = systemSettings?.global_tracking_script || '<!-- Script Global não configurado no banco system_settings -->';
+                                                const finalScript = script.replace(/{{WA_PRE_MSG}}/g, clinicData.wa_pre_msg || 'Olá! Vim do site.')
+                                                                          .replace(/{{PHONE}}/g, clinicData.phone ? clinicData.phone.replace(/\D/g, '') : 'SEUNUMERO');
+                                                
+                                                navigator.clipboard.writeText(finalScript);
                                                 const btn = e.currentTarget;
                                                 const orig = btn.innerHTML;
                                                 btn.innerHTML = '<svg class="w-4 h-4 mr-2 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg> Copiado!';

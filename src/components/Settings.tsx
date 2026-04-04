@@ -858,17 +858,17 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onCon
                     {/* Mensagem Padrão WA */}
                     <div className="space-y-3 group/input">
                         <label className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-                            Mensagem Inicial que será enviada ao WhatsApp de Atendimento
+                            Mensagem Padrão de Início de Conversa
                         </label>
                         <input
                             type="text"
                             value={clinicData.wa_pre_msg || ''}
                             onChange={(e) => onClinicChange({ wa_pre_msg: e.target.value })}
-                            placeholder="Olá! Vi o anúncio e me interessei pelos produtos Apple importados! Quais modelos estão disponíveis? E tem alguma oferta especial hoje?"
+                            placeholder="Olá! Gostaria de agendar uma consulta. Como funcionam os horários?"
                             className="w-full px-4 py-3 border border-slate-200 rounded-xl font-medium text-slate-700 text-sm placeholder:text-slate-400 focus:ring-4 focus:ring-amber-100 focus:border-amber-400 outline-none transition-all shadow-sm hover:border-amber-200"
                         />
                         <p className="text-[12px] text-slate-400 font-medium leading-relaxed">
-                            Essa é a mensagem padrão que virá pré-pronta para ser enviada na conversa com o whatsapp do seu cliente.
+                            Esta mensagem será preenchida automaticamente quando o paciente clicar no botão de WhatsApp da sua página.
                         </p>
                     </div>
                     {!showScripts ? (
@@ -897,21 +897,21 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onCon
                                 <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
                                 <label className="text-xs font-bold text-slate-700 flex items-center gap-2">
                                     <Globe className="w-4 h-4 text-blue-500" />
-                                    Endereço do Webhook <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-md text-[9px] uppercase tracking-wider ml-2">Typeform/N8N</span>
+                                    Endereço Webhook <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-md text-[9px] uppercase tracking-wider ml-2">LP / Forms</span>
                                 </label>
                                 <p className="text-[12px] text-slate-500 font-medium leading-relaxed max-w-2xl">
-                                    Envie os dados do Lead (Nome, Telefone, rast_id) e UTMs originais para este webhook.
+                                    Utilize este endereço no formulário da sua Landing Page para capturar os leads diretamente no sistema.
                                 </p>
                                 <div className="flex flex-col sm:flex-row gap-3 pt-1">
                                     <div className="flex-1 px-4 py-3 bg-[#0d1117] border border-slate-800 rounded-xl flex items-center shadow-inner overflow-x-auto custom-scrollbar">
                                         <code className="text-[13px] font-mono text-blue-400 whitespace-nowrap">
-                                            {systemSettings?.webhook_lead_catch_url || `https://n8n.webhook.com/webhook/lead-catch/${clinic?.id || 'SEU_CLINIC_ID'}`}
+                                            https://webhook.med4growautomacao.com.br/webhook/clinica/forms_tracking
                                         </code>
                                     </div>
                                     <Button 
                                         variant="outline" 
                                         onClick={(e) => {
-                                            const url = systemSettings?.webhook_lead_catch_url || `https://n8n.webhook.com/webhook/lead-catch/${clinic?.id || 'SEU_CLINIC_ID'}`;
+                                            const url = "https://webhook.med4growautomacao.com.br/webhook/clinica/forms_tracking";
                                             navigator.clipboard.writeText(url);
                                             const btn = e.currentTarget;
                                             const orig = btn.innerHTML;
@@ -936,25 +936,21 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onCon
                                 <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
                                 <label className="text-xs font-bold text-slate-700 flex items-center gap-2">
                                     <MessageCircle className="w-4 h-4 text-emerald-500" />
-                                    URL Dinâmica do WhatsApp <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-md text-[9px] uppercase tracking-wider ml-2">Smart Link</span>
+                                    URL do WhatsApp <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-md text-[9px] uppercase tracking-wider ml-2">Direto</span>
                                 </label>
                                 <p className="text-[12px] text-slate-500 font-medium leading-relaxed max-w-2xl">
-                                    Link customizado para seus botões de contato. O <code>rast_id</code> na URL permite ao N8N linkar a origem no CRM.
+                                    Utilize este link no botão de "Enviar Mensagem" da sua Landing Page.
                                 </p>
                                 <div className="flex flex-col sm:flex-row gap-3 pt-1">
                                     <div className="flex-1 px-4 py-3 bg-[#0d1117] border border-slate-800 rounded-xl flex items-center shadow-inner overflow-x-auto custom-scrollbar">
                                         <code className="text-[13px] font-mono text-emerald-400 whitespace-nowrap">
-                                            {
-                                                (systemSettings?.whatsapp_button_template || `https://api.whatsapp.com/send?phone=SEUNUMERO&text=Olá! Vim pelo site. [ID:${clinic?.id || 'ID'}]`)
-                                                .replace(/(wa\.me\/|phone=)\d+/, `$1${clinicData.phone?.replace(/\D/g, '') || 'SEUNUMERO'}`)
-                                            }
+                                            https://wa.me/{clinicData.phone?.replace(/\D/g, '') || 'NUMERO'}
                                         </code>
                                     </div>
                                     <Button 
                                         variant="outline" 
                                         onClick={(e) => {
-                                            const waLink = (systemSettings?.whatsapp_button_template || `https://api.whatsapp.com/send?phone=SEUNUMERO&text=Olá! Vim pelo site. [ID:${clinic?.id || 'ID'}]`)
-                                                           .replace(/(wa\.me\/|phone=)\d+/, `$1${clinicData.phone?.replace(/\D/g, '') || 'SEUNUMERO'}`);
+                                            const waLink = `https://wa.me/${clinicData.phone?.replace(/\D/g, '') || 'NUMERO'}`;
                                             navigator.clipboard.writeText(waLink);
                                             const btn = e.currentTarget;
                                             const orig = btn.innerHTML;

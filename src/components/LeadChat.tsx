@@ -77,7 +77,7 @@ export function extractMessageText(message: any): string {
 }
 
 export function LeadChat({ lead, onClose }: LeadChatProps) {
-  const { data: messages, loading, send } = useChatMessages(lead.id);
+  const { data: messages, loading, send } = useChatMessages(lead.id, lead.phone);
   const { update: updateLead } = useLeads();
   const [content, setContent] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);

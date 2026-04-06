@@ -956,7 +956,7 @@ export interface ChatMessage {
   created_at: string;
 }
 
-export function useChatMessages(leadId?: string) {
+export function useChatMessages(leadId?: string, leadPhone?: string | null) {
   const { profile } = useAuth();
   const [data, setData] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1021,6 +1021,14 @@ export function useChatMessages(leadId?: string) {
 
   const fetch = useCallback(async () => {
     if (!profile?.clinic_id) return;
+    
+    // Safety check: if no leadId and no leadPhone provided, we shouldn't fetch all clinic messages
+    if (!leadId && !leadPhone) {
+      setData([]);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     let query = supabase
       .from('chat_messages')
@@ -1029,6 +1037,8 @@ export function useChatMessages(leadId?: string) {
     
     if (leadId) {
       query = query.eq('lead_id', leadId);
+    } else if (leadPhone) {
+      query = query.eq('phone', leadPhone);
     }
 
     const { data, error } = await query.order('created_at', { ascending: true });
@@ -1129,7 +1139,7 @@ export function useChatMessages(leadId?: string) {
             clinic_id: profile.clinic_id,
             name: `Lead ${leadPhone}`,
             phone: leadPhone,
-            source: 'manual'
+            source: null
           })
           .select()
           .single();

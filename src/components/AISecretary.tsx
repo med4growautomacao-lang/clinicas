@@ -992,7 +992,7 @@ function ChatsView() {
   const { data: leads, loading: leadsLoading } = useLeads();
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const selectedLead = leads.find(l => l.id === selectedLeadId);
-  const { data: messages, loading: messagesLoading } = useChatMessages(selectedLeadId || undefined);
+  const { data: messages, loading: messagesLoading } = useChatMessages(selectedLeadId || undefined, selectedLead?.phone);
 
   const scrollRef = React.useRef<HTMLDivElement>(null);
 

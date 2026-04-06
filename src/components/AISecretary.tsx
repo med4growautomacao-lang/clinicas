@@ -29,6 +29,7 @@ import {
   DollarSign,
   CheckSquare,
   MessageCircle,
+  Info,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -1479,6 +1480,29 @@ function ConfigView() {
                     className="w-full p-4 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all resize-none text-sm leading-relaxed"
                     placeholder="Digite a mensagem de boas-vindas..."
                   />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1 font-sans">
+                        Aguardar (minutos)
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min={0}
+                          value={localConfig.welcome_message_delay ?? 5}
+                          onChange={(e) => setConfig({ welcome_message_delay: parseInt(e.target.value) || 0 })}
+                          className="w-24 p-3 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 outline-none transition-all text-sm"
+                        />
+                        <span className="text-xs text-slate-500 font-medium">min</span>
+                      </div>
+                    </div>
+                    <div className="flex items-end gap-2 px-3 py-2 bg-slate-50 rounded-lg border border-slate-100">
+                      <Info className="w-3 h-3 text-teal-600 shrink-0 mb-0.5" />
+                      <p className="text-[10px] text-slate-500 font-medium italic leading-tight">
+                        Tempo de espera antes da abordagem automática.
+                      </p>
+                    </div>
+                  </div>
                 </motion.div>
               )}
             </AnimatePresence>

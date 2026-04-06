@@ -780,6 +780,7 @@ export interface AIConfig {
   default_ticket_value: number;
   welcome_message_enabled: boolean;
   welcome_message_text: string | null;
+  welcome_message_delay: number;
   updated_at: string;
 }
 

@@ -464,11 +464,28 @@ function AISettings({ data, onChange }: { data: Partial<AIConfig>, onChange: (up
                                     onChange={(e) => onChange({ welcome_message_text: e.target.value })}
                                     placeholder="Digite a mensagem de boas-vindas..."
                                 />
-                                <div className="flex items-center gap-2 px-3 py-2 bg-white/50 rounded-lg border border-teal-50">
-                                    <Info className="w-3 h-3 text-teal-600" />
-                                    <p className="text-[10px] text-slate-500 font-medium italic">
-                                        Dica: Use mensagens curtas e amigáveis para iniciar a conversa.
-                                    </p>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1 font-sans">
+                                            Aguardar (minutos)
+                                        </label>
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="number"
+                                                min={0}
+                                                className="w-24 px-4 py-2 border border-slate-200 rounded-xl font-medium text-slate-700 text-sm bg-white focus:ring-2 focus:ring-teal-100 transition-all outline-none"
+                                                value={data.welcome_message_delay ?? 5}
+                                                onChange={(e) => onChange({ welcome_message_delay: parseInt(e.target.value) || 0 })}
+                                            />
+                                            <span className="text-xs text-slate-500 font-medium">min</span>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-end gap-2 px-3 py-2 bg-white/50 rounded-lg border border-teal-50">
+                                        <Info className="w-3 h-3 text-teal-600 shrink-0 mb-0.5" />
+                                        <p className="text-[10px] text-slate-500 font-medium italic leading-tight">
+                                            Tempo que a IA irá aguardar o lead iniciar a conversa antes de abordá-lo automaticamente.
+                                        </p>
+                                    </div>
                                 </div>
                             </motion.div>
                         )}

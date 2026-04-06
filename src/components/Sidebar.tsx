@@ -30,12 +30,12 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
   
   const allNavItems = [
     { id: "dashboard", label: "Visão Geral", icon: LayoutDashboard, color: "text-emerald-600", roles: ['gestor', 'medico', 'secretaria'] },
+    { id: "marketing", label: "Marketing", icon: BarChart3, color: "text-cyan-600", roles: ['gestor'] },
     { id: "ai-secretary", label: "Comercial", icon: Bot, color: "text-teal-600", roles: ['gestor', 'secretaria'] },
     { id: "appointments", label: "Agendamentos", icon: CalendarDays, color: "text-teal-700", roles: ['gestor', 'medico', 'secretaria'] },
     { id: "medical-records", label: "Prontuários", icon: ClipboardList, color: "text-slate-700", roles: ['gestor', 'medico', 'secretaria'] },
     { id: "doctors", label: "Corpo Clínico", icon: Users, color: "text-emerald-800", roles: ['gestor'] },
     { id: "finance", label: "Financeiro", icon: CircleDollarSign, color: "text-emerald-700", roles: ['gestor'] },
-    { id: "marketing", label: "Marketing", icon: BarChart3, color: "text-cyan-600", roles: ['gestor'] },
     { id: "settings", label: "Configurações", icon: Settings, color: "text-slate-500", roles: ['gestor'] },
     { id: "super-admin", label: "Super Admin", icon: ShieldCheck, color: "text-orange-600", roles: ['super-admin'] },
   ];

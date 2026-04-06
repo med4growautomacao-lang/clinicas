@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(list\\(d.get\\(''mcpServers'',{}\\).keys\\(\\)\\)\\)\")"
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(list\\(d.get\\(''mcpServers'',{}\\).keys\\(\\)\\)\\)\")",
+      "mcp__supabase__list_tables"
     ]
   }
 }

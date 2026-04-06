@@ -28,6 +28,7 @@ import {
   Trash2,
   DollarSign,
   CheckSquare,
+  MessageCircle,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -1432,6 +1433,57 @@ function ConfigView() {
           </CardContent>
         </Card>
 
+        <Card className="border border-slate-200 shadow-sm relative overflow-hidden">
+          <div className="h-1.5 bg-teal-600 absolute top-0 left-0 right-0" />
+          <CardHeader className="pb-4">
+            <CardTitle className="text-lg font-bold text-slate-900 flex items-center gap-3">
+              <MessageCircle className="w-5 h-5 text-teal-600" />
+              Mensagem de Boas Vindas Formulário
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-100">
+              <div>
+                <p className="text-sm font-bold text-slate-900">Ativar Boas Vindas</p>
+                <p className="text-[10px] font-semibold text-slate-500 uppercase pt-0.5">Disparo no primeiro contato</p>
+              </div>
+              <button
+                onClick={() => setConfig({ welcome_message_enabled: !localConfig.welcome_message_enabled })}
+                className={cn(
+                  "w-12 h-6 rounded-full relative transition-all",
+                  localConfig.welcome_message_enabled ? "bg-teal-600" : "bg-slate-300"
+                )}
+              >
+                <div className={cn(
+                  "w-4 h-4 bg-white rounded-full absolute top-1 transition-all shadow-sm",
+                  localConfig.welcome_message_enabled ? "right-1" : "left-1"
+                )}></div>
+              </button>
+            </div>
+
+            <AnimatePresence>
+              {localConfig.welcome_message_enabled && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="space-y-2 overflow-hidden"
+                >
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1 font-sans">
+                    Texto da Mensagem
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={localConfig.welcome_message_text || ""}
+                    onChange={(e) => setConfig({ welcome_message_text: e.target.value })}
+                    className="w-full p-4 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all resize-none text-sm leading-relaxed"
+                    placeholder="Digite a mensagem de boas-vindas..."
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

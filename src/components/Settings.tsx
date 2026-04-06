@@ -424,20 +424,79 @@ function AISettings({ data, onChange }: { data: Partial<AIConfig>, onChange: (up
                     />
                 </div>
 
-                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-lg border border-slate-200">
+                <div className="space-y-4 p-5 bg-teal-50/50 rounded-2xl border border-teal-100 shadow-sm transition-all group">
+                    <div className="flex items-center justify-between">
+                        <div className="flex gap-4">
+                            <div className={cn(
+                                "w-10 h-10 rounded-xl flex items-center justify-center transition-all",
+                                data.welcome_message_enabled ? "bg-teal-600 shadow-md scale-105" : "bg-slate-200"
+                            )}>
+                                <MessageCircle className={cn("w-5 h-5", data.welcome_message_enabled ? "text-white" : "text-slate-500")} />
+                            </div>
+                            <div>
+                                <p className="font-bold text-slate-900 text-sm">Mensagem de Boas Vindas Formulário</p>
+                                <p className="text-slate-500 font-medium text-xs mt-0.5">Enviar uma mensagem automática ao primeiro contato do lead.</p>
+                            </div>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                            <input 
+                                type="checkbox" 
+                                className="sr-only peer"
+                                checked={data.welcome_message_enabled || false}
+                                onChange={(e) => onChange({ welcome_message_enabled: e.target.checked })}
+                            />
+                            <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-teal-100 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-600"></div>
+                        </label>
+                    </div>
+
+                    <AnimatePresence>
+                        {data.welcome_message_enabled && (
+                            <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                exit={{ opacity: 0, height: 0 }}
+                                className="pt-4 space-y-3 overflow-hidden"
+                            >
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Texto da Mensagem</label>
+                                <textarea 
+                                    className="w-full px-4 py-3 border border-slate-200 rounded-xl font-medium text-slate-700 h-28 text-sm bg-white focus:ring-2 focus:ring-teal-100 transition-all outline-none"
+                                    value={data.welcome_message_text || ''}
+                                    onChange={(e) => onChange({ welcome_message_text: e.target.value })}
+                                    placeholder="Digite a mensagem de boas-vindas..."
+                                />
+                                <div className="flex items-center gap-2 px-3 py-2 bg-white/50 rounded-lg border border-teal-50">
+                                    <Info className="w-3 h-3 text-teal-600" />
+                                    <p className="text-[10px] text-slate-500 font-medium italic">
+                                        Dica: Use mensagens curtas e amigáveis para iniciar a conversa.
+                                    </p>
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+                </div>
+
+                <div className="flex items-center justify-between p-5 bg-slate-50 rounded-2xl border border-slate-200 transition-all hover:bg-slate-100/50">
                     <div className="flex gap-4">
-                        <Bot className="w-5 h-5 text-teal-600 shrink-0" />
+                        <div className={cn(
+                            "w-10 h-10 rounded-xl flex items-center justify-center transition-all",
+                            data.auto_schedule ? "bg-teal-600 shadow-md" : "bg-slate-200"
+                        )}>
+                            <Bot className={cn("w-5 h-5", data.auto_schedule ? "text-white" : "text-slate-500")} />
+                        </div>
                         <div>
                             <p className="font-bold text-slate-900 text-sm">Agendamento Automático</p>
                             <p className="text-slate-500 font-medium text-xs mt-0.5">Permitir que a IA agende consultas diretamente.</p>
                         </div>
                     </div>
-                    <input 
-                        type="checkbox" 
-                        className="w-5 h-5 accent-teal-600"
-                        checked={data.auto_schedule || false}
-                        onChange={(e) => onChange({ auto_schedule: e.target.checked })}
-                    />
+                    <label className="relative inline-flex items-center cursor-pointer">
+                        <input 
+                            type="checkbox" 
+                            className="sr-only peer"
+                            checked={data.auto_schedule || false}
+                            onChange={(e) => onChange({ auto_schedule: e.target.checked })}
+                        />
+                        <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-teal-100 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-600"></div>
+                    </label>
                 </div>
             </CardContent>
         </Card>

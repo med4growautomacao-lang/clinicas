@@ -778,6 +778,8 @@ export interface AIConfig {
   sla_minutes: number;
   business_hours: { start: string; end: string; days: number[] };
   default_ticket_value: number;
+  welcome_message_enabled: boolean;
+  welcome_message_text: string | null;
   updated_at: string;
 }
 

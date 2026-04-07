@@ -752,6 +752,7 @@ export interface Clinic {
   meta_ad_account_id?: string | null;
   meta_pixel_id?: string | null;
   wa_pre_msg?: string | null;
+  organization_id?: string | null;
 }
 
 export interface AIConfig {
@@ -1290,4 +1291,37 @@ export function useTransitionRules() {
   };
 
   return { data, loading, error, refetch: fetch, create, remove, update };
+}
+
+// ==========================================
+// ORGANIZATIONS
+// ==========================================
+export interface Organization {
+  id: string;
+  name: string;
+  plan: string;
+  logo_url: string | null;
+  created_at: string;
+}
+
+export function useOrganizations() {
+  const [data, setData] = useState<Organization[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase.from('organizations').select('*').order('name');
+    setData(data || []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { fetch(); }, [fetch]);
+
+  const create = async (org: { name: string; plan: string }) => {
+    const { data, error } = await supabase.from('organizations').insert(org).select().single();
+    if (!error) fetch();
+    return { data, error };
+  };
+
+  return { data, loading, create, refetch: fetch };
 }

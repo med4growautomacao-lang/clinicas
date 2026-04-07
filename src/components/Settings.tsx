@@ -154,12 +154,35 @@ export function Settings() {
             token = await generateConnectToken() ?? undefined;
         }
         if (!token) return;
-        const baseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-        const projectRef = baseUrl.replace('https://', '').split('.')[0];
+        const projectRef = 'yzpclhuifquhfqpiwysh';
         const url = `https://${projectRef}.supabase.co/functions/v1/whatsapp-qr-public?token=${token}`;
-        await navigator.clipboard.writeText(url);
-        setLinkCopied(true);
-        setTimeout(() => setLinkCopied(false), 2500);
+        try {
+            await navigator.clipboard.writeText(url);
+            setLinkCopied(true);
+            setTimeout(() => setLinkCopied(false), 2500);
+        } catch {
+            // Fallback: prompt para copiar manualmente
+            const input = document.createElement('input');
+            input.value = url;
+            document.body.appendChild(input);
+            input.select();
+            document.execCommand('copy');
+            document.body.removeChild(input);
+            setLinkCopied(true);
+            setTimeout(() => setLinkCopied(false), 2500);
+        }
+    };
+
+    const [connectLink, setConnectLink] = useState<string | null>(null);
+
+    const handleShowLink = async () => {
+        let token = whatsapp?.connect_token;
+        if (!token) {
+            token = await generateConnectToken() ?? undefined;
+        }
+        if (!token) return;
+        const projectRef = 'yzpclhuifquhfqpiwysh';
+        setConnectLink(`https://${projectRef}.supabase.co/functions/v1/whatsapp-qr-public?token=${token}`);
     };
 
     if (loading) {
@@ -252,13 +275,54 @@ export function Settings() {
                                 onConnect={handleWhatsappConnect}
                                 onCancel={handleWhatsappCancel}
                                 connecting={connecting}
-                                onCopyLink={handleCopyLink}
+                                onCopyLink={handleShowLink}
                                 linkCopied={linkCopied}
                             />
                         )}
                     </motion.div>
                 </AnimatePresence>
             </div>
+
+            {/* Modal: Link de Conexão WhatsApp */}
+            {connectLink && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setConnectLink(null)}>
+                    <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 p-6 space-y-4" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-base font-bold text-slate-900">Link de Conexão WhatsApp</h3>
+                            <button onClick={() => setConnectLink(null)} className="text-slate-400 hover:text-slate-600">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <p className="text-sm text-slate-500">Envie este link para o responsável da clínica. A página atualizará o QR Code automaticamente.</p>
+                        <div className="flex gap-2">
+                            <input
+                                readOnly
+                                value={connectLink}
+                                className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono text-slate-700 bg-slate-50 focus:outline-none"
+                                onFocus={e => e.target.select()}
+                            />
+                            <button
+                                onClick={() => {
+                                    try { navigator.clipboard.writeText(connectLink); } catch {
+                                        const inp = document.createElement('input');
+                                        inp.value = connectLink;
+                                        document.body.appendChild(inp);
+                                        inp.select();
+                                        document.execCommand('copy');
+                                        document.body.removeChild(inp);
+                                    }
+                                    setLinkCopied(true);
+                                    setTimeout(() => setLinkCopied(false), 2500);
+                                }}
+                                className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-sm font-bold flex items-center gap-2 transition-colors"
+                            >
+                                {linkCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                                {linkCopied ? 'Copiado!' : 'Copiar'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             <div className="pt-6 border-t border-slate-200 flex justify-end gap-3 bg-slate-50/80 backdrop-blur-md sticky bottom-0 z-20">
                 <Button 

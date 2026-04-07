@@ -180,8 +180,7 @@ export function Settings() {
             token = await generateConnectToken() ?? undefined;
         }
         if (!token) return;
-        const projectRef = 'yzpclhuifquhfqpiwysh';
-        setConnectLink(`https://${projectRef}.supabase.co/functions/v1/whatsapp-qr-public?token=${token}`);
+        setConnectLink(`${window.location.origin}/connect?token=${token}`);
     };
 
     if (loading) {

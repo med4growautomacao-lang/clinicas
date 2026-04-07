@@ -2,13 +2,16 @@ import React, { createContext, useContext, useEffect, useState, ReactNode } from
 import { supabase } from '../lib/supabase';
 import { Session, User } from '@supabase/supabase-js';
 
-export type UserRole = 'gestor' | 'medico' | 'secretaria' | 'super-admin';
+export type UserRole = 'gestor' | 'medico' | 'secretaria' | 'super-admin' | 'org_admin';
 
 interface UserProfile {
   id: string;
-  clinic_id: string;
+  clinic_id: string | null;
   role: UserRole;
   full_name: string;
+  // Org-admin fields
+  organization_id?: string;
+  organization_name?: string;
 }
 
 interface AuthContextType {
@@ -18,6 +21,9 @@ interface AuthContextType {
   clinicName: string;
   userRole: UserRole;
   loading: boolean;
+  // Org-admin: clínica ativa selecionada (substitui profile.clinic_id para hooks)
+  activeClinicId: string | null;
+  setActiveClinicId: (id: string | null) => void;
   signOut: () => Promise<void>;
 }
 
@@ -29,11 +35,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [clinicName, setClinicName] = useState('');
+  const [activeClinicId, setActiveClinicId] = useState<string | null>(null);
 
   useEffect(() => {
     let ignore = false;
 
-    // Safety timeout - if nothing happens in 5 seconds, stop loading
     const safetyTimeout = setTimeout(() => {
       if (!ignore) {
         console.warn('AuthContext: Safety timeout reached, forcing loading to false');
@@ -41,11 +47,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }, 5000);
 
-    // 1. Check for existing session first
     supabase.auth.getSession().then(async ({ data: { session: currentSession }, error }) => {
       if (ignore) return;
       console.log('AuthContext: getSession result:', currentSession?.user?.email ?? 'no session', error);
-      
+
       if (error) {
         console.error('AuthContext: getSession error:', error);
         clearTimeout(safetyTimeout);
@@ -61,18 +66,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         setLoading(false);
       }
-      
+
       clearTimeout(safetyTimeout);
     });
 
-    // 2. Listen for future auth changes (login, logout, token refresh)
-    // IMPORTANT: callback must NOT be async to avoid deadlock with Supabase client.
-    // The client needs the callback to return before finalizing auth state,
-    // but an async callback that awaits a Supabase query creates a circular wait.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
       if (ignore) return;
       console.log('AuthContext: Auth event received:', event, 'Has session:', !!newSession);
-      
+
       if (event === 'INITIAL_SESSION') {
         console.log('AuthContext: Skipping INITIAL_SESSION event');
         return;
@@ -80,17 +81,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       setSession(newSession);
       setUser(newSession?.user ?? null);
-      console.log('AuthContext: Updated user state to:', newSession?.user?.email ?? 'null');
 
       if (newSession?.user) {
-        // Defer profile fetch to next tick so onAuthStateChange callback returns
-        // immediately, allowing Supabase to finalize the session first
         const userId = newSession.user.id;
         setTimeout(() => fetchProfile(userId), 0);
       } else {
         console.log('AuthContext: No session, clearing profile');
         setProfile(null);
         setClinicName('');
+        setActiveClinicId(null);
         setLoading(false);
       }
     });
@@ -105,6 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function fetchProfile(userId: string) {
     console.log('AuthContext: Fetching profile for:', userId);
     try {
+      // 1. Tentar usuário de clínica normal primeiro
       const { data: userData, error: userError } = await supabase
         .from('users')
         .select('*')
@@ -118,13 +118,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (userData) {
-        console.log('AuthContext: Profile loaded successfully:', userData.email, 'Role:', userData.role);
+        console.log('AuthContext: Profile loaded (clinic user):', userData.email, 'Role:', userData.role);
         setProfile({
           id: userData.id,
           clinic_id: userData.clinic_id,
           role: userData.role as UserRole,
           full_name: userData.full_name
         });
+        setActiveClinicId(userData.clinic_id);
 
         const { data: clinicData } = await supabase
           .from('clinics')
@@ -132,12 +133,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           .eq('id', userData.clinic_id)
           .maybeSingle();
 
-        if (clinicData?.name) {
-          setClinicName(clinicData.name);
-        }
-      } else {
-        console.warn('AuthContext: No profile found in users table');
+        if (clinicData?.name) setClinicName(clinicData.name);
+        return;
       }
+
+      // 2. Verificar se é org-admin
+      const { data: orgUser } = await supabase
+        .from('org_users')
+        .select('*, organizations(id, name)')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (orgUser) {
+        console.log('AuthContext: Profile loaded (org_admin):', orgUser.email, 'Org:', (orgUser.organizations as any)?.name);
+        const org = orgUser.organizations as any;
+        setProfile({
+          id: userId,
+          clinic_id: null,
+          role: 'org_admin',
+          full_name: orgUser.full_name || orgUser.email || '',
+          organization_id: orgUser.organization_id,
+          organization_name: org?.name || ''
+        });
+        setActiveClinicId(null);
+        setClinicName(org?.name || '');
+        return;
+      }
+
+      console.warn('AuthContext: No profile found in users or org_users');
     } catch (error) {
       console.error('AuthContext: Profile error:', error);
     } finally {
@@ -148,15 +171,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     try {
-      console.log('AuthContext: Attempting to sign out...');
       const { error } = await supabase.auth.signOut();
-      if (error) {
-        console.error('AuthContext: Sign out error from Supabase:', error);
-      } else {
-        console.log('AuthContext: Sign out successful');
-      }
+      if (error) console.error('AuthContext: Sign out error:', error);
     } catch (error) {
-      console.error('AuthContext: Sign out unexpected exception:', error);
+      console.error('AuthContext: Sign out exception:', error);
     }
   };
 
@@ -168,6 +186,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clinicName,
       userRole: profile?.role || 'secretaria',
       loading,
+      activeClinicId,
+      setActiveClinicId,
       signOut
     }}>
       {children}

@@ -9,6 +9,7 @@ import { DoctorsManagement } from './components/DoctorsManagement';
 import { Settings } from './components/Settings';
 import SuperAdmin from './components/SuperAdmin';
 import { MarketingAnalytics } from './components/MarketingAnalytics';
+import { OrgAdmin } from './components/OrgAdmin';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -52,6 +53,8 @@ function AppContent() {
         return <MarketingAnalytics />;
       case 'super-admin':
         return <SuperAdmin />;
+      case 'org-admin':
+        return <OrgAdmin />;
       default:
         return (
           <div className="flex items-center justify-center h-full text-slate-500 font-medium italic">

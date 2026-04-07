@@ -38,6 +38,7 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
     { id: "finance", label: "Financeiro", icon: CircleDollarSign, color: "text-emerald-700", roles: ['gestor'] },
     { id: "settings", label: "Configurações", icon: Settings, color: "text-slate-500", roles: ['gestor'] },
     { id: "super-admin", label: "Super Admin", icon: ShieldCheck, color: "text-orange-600", roles: ['super-admin'] },
+    { id: "org-admin", label: "Organização", icon: Activity, color: "text-violet-600", roles: ['org_admin'] },
   ];
 
   const navItems = allNavItems.filter(item => item.roles.includes(userRole));

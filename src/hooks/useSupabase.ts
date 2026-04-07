@@ -21,29 +21,29 @@ export interface Doctor {
 }
 
 export function useDoctors() {
-  const { profile } = useAuth();
+  const { profile, activeClinicId } = useAuth();
   const [data, setData] = useState<Doctor[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetch = useCallback(async (silent = false) => {
-    if (!profile?.clinic_id) return;
+    if (!activeClinicId) return;
     if (!silent) setLoading(true);
     const { data, error } = await supabase
       .from('doctors')
       .select('*')
-      .eq('clinic_id', profile.clinic_id)
+      .eq('clinic_id', activeClinicId)
       .order('name');
     
     if (error) { setError(error.message); if (!silent) setLoading(false); return; }
     setData(data || []);
     setError(null);
     if (!silent) setLoading(false);
-  }, [profile?.clinic_id]);
+  }, [activeClinicId]);
 
   useEffect(() => { 
     fetch(); 
-    if (!profile?.clinic_id) return;
+    if (!activeClinicId) return;
 
     const channel = supabase
       .channel('doctors_realtime')
@@ -51,20 +51,20 @@ export function useDoctors() {
         event: '*', 
         schema: 'public', 
         table: 'doctors',
-        filter: `clinic_id=eq.${profile.clinic_id}`
+        filter: `clinic_id=eq.${activeClinicId}`
       }, () => {
         fetch(true);
       })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [fetch, profile?.clinic_id]);
+  }, [fetch, activeClinicId]);
 
   const create = async (doc: Partial<Doctor>) => {
-    if (!profile?.clinic_id) return null;
+    if (!activeClinicId) return null;
     const { data, error } = await supabase
       .from('doctors')
-      .insert({ ...doc, clinic_id: profile.clinic_id })
+      .insert({ ...doc, clinic_id: activeClinicId })
       .select()
       .single();
     if (error) { setError(error.message); return null; }
@@ -73,9 +73,9 @@ export function useDoctors() {
   };
 
   const createWithAuth = async (params: any) => {
-    if (!profile?.clinic_id) return null;
+    if (!activeClinicId) return null;
     const { data, error } = await supabase.functions.invoke('create-professional', {
-      body: { ...params, clinic_id: profile.clinic_id }
+      body: { ...params, clinic_id: activeClinicId }
     });
     if (error) { setError(error.message); return null; }
     if (data.error) { setError(data.error); return null; }
@@ -130,29 +130,29 @@ export interface Patient {
 }
 
 export function usePatients() {
-  const { profile } = useAuth();
+  const { profile, activeClinicId } = useAuth();
   const [data, setData] = useState<Patient[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetch = useCallback(async (silent = false) => {
-    if (!profile?.clinic_id) return;
+    if (!activeClinicId) return;
     if (!silent) setLoading(true);
     const { data, error } = await supabase
       .from('patients')
       .select('*')
-      .eq('clinic_id', profile.clinic_id)
+      .eq('clinic_id', activeClinicId)
       .order('name');
     
     if (error) { setError(error.message); if (!silent) setLoading(false); return; }
     setData(data || []);
     setError(null);
     if (!silent) setLoading(false);
-  }, [profile?.clinic_id]);
+  }, [activeClinicId]);
 
   useEffect(() => { 
     fetch(); 
-    if (!profile?.clinic_id) return;
+    if (!activeClinicId) return;
 
     const channel = supabase
       .channel('patients_realtime')
@@ -160,20 +160,20 @@ export function usePatients() {
         event: '*', 
         schema: 'public', 
         table: 'patients',
-        filter: `clinic_id=eq.${profile.clinic_id}`
+        filter: `clinic_id=eq.${activeClinicId}`
       }, () => {
         fetch(true);
       })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [fetch, profile?.clinic_id]);
+  }, [fetch, activeClinicId]);
 
   const create = async (p: Partial<Patient>) => {
-    if (!profile?.clinic_id) return null;
+    if (!activeClinicId) return null;
     const { data, error } = await supabase
       .from('patients')
-      .insert({ ...p, clinic_id: profile.clinic_id })
+      .insert({ ...p, clinic_id: activeClinicId })
       .select()
       .single();
     if (error) { setError(error.message); return null; }
@@ -218,19 +218,19 @@ export interface Appointment {
 }
 
 export function useAppointments() {
-  const { profile, userRole } = useAuth();
+  const { profile, userRole, activeClinicId } = useAuth();
   const [data, setData] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetch = useCallback(async (silent = false) => {
-    if (!profile?.clinic_id) return;
+    if (!activeClinicId) return;
     if (!silent) setLoading(true);
     
     let query = supabase
       .from('appointments')
       .select('*, patient:patients(name, cpf, phone), doctor:doctors!inner(name, user_id)')
-      .eq('clinic_id', profile.clinic_id);
+      .eq('clinic_id', activeClinicId);
 
     if (userRole === 'medico') {
       query = query.eq('doctor.user_id', profile.id);
@@ -244,11 +244,11 @@ export function useAppointments() {
     setData(data || []);
     setError(null);
     if (!silent) setLoading(false);
-  }, [profile?.clinic_id, userRole, profile?.id]);
+  }, [activeClinicId, userRole, profile?.id]);
 
   useEffect(() => { 
     fetch(); 
-    if (!profile?.clinic_id) return;
+    if (!activeClinicId) return;
 
     const channel = supabase
       .channel('appointments_realtime')
@@ -256,20 +256,20 @@ export function useAppointments() {
         event: '*', 
         schema: 'public', 
         table: 'appointments',
-        filter: `clinic_id=eq.${profile.clinic_id}`
+        filter: `clinic_id=eq.${activeClinicId}`
       }, () => {
         fetch(true);
       })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [fetch, profile?.clinic_id]);
+  }, [fetch, activeClinicId]);
 
   const create = async (apt: Partial<Appointment>) => {
-    if (!profile?.clinic_id) return null;
+    if (!activeClinicId) return null;
     const { data, error } = await supabase
       .from('appointments')
-      .insert({ ...apt, clinic_id: profile.clinic_id })
+      .insert({ ...apt, clinic_id: activeClinicId })
       .select('*, patient:patients(name, cpf, phone), doctor:doctors!inner(name, user_id)')
       .single();
     if (error) { setError(error.message); return null; }
@@ -341,25 +341,25 @@ export interface Lead {
 }
 
 export function useFunnelStages() {
-  const { profile } = useAuth();
+  const { profile, activeClinicId } = useAuth();
   const [data, setData] = useState<FunnelStage[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetch = useCallback(async () => {
-    if (!profile?.clinic_id) return;
+    if (!activeClinicId) return;
     setLoading(true);
     const { data } = await supabase
       .from('funnel_stages')
       .select('*')
-      .eq('clinic_id', profile.clinic_id)
+      .eq('clinic_id', activeClinicId)
       .order('position');
     setData(data || []);
     setLoading(false);
-  }, [profile?.clinic_id]);
+  }, [activeClinicId]);
 
   useEffect(() => { 
     fetch(); 
-    if (!profile?.clinic_id) return;
+    if (!activeClinicId) return;
 
     const channel = supabase
       .channel('funnel_stages_realtime')
@@ -367,14 +367,14 @@ export function useFunnelStages() {
         event: '*', 
         schema: 'public', 
         table: 'funnel_stages',
-        filter: `clinic_id=eq.${profile.clinic_id}`
+        filter: `clinic_id=eq.${activeClinicId}`
       }, () => {
         fetch();
       })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [fetch, profile?.clinic_id]);
+  }, [fetch, activeClinicId]);
 
   const update = async (id: string, updates: Partial<FunnelStage>) => {
     const { error } = await supabase.from('funnel_stages').update(updates).eq('id', id);
@@ -400,11 +400,11 @@ export function useFunnelStages() {
   };
 
   const create = async (stage: Partial<FunnelStage>) => {
-    if (!profile?.clinic_id) return null;
+    if (!activeClinicId) return null;
     const { data: lastStage } = await supabase
       .from('funnel_stages')
       .select('position')
-      .eq('clinic_id', profile.clinic_id)
+      .eq('clinic_id', activeClinicId)
       .order('position', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -412,7 +412,7 @@ export function useFunnelStages() {
     const newPosition = (lastStage?.position ?? -1) + 1;
     const { data, error } = await supabase
       .from('funnel_stages')
-      .insert({ ...stage, clinic_id: profile.clinic_id, position: newPosition })
+      .insert({ ...stage, clinic_id: activeClinicId, position: newPosition })
       .select()
       .single();
     if (error) return null;
@@ -424,29 +424,29 @@ export function useFunnelStages() {
 }
 
 export function useLeads() {
-  const { profile } = useAuth();
+  const { profile, activeClinicId } = useAuth();
   const [data, setData] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetch = useCallback(async (silent = false) => {
-    if (!profile?.clinic_id) return;
+    if (!activeClinicId) return;
     if (!silent) setLoading(true);
     const { data, error } = await supabase
       .from('leads')
       .select('*')
-      .eq('clinic_id', profile.clinic_id)
+      .eq('clinic_id', activeClinicId)
       .order('updated_at', { ascending: false, nullsFirst: false });
     
     if (error) { setError(error.message); if (!silent) setLoading(false); return; }
     setData(data || []);
     setError(null);
     if (!silent) setLoading(false);
-  }, [profile?.clinic_id]);
+  }, [activeClinicId]);
 
   useEffect(() => { 
     fetch(); 
-    if (!profile?.clinic_id) return;
+    if (!activeClinicId) return;
 
     const channel = supabase
       .channel('leads_realtime')
@@ -454,20 +454,20 @@ export function useLeads() {
         event: '*', 
         schema: 'public', 
         table: 'leads',
-        filter: `clinic_id=eq.${profile.clinic_id}`
+        filter: `clinic_id=eq.${activeClinicId}`
       }, () => {
         fetch(true);
       })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [fetch, profile?.clinic_id]);
+  }, [fetch, activeClinicId]);
 
   const create = async (lead: Partial<Lead>) => {
-    if (!profile?.clinic_id) return null;
+    if (!activeClinicId) return null;
     const { data, error } = await supabase
       .from('leads')
-      .insert({ ...lead, clinic_id: profile.clinic_id })
+      .insert({ ...lead, clinic_id: activeClinicId })
       .select()
       .single();
     if (error) { setError(error.message); return null; }
@@ -503,16 +503,16 @@ export interface DashboardStats {
 }
 
 export function useDashboardStats() {
-  const { profile } = useAuth();
+  const { profile, activeClinicId } = useAuth();
   const [data, setData] = useState<DashboardStats>({
     totalAppointments: 0, totalRevenue: 0, totalMessages: 0, newPatients: 0
   });
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async (silent = false) => {
-    if (!profile?.clinic_id) return;
+    if (!activeClinicId) return;
     if (!silent) setLoading(true);
-    const clinicId = profile!.clinic_id;
+    const clinicId = activeClinicId;
 
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
@@ -539,23 +539,23 @@ export function useDashboardStats() {
       newPatients: patientsRes.count || 0,
     });
     if (!silent) setLoading(false);
-  }, [profile?.clinic_id]);
+  }, [activeClinicId]);
 
   useEffect(() => {
     load();
-    if (!profile?.clinic_id) return;
+    if (!activeClinicId) return;
 
     // Sincronizar dashboard com mudanças em tabelas chave
     const channel = supabase
       .channel('dashboard_realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'appointments', filter: `clinic_id=eq.${profile.clinic_id}` }, () => load(true))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'financial_transactions', filter: `clinic_id=eq.${profile.clinic_id}` }, () => load(true))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'patients', filter: `clinic_id=eq.${profile.clinic_id}` }, () => load(true))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages', filter: `clinic_id=eq.${profile.clinic_id}` }, () => load(true))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'appointments', filter: `clinic_id=eq.${activeClinicId}` }, () => load(true))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'financial_transactions', filter: `clinic_id=eq.${activeClinicId}` }, () => load(true))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'patients', filter: `clinic_id=eq.${activeClinicId}` }, () => load(true))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages', filter: `clinic_id=eq.${activeClinicId}` }, () => load(true))
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [load, profile?.clinic_id]);
+  }, [load, activeClinicId]);
 
   return { data, loading, refetch: load };
 }
@@ -579,29 +579,29 @@ export interface FinancialTransaction {
 }
 
 export function useFinancial() {
-  const { profile } = useAuth();
+  const { profile, activeClinicId } = useAuth();
   const [data, setData] = useState<FinancialTransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetch = useCallback(async (silent = false) => {
-    if (!profile?.clinic_id) return;
+    if (!activeClinicId) return;
     if (!silent) setLoading(true);
     const { data, error } = await supabase
       .from('financial_transactions')
       .select('*')
-      .eq('clinic_id', profile.clinic_id)
+      .eq('clinic_id', activeClinicId)
       .order('date', { ascending: false });
     
     if (error) { setError(error.message); if (!silent) setLoading(false); return; }
     setData(data || []);
     setError(null);
     if (!silent) setLoading(false);
-  }, [profile?.clinic_id]);
+  }, [activeClinicId]);
 
   useEffect(() => { 
     fetch(); 
-    if (!profile?.clinic_id) return;
+    if (!activeClinicId) return;
 
     const channel = supabase
       .channel('financial_realtime')
@@ -609,20 +609,20 @@ export function useFinancial() {
         event: '*', 
         schema: 'public', 
         table: 'financial_transactions',
-        filter: `clinic_id=eq.${profile.clinic_id}`
+        filter: `clinic_id=eq.${activeClinicId}`
       }, () => {
         fetch(true);
       })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [fetch, profile?.clinic_id]);
+  }, [fetch, activeClinicId]);
 
   const create = async (tx: Partial<FinancialTransaction>) => {
-    if (!profile?.clinic_id) return null;
+    if (!activeClinicId) return null;
     const { data, error } = await supabase
       .from('financial_transactions')
-      .insert({ ...tx, clinic_id: profile.clinic_id })
+      .insert({ ...tx, clinic_id: activeClinicId })
       .select()
       .single();
     if (error) { setError(error.message); return null; }
@@ -667,7 +667,7 @@ export interface MedicalRecord {
 }
 
 export function useMedicalRecords(patientId: string | null) {
-  const { profile } = useAuth();
+  const { profile, activeClinicId } = useAuth();
   const [data, setData] = useState<MedicalRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -707,10 +707,10 @@ export function useMedicalRecords(patientId: string | null) {
   }, [fetch, patientId]);
 
   const create = async (record: Partial<MedicalRecord>) => {
-    if (!profile?.clinic_id) return null;
+    if (!activeClinicId) return null;
     const { data, error } = await supabase
       .from('medical_records')
-      .insert({ ...record, clinic_id: profile.clinic_id })
+      .insert({ ...record, clinic_id: activeClinicId })
       .select('*, doctor:doctors(name)')
       .single();
     if (error) { setError(error.message); return null; }
@@ -796,7 +796,7 @@ export interface WhatsappInstance {
 }
 
 export function useSettings() {
-  const { profile } = useAuth();
+  const { profile, activeClinicId } = useAuth();
   const [clinic, setClinic] = useState<Clinic | null>(null);
   const [aiConfig, setAIConfig] = useState<AIConfig | null>(null);
   const [whatsapp, setWhatsapp] = useState<WhatsappInstance | null>(null);
@@ -804,13 +804,13 @@ export function useSettings() {
   const [loading, setLoading] = useState(true);
 
   const fetch = useCallback(async (silent = false) => {
-    if (!profile?.clinic_id) return;
+    if (!activeClinicId) return;
     if (!silent) setLoading(true);
 
     const [clinicRes, aiRes, waRes, sysRes] = await Promise.all([
-      supabase.from('clinics').select('*').eq('id', profile.clinic_id).maybeSingle(),
-      supabase.from('ai_config').select('*').eq('clinic_id', profile.clinic_id).maybeSingle(),
-      supabase.from('whatsapp_instances').select('*').eq('clinic_id', profile.clinic_id).maybeSingle(),
+      supabase.from('clinics').select('*').eq('id', activeClinicId).maybeSingle(),
+      supabase.from('ai_config').select('*').eq('clinic_id', activeClinicId).maybeSingle(),
+      supabase.from('whatsapp_instances').select('*').eq('clinic_id', activeClinicId).maybeSingle(),
       supabase.from('system_settings').select('*')
     ]);
 
@@ -825,11 +825,11 @@ export function useSettings() {
     }
     
     setLoading(false);
-  }, [profile?.clinic_id]);
+  }, [activeClinicId]);
 
   useEffect(() => { 
     fetch(); 
-    if (!profile?.clinic_id) return;
+    if (!activeClinicId) return;
 
     const channel = supabase
       .channel('whatsapp_instances_realtime')
@@ -839,7 +839,7 @@ export function useSettings() {
         table: 'whatsapp_instances'
       }, (payload) => {
         console.log('Realtime event received:', payload);
-        if (payload.new && (payload.new as any).clinic_id === profile.clinic_id) {
+        if (payload.new && (payload.new as any).clinic_id === activeClinicId) {
           fetch(true);
         }
       })
@@ -858,22 +858,22 @@ export function useSettings() {
       supabase.removeChannel(channel);
       if (pollInterval) clearInterval(pollInterval);
     };
-  }, [fetch, profile?.clinic_id, whatsapp?.status]); // Adicionado whatsapp.status para re-avaliar o polling
+  }, [fetch, activeClinicId, whatsapp?.status]); // Adicionado whatsapp.status para re-avaliar o polling
 
   const updateClinic = async (updates: Partial<Clinic>) => {
-    if (!profile?.clinic_id) return false;
-    const { error } = await supabase.from('clinics').update(updates).eq('id', profile.clinic_id);
+    if (!activeClinicId) return false;
+    const { error } = await supabase.from('clinics').update(updates).eq('id', activeClinicId);
     if (!error) await fetch();
     return !error;
   };
 
   const updateAI = async (updates: Partial<AIConfig>) => {
-    if (!profile?.clinic_id) return false;
+    if (!activeClinicId) return false;
     const { error } = await supabase
       .from('ai_config')
       .upsert({ 
         ...updates, 
-        clinic_id: profile.clinic_id,
+        clinic_id: activeClinicId,
         updated_at: new Date().toISOString()
       }, { onConflict: 'clinic_id' });
     if (!error) await fetch();
@@ -881,18 +881,18 @@ export function useSettings() {
   };
 
   const updateWhatsapp = async (updates: Partial<WhatsappInstance>) => {
-    if (!profile?.clinic_id) return false;
+    if (!activeClinicId) return false;
     
     // Check if instance exists
     if (!whatsapp) {
       const { error } = await supabase.from('whatsapp_instances').insert({
         ...updates,
-        clinic_id: profile.clinic_id
+        clinic_id: activeClinicId
       });
       if (!error) await fetch();
       return !error;
     } else {
-      const { error } = await supabase.from('whatsapp_instances').update(updates).eq('clinic_id', profile.clinic_id);
+      const { error } = await supabase.from('whatsapp_instances').update(updates).eq('clinic_id', activeClinicId);
       if (!error) await fetch();
       return !error;
     }
@@ -957,7 +957,7 @@ export interface ChatMessage {
 }
 
 export function useChatMessages(leadId?: string, leadPhone?: string | null) {
-  const { profile } = useAuth();
+  const { profile, activeClinicId } = useAuth();
   const [data, setData] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -965,14 +965,14 @@ export function useChatMessages(leadId?: string, leadPhone?: string | null) {
   const [clinicPhone, setClinicPhone] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!profile?.clinic_id) return;
+    if (!activeClinicId) return;
     supabase
       .from('whatsapp_instances')
       .select('phone_number')
-      .eq('clinic_id', profile.clinic_id)
+      .eq('clinic_id', activeClinicId)
       .maybeSingle()
       .then(({ data }) => setClinicPhone(data?.phone_number || null));
-  }, [profile?.clinic_id]);
+  }, [activeClinicId]);
 
   const parseMessage = (msg: any): any => {
     try {
@@ -1020,7 +1020,7 @@ export function useChatMessages(leadId?: string, leadPhone?: string | null) {
   };
 
   const fetch = useCallback(async () => {
-    if (!profile?.clinic_id) return;
+    if (!activeClinicId) return;
     
     // Safety check: if no leadId and no leadPhone provided, we shouldn't fetch all clinic messages
     if (!leadId && !leadPhone) {
@@ -1033,7 +1033,7 @@ export function useChatMessages(leadId?: string, leadPhone?: string | null) {
     let query = supabase
       .from('chat_messages')
       .select('*')
-      .eq('clinic_id', profile.clinic_id);
+      .eq('clinic_id', activeClinicId);
     
     if (leadId) {
       query = query.eq('lead_id', leadId);
@@ -1053,11 +1053,11 @@ export function useChatMessages(leadId?: string, leadPhone?: string | null) {
     setData(formattedData);
     setError(null);
     setLoading(false);
-  }, [profile?.clinic_id, leadId]);
+  }, [activeClinicId, leadId]);
 
   useEffect(() => { 
     fetch(); 
-    if (!profile?.clinic_id) return;
+    if (!activeClinicId) return;
 
     const channel = supabase
       .channel(`chat_${leadId || 'all'}`)
@@ -1065,7 +1065,7 @@ export function useChatMessages(leadId?: string, leadPhone?: string | null) {
         event: 'INSERT', 
         schema: 'public', 
         table: 'chat_messages',
-        filter: leadId ? `lead_id=eq.${leadId}` : `clinic_id=eq.${profile.clinic_id}`
+        filter: leadId ? `lead_id=eq.${leadId}` : `clinic_id=eq.${activeClinicId}`
       }, (payload) => {
         const newMsg = payload.new as ChatMessage;
         if (!leadId || newMsg.lead_id === leadId) {
@@ -1082,10 +1082,10 @@ export function useChatMessages(leadId?: string, leadPhone?: string | null) {
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [fetch, profile?.clinic_id, leadId]);
+  }, [fetch, activeClinicId, leadId]);
 
   const send = async (msg: Partial<ChatMessage>) => {
-    if (!profile?.clinic_id) return null;
+    if (!activeClinicId) return null;
     
     let rawPhone = msg.phone || null;
 
@@ -1110,7 +1110,7 @@ export function useChatMessages(leadId?: string, leadPhone?: string | null) {
     }
 
     const insertData: any = { 
-      clinic_id: profile.clinic_id, 
+      clinic_id: activeClinicId, 
       direction: 'outbound', 
       sender: 'user',
       lead_id: leadId || msg.lead_id,
@@ -1125,7 +1125,7 @@ export function useChatMessages(leadId?: string, leadPhone?: string | null) {
       const { data: existingLead } = await supabase
         .from('leads')
         .select('id')
-        .eq('clinic_id', profile.clinic_id)
+        .eq('clinic_id', activeClinicId)
         .eq('phone', leadPhone)
         .maybeSingle();
 
@@ -1136,7 +1136,7 @@ export function useChatMessages(leadId?: string, leadPhone?: string | null) {
         const { data: newLead, error: leadError } = await supabase
           .from('leads')
           .insert({
-            clinic_id: profile.clinic_id,
+            clinic_id: activeClinicId,
             name: `Lead ${leadPhone}`,
             phone: leadPhone,
             source: null
@@ -1178,19 +1178,19 @@ export interface MarketingData {
 }
 
 export function useMarketing() {
-  const { profile } = useAuth();
+  const { profile, activeClinicId } = useAuth();
   const [data, setData] = useState<MarketingData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetch = useCallback(async (startDate: string, endDate: string) => {
-    if (!profile?.clinic_id) return;
+    if (!activeClinicId) return;
     setLoading(true);
     
     const { data, error } = await supabase
       .from('marketing_data')
       .select('*')
-      .eq('clinic_id', profile.clinic_id)
+      .eq('clinic_id', activeClinicId)
       .gte('date', startDate)
       .lte('date', endDate)
       .order('date', { ascending: true });
@@ -1204,14 +1204,14 @@ export function useMarketing() {
     setData(data || []);
     setError(null);
     setLoading(false);
-  }, [profile?.clinic_id]);
+  }, [activeClinicId]);
 
   const upsert = async (items: Partial<MarketingData>[]) => {
-    if (!profile?.clinic_id) return false;
+    if (!activeClinicId) return false;
     
     const prepared = items.map(item => ({
       ...item,
-      clinic_id: profile.clinic_id
+      clinic_id: activeClinicId
     }));
 
     const { error } = await supabase
@@ -1239,33 +1239,33 @@ export interface TransitionRule {
 }
 
 export function useTransitionRules() {
-  const { profile } = useAuth();
+  const { profile, activeClinicId } = useAuth();
   const [data, setData] = useState<TransitionRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetch = useCallback(async () => {
-    if (!profile?.clinic_id) return;
+    if (!activeClinicId) return;
     setLoading(true);
     const { data, error } = await supabase
       .from('stage_transition_rules')
       .select('*')
-      .eq('clinic_id', profile.clinic_id)
+      .eq('clinic_id', activeClinicId)
       .order('created_at');
     
     if (error) { setError(error.message); setLoading(false); return; }
     setData(data || []);
     setError(null);
     setLoading(false);
-  }, [profile?.clinic_id]);
+  }, [activeClinicId]);
 
   useEffect(() => { fetch(); }, [fetch]);
 
   const create = async (rule: Partial<TransitionRule>) => {
-    if (!profile?.clinic_id) return null;
+    if (!activeClinicId) return null;
     const { data, error } = await supabase
       .from('stage_transition_rules')
-      .insert({ ...rule, clinic_id: profile.clinic_id })
+      .insert({ ...rule, clinic_id: activeClinicId })
       .select()
       .single();
     if (!error) await fetch();

@@ -16,6 +16,23 @@ export function ConnectPage() {
   const [state, setState] = useState<QRState>({ status: 'connecting', qr_code: null, phone_number: null, clinic_name: null });
   const [invalid, setInvalid] = useState(false);
   const [loadingInitial, setLoadingInitial] = useState(true);
+  const [requesting, setRequesting] = useState(false);
+
+  const handleStartConnection = async () => {
+    if (!token || requesting) return;
+    setRequesting(true);
+    try {
+      await fetch(`${EDGE_URL.replace('whatsapp-qr-public', 'whatsapp-bridge')}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'create', token })
+      });
+    } catch (err) {
+      console.error('Error starting connection:', err);
+    } finally {
+      setTimeout(() => setRequesting(false), 2000);
+    }
+  };
 
   useEffect(() => {
     if (!token) { 
@@ -160,22 +177,29 @@ export function ConnectPage() {
         </div>
 
         <div className="text-center space-y-8">
-          <div className="space-y-3">
-            <h1 className="text-3xl font-black text-slate-900 tracking-tight leading-tight">
-                Escaneie o <span className="text-teal-600">QR Code</span>
-            </h1>
-            <p className="text-slate-500 font-medium text-sm max-w-[280px] mx-auto leading-relaxed">
-                Abra seu WhatsApp e escaneie o código abaixo para vincular sua conta.
-            </p>
-          </div>
+          <AnimatePresence mode="wait">
+            {state.status === 'qr_pending' ? (
+              <motion.div 
+                key="qr-section"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="space-y-8"
+              >
+                <div className="space-y-3">
+                  <h1 className="text-3xl font-black text-slate-900 tracking-tight leading-tight">
+                      Escaneie o <span className="text-teal-600">QR Code</span>
+                  </h1>
+                  <p className="text-slate-500 font-medium text-sm max-w-[280px] mx-auto leading-relaxed">
+                      Abra seu WhatsApp e escaneie o código abaixo para vincular sua conta.
+                  </p>
+                </div>
 
-          <div className="relative group mx-auto w-fit">
-            <div className="absolute -inset-6 bg-gradient-to-tr from-teal-500/10 to-emerald-500/10 rounded-[3rem] blur-2xl transition-all opacity-0 group-hover:opacity-100" />
-            
-            <AnimatePresence mode="wait">
-                {qrSrc ? (
+                <div className="relative group mx-auto w-fit">
+                  <div className="absolute -inset-6 bg-gradient-to-tr from-teal-500/10 to-emerald-500/10 rounded-[3rem] blur-2xl transition-all opacity-0 group-hover:opacity-100" />
+                  
+                  {qrSrc ? (
                     <motion.div 
-                        key="qr-container"
                         initial={{ opacity: 0, scale: 0.9 }}
                         animate={{ opacity: 1, scale: 1 }}
                         className="relative p-8 bg-white rounded-[2rem] border border-slate-100 shadow-xl shadow-slate-200/50"
@@ -185,38 +209,81 @@ export function ConnectPage() {
                             alt="WhatsApp QR Code" 
                             className="w-56 h-56 md:w-64 md:h-64 object-contain relative z-10"
                         />
-                        <motion.div 
-                           animate={{ opacity: [0.3, 0.6, 0.3] }}
-                           transition={{ repeat: Infinity, duration: 2 }}
-                           className="absolute top-0 left-0 w-full h-[5px] bg-teal-500/30 blur-[2px] z-20" 
-                           style={{ transform: 'translateY(calc(var(--scan-pos, 0) * 1px))' }}
-                        />
                     </motion.div>
-                ) : (
-                    <motion.div 
-                        key="loader-container"
-                        className="w-56 h-56 md:w-64 md:h-64 flex flex-col items-center justify-center p-8 bg-slate-50 rounded-[2rem] border border-dashed border-slate-200"
-                    >
+                  ) : (
+                    <div className="w-56 h-56 md:w-64 md:h-64 flex flex-col items-center justify-center p-8 bg-slate-50 rounded-[2rem] border border-dashed border-slate-200">
                         <Loader2 className="w-10 h-10 text-teal-600 animate-spin mb-4" />
                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Gerando Código...</p>
-                    </motion.div>
-                )}
-            </AnimatePresence>
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 text-left">
-            {[
-                { step: "01", text: "Abra o WhatsApp no seu celular" },
-                { step: "02", text: "Vá em Menu ou Configurações" },
-                { step: "03", text: "Selecione Dispositivos Conectados" },
-                { step: "04", text: "Aponte sua câmera para esta tela" },
-            ].map((i) => (
-                <div key={i.step} className="flex items-center gap-4 p-4 rounded-2xl bg-slate-50/50 border border-slate-100 group hover:bg-white hover:shadow-md transition-all">
-                    <span className="text-xs font-black text-teal-600/40 group-hover:text-teal-600">{i.step}</span>
-                    <p className="text-sm font-bold text-slate-700">{i.text}</p>
+                    </div>
+                  )}
                 </div>
-            ))}
-          </div>
+
+                <div className="grid grid-cols-1 gap-3 text-left">
+                  {[
+                      { step: "01", text: "Abra o WhatsApp no seu celular" },
+                      { step: "02", text: "Vá em Menu ou Configurações" },
+                      { step: "03", text: "Selecione Dispositivos Conectados" },
+                      { step: "04", text: "Aponte sua câmera para esta tela" },
+                  ].map((i) => (
+                      <div key={i.step} className="flex items-center gap-4 p-4 rounded-2xl bg-slate-50/50 border border-slate-100 group hover:bg-white hover:shadow-md transition-all">
+                          <span className="text-xs font-black text-teal-600/40 group-hover:text-teal-600">{i.step}</span>
+                          <p className="text-sm font-bold text-slate-700">{i.text}</p>
+                      </div>
+                  ))}
+                </div>
+              </motion.div>
+            ) : (
+              <motion.div 
+                key="start-section"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="space-y-8 py-4"
+              >
+                <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-2">
+                    <Smartphone className="w-10 h-10 text-slate-300" />
+                </div>
+                
+                <div className="space-y-3">
+                    <h1 className="text-3xl font-black text-slate-900 tracking-tight">Pronto para Conectar?</h1>
+                    <p className="text-slate-500 font-medium text-sm max-w-[280px] mx-auto leading-relaxed">
+                        Clique no botão abaixo para gerar um código de conexão seguro para sua conta.
+                    </p>
+                </div>
+
+                <button
+                    onClick={handleStartConnection}
+                    disabled={requesting}
+                    className={`
+                        w-full py-5 px-8 rounded-2xl font-black text-lg transition-all duration-300
+                        flex items-center justify-center gap-3 shadow-2xl
+                        ${requesting 
+                            ? 'bg-slate-100 text-slate-400 cursor-not-allowed' 
+                            : 'bg-teal-600 hover:bg-teal-700 text-white active:scale-[0.98] shadow-teal-200'}
+                    `}
+                >
+                    {requesting ? (
+                        <>
+                            <Loader2 className="w-6 h-6 animate-spin" />
+                            Preparando...
+                        </>
+                    ) : (
+                        <>
+                            <QrCode className="w-6 h-6" />
+                            Gerar Link de Conexão
+                        </>
+                    )}
+                </button>
+
+                <div className="bg-amber-50 rounded-2xl p-4 flex gap-3 text-left">
+                    <Info className="w-5 h-5 text-amber-600 shrink-0" />
+                    <p className="text-xs font-bold text-amber-700 leading-relaxed">
+                        Certique-se de que o celular está por perto e com internet ativa.
+                    </p>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
         <div className="mt-10 pt-8 border-t border-slate-100 flex items-center justify-between">

@@ -15,13 +15,31 @@ serve(async (req) => {
 
   try {
     const body = await req.json()
-    const { clinic_id, action } = body
-    console.log(`action: ${action} | clinic_id: ${clinic_id}`)
+    let { clinic_id, action, token } = body
+    console.log(`action: ${action} | clinic_id: ${clinic_id} | token: ${token}`)
 
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
+
+    // Se tiver token mas não clinic_id, busca a clínica pelo token
+    if (token && !clinic_id) {
+      const { data: inst } = await supabaseClient
+        .from('whatsapp_instances')
+        .select('clinic_id')
+        .eq('connect_token', token)
+        .maybeSingle()
+      
+      if (inst) clinic_id = inst.clinic_id
+    }
+
+    if (!clinic_id) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Clinica nao identificada.' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+      )
+    }
 
     // ── Criar grupo de notificações ──────────────────────────────────────────
     if (action === 'create_group') {

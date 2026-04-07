@@ -22,8 +22,12 @@ interface OrgUser {
   created_at: string;
 }
 
-export function OrgAdmin() {
-  const { profile, activeClinicId, setActiveClinicId, clinicName } = useAuth();
+interface OrgAdminProps {
+  onEnterClinic: () => void;
+}
+
+export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
+  const { profile, activeClinicId, setActiveClinicId } = useAuth();
   const [clinics, setClinics] = useState<Clinic[]>([]);
   const [orgUsers, setOrgUsers] = useState<OrgUser[]>([]);
   const [loadingClinics, setLoadingClinics] = useState(true);
@@ -149,7 +153,14 @@ export function OrgAdmin() {
                   <p className="text-sm font-bold text-slate-900 mb-1">{clinic.name}</p>
 
                   <button
-                    onClick={() => setActiveClinicId(activeClinicId === clinic.id ? null : clinic.id)}
+                    onClick={() => {
+                      if (activeClinicId === clinic.id) {
+                        setActiveClinicId(null);
+                      } else {
+                        setActiveClinicId(clinic.id);
+                        onEnterClinic();
+                      }
+                    }}
                     className={cn(
                       "mt-3 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition-all",
                       activeClinicId === clinic.id

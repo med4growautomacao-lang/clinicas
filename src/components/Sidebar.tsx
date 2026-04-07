@@ -26,8 +26,11 @@ interface SidebarProps {
 }
 
 export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
-  const { clinicName, userRole, signOut, profile } = useAuth();
-  
+  const { clinicName, userRole, signOut, profile, activeClinicId } = useAuth();
+
+  // Org-admin com clínica ativa navega como gestor
+  const effectiveRole = userRole === 'org_admin' && activeClinicId ? 'gestor' : userRole;
+
   const allNavItems = [
     { id: "dashboard", label: "Visão Geral", icon: LayoutDashboard, color: "text-emerald-600", roles: ['gestor', 'medico', 'secretaria'] },
     { id: "marketing", label: "Marketing", icon: BarChart3, color: "text-cyan-600", roles: ['gestor'] },
@@ -41,7 +44,7 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
     { id: "org-admin", label: "Organização", icon: Activity, color: "text-violet-600", roles: ['org_admin'] },
   ];
 
-  const navItems = allNavItems.filter(item => item.roles.includes(userRole));
+  const navItems = allNavItems.filter(item => item.roles.includes(effectiveRole));
 
   return (
     <div className="w-72 bg-white flex flex-col h-full border-r border-slate-200 shadow-sm z-10 transition-all duration-200">

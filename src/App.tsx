@@ -54,7 +54,7 @@ function AppContent() {
       case 'super-admin':
         return <SuperAdmin />;
       case 'org-admin':
-        return <OrgAdmin />;
+        return <OrgAdmin onEnterClinic={() => setActiveTab('dashboard')} />;
       default:
         return (
           <div className="flex items-center justify-center h-full text-slate-500 font-medium italic">

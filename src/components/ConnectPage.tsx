@@ -67,6 +67,28 @@ export function ConnectPage() {
     return () => clearInterval(interval);
   }, [token]);
 
+  useEffect(() => {
+    let pulseInterval: any;
+    if (token && (state.status === 'connecting' || state.status === 'qr_pending')) {
+      const sendSignal = async () => {
+        try {
+          await fetch(`${EDGE_URL.replace('whatsapp-qr-public', 'whatsapp-bridge')}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'connect', token })
+          });
+        } catch (err) {
+          console.error('Pulse error:', err);
+        }
+      };
+      
+      pulseInterval = setInterval(sendSignal, 15000);
+    }
+    return () => {
+      if (pulseInterval) clearInterval(pulseInterval);
+    };
+  }, [state.status, token]);
+
   if (loadingInitial) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">

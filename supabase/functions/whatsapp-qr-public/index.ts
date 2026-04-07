@@ -26,7 +26,7 @@ serve(async (req) => {
 
   const { data, error } = await supabase
     .from('whatsapp_instances')
-    .select('qr_code, status, phone_number')
+    .select('qr_code, status, phone_number, clinics(name)')
     .eq('connect_token', token)
     .maybeSingle()
 
@@ -48,6 +48,7 @@ serve(async (req) => {
       qr_code: data.qr_code ?? null,
       status: data.status,
       phone_number: data.phone_number ?? null,
+      clinic_name: data.clinics?.name ?? null,
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     })

@@ -8,11 +8,12 @@ interface QRState {
   status: string;
   qr_code: string | null;
   phone_number: string | null;
+  clinic_name: string | null;
 }
 
 export function ConnectPage() {
   const token = new URLSearchParams(window.location.search).get('token');
-  const [state, setState] = useState<QRState>({ status: 'connecting', qr_code: null, phone_number: null });
+  const [state, setState] = useState<QRState>({ status: 'connecting', qr_code: null, phone_number: null, clinic_name: null });
   const [invalid, setInvalid] = useState(false);
   const [loadingInitial, setLoadingInitial] = useState(true);
 
@@ -104,7 +105,7 @@ export function ConnectPage() {
             
             <div className="space-y-2">
                 <h1 className="text-3xl font-black text-slate-900 tracking-tight">Sucesso!</h1>
-                <p className="text-slate-500 font-medium italic">Seu WhatsApp foi integrado ao sistema.</p>
+                <p className="text-slate-500 font-medium italic">Seu WhatsApp foi integrado à {state.clinic_name || 'clínica'}.</p>
             </div>
 
             {state.phone_number && (
@@ -145,8 +146,10 @@ export function ConnectPage() {
                 <div className="w-10 h-10 bg-teal-600 rounded-xl flex items-center justify-center shadow-lg shadow-teal-200">
                     <QrCode className="w-5 h-5 text-white" />
                 </div>
-                <div>
-                    <h2 className="text-lg font-black text-slate-900 leading-none">Integração</h2>
+                <div className="text-left overflow-hidden">
+                    <h2 className="text-lg font-black text-slate-900 leading-tight truncate max-w-[180px]">
+                        {state.clinic_name || 'Integração'}
+                    </h2>
                     <p className="text-[10px] font-bold text-teal-600 uppercase tracking-widest mt-0.5">WhatsApp Remote</p>
                 </div>
             </div>

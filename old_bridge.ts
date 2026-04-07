@@ -1,4 +1,4 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+﻿import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 const corsHeaders = {
@@ -22,14 +22,14 @@ serve(async (req) => {
     const connect_token = body.connect_token || body.token
     let clinic_id = body.clinic_id
 
+    // Dados da inst├óncia (api_id, api_token)
     let api_id = null;
     let api_token = null;
-    let instance_id = null;
 
     if (connect_token && !clinic_id) {
       const { data: instance, error: instanceError } = await supabaseClient
         .from('whatsapp_instances')
-        .select('id, clinic_id, api_id, api_token')
+        .select('clinic_id, api_id, api_token')
         .eq('connect_token', connect_token)
         .maybeSingle();
 
@@ -39,35 +39,28 @@ serve(async (req) => {
         clinic_id = instance.clinic_id;
         api_id = instance.api_id;
         api_token = instance.api_token;
-        instance_id = instance.id;
       }
     } else if (clinic_id) {
+      // Se j├í temos a cl├¡nica, buscamos os dados da inst├óncia dela
       const { data: instance } = await supabaseClient
         .from('whatsapp_instances')
-        .select('id, api_id, api_token')
+        .select('api_id, api_token')
         .eq('clinic_id', clinic_id)
         .maybeSingle();
       
       if (instance) {
         api_id = instance.api_id;
         api_token = instance.api_token;
-        instance_id = instance.id;
       }
     }
 
     if (!clinic_id) {
-      return new Response(JSON.stringify({ success: false, error: 'Clinica nao identificada via token' }), { 
+      return new Response(JSON.stringify({ success: false, error: 'Clinica nao identificada' }), { 
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
       })
     }
 
-    const { data: clinicData, error: clinicError } = await supabaseClient
-      .from('clinics')
-      .select('name, organization_id')
-      .eq('id', clinic_id)
-      .single();
-
-    if (clinicError) throw clinicError;
+    const { data: clinicData } = await supabaseClient.from('clinics').select('name').eq('id', clinic_id).single();
 
     const webhookUrl = Deno.env.get('WHATSAPP_CONNECTION_WEBHOOK')
 
@@ -75,15 +68,13 @@ serve(async (req) => {
       event: 'whatsapp_connection_requested',
       action: action || 'connect',
       clinic_id,
-      clinic_name: clinicData?.name || 'Clínica Desconhecida',
-      organization_id: clinicData?.organization_id,
-      instance_id,
+      clinic_name: clinicData?.name || 'Cl├¡nica Desconhecida',
       api_id,
       api_token,
       timestamp: new Date().toISOString()
     }
 
-    console.log(`[WH-BRIDGE] Triggering n8n for clinic: ${clinic_id}, instance: ${instance_id}`);
+    console.log(`[WH-BRIDGE] Triggering n8n with clinic: ${clinic_id} (${clinicData?.name})`);
 
     const response = await fetch(webhookUrl!, {
       method: 'POST',

@@ -26,7 +26,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
-  const { clinicName, userRole, signOut, profile, activeClinicId } = useAuth();
+  const { clinicName, userRole, signOut, profile, activeClinicId, setActiveClinicId, activeClinicName, setActiveClinicName } = useAuth();
 
   // Org-admin com clínica ativa navega como gestor
   const effectiveRole = userRole === 'org_admin' && activeClinicId ? 'gestor' : userRole;
@@ -88,6 +88,20 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
           );
         })}
       </nav>
+
+      {/* Banner de clínica ativa para org-admin */}
+      {userRole === 'org_admin' && activeClinicId && (
+        <div className="mx-3 mb-2 p-3 bg-violet-50 border border-violet-200 rounded-xl">
+          <p className="text-[9px] font-bold text-violet-500 uppercase tracking-widest mb-1">Visualizando clínica</p>
+          <p className="text-xs font-bold text-violet-900 truncate">{activeClinicName}</p>
+          <button
+            onClick={() => { setActiveClinicId(null); setActiveClinicName(null); setActiveTab('org-admin'); }}
+            className="mt-2 w-full text-[10px] font-bold text-violet-600 hover:text-violet-800 hover:bg-violet-100 rounded-lg py-1 transition-all"
+          >
+            ← Voltar para Organização
+          </button>
+        </div>
+      )}
 
       <div className="p-4 mt-auto border-t border-slate-100 bg-slate-50/50 space-y-3">
         <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-sm group">

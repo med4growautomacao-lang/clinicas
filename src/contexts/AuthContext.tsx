@@ -24,6 +24,8 @@ interface AuthContextType {
   // Org-admin: clínica ativa selecionada (substitui profile.clinic_id para hooks)
   activeClinicId: string | null;
   setActiveClinicId: (id: string | null) => void;
+  activeClinicName: string | null;
+  setActiveClinicName: (name: string | null) => void;
   signOut: () => Promise<void>;
 }
 
@@ -36,6 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [clinicName, setClinicName] = useState('');
   const [activeClinicId, setActiveClinicId] = useState<string | null>(null);
+  const [activeClinicName, setActiveClinicName] = useState<string | null>(null);
 
   useEffect(() => {
     let ignore = false;
@@ -188,6 +191,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       activeClinicId,
       setActiveClinicId,
+      activeClinicName,
+      setActiveClinicName,
       signOut
     }}>
       {children}

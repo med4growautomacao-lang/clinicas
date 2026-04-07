@@ -27,7 +27,7 @@ interface OrgAdminProps {
 }
 
 export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
-  const { profile, activeClinicId, setActiveClinicId } = useAuth();
+  const { profile, activeClinicId, setActiveClinicId, setActiveClinicName } = useAuth();
   const [clinics, setClinics] = useState<Clinic[]>([]);
   const [orgUsers, setOrgUsers] = useState<OrgUser[]>([]);
   const [loadingClinics, setLoadingClinics] = useState(true);
@@ -156,8 +156,10 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                     onClick={() => {
                       if (activeClinicId === clinic.id) {
                         setActiveClinicId(null);
+                        setActiveClinicName(null);
                       } else {
                         setActiveClinicId(clinic.id);
+                        setActiveClinicName(clinic.name);
                         onEnterClinic();
                       }
                     }}

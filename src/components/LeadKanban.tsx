@@ -72,7 +72,7 @@ export function LeadKanban() {
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [selectedLead, setSelectedLead] = useState<any>(null);
-  const [formData, setFormData] = useState({ name: '', phone: '', source: '', capture_channel: 'whatsapp', stage_id: '', estimated_value: '', loss_reason: '' });
+  const [formData, setFormData] = useState({ name: '', phone: '', source: 'sincronizacao', capture_channel: 'whatsapp', stage_id: '', estimated_value: '', loss_reason: '' });
   const [submitting, setSubmitting] = useState(false);
   const [chatLead, setChatLead] = useState<any>(null);
   const [localStages, setLocalStages] = useState<any[]>([]);
@@ -130,7 +130,7 @@ export function LeadKanban() {
       await create(payload);
     }
 
-    setFormData({ name: '', phone: '', source: '', capture_channel: 'whatsapp', stage_id: '', estimated_value: '', loss_reason: '' });
+    setFormData({ name: '', phone: '', source: 'sincronizacao', capture_channel: 'whatsapp', stage_id: '', estimated_value: '', loss_reason: '' });
     setSelectedLead(null);
     setShowModal(false);
     setSubmitting(false);
@@ -543,7 +543,7 @@ export function LeadKanban() {
           <Button variant="outline" size="icon" className="h-10 w-10 text-slate-400 hover:text-teal-600" onClick={() => { setLocalStages([...stages]); setShowSettingsModal(true); }}>
             <Settings className="w-5 h-5" />
           </Button>
-          <Button className="py-5 px-6 group" onClick={() => { setSelectedLead(null); setFormData({ name: '', phone: '', source: '', capture_channel: 'whatsapp', stage_id: stages[0]?.id || '', estimated_value: String(aiConfig?.default_ticket_value ?? ''), loss_reason: '' }); setShowModal(true); }}>
+          <Button className="py-5 px-6 group" onClick={() => { setSelectedLead(null); setFormData({ name: '', phone: '', source: 'sincronizacao', capture_channel: 'whatsapp', stage_id: stages[0]?.id || '', estimated_value: String(aiConfig?.default_ticket_value ?? ''), loss_reason: '' }); setShowModal(true); }}>
             <Plus className="w-5 h-5 mr-2 group-hover:rotate-90 transition-transform" />
             Novo Lead
           </Button>
@@ -563,7 +563,7 @@ export function LeadKanban() {
                 <span className="text-[10px] font-bold text-slate-400 shrink-0">
                   R$ {stageTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                 </span>
-                <button className="text-slate-400 hover:text-slate-600 shrink-0" onClick={() => { setSelectedLead(null); setFormData({ name: '', phone: '', source: '', capture_channel: 'whatsapp', stage_id: stage.id, estimated_value: String(aiConfig?.default_ticket_value ?? ''), loss_reason: '' }); setShowModal(true); }}>
+                <button className="text-slate-400 hover:text-slate-600 shrink-0" onClick={() => { setSelectedLead(null); setFormData({ name: '', phone: '', source: 'sincronizacao', capture_channel: 'whatsapp', stage_id: stage.id, estimated_value: String(aiConfig?.default_ticket_value ?? ''), loss_reason: '' }); setShowModal(true); }}>
                   <Plus className="w-4 h-4" />
                 </button>
               </div>
@@ -607,9 +607,10 @@ export function LeadKanban() {
                     className={cn(
                       "px-3 py-2.5 rounded-lg border shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md transition-all group",
                       draggedLead?.id === lead.id && "opacity-50",
-                      isPerdido ? "bg-white border-rose-200" 
+                      isPerdido ? "bg-white border-rose-200"
                         : (!!lead.fb_campaign_name || lead.source === 'meta_ads') ? "bg-blue-50/60 border-blue-200/80"
                         : (!!lead.g_campaign_name || lead.source === 'google_ads') ? "bg-emerald-50/60 border-emerald-200/80"
+                        : lead.source === 'sincronizacao' ? "bg-violet-50/60 border-violet-200/80"
                         : "bg-white border-slate-200"
                     )}
                   >
@@ -617,6 +618,7 @@ export function LeadKanban() {
                     {(() => {
                       const isMeta = !!lead.fb_campaign_name || lead.source === 'meta_ads';
                       const isGoogle = !!lead.g_campaign_name || lead.source === 'google_ads';
+                      const isSync = !isMeta && !isGoogle && lead.source === 'sincronizacao';
                       const campaignName = lead.fb_campaign_name || lead.g_campaign_name;
                       
                       const hasUtms = isMeta 
@@ -638,9 +640,9 @@ export function LeadKanban() {
                           )}
                           <span className={cn(
                             "text-[9px] font-black uppercase tracking-[0.1em] truncate",
-                            isMeta ? "text-blue-500" : isGoogle ? "text-emerald-500" : "text-slate-400"
+                            isMeta ? "text-blue-500" : isGoogle ? "text-emerald-500" : isSync ? "text-violet-500" : "text-slate-400"
                           )}>
-                            {isMeta ? 'Meta Ads' : isGoogle ? 'Google Ads' : 'Sem Origem'}
+                            {isMeta ? 'Meta Ads' : isGoogle ? 'Google Ads' : isSync ? 'Sincronização' : 'Sem Origem'}
                           </span>
                         </div>
                         
@@ -787,6 +789,7 @@ export function LeadKanban() {
                     <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Plataforma</label>
                     <select value={formData.source} onChange={e => setFormData(p => ({ ...p, source: e.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 font-medium text-sm">
                       <option value="">Sem Origem</option>
+                      <option value="sincronizacao">Sincronização</option>
                       <option value="meta_ads">Meta Ads</option>
                       <option value="google_ads">Google Ads</option>
                     </select>

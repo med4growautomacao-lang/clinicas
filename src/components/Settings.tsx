@@ -154,8 +154,7 @@ export function Settings() {
             token = await generateConnectToken() ?? undefined;
         }
         if (!token) return;
-        const projectRef = 'yzpclhuifquhfqpiwysh';
-        const url = `https://${projectRef}.supabase.co/functions/v1/whatsapp-qr-public?token=${token}`;
+        const url = `${window.location.origin}/connect?token=${token}`;
         try {
             await navigator.clipboard.writeText(url);
             setLinkCopied(true);

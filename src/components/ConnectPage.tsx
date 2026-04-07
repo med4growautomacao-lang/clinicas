@@ -183,7 +183,7 @@ export function ConnectPage() {
 
         <div className="text-center space-y-8">
           <AnimatePresence mode="wait">
-            {state.status === 'qr_pending' ? (
+            {(state.status === 'qr_pending' || state.status === 'connecting' || state.qr_code) ? (
               <motion.div 
                 key="qr-section"
                 initial={{ opacity: 0 }}

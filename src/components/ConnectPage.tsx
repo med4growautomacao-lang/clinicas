@@ -22,11 +22,16 @@ export function ConnectPage() {
     if (!token || requesting) return;
     setRequesting(true);
     try {
-      await fetch(`${EDGE_URL.replace('whatsapp-qr-public', 'whatsapp-bridge')}`, {
+      const response = await fetch(`${EDGE_URL.replace('whatsapp-qr-public', 'whatsapp-bridge')}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'create', token })
       });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('Bridge Error Details:', errorData);
+      }
     } catch (err) {
       console.error('Error starting connection:', err);
     } finally {

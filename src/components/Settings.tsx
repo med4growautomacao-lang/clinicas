@@ -806,33 +806,45 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onCon
                                     </p>
                                     
                                     <div className="flex flex-col sm:flex-row items-center gap-3">
-                                        <Button 
-                                            onClick={onConnect} 
-                                            disabled={connecting || data.status === 'qr_pending' || data.status === 'connecting'}
-                                            className="bg-gradient-to-r from-teal-600 to-teal-500 hover:from-teal-700 hover:to-teal-600 text-white gap-2 h-12 px-10 font-bold shadow-xl shadow-teal-500/20 transition-all active:scale-[0.98] disabled:opacity-50 rounded-xl"
+                                        {(data.status === "disconnected" || !data.status) && (
+                                            <Button 
+                                                onClick={onConnect} 
+                                                disabled={connecting}
+                                                className="bg-gradient-to-r from-teal-600 to-teal-500 hover:from-teal-700 hover:to-teal-600 text-white gap-2 h-12 px-10 font-bold shadow-xl shadow-teal-500/20 transition-all active:scale-[0.98] disabled:opacity-50 rounded-xl"
+                                            >
+                                                {connecting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Wifi className="w-5 h-5" />}
+                                                {connecting ? 'Processando...' : 'Conectar Agora'}
+                                            </Button>
+                                        )}
+
+                                        {(data.status === 'qr_pending' || data.status === 'connecting') && (
+                                            <Button
+                                                onClick={onConnect}
+                                                disabled={true}
+                                                className="bg-slate-100 text-slate-400 gap-2 h-12 px-10 font-bold rounded-xl cursor-not-allowed"
+                                            >
+                                                <Loader2 className="w-5 h-5 animate-spin" />
+                                                Aguardando QR Code...
+                                            </Button>
+                                        )}
+                                        
+                                        <Button
+                                            variant="outline"
+                                            onClick={onCopyLink}
+                                            className="text-teal-600 border-teal-200 hover:bg-teal-50 h-12 px-6 font-bold flex items-center gap-2 rounded-xl"
                                         >
-                                            {(connecting || data.status === 'connecting') ? <Loader2 className="w-5 h-5 animate-spin" /> : <Wifi className="w-5 h-5" />}
-                                            {(connecting || data.status === 'connecting') ? 'Processando...' : (data.status === 'qr_pending' ? 'Aguardando QR Code...' : 'Conectar Agora')}
+                                            {linkCopied ? <CheckCircle2 className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                                            {linkCopied ? 'Link copiado!' : 'Copiar Link para Clínica'}
                                         </Button>
 
                                         {(data.status === 'qr_pending' || data.status === 'connecting') && (
-                                            <>
-                                                <Button
-                                                    variant="outline"
-                                                    onClick={onCopyLink}
-                                                    className="text-teal-600 border-teal-200 hover:bg-teal-50 h-12 px-6 font-bold flex items-center gap-2"
-                                                >
-                                                    {linkCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                                                    {linkCopied ? 'Link copiado!' : 'Copiar Link'}
-                                                </Button>
-                                                <Button
-                                                    variant="outline"
-                                                    onClick={onCancel}
-                                                    className="text-slate-500 border-slate-200 hover:bg-slate-100 h-12 px-6 font-bold flex items-center gap-2"
-                                                >
-                                                    <X className="w-4 h-4" /> Cancelar
-                                                </Button>
-                                            </>
+                                            <Button
+                                                variant="ghost"
+                                                onClick={onCancel}
+                                                className="text-slate-400 hover:text-rose-500 h-12 px-6 font-bold flex items-center gap-2"
+                                            >
+                                                <X className="w-4 h-4" /> Cancelar
+                                            </Button>
                                         )}
                                     </div>
                                     

@@ -40,7 +40,7 @@ import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import WhatsappLogo from "../assets/logos/Logo Whatsapp.png";
 
 export function Settings() {
-    const { clinic, aiConfig, whatsapp, loading, updateClinic, updateAI, updateWhatsapp } = useSettings();
+    const { clinic, aiConfig, whatsapp, loading, updateClinic, updateAI, updateWhatsapp, generateConnectToken } = useSettings();
     const [activeTab, setActiveTab] = useState<"branding" | "ai" | "clinic" | "integrations">("branding");
     
     // Local states for editing
@@ -49,6 +49,7 @@ export function Settings() {
     const [localWA, setLocalWA] = useState<Partial<WhatsappInstance>>({});
     const [saving, setSaving] = useState(false);
     const [connecting, setConnecting] = useState(false);
+    const [linkCopied, setLinkCopied] = useState(false);
 
     useEffect(() => {
         console.log('Settings: Auth values changed - WhatsApp:', !!whatsapp, 'Has QR:', !!whatsapp?.qr_code, 'Status:', whatsapp?.status);
@@ -147,6 +148,20 @@ export function Settings() {
         }
     };
 
+    const handleCopyLink = async () => {
+        let token = whatsapp?.connect_token;
+        if (!token) {
+            token = await generateConnectToken() ?? undefined;
+        }
+        if (!token) return;
+        const baseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+        const projectRef = baseUrl.replace('https://', '').split('.')[0];
+        const url = `https://${projectRef}.supabase.co/functions/v1/whatsapp-qr-public?token=${token}`;
+        await navigator.clipboard.writeText(url);
+        setLinkCopied(true);
+        setTimeout(() => setLinkCopied(false), 2500);
+    };
+
     if (loading) {
         return (
             <div className="flex items-center justify-center h-64">
@@ -229,14 +244,16 @@ export function Settings() {
                             />
                         )}
                         {activeTab === "integrations" && (
-                            <IntegrationSettings 
-                                data={localWA} 
-                                onChange={(updates) => setLocalWA(prev => ({ ...prev, ...updates }))} 
+                            <IntegrationSettings
+                                data={localWA}
+                                onChange={(updates) => setLocalWA(prev => ({ ...prev, ...updates }))}
                                 clinicData={localClinic}
                                 onClinicChange={(updates) => setLocalClinic(prev => ({ ...prev, ...updates }))}
                                 onConnect={handleWhatsappConnect}
                                 onCancel={handleWhatsappCancel}
                                 connecting={connecting}
+                                onCopyLink={handleCopyLink}
+                                linkCopied={linkCopied}
                             />
                         )}
                     </motion.div>
@@ -516,14 +533,16 @@ function ClinicSettings({ data, onChange }: { data: Partial<Clinic>, onChange: (
     );
 }
 
-function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onConnect, onCancel, connecting }: {
+function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onConnect, onCancel, connecting, onCopyLink, linkCopied }: {
     data: Partial<WhatsappInstance>,
     onChange: (updates: Partial<WhatsappInstance>) => void,
     clinicData: Partial<Clinic>,
     onClinicChange: (updates: Partial<Clinic>) => void,
     onConnect: () => void,
     onCancel: () => void,
-    connecting: boolean
+    connecting: boolean,
+    onCopyLink: () => void,
+    linkCopied: boolean
 }) {
     const { clinic, refetch, systemSettings } = useSettings();
     const [groupName, setGroupName] = useState('Informativos do Agente IA');
@@ -735,13 +754,23 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onCon
                                         </Button>
 
                                         {(data.status === 'qr_pending' || data.status === 'connecting') && (
-                                            <Button 
-                                                variant="outline"
-                                                onClick={onCancel}
-                                                className="text-slate-500 border-slate-200 hover:bg-slate-100 h-12 px-6 font-bold flex items-center gap-2"
-                                            >
-                                                <X className="w-4 h-4" /> Cancelar
-                                            </Button>
+                                            <>
+                                                <Button
+                                                    variant="outline"
+                                                    onClick={onCopyLink}
+                                                    className="text-teal-600 border-teal-200 hover:bg-teal-50 h-12 px-6 font-bold flex items-center gap-2"
+                                                >
+                                                    {linkCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                                                    {linkCopied ? 'Link copiado!' : 'Copiar Link'}
+                                                </Button>
+                                                <Button
+                                                    variant="outline"
+                                                    onClick={onCancel}
+                                                    className="text-slate-500 border-slate-200 hover:bg-slate-100 h-12 px-6 font-bold flex items-center gap-2"
+                                                >
+                                                    <X className="w-4 h-4" /> Cancelar
+                                                </Button>
+                                            </>
                                         )}
                                     </div>
                                     

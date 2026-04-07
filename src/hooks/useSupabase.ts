@@ -794,6 +794,7 @@ export interface WhatsappInstance {
   status: 'connected' | 'disconnected' | 'qr_pending' | 'connecting';
   connected_at: string | null;
   qr_code?: string | null;
+  connect_token?: string | null;
 }
 
 export function useSettings() {
@@ -899,7 +900,13 @@ export function useSettings() {
     }
   };
 
-  return { clinic, aiConfig, whatsapp, systemSettings, loading, refetch: fetch, updateClinic, updateAI, updateWhatsapp };
+  const generateConnectToken = async (): Promise<string | null> => {
+    const token = crypto.randomUUID();
+    const ok = await updateWhatsapp({ connect_token: token });
+    return ok ? token : null;
+  };
+
+  return { clinic, aiConfig, whatsapp, systemSettings, loading, refetch: fetch, updateClinic, updateAI, updateWhatsapp, generateConnectToken };
 }
 
 export function useClinics() {
@@ -918,7 +925,19 @@ export function useClinics() {
 
   useEffect(() => { fetch(); }, [fetch]);
 
-  const create = async (clinic: Partial<Clinic>) => {
+  const create = async (clinic: Partial<Clinic> & { ownerName?: string; ownerEmail?: string; ownerPassword?: string }) => {
+    if (clinic.ownerEmail) {
+      const { data, error } = await supabase.rpc('create_clinic_with_owner', {
+        p_clinic_name: clinic.name,
+        p_plan: clinic.plan || 'pro',
+        p_organization_id: clinic.organization_id || null,
+        p_owner_name: clinic.ownerName || '',
+        p_owner_email: clinic.ownerEmail,
+        p_owner_password: clinic.ownerPassword || '',
+      });
+      if (!error) fetch();
+      return { data, error };
+    }
     const { data, error } = await supabase.from('clinics').insert(clinic).select().single();
     if (!error) fetch();
     return { data, error };
@@ -930,7 +949,13 @@ export function useClinics() {
     return !error;
   };
 
-  return { data, loading, error, refetch: fetch, create, update };
+  const deleteClinic = async (id: string) => {
+    const { error } = await supabase.rpc('delete_clinic_cascade', { p_clinic_id: id });
+    if (!error) fetch();
+    return !error;
+  };
+
+  return { data, loading, error, refetch: fetch, create, update, deleteClinic };
 }
 
 

@@ -2,12 +2,12 @@ import React, { useState } from 'react';
 import { useClinics, useOrganizations, Clinic } from '../hooks/useSupabase';
 import {
   Building2, Plus, Search, Activity, ShieldCheck,
-  Edit2, Trash2, ChevronDown, ChevronRight, Loader2, X, Network,
+  Edit2, Trash2, ChevronDown, ChevronRight, Loader2, X, Network, User, Mail, Lock,
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 
 export default function SuperAdmin() {
-  const { data: clinics, loading: clinicsLoading, create: createClinic } = useClinics();
+  const { data: clinics, loading: clinicsLoading, create: createClinic, deleteClinic } = useClinics();
   const { data: orgs, loading: orgsLoading, create: createOrg } = useOrganizations();
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -20,7 +20,9 @@ export default function SuperAdmin() {
 
   // Modal: Nova Clínica
   const [showClinicModal, setShowClinicModal] = useState(false);
-  const [newClinic, setNewClinic] = useState<Partial<Clinic>>({ name: '', plan: 'pro', organization_id: null });
+  const [newClinic, setNewClinic] = useState<Partial<Clinic> & { ownerName: string; ownerEmail: string; ownerPassword: string }>({
+    name: '', plan: 'pro', organization_id: null, ownerName: '', ownerEmail: '', ownerPassword: '',
+  });
   const [submittingClinic, setSubmittingClinic] = useState(false);
 
   const toggleOrg = (id: string) => {
@@ -32,7 +34,7 @@ export default function SuperAdmin() {
   };
 
   const openClinicModal = (orgId: string | null = null) => {
-    setNewClinic({ name: '', plan: 'pro', organization_id: orgId });
+    setNewClinic({ name: '', plan: 'pro', organization_id: orgId, ownerName: '', ownerEmail: '', ownerPassword: '' });
     setShowClinicModal(true);
   };
 
@@ -55,7 +57,13 @@ export default function SuperAdmin() {
     setSubmittingClinic(false);
     if (error) { alert('Erro: ' + error.message); return; }
     setShowClinicModal(false);
-    setNewClinic({ name: '', plan: 'pro', organization_id: null });
+    setNewClinic({ name: '', plan: 'pro', organization_id: null, ownerName: '', ownerEmail: '', ownerPassword: '' });
+  };
+
+  const handleDeleteClinic = async (clinic: Clinic) => {
+    if (!confirm(`Excluir "${clinic.name}" e todos os seus dados? Esta ação não pode ser desfeita.`)) return;
+    const ok = await deleteClinic(clinic.id);
+    if (!ok) alert('Erro ao excluir clínica.');
   };
 
   const loading = clinicsLoading || orgsLoading;
@@ -205,7 +213,7 @@ export default function SuperAdmin() {
                     <table className="w-full text-left">
                       <tbody className="divide-y divide-slate-50">
                         {orgClinics.map((clinic: Clinic) => (
-                          <ClinicRow key={clinic.id} clinic={clinic} />
+                          <ClinicRow key={clinic.id} clinic={clinic} onDelete={handleDeleteClinic} />
                         ))}
                       </tbody>
                     </table>
@@ -233,7 +241,7 @@ export default function SuperAdmin() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {clinicsSemOrg.map((clinic: Clinic) => (
-                  <ClinicRow key={clinic.id} clinic={clinic} showId />
+                  <ClinicRow key={clinic.id} clinic={clinic} showId onDelete={handleDeleteClinic} />
                 ))}
               </tbody>
             </table>
@@ -296,8 +304,8 @@ export default function SuperAdmin() {
       {/* Modal: Nova Clínica */}
       {showClinicModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4">
-            <div className="flex items-center justify-between p-6 border-b border-slate-100">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-6 border-b border-slate-100 sticky top-0 bg-white">
               <div>
                 <h3 className="text-lg font-bold text-slate-900">Nova Clínica</h3>
                 <p className="text-sm text-slate-500">
@@ -311,6 +319,7 @@ export default function SuperAdmin() {
               </button>
             </div>
             <form onSubmit={handleCreateClinic} className="p-6 space-y-4">
+              {/* Dados da Clínica */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Nome da Clínica</label>
                 <input
@@ -346,6 +355,44 @@ export default function SuperAdmin() {
                   ))}
                 </select>
               </div>
+
+              {/* Divisor */}
+              <div className="border-t border-slate-100 pt-4">
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Gestor da Clínica</p>
+                <div className="space-y-3">
+                  <div className="relative">
+                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <input
+                      type="text"
+                      value={newClinic.ownerName}
+                      onChange={(e) => setNewClinic({ ...newClinic, ownerName: e.target.value })}
+                      className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
+                      placeholder="Nome completo"
+                    />
+                  </div>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <input
+                      type="email"
+                      value={newClinic.ownerEmail}
+                      onChange={(e) => setNewClinic({ ...newClinic, ownerEmail: e.target.value })}
+                      className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
+                      placeholder="email@exemplo.com"
+                    />
+                  </div>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <input
+                      type="password"
+                      value={newClinic.ownerPassword}
+                      onChange={(e) => setNewClinic({ ...newClinic, ownerPassword: e.target.value })}
+                      className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
+                      placeholder="Senha de acesso"
+                    />
+                  </div>
+                </div>
+              </div>
+
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setShowClinicModal(false)}
                   className="flex-1 px-4 py-2 border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition-colors">
@@ -365,7 +412,7 @@ export default function SuperAdmin() {
   );
 }
 
-const ClinicRow: React.FC<{ clinic: Clinic; showId?: boolean }> = ({ clinic, showId = false }) => {
+const ClinicRow: React.FC<{ clinic: Clinic; showId?: boolean; onDelete: (clinic: Clinic) => void }> = ({ clinic, showId = false, onDelete }) => {
   return (
     <tr className="hover:bg-slate-50 transition-colors group">
       <td className="px-6 py-3">
@@ -394,11 +441,14 @@ const ClinicRow: React.FC<{ clinic: Clinic; showId?: boolean }> = ({ clinic, sho
           <button className="p-1.5 text-slate-400 hover:text-teal-600 transition-colors rounded">
             <Edit2 className="w-3.5 h-3.5" />
           </button>
-          <button className="p-1.5 text-slate-400 hover:text-red-500 transition-colors rounded">
+          <button
+            onClick={() => onDelete(clinic)}
+            className="p-1.5 text-slate-400 hover:text-red-500 transition-colors rounded"
+          >
             <Trash2 className="w-3.5 h-3.5" />
           </button>
         </div>
       </td>
     </tr>
   );
-}
+};

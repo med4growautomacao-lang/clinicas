@@ -26,7 +26,8 @@ interface OrgAdminProps {
   onEnterClinic: () => void;
 }
 
-const ROLES = ['usuario', 'owner'];
+const ORG_ROLES = ['usuario', 'owner'];
+const CLINIC_ROLES = ['gestor', 'medico', 'secretaria'];
 const PLANS = ['free', 'pro', 'enterprise'];
 
 export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
@@ -48,6 +49,13 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
   const [userSaving, setUserSaving] = useState(false);
   const [userError, setUserError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+
+  // Modal: novo usuário clínica
+  const [clinicUserTarget, setClinicUserTarget] = useState<{ id: string; name: string } | null>(null);
+  const [clinicUserForm, setClinicUserForm] = useState({ name: '', email: '', password: '', role: 'gestor' });
+  const [clinicUserSaving, setClinicUserSaving] = useState(false);
+  const [clinicUserError, setClinicUserError] = useState('');
+  const [showClinicUserPassword, setShowClinicUserPassword] = useState(false);
 
   const fetchClinics = useCallback(async () => {
     if (!profile?.organization_id) return;
@@ -115,8 +123,29 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
     setUserSaving(false);
     if (error) { setUserError(error.message); return; }
     setShowUserModal(false);
-    setUserForm({ name: '', email: '', password: '', role: 'gestor' });
+    setUserForm({ name: '', email: '', password: '', role: 'usuario' });
     fetchOrgUsers();
+  };
+
+  const handleAddClinicUser = async () => {
+    if (!clinicUserTarget) return;
+    if (!clinicUserForm.name.trim() || !clinicUserForm.email.trim() || !clinicUserForm.password.trim()) {
+      setClinicUserError('Preencha todos os campos.');
+      return;
+    }
+    setClinicUserSaving(true);
+    setClinicUserError('');
+    const { error } = await supabase.rpc('add_user_to_clinic', {
+      p_clinic_id: clinicUserTarget.id,
+      p_full_name: clinicUserForm.name.trim(),
+      p_email: clinicUserForm.email.trim(),
+      p_password: clinicUserForm.password,
+      p_role: clinicUserForm.role,
+    });
+    setClinicUserSaving(false);
+    if (error) { setClinicUserError(error.message); return; }
+    setClinicUserTarget(null);
+    setClinicUserForm({ name: '', email: '', password: '', role: 'gestor' });
   };
 
   return (
@@ -228,6 +257,13 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                   </div>
 
                   <p className="text-sm font-bold text-slate-900 mb-1">{clinic.name}</p>
+
+                  <button
+                    onClick={e => { e.stopPropagation(); setClinicUserTarget({ id: clinic.id, name: clinic.name }); }}
+                    className="mt-3 w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-teal-50 text-teal-700 hover:bg-teal-100 border border-teal-100 transition-all"
+                  >
+                    + Usuário
+                  </button>
 
                   <button
                     onClick={() => {
@@ -384,7 +420,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                 <div>
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Papel</label>
                   <div className="flex flex-wrap gap-2">
-                    {ROLES.map(r => (
+                    {ORG_ROLES.map(r => (
                       <button key={r} onClick={() => setUserForm(f => ({ ...f, role: r }))}
                         className={cn("px-3 py-1.5 rounded-lg text-xs font-bold capitalize transition-all border",
                           userForm.role === r ? "bg-violet-600 text-white border-violet-600" : "bg-slate-50 text-slate-600 border-slate-200 hover:border-violet-300")}>
@@ -397,6 +433,60 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                 <button onClick={handleAddUser} disabled={userSaving}
                   className="w-full py-3 bg-violet-600 hover:bg-violet-700 disabled:bg-slate-100 disabled:text-slate-400 text-white rounded-xl font-black text-sm transition-all flex items-center justify-center gap-2">
                   {userSaving ? <><Loader2 className="w-4 h-4 animate-spin" /> Adicionando...</> : 'Adicionar Usuário'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal: Usuário da Clínica */}
+      <AnimatePresence>
+        {clinicUserTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm"
+            >
+              <div className="flex items-center justify-between mb-1">
+                <h3 className="text-base font-black text-slate-900">Novo Usuário</h3>
+                <button onClick={() => { setClinicUserTarget(null); setClinicUserError(''); }} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors">
+                  <X className="w-4 h-4 text-slate-500" />
+                </button>
+              </div>
+              <p className="text-xs text-slate-400 font-medium mb-4">{clinicUserTarget.name}</p>
+
+              <div className="space-y-3">
+                <input value={clinicUserForm.name} onChange={e => setClinicUserForm(f => ({ ...f, name: e.target.value }))}
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500" placeholder="Nome completo" />
+                <input value={clinicUserForm.email} onChange={e => setClinicUserForm(f => ({ ...f, email: e.target.value }))}
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500" placeholder="Email" type="email" />
+                <div className="relative">
+                  <input value={clinicUserForm.password} onChange={e => setClinicUserForm(f => ({ ...f, password: e.target.value }))}
+                    type={showClinicUserPassword ? 'text' : 'password'}
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500 pr-10" placeholder="Senha" />
+                  <button type="button" onClick={() => setShowClinicUserPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                    {showClinicUserPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Papel</label>
+                  <div className="flex gap-2">
+                    {CLINIC_ROLES.map(r => (
+                      <button key={r} onClick={() => setClinicUserForm(f => ({ ...f, role: r }))}
+                        className={cn("flex-1 py-2 rounded-xl text-xs font-bold capitalize transition-all border",
+                          clinicUserForm.role === r ? "bg-teal-600 text-white border-teal-600" : "bg-slate-50 text-slate-600 border-slate-200 hover:border-teal-300")}>
+                        {r === 'medico' ? 'Médico' : r === 'secretaria' ? 'Secretária' : 'Gestor'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {clinicUserError && <p className="text-xs text-red-500 font-bold">{clinicUserError}</p>}
+                <button onClick={handleAddClinicUser} disabled={clinicUserSaving}
+                  className="w-full py-3 bg-teal-600 hover:bg-teal-700 disabled:bg-slate-100 disabled:text-slate-400 text-white rounded-xl font-black text-sm transition-all flex items-center justify-center gap-2">
+                  {clinicUserSaving ? <><Loader2 className="w-4 h-4 animate-spin" /> Adicionando...</> : 'Adicionar Usuário'}
                 </button>
               </div>
             </motion.div>

@@ -174,7 +174,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           organization_id: orgUser.organization_id,
           organization_name: org?.name || ''
         });
-        setActiveClinicId(null);
+        // Não sobrescreve se org_admin já tem uma clínica ativa selecionada
+        if (!sessionStorage.getItem('activeClinicId')) setActiveClinicId(null);
         setClinicName(org?.name || '');
         return;
       }

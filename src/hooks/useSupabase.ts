@@ -450,10 +450,10 @@ export function useLeads() {
     if (!activeClinicId) return;
 
     const channel = supabase
-      .channel('leads_realtime')
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
+      .channel(`leads_realtime_${activeClinicId}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
         table: 'leads',
         filter: `clinic_id=eq.${activeClinicId}`
       }, () => {

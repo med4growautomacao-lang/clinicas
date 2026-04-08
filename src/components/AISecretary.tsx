@@ -1277,7 +1277,7 @@ function ChatsView() {
                         {lead.name}
                       </span>
                       <span className="text-[10px] font-medium text-slate-400">
-                        {format(new Date(lead.created_at), 'dd/MM')}
+                        {format(new Date(lead.last_message_at ?? lead.created_at), 'dd/MM')}
                       </span>
                     </div>
                     <p className="text-xs text-slate-500 truncate mb-1">
@@ -1307,7 +1307,7 @@ function ChatsView() {
                         })()}
                       </div>
                       <span className="text-[9px] font-bold text-slate-400">
-                        {format(new Date(lead.created_at), 'HH:mm')}
+                        {format(new Date(lead.last_message_at ?? lead.created_at), 'HH:mm')}
                       </span>
                     </div>
                   </div>

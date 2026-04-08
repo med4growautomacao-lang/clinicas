@@ -37,8 +37,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [clinicName, setClinicName] = useState('');
-  const [activeClinicId, setActiveClinicId] = useState<string | null>(null);
-  const [activeClinicName, setActiveClinicName] = useState<string | null>(null);
+  const [activeClinicId, setActiveClinicIdState] = useState<string | null>(
+    () => sessionStorage.getItem('activeClinicId')
+  );
+  const [activeClinicName, setActiveClinicNameState] = useState<string | null>(
+    () => sessionStorage.getItem('activeClinicName')
+  );
+
+  const setActiveClinicId = (id: string | null) => {
+    setActiveClinicIdState(id);
+    if (id) sessionStorage.setItem('activeClinicId', id);
+    else sessionStorage.removeItem('activeClinicId');
+  };
+
+  const setActiveClinicName = (name: string | null) => {
+    setActiveClinicNameState(name);
+    if (name) sessionStorage.setItem('activeClinicName', name);
+    else sessionStorage.removeItem('activeClinicName');
+  };
 
   useEffect(() => {
     let ignore = false;
@@ -174,6 +190,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     try {
+      sessionStorage.removeItem('activeClinicId');
+      sessionStorage.removeItem('activeClinicName');
       const { error } = await supabase.auth.signOut();
       if (error) console.error('AuthContext: Sign out error:', error);
     } catch (error) {

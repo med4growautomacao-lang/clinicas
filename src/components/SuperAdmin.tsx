@@ -57,31 +57,64 @@ function Avatar({ name, size = 'sm' }: { name: string; size?: 'sm' | 'md' }) {
 }
 
 // ─── UserRow ──────────────────────────────────────────────────────────────────
-function UserRow({ name, email, role }: { name: string; email: string; role: string }) {
+function UserRow({ name, email, role, onRemove }: { name: string; email: string; role: string; onRemove?: () => void }) {
   const { cls, label } = roleBadge(role);
+  const [confirming, setConfirming] = useState(false);
+
+  const handleRemoveClick = () => {
+    if (confirming) {
+      onRemove?.();
+      setConfirming(false);
+    } else {
+      setConfirming(true);
+    }
+  };
+
   return (
-    <div className="flex items-center gap-3 py-2 px-3 rounded-xl hover:bg-slate-50 transition-colors group">
+    <div
+      className="flex items-center gap-3 py-2 px-3 rounded-xl hover:bg-slate-50 transition-colors group"
+      onMouseLeave={() => setConfirming(false)}
+    >
       <Avatar name={name} />
       <div className="flex-1 min-w-0">
         <p className="text-sm font-bold text-slate-800 truncate">{name}</p>
         <p className="text-xs text-slate-400 truncate">{email}</p>
       </div>
       <span className={cls}>{label}</span>
+      {onRemove && (
+        confirming ? (
+          <button
+            onClick={handleRemoveClick}
+            className="flex items-center gap-1 px-2 py-1 bg-red-500 hover:bg-red-600 text-white rounded-lg text-xs font-bold transition-all"
+          >
+            <Trash2 className="w-3 h-3" /> Remover
+          </button>
+        ) : (
+          <button
+            onClick={handleRemoveClick}
+            className="opacity-0 group-hover:opacity-100 p-1 text-slate-300 hover:text-red-500 transition-all rounded-lg hover:bg-red-50"
+          >
+            <Trash2 className="w-3 h-3" />
+          </button>
+        )
+      )}
     </div>
   );
 }
 
 // ─── ClinicCard ───────────────────────────────────────────────────────────────
 function ClinicCard({
-  clinic, users, onAddUser, onDelete, showId = false,
+  clinic, users, onAddUser, onDelete, onRemoveUser, showId = false,
 }: {
   clinic: Clinic;
   users: ClinicUser[];
   onAddUser: () => void;
   onDelete: () => void;
+  onRemoveUser: (userId: string) => void;
   showId?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const { label: planLabel } = { label: clinic.plan };
 
   return (
@@ -100,22 +133,32 @@ function ClinicCard({
             onClick={onAddUser}
             className="flex items-center gap-1 px-2.5 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-lg text-xs font-bold transition-colors"
           >
-            <UserPlus className="w-3 h-3" /> Usuário
+            + Usuário
           </button>
           <button
             onClick={() => setExpanded(v => !v)}
             className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-lg text-xs font-bold transition-colors"
           >
-            <Users className="w-3 h-3" />
             <span>{users.length}</span>
             {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
           </button>
-          <button
-            onClick={onDelete}
-            className="p-1.5 text-slate-300 hover:text-red-500 transition-colors rounded-lg hover:bg-red-50"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
+          {confirmingDelete ? (
+            <button
+              onClick={() => { onDelete(); setConfirmingDelete(false); }}
+              className="flex items-center gap-1 px-2.5 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded-lg text-xs font-bold transition-all"
+              onBlur={() => setConfirmingDelete(false)}
+              autoFocus
+            >
+              <Trash2 className="w-3 h-3" /> Excluir
+            </button>
+          ) : (
+            <button
+              onClick={() => setConfirmingDelete(true)}
+              className="p-1.5 text-slate-300 hover:text-red-500 transition-colors rounded-lg hover:bg-red-50"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -126,7 +169,7 @@ function ClinicCard({
           ) : (
             <div className="space-y-0.5">
               {users.map(u => (
-                <UserRow key={u.id} name={u.full_name} email={u.email} role={u.role} />
+                <UserRow key={u.id} name={u.full_name} email={u.email} role={u.role} onRemove={() => onRemoveUser(u.id)} />
               ))}
             </div>
           )}
@@ -139,7 +182,7 @@ function ClinicCard({
 // ─── OrgSection ───────────────────────────────────────────────────────────────
 function OrgSection({
   org, orgClinics, clinicUsers, orgUsers,
-  onAddClinic, onAddOrgUser, onAddClinicUser, onDeleteClinic,
+  onAddClinic, onAddOrgUser, onAddClinicUser, onDeleteClinic, onRemoveClinicUser,
 }: {
   org: Organization;
   orgClinics: Clinic[];
@@ -149,6 +192,7 @@ function OrgSection({
   onAddOrgUser: () => void;
   onAddClinicUser: (clinicId: string, clinicName: string) => void;
   onDeleteClinic: (clinic: Clinic) => void;
+  onRemoveClinicUser: (userId: string, clinicId: string) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const [showOrgUsers, setShowOrgUsers] = useState(false);
@@ -176,13 +220,13 @@ function OrgSection({
             onClick={e => { e.stopPropagation(); onAddOrgUser(); }}
             className="flex items-center gap-1 px-3 py-1.5 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg text-xs font-bold transition-colors"
           >
-            <UserPlus className="w-3 h-3" /> Admin
+            + Usuário
           </button>
           <button
             onClick={e => { e.stopPropagation(); onAddClinic(); }}
             className="flex items-center gap-1 px-3 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-lg text-xs font-bold transition-colors"
           >
-            <Plus className="w-3 h-3" /> Clínica
+            + Clínica
           </button>
           {expanded ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
         </div>
@@ -207,6 +251,7 @@ function OrgSection({
                     users={clinicUsers[clinic.id] || []}
                     onAddUser={() => onAddClinicUser(clinic.id, clinic.name)}
                     onDelete={() => onDeleteClinic(clinic)}
+                    onRemoveUser={(userId) => onRemoveClinicUser(userId, clinic.id)}
                   />
                 ))}
               </div>
@@ -490,7 +535,7 @@ function AddOrgModal({ onSubmit, onClose }: { onSubmit: (d: { name: string; plan
 export default function SuperAdmin() {
   const { data: clinics, loading: clinicsLoading, create: createClinic, deleteClinic } = useClinics();
   const { data: orgs, loading: orgsLoading, create: createOrg } = useOrganizations();
-  const { clinicUsers, orgUsers, usersLoading, addClinicUser, addOrgUser, totalUsers, refetchUsers } = useSuperAdminData();
+  const { clinicUsers, orgUsers, usersLoading, addClinicUser, addOrgUser, removeClinicUser, totalUsers, refetchUsers } = useSuperAdminData();
 
   const [search, setSearch] = useState('');
   const [modal, setModal] = useState<ModalState>(null);
@@ -602,6 +647,7 @@ export default function SuperAdmin() {
             onAddOrgUser={() => setModal({ type: 'org-user', orgId: org.id, orgName: org.name })}
             onAddClinicUser={(clinicId, clinicName) => setModal({ type: 'clinic-user', clinicId, clinicName })}
             onDeleteClinic={handleDeleteClinic}
+            onRemoveClinicUser={removeClinicUser}
           />
         ))}
       </div>
@@ -620,6 +666,7 @@ export default function SuperAdmin() {
                 users={clinicUsers[clinic.id] || []}
                 onAddUser={() => setModal({ type: 'clinic-user', clinicId: clinic.id, clinicName: clinic.name })}
                 onDelete={() => handleDeleteClinic(clinic)}
+                onRemoveUser={(userId) => removeClinicUser(userId, clinic.id)}
                 showId
               />
             ))}

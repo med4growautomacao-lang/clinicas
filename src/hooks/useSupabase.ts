@@ -1421,7 +1421,15 @@ export function useSuperAdminData() {
     return !error;
   };
 
+  const removeClinicUser = async (userId: string, clinicId: string) => {
+    const { error } = await supabase.rpc('remove_user_from_clinic', {
+      p_user_id: userId, p_clinic_id: clinicId,
+    });
+    if (!error) fetchUsers();
+    return !error;
+  };
+
   const totalUsers = Object.values(clinicUsers).flat().length + Object.values(orgUsers).flat().length;
 
-  return { clinicUsers, orgUsers, usersLoading, addClinicUser, addOrgUser, totalUsers, refetchUsers: fetchUsers };
+  return { clinicUsers, orgUsers, usersLoading, addClinicUser, addOrgUser, removeClinicUser, totalUsers, refetchUsers: fetchUsers };
 }

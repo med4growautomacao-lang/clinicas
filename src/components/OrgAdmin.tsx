@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
-import { Building2, Users, ArrowRight, LogIn, Plus, Loader2, RefreshCw } from "lucide-react";
+import { Building2, Users, ArrowRight, LogIn, Loader2, X, Eye, EyeOff } from "lucide-react";
 import { cn } from "@/src/lib/utils";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 
 interface Clinic {
   id: string;
@@ -26,12 +26,28 @@ interface OrgAdminProps {
   onEnterClinic: () => void;
 }
 
+const ROLES = ['usuario', 'owner'];
+const PLANS = ['free', 'pro', 'enterprise'];
+
 export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
   const { profile, activeClinicId, setActiveClinicId, setActiveClinicName } = useAuth();
   const [clinics, setClinics] = useState<Clinic[]>([]);
   const [orgUsers, setOrgUsers] = useState<OrgUser[]>([]);
   const [loadingClinics, setLoadingClinics] = useState(true);
   const [activeSubTab, setActiveSubTab] = useState<"clinics" | "users">("clinics");
+
+  // Modal: nova clínica
+  const [showClinicModal, setShowClinicModal] = useState(false);
+  const [clinicForm, setClinicForm] = useState({ name: '', plan: 'free', ownerName: '', ownerEmail: '', ownerPassword: '' });
+  const [clinicSaving, setClinicSaving] = useState(false);
+  const [clinicError, setClinicError] = useState('');
+
+  // Modal: novo usuário org
+  const [showUserModal, setShowUserModal] = useState(false);
+  const [userForm, setUserForm] = useState({ name: '', email: '', password: '', role: 'usuario' });
+  const [userSaving, setUserSaving] = useState(false);
+  const [userError, setUserError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   const fetchClinics = useCallback(async () => {
     if (!profile?.organization_id) return;
@@ -59,6 +75,49 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
     fetchClinics();
     fetchOrgUsers();
   }, [fetchClinics, fetchOrgUsers]);
+
+  const handleCreateClinic = async () => {
+    if (!clinicForm.name.trim() || !clinicForm.ownerName.trim() || !clinicForm.ownerEmail.trim() || !clinicForm.ownerPassword.trim()) {
+      setClinicError('Preencha todos os campos.');
+      return;
+    }
+    setClinicSaving(true);
+    setClinicError('');
+    const { error } = await supabase.rpc('create_clinic_with_owner', {
+      p_clinic_name: clinicForm.name.trim(),
+      p_plan: clinicForm.plan,
+      p_organization_id: profile?.organization_id || null,
+      p_owner_name: clinicForm.ownerName.trim(),
+      p_owner_email: clinicForm.ownerEmail.trim(),
+      p_owner_password: clinicForm.ownerPassword,
+    });
+    setClinicSaving(false);
+    if (error) { setClinicError(error.message); return; }
+    setShowClinicModal(false);
+    setClinicForm({ name: '', plan: 'free', ownerName: '', ownerEmail: '', ownerPassword: '' });
+    fetchClinics();
+  };
+
+  const handleAddUser = async () => {
+    if (!userForm.name.trim() || !userForm.email.trim() || !userForm.password.trim()) {
+      setUserError('Preencha todos os campos.');
+      return;
+    }
+    setUserSaving(true);
+    setUserError('');
+    const { error } = await supabase.rpc('add_user_to_org', {
+      p_org_id: profile?.organization_id,
+      p_full_name: userForm.name.trim(),
+      p_email: userForm.email.trim(),
+      p_password: userForm.password,
+      p_role: userForm.role,
+    });
+    setUserSaving(false);
+    if (error) { setUserError(error.message); return; }
+    setShowUserModal(false);
+    setUserForm({ name: '', email: '', password: '', role: 'gestor' });
+    fetchOrgUsers();
+  };
 
   return (
     <div className="space-y-8 h-full flex flex-col font-sans">
@@ -88,26 +147,45 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
         )}
       </div>
 
-      {/* Sub-tabs */}
-      <div className="flex bg-white p-1 rounded-xl border border-slate-200 gap-1 w-fit">
-        {[
-          { id: "clinics", label: "Clínicas", icon: Building2 },
-          { id: "users", label: "Usuários da Org", icon: Users },
-        ].map((t) => (
+      {/* Sub-tabs + action button */}
+      <div className="flex items-center justify-between">
+        <div className="flex bg-white p-1 rounded-xl border border-slate-200 gap-1 w-fit">
+          {[
+            { id: "clinics", label: "Clínicas", icon: Building2 },
+            { id: "users", label: "Usuários", icon: Users },
+          ].map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setActiveSubTab(t.id as any)}
+              className={cn(
+                "flex items-center gap-2 px-5 py-2 text-xs font-bold rounded-lg transition-all",
+                activeSubTab === t.id
+                  ? "bg-violet-600 text-white shadow-sm"
+                  : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+              )}
+            >
+              <t.icon className="w-3.5 h-3.5" />
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {activeSubTab === "clinics" && (
           <button
-            key={t.id}
-            onClick={() => setActiveSubTab(t.id as any)}
-            className={cn(
-              "flex items-center gap-2 px-5 py-2 text-xs font-bold rounded-lg transition-all",
-              activeSubTab === t.id
-                ? "bg-violet-600 text-white shadow-sm"
-                : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
-            )}
+            onClick={() => setShowClinicModal(true)}
+            className="flex items-center gap-1.5 px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
           >
-            <t.icon className="w-3.5 h-3.5" />
-            {t.label}
+            + Clínica
           </button>
-        ))}
+        )}
+        {activeSubTab === "users" && (
+          <button
+            onClick={() => setShowUserModal(true)}
+            className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
+          >
+            + Usuário
+          </button>
+        )}
       </div>
 
       {/* Content */}
@@ -121,7 +199,6 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
             <div className="flex flex-col items-center justify-center h-48 text-center">
               <Building2 className="w-12 h-12 text-slate-200 mb-3" />
               <p className="text-slate-500 font-medium text-sm">Nenhuma clínica vinculada a esta organização.</p>
-              <p className="text-slate-400 text-xs mt-1">Vincule clínicas existentes pelo Super Admin.</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -171,15 +248,9 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                     )}
                   >
                     {activeClinicId === clinic.id ? (
-                      <>
-                        <LogIn className="w-3.5 h-3.5" />
-                        Visualizando
-                      </>
+                      <><LogIn className="w-3.5 h-3.5" /> Visualizando</>
                     ) : (
-                      <>
-                        <ArrowRight className="w-3.5 h-3.5" />
-                        Entrar como clínica
-                      </>
+                      <><ArrowRight className="w-3.5 h-3.5" /> Entrar como clínica</>
                     )}
                   </button>
                 </motion.div>
@@ -208,7 +279,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                     <p className="text-xs text-slate-500 truncate">{u.email}</p>
                   </div>
                   <span className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 shrink-0">
-                    {u.role}
+                    {u.role === 'org_owner' || u.role === 'owner' ? 'Owner' : 'Usuário'}
                   </span>
                 </div>
               ))}
@@ -216,6 +287,122 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
           )}
         </div>
       )}
+
+      {/* Modal: Nova Clínica */}
+      <AnimatePresence>
+        {showClinicModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md"
+            >
+              <div className="flex items-center justify-between mb-5">
+                <h3 className="text-base font-black text-slate-900">Nova Clínica</h3>
+                <button onClick={() => { setShowClinicModal(false); setClinicError(''); }} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors">
+                  <X className="w-4 h-4 text-slate-500" />
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1">Nome da Clínica</label>
+                  <input value={clinicForm.name} onChange={e => setClinicForm(f => ({ ...f, name: e.target.value }))}
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500" placeholder="Ex: Clínica Central" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1">Plano</label>
+                  <div className="flex gap-2">
+                    {PLANS.map(p => (
+                      <button key={p} onClick={() => setClinicForm(f => ({ ...f, plan: p }))}
+                        className={cn("flex-1 py-2 rounded-xl text-xs font-bold capitalize transition-all border",
+                          clinicForm.plan === p ? "bg-teal-600 text-white border-teal-600" : "bg-slate-50 text-slate-600 border-slate-200 hover:border-teal-300")}>
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="pt-1 border-t border-slate-100">
+                  <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Gestor Responsável</p>
+                  <div className="space-y-2">
+                    <input value={clinicForm.ownerName} onChange={e => setClinicForm(f => ({ ...f, ownerName: e.target.value }))}
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500" placeholder="Nome completo" />
+                    <input value={clinicForm.ownerEmail} onChange={e => setClinicForm(f => ({ ...f, ownerEmail: e.target.value }))}
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500" placeholder="Email" type="email" />
+                    <div className="relative">
+                      <input value={clinicForm.ownerPassword} onChange={e => setClinicForm(f => ({ ...f, ownerPassword: e.target.value }))}
+                        type={showPassword ? 'text' : 'password'}
+                        className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500 pr-10" placeholder="Senha" />
+                      <button type="button" onClick={() => setShowPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                {clinicError && <p className="text-xs text-red-500 font-bold">{clinicError}</p>}
+                <button onClick={handleCreateClinic} disabled={clinicSaving}
+                  className="w-full py-3 bg-teal-600 hover:bg-teal-700 disabled:bg-slate-100 disabled:text-slate-400 text-white rounded-xl font-black text-sm transition-all flex items-center justify-center gap-2">
+                  {clinicSaving ? <><Loader2 className="w-4 h-4 animate-spin" /> Criando...</> : 'Criar Clínica'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal: Novo Usuário Org */}
+      <AnimatePresence>
+        {showUserModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm"
+            >
+              <div className="flex items-center justify-between mb-5">
+                <h3 className="text-base font-black text-slate-900">Novo Usuário</h3>
+                <button onClick={() => { setShowUserModal(false); setUserError(''); }} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors">
+                  <X className="w-4 h-4 text-slate-500" />
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <input value={userForm.name} onChange={e => setUserForm(f => ({ ...f, name: e.target.value }))}
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-violet-500" placeholder="Nome completo" />
+                <input value={userForm.email} onChange={e => setUserForm(f => ({ ...f, email: e.target.value }))}
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-violet-500" placeholder="Email" type="email" />
+                <div className="relative">
+                  <input value={userForm.password} onChange={e => setUserForm(f => ({ ...f, password: e.target.value }))}
+                    type={showPassword ? 'text' : 'password'}
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-violet-500 pr-10" placeholder="Senha" />
+                  <button type="button" onClick={() => setShowPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Papel</label>
+                  <div className="flex flex-wrap gap-2">
+                    {ROLES.map(r => (
+                      <button key={r} onClick={() => setUserForm(f => ({ ...f, role: r }))}
+                        className={cn("px-3 py-1.5 rounded-lg text-xs font-bold capitalize transition-all border",
+                          userForm.role === r ? "bg-violet-600 text-white border-violet-600" : "bg-slate-50 text-slate-600 border-slate-200 hover:border-violet-300")}>
+                        {r}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {userError && <p className="text-xs text-red-500 font-bold">{userError}</p>}
+                <button onClick={handleAddUser} disabled={userSaving}
+                  className="w-full py-3 bg-violet-600 hover:bg-violet-700 disabled:bg-slate-100 disabled:text-slate-400 text-white rounded-xl font-black text-sm transition-all flex items-center justify-center gap-2">
+                  {userSaving ? <><Loader2 className="w-4 h-4 animate-spin" /> Adicionando...</> : 'Adicionar Usuário'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

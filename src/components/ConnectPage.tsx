@@ -17,6 +17,7 @@ export function ConnectPage() {
   const [invalid, setInvalid] = useState(false);
   const [loadingInitial, setLoadingInitial] = useState(true);
   const [requesting, setRequesting] = useState(false);
+  const intervalRef = React.useRef<any>(null);
 
   const handleStartConnection = async () => {
     if (!token || requesting) return;
@@ -46,25 +47,34 @@ export function ConnectPage() {
         return; 
     }
 
+    const stopPolling = () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+
     const poll = async () => {
       try {
         const res = await fetch(`${EDGE_URL}?token=${token}&json=1`);
-        if (res.status === 404) { 
-            setInvalid(true); 
-            setLoadingInitial(false);
-            return; 
+        if (res.status === 404) {
+          setInvalid(true);
+          setLoadingInitial(false);
+          stopPolling();
+          return;
         }
         const data = await res.json();
         setState(data);
         setLoadingInitial(false);
+        if (data.status === 'connected') stopPolling();
       } catch (err) {
-          console.error('Polling error:', err);
+        console.error('Polling error:', err);
       }
     };
 
     poll();
-    const interval = setInterval(poll, 5000);
-    return () => clearInterval(interval);
+    intervalRef.current = setInterval(poll, 5000);
+    return () => stopPolling();
   }, [token]);
 
   useEffect(() => {
@@ -315,7 +325,7 @@ export function ConnectPage() {
 
         <div className="mt-10 pt-8 border-t border-slate-100 flex items-center justify-between">
             <div className="flex items-center gap-2">
-                <RefreshCw className="w-3.5 h-3.5 text-slate-300 animate-spin-slow" />
+                <RefreshCw className="w-3.5 h-3.5 text-slate-300 animate-spin" />
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Atualiza a cada 5s</span>
             </div>
             <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest flex items-center gap-1">

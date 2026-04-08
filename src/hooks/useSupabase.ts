@@ -1350,3 +1350,78 @@ export function useOrganizations() {
 
   return { data, loading, create, refetch: fetch };
 }
+
+// ==========================================
+// SUPER ADMIN DATA
+// ==========================================
+export interface ClinicUser {
+  id: string;
+  clinic_id: string;
+  role: string;
+  full_name: string;
+  email: string;
+  avatar_url?: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface OrgUser {
+  id: string;
+  user_id: string;
+  organization_id: string;
+  role: string;
+  full_name: string;
+  email: string;
+  created_at: string;
+}
+
+export function useSuperAdminData() {
+  const [clinicUsers, setClinicUsers] = useState<Record<string, ClinicUser[]>>({});
+  const [orgUsers, setOrgUsers] = useState<Record<string, OrgUser[]>>({});
+  const [usersLoading, setUsersLoading] = useState(true);
+
+  const fetchUsers = useCallback(async () => {
+    setUsersLoading(true);
+    const [cuRes, ouRes] = await Promise.all([
+      supabase.from('users').select('*').order('full_name'),
+      supabase.from('org_users').select('*').order('full_name'),
+    ]);
+    const grouped: Record<string, ClinicUser[]> = {};
+    (cuRes.data || []).forEach((u: ClinicUser) => {
+      if (!grouped[u.clinic_id]) grouped[u.clinic_id] = [];
+      grouped[u.clinic_id].push(u);
+    });
+    setClinicUsers(grouped);
+    const orgGrouped: Record<string, OrgUser[]> = {};
+    (ouRes.data || []).forEach((u: OrgUser) => {
+      if (!orgGrouped[u.organization_id]) orgGrouped[u.organization_id] = [];
+      orgGrouped[u.organization_id].push(u);
+    });
+    setOrgUsers(orgGrouped);
+    setUsersLoading(false);
+  }, []);
+
+  useEffect(() => { fetchUsers(); }, [fetchUsers]);
+
+  const addClinicUser = async (clinicId: string, user: { name: string; email: string; password: string; role: string }) => {
+    const { error } = await supabase.rpc('add_user_to_clinic', {
+      p_clinic_id: clinicId, p_full_name: user.name,
+      p_email: user.email, p_password: user.password, p_role: user.role,
+    });
+    if (!error) fetchUsers();
+    return !error;
+  };
+
+  const addOrgUser = async (orgId: string, user: { name: string; email: string; password: string; role: string }) => {
+    const { error } = await supabase.rpc('add_user_to_org', {
+      p_org_id: orgId, p_full_name: user.name,
+      p_email: user.email, p_password: user.password, p_role: user.role,
+    });
+    if (!error) fetchUsers();
+    return !error;
+  };
+
+  const totalUsers = Object.values(clinicUsers).flat().length + Object.values(orgUsers).flat().length;
+
+  return { clinicUsers, orgUsers, usersLoading, addClinicUser, addOrgUser, totalUsers, refetchUsers: fetchUsers };
+}

@@ -26,7 +26,10 @@ interface OrgAdminProps {
   onEnterClinic: () => void;
 }
 
-const ORG_ROLES = ['usuario', 'owner'];
+const ORG_ROLES = [
+  { value: 'org_admin', label: 'Usuário' },
+  { value: 'org_owner', label: 'Owner' },
+];
 const CLINIC_ROLES = ['gestor', 'medico', 'secretaria'];
 const PLANS = ['free', 'pro', 'enterprise'];
 
@@ -45,7 +48,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
 
   // Modal: novo usuário org
   const [showUserModal, setShowUserModal] = useState(false);
-  const [userForm, setUserForm] = useState({ name: '', email: '', password: '', role: 'usuario' });
+  const [userForm, setUserForm] = useState({ name: '', email: '', password: '', role: 'org_admin' });
   const [userSaving, setUserSaving] = useState(false);
   const [userError, setUserError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -421,10 +424,10 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Papel</label>
                   <div className="flex flex-wrap gap-2">
                     {ORG_ROLES.map(r => (
-                      <button key={r} onClick={() => setUserForm(f => ({ ...f, role: r }))}
-                        className={cn("px-3 py-1.5 rounded-lg text-xs font-bold capitalize transition-all border",
-                          userForm.role === r ? "bg-violet-600 text-white border-violet-600" : "bg-slate-50 text-slate-600 border-slate-200 hover:border-violet-300")}>
-                        {r}
+                      <button key={r.value} onClick={() => setUserForm(f => ({ ...f, role: r.value }))}
+                        className={cn("px-3 py-1.5 rounded-lg text-xs font-bold transition-all border",
+                          userForm.role === r.value ? "bg-violet-600 text-white border-violet-600" : "bg-slate-50 text-slate-600 border-slate-200 hover:border-violet-300")}>
+                        {r.label}
                       </button>
                     ))}
                   </div>

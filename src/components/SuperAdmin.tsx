@@ -298,7 +298,7 @@ function AddUserModal({
 }) {
   const isOrg = type === 'org-user';
   const roles = isOrg
-    ? [{ v: 'org_admin', l: 'Admin da Org' }, { v: 'org_owner', l: 'Owner' }]
+    ? [{ v: 'org_admin', l: 'Usuário' }, { v: 'org_owner', l: 'Owner' }]
     : [{ v: 'gestor', l: 'Gestor' }, { v: 'medico', l: 'Médico' }, { v: 'secretaria', l: 'Secretária' }];
 
   const [form, setForm] = useState({ name: '', email: '', password: '', role: roles[0].v });

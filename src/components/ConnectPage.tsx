@@ -18,6 +18,21 @@ export function ConnectPage() {
   const [loadingInitial, setLoadingInitial] = useState(true);
   const [requesting, setRequesting] = useState(false);
   const intervalRef = React.useRef<any>(null);
+  const connectedRef = React.useRef(false);
+
+  const clearQr = React.useCallback(() => {
+    if (!token || connectedRef.current) return;
+    const BRIDGE_URL = EDGE_URL.replace('whatsapp-qr-public', 'whatsapp-bridge');
+    // sendBeacon garante envio mesmo quando a aba fecha
+    navigator.sendBeacon(BRIDGE_URL, JSON.stringify({ action: 'cancel', token }));
+  }, [token]);
+
+  // Limpa QR ao fechar/recarregar a aba
+  useEffect(() => {
+    const onUnload = () => clearQr();
+    window.addEventListener('beforeunload', onUnload);
+    return () => window.removeEventListener('beforeunload', onUnload);
+  }, [clearQr]);
 
   const handleStartConnection = async () => {
     if (!token || requesting) return;
@@ -66,7 +81,7 @@ export function ConnectPage() {
         const data = await res.json();
         setState(data);
         setLoadingInitial(false);
-        if (data.status === 'connected') stopPolling();
+        if (data.status === 'connected') { connectedRef.current = true; stopPolling(); }
       } catch (err) {
         console.error('Polling error:', err);
       }
@@ -268,9 +283,16 @@ export function ConnectPage() {
                       </div>
                   ))}
                 </div>
+
+                <button
+                  onClick={() => { clearQr(); setState(s => ({ ...s, status: 'disconnected', qr_code: null })); }}
+                  className="text-xs text-slate-400 hover:text-red-500 font-bold transition-colors underline underline-offset-2"
+                >
+                  Cancelar conexão
+                </button>
               </motion.div>
             ) : (
-              <motion.div 
+              <motion.div
                 key="start-section"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}

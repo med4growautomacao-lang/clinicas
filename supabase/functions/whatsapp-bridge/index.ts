@@ -56,9 +56,22 @@ serve(async (req) => {
     }
 
     if (!clinic_id) {
-      return new Response(JSON.stringify({ success: false, error: 'Clinica nao identificada via token' }), { 
-        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+      return new Response(JSON.stringify({ success: false, error: 'Clinica nao identificada via token' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       })
+    }
+
+    // Cancelamento: limpa QR e status, sem chamar n8n
+    if (action === 'cancel') {
+      await supabaseClient
+        .from('whatsapp_instances')
+        .update({ qr_code: null, status: 'disconnected' })
+        .eq('clinic_id', clinic_id)
+        .in('status', ['qr_pending', 'connecting']);
+
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
     }
 
     const { data: clinicData, error: clinicError } = await supabaseClient

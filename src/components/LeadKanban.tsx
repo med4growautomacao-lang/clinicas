@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useCallback } from "react";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import {
@@ -62,6 +62,49 @@ function calcBusinessMinutes(since: Date, bh: { start: string; end: string; days
 import { format, parseISO, formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { LeadChat } from "./LeadChat";
+
+function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const isDragging = useRef(false);
+  const startX = useRef(0);
+  const scrollLeft = useRef(0);
+
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('[draggable="true"]') || target.closest('button') || target.closest('input')) return;
+    isDragging.current = true;
+    startX.current = e.pageX - (ref.current?.offsetLeft ?? 0);
+    scrollLeft.current = ref.current?.scrollLeft ?? 0;
+    if (ref.current) ref.current.style.cursor = 'grabbing';
+  }, []);
+
+  const onMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isDragging.current || !ref.current) return;
+    e.preventDefault();
+    const x = e.pageX - ref.current.offsetLeft;
+    const walk = x - startX.current;
+    ref.current.scrollLeft = scrollLeft.current - walk;
+  }, []);
+
+  const onMouseUp = useCallback(() => {
+    isDragging.current = false;
+    if (ref.current) ref.current.style.cursor = '';
+  }, []);
+
+  return (
+    <div
+      ref={ref}
+      className="flex gap-4 overflow-x-auto pb-2 h-full custom-scrollbar min-h-[600px] select-none"
+      style={{ overflowX: 'scroll' }}
+      onMouseDown={onMouseDown}
+      onMouseMove={onMouseMove}
+      onMouseUp={onMouseUp}
+      onMouseLeave={onMouseUp}
+    >
+      {children}
+    </div>
+  );
+}
 
 export function LeadKanban() {
   const { data: stages, loading: stagesLoading, reorder: reorderStages, update: updateStage, create: createStage, remove: removeStage } = useFunnelStages();
@@ -550,7 +593,7 @@ export function LeadKanban() {
         </div>
       </div>
 
-      <div className="flex gap-4 overflow-x-auto pb-4 h-full custom-scrollbar min-h-[600px]">
+      <KanbanScrollContainer>
         {stages.map((stage) => {
           const stageLeads = leads.filter(l => l.stage_id === stage.id);
           const stageTotal = stageLeads.reduce((sum, l) => sum + (Number(l.estimated_value) || 0), 0);
@@ -750,7 +793,7 @@ export function LeadKanban() {
             </div>
           );
         })}
-      </div>
+      </KanbanScrollContainer>
 
       {/* Create Lead Modal */}
       <AnimatePresence>

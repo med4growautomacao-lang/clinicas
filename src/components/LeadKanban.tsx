@@ -68,6 +68,7 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
   const topScrollRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
   const isPanning = useRef(false);
+  const pendingPan = useRef(false);
   const isCardDragging = useRef(false);
   const startX = useRef(0);
   const scrollLeft = useRef(0);
@@ -103,29 +104,38 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     if (target.closest('button') || target.closest('input') || target.closest('textarea')) return;
-    const pageX = e.pageX;
-    const currentScroll = mainRef.current?.scrollLeft ?? 0;
-    // Aguarda dragstart ter chance de disparar antes de ativar pan
-    setTimeout(() => {
-      if (isCardDragging.current) return;
-      isPanning.current = true;
-      startX.current = pageX;
-      scrollLeft.current = currentScroll;
-      if (mainRef.current) mainRef.current.style.cursor = 'grabbing';
-    }, 0);
+    pendingPan.current = true;
+    startX.current = e.pageX;
+    scrollLeft.current = mainRef.current?.scrollLeft ?? 0;
   }, []);
 
   const onMouseMove = useCallback((e: React.MouseEvent) => {
+    if (pendingPan.current && !isCardDragging.current && !isPanning.current) {
+      if (Math.abs(e.pageX - startX.current) > 5) {
+        isPanning.current = true;
+        startX.current = e.pageX;
+        scrollLeft.current = mainRef.current?.scrollLeft ?? 0;
+        if (mainRef.current) mainRef.current.style.cursor = 'grabbing';
+      }
+      return;
+    }
     if (!isPanning.current || !mainRef.current) return;
     mainRef.current.scrollLeft = scrollLeft.current - (e.pageX - startX.current);
   }, []);
 
   const stopPan = useCallback(() => {
+    pendingPan.current = false;
     isPanning.current = false;
     if (mainRef.current) mainRef.current.style.cursor = '';
   }, []);
 
-  const onDragStart = useCallback(() => { isCardDragging.current = true; }, []);
+  const onDragStart = useCallback(() => {
+    isCardDragging.current = true;
+    pendingPan.current = false;
+    isPanning.current = false;
+    if (mainRef.current) mainRef.current.style.cursor = '';
+  }, []);
+
   const onDragEnd = useCallback(() => {
     isCardDragging.current = false;
     isPanning.current = false;

@@ -339,7 +339,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                       "w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-[10px] font-bold transition-all",
                       activeClinicId === clinic.id
                         ? "bg-violet-600 text-white hover:bg-violet-700"
-                        : "bg-slate-50 text-slate-600 hover:bg-violet-50 hover:text-violet-700 border border-slate-200"
+                        : "bg-violet-500 text-white hover:bg-violet-600"
                     )}
                   >
                     {activeClinicId === clinic.id ? (

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from "react";
+import React, { useState, useRef, useCallback, useEffect } from "react";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import {
@@ -64,44 +64,92 @@ import { ptBR } from "date-fns/locale";
 import { LeadChat } from "./LeadChat";
 
 function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const isDragging = useRef(false);
+  const mainRef = useRef<HTMLDivElement>(null);
+  const topScrollRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
+  const isPanning = useRef(false);
+  const isCardDragging = useRef(false);
   const startX = useRef(0);
   const scrollLeft = useRef(0);
+  const syncingFrom = useRef<'main' | 'top' | null>(null);
+
+  const onMainScroll = useCallback(() => {
+    if (syncingFrom.current === 'top') return;
+    syncingFrom.current = 'main';
+    if (topScrollRef.current && mainRef.current)
+      topScrollRef.current.scrollLeft = mainRef.current.scrollLeft;
+    syncingFrom.current = null;
+  }, []);
+
+  const onTopScroll = useCallback(() => {
+    if (syncingFrom.current === 'main') return;
+    syncingFrom.current = 'top';
+    if (mainRef.current && topScrollRef.current)
+      mainRef.current.scrollLeft = topScrollRef.current.scrollLeft;
+    syncingFrom.current = null;
+  }, []);
+
+  useEffect(() => {
+    const update = () => {
+      if (mainRef.current && innerRef.current)
+        innerRef.current.style.width = mainRef.current.scrollWidth + 'px';
+    };
+    update();
+    const obs = new ResizeObserver(update);
+    if (mainRef.current) obs.observe(mainRef.current);
+    return () => obs.disconnect();
+  }, []);
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
+    if (isCardDragging.current) return;
     const target = e.target as HTMLElement;
-    if (target.closest('[draggable="true"]') || target.closest('button') || target.closest('input')) return;
-    isDragging.current = true;
-    startX.current = e.pageX - (ref.current?.offsetLeft ?? 0);
-    scrollLeft.current = ref.current?.scrollLeft ?? 0;
-    if (ref.current) ref.current.style.cursor = 'grabbing';
+    if (target.closest('[draggable="true"]') || target.closest('button') || target.closest('input') || target.closest('textarea')) return;
+    isPanning.current = true;
+    startX.current = e.pageX;
+    scrollLeft.current = mainRef.current?.scrollLeft ?? 0;
+    if (mainRef.current) mainRef.current.style.cursor = 'grabbing';
   }, []);
 
   const onMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!isDragging.current || !ref.current) return;
-    e.preventDefault();
-    const x = e.pageX - ref.current.offsetLeft;
-    const walk = x - startX.current;
-    ref.current.scrollLeft = scrollLeft.current - walk;
+    if (!isPanning.current || !mainRef.current) return;
+    mainRef.current.scrollLeft = scrollLeft.current - (e.pageX - startX.current);
   }, []);
 
-  const onMouseUp = useCallback(() => {
-    isDragging.current = false;
-    if (ref.current) ref.current.style.cursor = '';
+  const stopPan = useCallback(() => {
+    isPanning.current = false;
+    if (mainRef.current) mainRef.current.style.cursor = '';
   }, []);
+
+  // Detecta início/fim de drag de card (HTML5 drag API)
+  const onDragStart = useCallback(() => { isCardDragging.current = true; }, []);
+  const onDragEnd = useCallback(() => { isCardDragging.current = false; }, []);
 
   return (
-    <div
-      ref={ref}
-      className="flex gap-4 overflow-x-auto pb-2 h-full custom-scrollbar min-h-[600px] select-none"
-      style={{ overflowX: 'scroll' }}
-      onMouseDown={onMouseDown}
-      onMouseMove={onMouseMove}
-      onMouseUp={onMouseUp}
-      onMouseLeave={onMouseUp}
-    >
-      {children}
+    <div className="flex flex-col h-full">
+      {/* Barra de scroll superior */}
+      <div
+        ref={topScrollRef}
+        className="overflow-x-scroll custom-scrollbar mb-4"
+        style={{ height: 12 }}
+        onScroll={onTopScroll}
+      >
+        <div ref={innerRef} style={{ height: 1 }} />
+      </div>
+
+      {/* Container principal */}
+      <div
+        ref={mainRef}
+        className="flex gap-4 overflow-x-scroll pb-2 h-full custom-scrollbar min-h-[600px]"
+        onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
+        onScroll={onMainScroll}
+        onMouseDown={onMouseDown}
+        onMouseMove={onMouseMove}
+        onMouseUp={stopPan}
+        onMouseLeave={stopPan}
+      >
+        {children}
+      </div>
     </div>
   );
 }

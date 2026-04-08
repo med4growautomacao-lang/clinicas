@@ -101,13 +101,18 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
   }, []);
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
-    if (isCardDragging.current) return;
     const target = e.target as HTMLElement;
-    if (target.closest('[draggable="true"]') || target.closest('button') || target.closest('input') || target.closest('textarea')) return;
-    isPanning.current = true;
-    startX.current = e.pageX;
-    scrollLeft.current = mainRef.current?.scrollLeft ?? 0;
-    if (mainRef.current) mainRef.current.style.cursor = 'grabbing';
+    if (target.closest('button') || target.closest('input') || target.closest('textarea')) return;
+    const pageX = e.pageX;
+    const currentScroll = mainRef.current?.scrollLeft ?? 0;
+    // Aguarda dragstart ter chance de disparar antes de ativar pan
+    setTimeout(() => {
+      if (isCardDragging.current) return;
+      isPanning.current = true;
+      startX.current = pageX;
+      scrollLeft.current = currentScroll;
+      if (mainRef.current) mainRef.current.style.cursor = 'grabbing';
+    }, 0);
   }, []);
 
   const onMouseMove = useCallback((e: React.MouseEvent) => {
@@ -120,9 +125,12 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
     if (mainRef.current) mainRef.current.style.cursor = '';
   }, []);
 
-  // Detecta início/fim de drag de card (HTML5 drag API)
   const onDragStart = useCallback(() => { isCardDragging.current = true; }, []);
-  const onDragEnd = useCallback(() => { isCardDragging.current = false; }, []);
+  const onDragEnd = useCallback(() => {
+    isCardDragging.current = false;
+    isPanning.current = false;
+    if (mainRef.current) mainRef.current.style.cursor = '';
+  }, []);
 
   return (
     <div className="flex flex-col h-full">

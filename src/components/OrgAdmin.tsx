@@ -319,8 +319,8 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                       : "bg-slate-50 text-slate-400 border-slate-100"
                   )}>
                     {clinic.whatsapp_status === 'connected'
-                      ? <><Wifi className="w-3 h-3" /> Conectado</>
-                      : <><WifiOff className="w-3 h-3" /> Desconectado</>
+                      ? <><Wifi className="w-3 h-3" /> WhatsApp Conectado</>
+                      : <><WifiOff className="w-3 h-3" /> WhatsApp Desconectado</>
                     }
                   </div>
 
@@ -345,7 +345,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                     {activeClinicId === clinic.id ? (
                       <><LogIn className="w-3 h-3" /> Visualizando</>
                     ) : (
-                      <><ArrowRight className="w-3 h-3" /> Entrar</>
+                      <><ArrowRight className="w-3 h-3" /> Visualizar</>
                     )}
                   </button>
                 </motion.div>

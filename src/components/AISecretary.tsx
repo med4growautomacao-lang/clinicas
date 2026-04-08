@@ -1250,7 +1250,7 @@ function ChatsView() {
                 className={cn(
                   "p-3 rounded-lg cursor-pointer transition-all border",
                   selectedLeadId === lead.id
-                    ? "bg-teal-50 border-teal-100 shadow-sm"
+                    ? "bg-indigo-50 border-indigo-200 shadow-sm"
                     : isMeta ? "bg-blue-50/50 border-blue-100/60 hover:bg-blue-50"
                     : isGoogle ? "bg-emerald-50/50 border-emerald-100/60 hover:bg-emerald-50"
                     : "border-transparent hover:bg-slate-50"

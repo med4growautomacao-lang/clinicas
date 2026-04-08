@@ -436,7 +436,7 @@ export function useLeads() {
       .from('leads')
       .select('*')
       .eq('clinic_id', activeClinicId)
-      .order('last_message_at', { ascending: false, nullsFirst: false })
+      .order('last_activity_at', { ascending: false, nullsFirst: false })
       .order('updated_at', { ascending: false, nullsFirst: false });
     
     if (error) { setError(error.message); if (!silent) setLoading(false); return; }

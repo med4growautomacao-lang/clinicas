@@ -66,14 +66,20 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
   const fetchClinics = useCallback(async () => {
     if (!profile?.organization_id) return;
     setLoadingClinics(true);
-    const { data } = await supabase
-      .from("clinics")
-      .select("id, name, plan, logo_url, organization_id, whatsapp_instances(status)")
-      .eq("organization_id", profile.organization_id)
-      .order("name");
-    const mapped = (data || []).map((c: any) => ({
+    const [{ data: clinicsData }, { data: waData }] = await Promise.all([
+      supabase
+        .from("clinics")
+        .select("id, name, plan, logo_url, organization_id")
+        .eq("organization_id", profile.organization_id)
+        .order("name"),
+      supabase
+        .from("whatsapp_instances")
+        .select("clinic_id, status"),
+    ]);
+    const waMap = Object.fromEntries((waData || []).map(w => [w.clinic_id, w.status]));
+    const mapped = (clinicsData || []).map((c: any) => ({
       ...c,
-      whatsapp_status: c.whatsapp_instances?.[0]?.status ?? null,
+      whatsapp_status: waMap[c.id] ?? null,
     }));
     setClinics(mapped);
     setLoadingClinics(false);

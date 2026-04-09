@@ -29,7 +29,7 @@ serve(async (req) => {
   // Busca instância pelo connect_token
   const { data: instance } = await supabase
     .from('whatsapp_instances')
-    .select('clinic_id, phone_number')
+    .select('clinic_id, phone_number, redirect_message')
     .eq('connect_token', connectToken)
     .maybeSingle()
 
@@ -46,12 +46,12 @@ serve(async (req) => {
   const utmContent  = url.searchParams.get('utm_content')  || null
   const utmTerm     = url.searchParams.get('utm_term')     || null
 
-  // Gera rast_id curto
-  const rastId = 'nod-' + crypto.randomUUID().replace(/-/g, '').slice(0, 8)
+  // Gera código de protocolo (8 hex chars)
+  const protocolo = crypto.randomUUID().replace(/-/g, '').slice(0, 8)
 
   // Salva sessão
   await supabase.from('link_sessions').insert({
-    rast_id:      rastId,
+    rast_id:      protocolo,
     clinic_id:    instance.clinic_id,
     utm_source:   utmSource,
     utm_medium:   utmMedium,
@@ -60,20 +60,20 @@ serve(async (req) => {
     utm_term:     utmTerm,
   })
 
-  // Monta número limpo (só dígitos)
   const phone = instance.phone_number.replace(/\D/g, '')
-  const text = encodeURIComponent(`Olá! Gostaria de mais informações. [${rastId}]`)
-  const waUrl = `https://wa.me/${phone}?text=${text}`
+  const customMsg = instance.redirect_message?.trim() || 'Olá! Gostaria de mais informações.'
+  const fullText = `${customMsg} [Protocolo ${protocolo} não apague essa mensagem]`
+  const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(fullText)}`
 
   // Modo JSON: retorna dados para o app React setar o cookie e redirecionar
   if (format === 'json') {
-    return new Response(JSON.stringify({ rast_id: rastId, wa_url: waUrl }), {
+    return new Response(JSON.stringify({ rast_id: protocolo, wa_url: waUrl }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     })
   }
 
-  // Modo HTML: página que seta cookie e redireciona (acesso direto ao link)
+  // Modo HTML: acesso direto ao link (sem passar pelo app React)
   const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -84,7 +84,7 @@ serve(async (req) => {
 <body>
 <script>
   const expires = new Date(Date.now() + 63072000 * 1000).toUTCString();
-  document.cookie = "rast_id=${rastId}; expires=" + expires + "; path=/; SameSite=Lax";
+  document.cookie = "rast_id=${protocolo}; expires=" + expires + "; path=/; SameSite=Lax";
   window.location.href = "${waUrl}";
 <\/script>
 <noscript>

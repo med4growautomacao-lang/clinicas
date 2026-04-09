@@ -595,16 +595,16 @@ function ClinicSettings({ data, onChange }: { data: Partial<Clinic>, onChange: (
     );
 }
 
-function RedirectLinkCard({ connectToken }: { connectToken?: string | null }) {
-    const [campaign, setCampaign] = useState('');
+function RedirectLinkCard({ connectToken, redirectMessage, onMessageChange }: {
+    connectToken?: string | null;
+    redirectMessage?: string | null;
+    onMessageChange: (v: string) => void;
+}) {
     const [copied, setCopied] = useState(false);
 
-    const link = (() => {
-        if (!connectToken) return '';
-        const params = new URLSearchParams({ c: String(connectToken) });
-        if (campaign) params.set('utm_campaign', campaign);
-        return `${window.location.origin}/r?${params.toString()}`;
-    })();
+    const link = connectToken
+        ? `${window.location.origin}/r?c=${connectToken}`
+        : '';
 
     const copyLink = async () => {
         try { await navigator.clipboard.writeText(link); } catch {
@@ -633,14 +633,17 @@ function RedirectLinkCard({ connectToken }: { connectToken?: string | null }) {
             </CardHeader>
             <CardContent className="p-6 space-y-5">
                 <div className="space-y-2">
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Campanha (opcional)</label>
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Mensagem pré-preenchida</label>
                     <input
                         type="text"
-                        value={campaign}
-                        onChange={e => setCampaign(e.target.value)}
-                        placeholder="Ex: implante, clareamento, promo-maio..."
+                        value={redirectMessage || ''}
+                        onChange={e => onMessageChange(e.target.value)}
+                        placeholder="Olá! Gostaria de mais informações."
                         className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-200"
                     />
+                    <p className="text-[10px] text-slate-400">
+                        Lead verá: <span className="font-mono text-slate-500">{redirectMessage || 'Olá! Gostaria de mais informações.'} [Protocolo XXXXXXXX não apague essa mensagem]</span>
+                    </p>
                 </div>
 
                 <div className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl">
@@ -953,7 +956,7 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onCon
                 </CardContent>
             </Card>
 
-            <RedirectLinkCard connectToken={data.connect_token} />
+            <RedirectLinkCard connectToken={data.connect_token} redirectMessage={data.redirect_message} onMessageChange={(v) => onChange({ redirect_message: v })} />
                 </div>
             )}
 

@@ -796,6 +796,7 @@ export interface WhatsappInstance {
   connected_at: string | null;
   qr_code?: string | null;
   connect_token?: string | null;
+  redirect_message?: string | null;
 }
 
 export function useSettings() {

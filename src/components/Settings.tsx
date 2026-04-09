@@ -601,10 +601,18 @@ function RedirectLinkCard({ connectToken, redirectMessage, onMessageChange }: {
     onMessageChange: (v: string) => void;
 }) {
     const [copied, setCopied] = useState(false);
+    const [utmSource, setUtmSource]     = useState('');
+    const [utmMedium, setUtmMedium]     = useState('');
+    const [utmCampaign, setUtmCampaign] = useState('');
 
-    const link = connectToken
-        ? `${window.location.origin}/r?c=${connectToken}`
-        : '';
+    const link = (() => {
+        if (!connectToken) return '';
+        const params = new URLSearchParams({ c: String(connectToken) });
+        if (utmSource)   params.set('utm_source', utmSource);
+        if (utmMedium)   params.set('utm_medium', utmMedium);
+        if (utmCampaign) params.set('utm_campaign', utmCampaign);
+        return `${window.location.origin}/r?${params.toString()}`;
+    })();
 
     const copyLink = async () => {
         try { await navigator.clipboard.writeText(link); } catch {
@@ -644,6 +652,28 @@ function RedirectLinkCard({ connectToken, redirectMessage, onMessageChange }: {
                     <p className="text-[10px] text-slate-400">
                         Lead verá: <span className="font-mono text-slate-500">{redirectMessage || 'Olá! Gostaria de mais informações.'} [Protocolo XXXXXXXX não apague essa mensagem]</span>
                     </p>
+                </div>
+
+                <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">UTMs</label>
+                    <div className="grid grid-cols-3 gap-2">
+                        {[
+                            { label: 'utm_source', placeholder: 'instagram', value: utmSource, set: setUtmSource },
+                            { label: 'utm_medium', placeholder: 'bio', value: utmMedium, set: setUtmMedium },
+                            { label: 'utm_campaign', placeholder: 'promo-maio', value: utmCampaign, set: setUtmCampaign },
+                        ].map(({ label, placeholder, value, set }) => (
+                            <div key={label} className="space-y-1">
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{label}</p>
+                                <input
+                                    type="text"
+                                    value={value}
+                                    onChange={e => set(e.target.value)}
+                                    placeholder={placeholder}
+                                    className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-200"
+                                />
+                            </div>
+                        ))}
+                    </div>
                 </div>
 
                 <div className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl">

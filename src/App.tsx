@@ -15,6 +15,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Login } from './components/Login';
 import { ConnectPage } from './components/ConnectPage';
+import { RedirectPage } from './components/RedirectPage';
 import { Loader2 } from 'lucide-react';
 
 function AppContent() {
@@ -102,6 +103,9 @@ function AppContent() {
 export default function App() {
   if (window.location.pathname === '/connect') {
     return <ConnectPage />;
+  }
+  if (window.location.pathname === '/r') {
+    return <RedirectPage />;
   }
   return (
     <AuthProvider>

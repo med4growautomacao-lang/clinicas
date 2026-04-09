@@ -595,6 +595,75 @@ function ClinicSettings({ data, onChange }: { data: Partial<Clinic>, onChange: (
     );
 }
 
+function RedirectLinkCard({ connectToken }: { connectToken?: string | null }) {
+    const [campaign, setCampaign] = useState('');
+    const [copied, setCopied] = useState(false);
+
+    const link = (() => {
+        if (!connectToken) return '';
+        const params = new URLSearchParams({ c: String(connectToken) });
+        if (campaign) params.set('utm_campaign', campaign);
+        return `${window.location.origin}/r?${params.toString()}`;
+    })();
+
+    const copyLink = async () => {
+        try { await navigator.clipboard.writeText(link); } catch {
+            const inp = document.createElement('input');
+            inp.value = link; document.body.appendChild(inp); inp.select();
+            document.execCommand('copy'); document.body.removeChild(inp);
+        }
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2500);
+    };
+
+    if (!connectToken) return null;
+
+    return (
+        <Card className="border border-violet-200 shadow-sm bg-white overflow-hidden">
+            <CardHeader className="bg-violet-50 border-b border-violet-200 pb-5 px-8">
+                <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-violet-200">
+                        <ExternalLink className="w-5 h-5 text-violet-600" />
+                    </div>
+                    <div>
+                        <CardTitle className="text-base font-bold text-slate-800">Link de Redirecionamento</CardTitle>
+                        <p className="text-xs text-slate-500 mt-0.5">Rastreie cliques da bio, stories e anúncios direto no WhatsApp</p>
+                    </div>
+                </div>
+            </CardHeader>
+            <CardContent className="p-6 space-y-5">
+                <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Campanha (opcional)</label>
+                    <input
+                        type="text"
+                        value={campaign}
+                        onChange={e => setCampaign(e.target.value)}
+                        placeholder="Ex: implante, clareamento, promo-maio..."
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-200"
+                    />
+                </div>
+
+                <div className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                    <div className="flex-1 min-w-0">
+                        <p className="text-xs font-mono text-slate-600 truncate">{link}</p>
+                    </div>
+                    <button
+                        onClick={copyLink}
+                        className="shrink-0 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors"
+                    >
+                        {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                        {copied ? 'Copiado!' : 'Copiar'}
+                    </button>
+                </div>
+
+                <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Quando alguém clicar, abre o WhatsApp com mensagem pré-preenchida e o rastreamento é registrado automaticamente no lead.
+                </p>
+            </CardContent>
+        </Card>
+    );
+}
+
 function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onConnect, onCancel, connecting, onCopyLink, linkCopied }: {
     data: Partial<WhatsappInstance>,
     onChange: (updates: Partial<WhatsappInstance>) => void,
@@ -883,6 +952,8 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onCon
                     </div>
                 </CardContent>
             </Card>
+
+            <RedirectLinkCard connectToken={data.connect_token} />
                 </div>
             )}
 

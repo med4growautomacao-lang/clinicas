@@ -31,6 +31,7 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
   const { clinicName, userRole, signOut, profile, activeClinicId, setActiveClinicId, activeClinicName, setActiveClinicName } = useAuth();
   const [clinics, setClinics] = useState<{ id: string; name: string }[]>([]);
   const [showClinicPicker, setShowClinicPicker] = useState(false);
+  const [clinicPickerSearch, setClinicPickerSearch] = useState('');
   const pickerRef = useRef<HTMLDivElement>(null);
 
   // Carrega clínicas da org para o switcher
@@ -137,15 +138,27 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -4 }}
                   transition={{ duration: 0.12 }}
-                  className="absolute bottom-full left-0 right-0 mb-1 bg-white border border-violet-200 rounded-xl shadow-lg py-1 z-50 max-h-52 overflow-y-auto custom-scrollbar"
+                  className="absolute bottom-full left-0 right-0 mb-1 bg-white border border-violet-200 rounded-xl shadow-lg z-50"
                 >
-                  {clinics.map(c => (
+                  <div className="p-2 border-b border-slate-100">
+                    <input
+                      autoFocus
+                      type="text"
+                      placeholder="Buscar clínica..."
+                      value={clinicPickerSearch}
+                      onChange={e => setClinicPickerSearch(e.target.value)}
+                      className="w-full px-2 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-200"
+                    />
+                  </div>
+                  <div className="py-1 max-h-44 overflow-y-auto custom-scrollbar">
+                  {clinics.filter(c => c.name.toLowerCase().includes(clinicPickerSearch.toLowerCase())).map(c => (
                     <button
                       key={c.id}
                       onClick={() => {
                         setActiveClinicId(c.id);
                         setActiveClinicName(c.name);
                         setShowClinicPicker(false);
+                        setClinicPickerSearch('');
                       }}
                       className={cn(
                         "w-full text-left px-3 py-2 text-xs font-semibold transition-colors truncate",
@@ -157,6 +170,7 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
                       {c.name}
                     </button>
                   ))}
+                  </div>
                 </motion.div>
               )}
             </AnimatePresence>

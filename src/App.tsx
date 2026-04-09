@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { AISecretary } from './components/AISecretary';
@@ -19,7 +19,14 @@ import { Loader2 } from 'lucide-react';
 
 function AppContent() {
   const [activeTab, setActiveTab] = useState('dashboard');
-  const { user, loading } = useAuth();
+  const { user, loading, userRole, activeClinicId } = useAuth();
+
+  // Redireciona org_admin sem clínica ativa para a aba Organização
+  useEffect(() => {
+    if (!loading && userRole === 'org_admin' && !activeClinicId) {
+      setActiveTab('org-admin');
+    }
+  }, [loading, userRole, activeClinicId]);
 
   if (loading) {
     return (

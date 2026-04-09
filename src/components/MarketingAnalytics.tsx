@@ -1257,7 +1257,7 @@ function StatCard({ title, value, prevValue, type, icon: Icon, color }: any) {
       <div className="mt-4">
         <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{title}</h3>
         <p className="text-xl font-black text-slate-900 mt-1">
-          {type === 'currency' ? `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` :
+          {type === 'currency' ? `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` :
             type === 'percent' ? `${value.toFixed(1)}%` : value.toLocaleString('pt-BR')}
         </p>
       </div>
@@ -1408,7 +1408,7 @@ function MetricRow({ label, periods, metrics, compareMetrics, isComparing, platf
           <td key={idx} className="px-6 py-3 text-center border-r border-slate-50 last:border-r-0 whitespace-nowrap">
             <div className="flex flex-col items-center">
               <span className={cn("text-xs font-bold transition-all", isComparing ? "text-slate-900" : "text-slate-600")}>
-                {type === 'currency' ? `R$ ${val.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : type === 'percent' ? (val > 0 ? `${val.toFixed(1)}%` : '—') : val}
+                {type === 'currency' ? `R$ ${val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : type === 'percent' ? (val > 0 ? `${val.toFixed(1)}%` : '—') : val}
               </span>
               {isComparing && (
                 <div className={cn("text-[8px] font-black mt-1 px-1.5 py-0.5 rounded-full", delta && delta > 0 ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600")}>
@@ -1465,7 +1465,7 @@ function SummaryMetricRow({ label, periods, metrics, compareMetrics, isComparing
         return (
           <td key={idx} className="px-6 py-3 text-center border-r border-slate-50 last:border-r-0">
             <span className="text-xs font-black text-slate-900">
-              {formatType === 'curr' ? `R$ ${val.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : formatType === 'perc' ? `${val.toFixed(1)}%` : val}
+              {formatType === 'curr' ? `R$ ${val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : formatType === 'perc' ? `${val.toFixed(1)}%` : val}
             </span>
           </td>
         );

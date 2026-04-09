@@ -62,7 +62,7 @@ function getDateRangeStart(range: DateRange, customStart?: string): string {
 }
 
 export function ServiceDashboard() {
-  const { profile } = useAuth();
+  const { profile, activeClinicId } = useAuth();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [dateRange, setDateRange] = useState<DateRange>('30d');
@@ -83,8 +83,8 @@ export function ServiceDashboard() {
   }, []);
 
   const fetchData = useCallback(async () => {
-    if (!profile?.clinic_id) return;
-    const clinicId = profile.clinic_id;
+    const clinicId = activeClinicId || profile?.clinic_id;
+    if (!clinicId) return;
 
     try {
       const now = new Date();
@@ -217,14 +217,15 @@ export function ServiceDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [profile?.clinic_id, dateRange, customStartDate, customEndDate]);
+  }, [activeClinicId, profile?.clinic_id, dateRange, customStartDate, customEndDate]);
 
   useEffect(() => {
+    const clinicId = activeClinicId || profile?.clinic_id;
     fetchData();
-    if (!profile?.clinic_id) return;
-    const channel = supabase.channel('service_dashboard_rt').on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages', filter: `clinic_id=eq.${profile.clinic_id}` }, () => fetchData()).on('postgres_changes', { event: '*', schema: 'public', table: 'leads', filter: `clinic_id=eq.${profile.clinic_id}` }, () => fetchData()).on('postgres_changes', { event: '*', schema: 'public', table: 'automation_logs', filter: `clinic_id=eq.${profile.clinic_id}` }, () => fetchData()).on('postgres_changes', { event: '*', schema: 'public', table: 'appointments', filter: `clinic_id=eq.${profile.clinic_id}` }, () => fetchData()).subscribe();
+    if (!clinicId) return;
+    const channel = supabase.channel('service_dashboard_rt').on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages', filter: `clinic_id=eq.${clinicId}` }, () => fetchData()).on('postgres_changes', { event: '*', schema: 'public', table: 'leads', filter: `clinic_id=eq.${clinicId}` }, () => fetchData()).on('postgres_changes', { event: '*', schema: 'public', table: 'automation_logs', filter: `clinic_id=eq.${clinicId}` }, () => fetchData()).on('postgres_changes', { event: '*', schema: 'public', table: 'appointments', filter: `clinic_id=eq.${clinicId}` }, () => fetchData()).subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [fetchData, profile?.clinic_id]);
+  }, [fetchData, activeClinicId, profile?.clinic_id]);
 
   if (loading || !data) {
     return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 text-teal-600 animate-spin" /></div>;

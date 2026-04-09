@@ -354,7 +354,7 @@ export function MarketingAnalytics() {
           const dateStr = format(leadDate, 'yyyy-MM-dd');
           const manualLeads = marketingData.find(d => d.date === dateStr && d.platform === platform)?.manual_leads_count;
 
-          if (manualLeads === null || manualLeads === undefined) {
+          if (manualLeads === null || manualLeads === undefined || manualLeads === 0) {
             stats[pKey][platform].leads += 1;
             if (lead.capture_channel === 'forms') stats[pKey][platform].forms_leads += 1;
             else stats[pKey][platform].whatsapp_leads += 1;
@@ -372,7 +372,7 @@ export function MarketingAnalytics() {
             const dateStr = format(convDate, 'yyyy-MM-dd');
             const manualConvs = marketingData.find(d => d.date === dateStr && d.platform === platform)?.manual_conversions_count;
 
-            if (manualConvs === null || manualConvs === undefined) {
+            if (manualConvs === null || manualConvs === undefined || manualConvs === 0) {
               stats[pKey][platform].convs += 1;
             }
             // Auto-sum estimated_value if no manual conv_value

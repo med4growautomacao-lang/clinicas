@@ -16,6 +16,8 @@ import {
   BellRing,
   Calendar,
   ChevronDown,
+  Star,
+  ThumbsUp,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "../contexts/AuthContext";
@@ -35,6 +37,10 @@ interface DashboardData {
   confirmations: number;
   slaBreaches: number;
   pendingLeads: number;
+  csatAnswered: number;
+  csatAvgScore: number | null;
+  csatType: string;
+  csatDistribution: { score: number; count: number }[];
   dailyData: { 
     day: string; 
     label: string; 
@@ -115,6 +121,8 @@ export function ServiceDashboard() {
         dailyLeadsRes,
         dailyAptsRes,
         dailyLogsRes,
+        csatRes,
+        csatConfigRes,
       ] = await Promise.all([
         supabase.from('leads').select('id', { count: 'exact', head: true }).eq('clinic_id', clinicId),
         supabase.from('chat_messages').select('lead_id').eq('clinic_id', clinicId).eq('sender', 'ai').gte('created_at', rangeStart).lte('created_at', rangeEnd),
@@ -134,6 +142,8 @@ export function ServiceDashboard() {
         supabase.from('leads').select('created_at').eq('clinic_id', clinicId).gte('created_at', rangeStart).lte('created_at', rangeEnd).order('created_at', { ascending: true }),
         supabase.from('appointments').select('created_at').eq('clinic_id', clinicId).gte('created_at', rangeStart).lte('created_at', rangeEnd).order('created_at', { ascending: true }),
         supabase.from('automation_logs').select('triggered_at, type').eq('clinic_id', clinicId).gte('triggered_at', rangeStart).lte('triggered_at', rangeEnd).order('triggered_at', { ascending: true }),
+        supabase.from('leads').select('csat_score').eq('clinic_id', clinicId).not('csat_score', 'is', null).gte('csat_answered_at', rangeStart).lte('csat_answered_at', rangeEnd),
+        supabase.from('ai_config').select('csat_type').eq('clinic_id', clinicId).maybeSingle(),
       ]);
 
       const uniqueAILeads = new Set((aiLeadsRes.data || []).map((m: any) => m.lead_id)).size;
@@ -190,6 +200,15 @@ export function ServiceDashboard() {
         ...val
       }));
 
+      const csatScores = (csatRes.data || []).map((l: any) => l.csat_score as number);
+      const csatAnswered = csatScores.length;
+      const csatAvgScore = csatAnswered > 0 ? csatScores.reduce((a, b) => a + b, 0) / csatAnswered : null;
+      const csatDistMap: Record<number, number> = {};
+      csatScores.forEach((s) => { csatDistMap[s] = (csatDistMap[s] || 0) + 1; });
+      const csatDistribution = Object.entries(csatDistMap)
+        .map(([score, count]) => ({ score: parseInt(score), count: count as number }))
+        .sort((a, b) => b.score - a.score);
+
       const pending = (pendingRes.data || []).filter((l: any) => {
         if (!l.last_message_at) return false;
         if (!l.last_outbound_at) return true;
@@ -210,6 +229,10 @@ export function ServiceDashboard() {
         confirmations: confirmRes.count || 0,
         slaBreaches: slaRes.count || 0,
         pendingLeads: pending,
+        csatAnswered,
+        csatAvgScore,
+        csatType: csatConfigRes.data?.csat_type ?? 'csat',
+        csatDistribution,
         dailyData,
       });
     } catch (err) {
@@ -379,6 +402,75 @@ export function ServiceDashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* CSAT / NPS Card */}
+      <Card className="border border-slate-200 shadow-sm overflow-hidden">
+        <CardHeader className="bg-slate-50 border-b border-slate-100 py-3">
+          <CardTitle className="text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+            <Star className="w-4 h-4 text-indigo-500" />
+            Satisfação dos Pacientes — {data.csatType === 'nps' ? 'NPS' : data.csatType === 'both' ? 'CSAT / NPS' : 'CSAT'}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-5">
+          {data.csatAnswered === 0 ? (
+            <div className="flex flex-col items-center justify-center py-10 gap-3 text-slate-400">
+              <Star className="w-10 h-10 text-slate-200" />
+              <p className="text-sm font-semibold">Nenhuma resposta no período</p>
+              <p className="text-xs">As notas aparecerão aqui após os pacientes responderem à pesquisa.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* KPIs */}
+              <div className="flex flex-col gap-4">
+                <div className="flex flex-col items-center justify-center p-5 rounded-xl bg-indigo-50 border border-indigo-100 text-center">
+                  <Star className="w-5 h-5 text-indigo-400 mb-1" />
+                  <p className="text-3xl font-bold text-indigo-700">{data.csatAvgScore !== null ? data.csatAvgScore.toFixed(1) : '—'}</p>
+                  <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider mt-1">Nota Média</p>
+                  <p className="text-[10px] text-indigo-300 font-medium">de {data.csatType === 'csat' ? '5' : '10'}</p>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-slate-50 border border-slate-100 text-center">
+                    <ThumbsUp className="w-4 h-4 text-emerald-500 mb-1" />
+                    <p className="text-xl font-bold text-slate-900">{data.csatAnswered}</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-0.5">Respondidos</p>
+                  </div>
+                  <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-slate-50 border border-slate-100 text-center">
+                    <TrendingUp className="w-4 h-4 text-blue-500 mb-1" />
+                    <p className="text-xl font-bold text-slate-900">{data.totalLeads > 0 ? ((data.csatAnswered / data.totalLeads) * 100).toFixed(0) : 0}%</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-0.5">Resp. Rate</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Distribution */}
+              <div className="lg:col-span-2 flex flex-col justify-center gap-2.5">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Distribuição de Notas</p>
+                {data.csatDistribution.map(({ score, count }) => {
+                  const maxCount = Math.max(...data.csatDistribution.map(d => d.count), 1);
+                  const pct = (count / maxCount) * 100;
+                  const isHigh = data.csatType === 'nps' ? score >= 9 : score >= 4;
+                  const isMid = data.csatType === 'nps' ? score >= 7 : score === 3;
+                  const barColor = isHigh ? 'bg-emerald-500' : isMid ? 'bg-amber-400' : 'bg-rose-400';
+                  return (
+                    <div key={score} className="flex items-center gap-3">
+                      <span className="text-xs font-bold text-slate-600 w-5 text-right shrink-0">{score}</span>
+                      <div className="flex-1 bg-slate-100 rounded-full h-5 overflow-hidden">
+                        <motion.div
+                          initial={{ width: 0 }}
+                          animate={{ width: `${pct}%` }}
+                          transition={{ duration: 0.6 }}
+                          className={`h-full rounded-full ${barColor}`}
+                        />
+                      </div>
+                      <span className="text-xs font-bold text-slate-500 w-6 shrink-0">{count}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card className="border border-slate-200 shadow-sm overflow-hidden">
         <CardHeader className="bg-slate-50 border-b border-slate-100 py-3"><CardTitle className="text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2"><Bot className="w-4 h-4 text-teal-600" />Performance do Comercial (Período)</CardTitle></CardHeader>

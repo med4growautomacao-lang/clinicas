@@ -777,6 +777,10 @@ export interface AIConfig {
   transition_rules: any[] | null;
   finish_service_enabled: boolean;
   finish_service_message: string;
+  csat_enabled: boolean;
+  csat_type: 'csat' | 'nps' | 'both';
+  csat_message: string | null;
+  csat_delay_minutes: number;
   sla_minutes: number;
   business_hours: { start: string; end: string; days: number[] };
   default_ticket_value: number;

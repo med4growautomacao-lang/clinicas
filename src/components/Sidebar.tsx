@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   LayoutDashboard,
   Bot,
@@ -12,11 +12,13 @@ import {
   ShieldCheck,
   LogOut,
   BarChart3,
+  ChevronDown,
+  ChevronsUpDown,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserRole } from "../contexts/AuthContext";
-import { ChevronDown } from "lucide-react";
+import { supabase } from "../lib/supabase";
 
 // Logo removed for professional medicine icon
 
@@ -27,6 +29,30 @@ interface SidebarProps {
 
 export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
   const { clinicName, userRole, signOut, profile, activeClinicId, setActiveClinicId, activeClinicName, setActiveClinicName } = useAuth();
+  const [clinics, setClinics] = useState<{ id: string; name: string }[]>([]);
+  const [showClinicPicker, setShowClinicPicker] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+
+  // Carrega clínicas da org para o switcher
+  useEffect(() => {
+    if (userRole !== 'org_admin' || !profile?.organization_id) return;
+    supabase
+      .from('clinics')
+      .select('id, name')
+      .eq('organization_id', profile.organization_id)
+      .order('name')
+      .then(({ data }) => setClinics(data || []));
+  }, [userRole, profile?.organization_id]);
+
+  // Fecha picker ao clicar fora
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node))
+        setShowClinicPicker(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   // Org-admin com clínica ativa navega como gestor
   const effectiveRole = userRole === 'org_admin' && activeClinicId ? 'gestor' : userRole;
@@ -93,7 +119,49 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
       {userRole === 'org_admin' && activeClinicId && (
         <div className="mx-3 mb-2 p-3 bg-violet-50 border border-violet-200 rounded-xl">
           <p className="text-[9px] font-bold text-violet-500 uppercase tracking-widest mb-1">Visualizando clínica</p>
-          <p className="text-xs font-bold text-violet-900 truncate">{activeClinicName}</p>
+
+          {/* Switcher de clínica */}
+          <div ref={pickerRef} className="relative">
+            <button
+              onClick={() => setShowClinicPicker(v => !v)}
+              className="w-full flex items-center justify-between gap-1 text-xs font-bold text-violet-900 hover:bg-violet-100 rounded-lg px-1.5 py-1 transition-all"
+            >
+              <span className="truncate">{activeClinicName}</span>
+              <ChevronsUpDown className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+            </button>
+
+            <AnimatePresence>
+              {showClinicPicker && (
+                <motion.div
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  transition={{ duration: 0.12 }}
+                  className="absolute bottom-full left-0 right-0 mb-1 bg-white border border-violet-200 rounded-xl shadow-lg py-1 z-50 max-h-52 overflow-y-auto custom-scrollbar"
+                >
+                  {clinics.map(c => (
+                    <button
+                      key={c.id}
+                      onClick={() => {
+                        setActiveClinicId(c.id);
+                        setActiveClinicName(c.name);
+                        setShowClinicPicker(false);
+                      }}
+                      className={cn(
+                        "w-full text-left px-3 py-2 text-xs font-semibold transition-colors truncate",
+                        c.id === activeClinicId
+                          ? "bg-violet-50 text-violet-700"
+                          : "text-slate-700 hover:bg-slate-50"
+                      )}
+                    >
+                      {c.name}
+                    </button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
           <button
             onClick={() => { setActiveClinicId(null); setActiveClinicName(null); setActiveTab('org-admin'); }}
             className="mt-2 w-full text-[10px] font-bold text-violet-600 hover:text-violet-800 hover:bg-violet-100 rounded-lg py-1 transition-all"

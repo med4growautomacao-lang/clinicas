@@ -12,6 +12,7 @@ interface Clinic {
   logo_url: string | null;
   organization_id: string | null;
   whatsapp_status?: string | null;
+  category?: string | null;
 }
 
 interface OrgUser {
@@ -33,6 +34,16 @@ const ORG_ROLES = [
 ];
 const CLINIC_ROLES = ['gestor', 'medico', 'secretaria'];
 const PLANS = ['free', 'pro', 'enterprise'];
+const CLINIC_CATEGORIES = [
+  { value: 'clinica_medica', label: 'Clínica Médica' },
+  { value: 'odontologia', label: 'Consultório Odontológico' },
+  { value: 'estetica', label: 'Clínica de Estética' },
+  { value: 'psicologia', label: 'Psicologia / Terapia' },
+  { value: 'fisioterapia', label: 'Fisioterapia' },
+  { value: 'nutricao', label: 'Nutrição' },
+  { value: 'veterinaria', label: 'Veterinária' },
+  { value: 'outro', label: 'Outro' },
+];
 
 export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
   const { profile, activeClinicId, setActiveClinicId, setActiveClinicName } = useAuth();
@@ -45,7 +56,8 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
 
   // Modal: nova clínica
   const [showClinicModal, setShowClinicModal] = useState(false);
-  const [clinicForm, setClinicForm] = useState({ name: '', plan: 'free', ownerName: '', ownerEmail: '', ownerPassword: '' });
+  const [clinicForm, setClinicForm] = useState({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '' });
+  const [categoryFilter, setCategoryFilter] = useState('');
   const [clinicSaving, setClinicSaving] = useState(false);
   const [clinicError, setClinicError] = useState('');
 
@@ -69,7 +81,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
     const [{ data: clinicsData }, { data: waData }] = await Promise.all([
       supabase
         .from("clinics")
-        .select("id, name, plan, logo_url, organization_id")
+        .select("id, name, plan, logo_url, organization_id, category")
         .eq("organization_id", profile.organization_id)
         .order("name"),
       supabase
@@ -107,7 +119,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
     }
     setClinicSaving(true);
     setClinicError('');
-    const { error } = await supabase.rpc('create_clinic_with_owner', {
+    const { data: newClinic, error } = await supabase.rpc('create_clinic_with_owner', {
       p_clinic_name: clinicForm.name.trim(),
       p_plan: clinicForm.plan,
       p_organization_id: profile?.organization_id || null,
@@ -115,10 +127,13 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
       p_owner_email: clinicForm.ownerEmail.trim(),
       p_owner_password: clinicForm.ownerPassword,
     });
+    if (!error && clinicForm.category) {
+      await supabase.from('clinics').update({ category: clinicForm.category }).eq('name', clinicForm.name.trim()).eq('organization_id', profile?.organization_id || '');
+    }
     setClinicSaving(false);
     if (error) { setClinicError(error.message); return; }
     setShowClinicModal(false);
-    setClinicForm({ name: '', plan: 'free', ownerName: '', ownerEmail: '', ownerPassword: '' });
+    setClinicForm({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '' });
     fetchClinics();
   };
 
@@ -233,17 +248,36 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
         )}
       </div>
 
-      {/* Search bar */}
+      {/* Search bar + category filter */}
       {activeSubTab === "clinics" && (
-        <div className="relative">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-          <input
-            type="text"
-            placeholder="Buscar clínica..."
-            value={clinicSearch}
-            onChange={e => setClinicSearch(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-300 transition-all"
-          />
+        <div className="flex flex-col gap-2">
+          <div className="relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Buscar clínica..."
+              value={clinicSearch}
+              onChange={e => setClinicSearch(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-300 transition-all"
+            />
+          </div>
+          <div className="flex gap-1.5 flex-wrap">
+            <button
+              onClick={() => setCategoryFilter('')}
+              className={cn("px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all border", categoryFilter === '' ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-500 border-slate-200 hover:border-violet-300")}
+            >
+              Todas
+            </button>
+            {CLINIC_CATEGORIES.map(cat => (
+              <button
+                key={cat.value}
+                onClick={() => setCategoryFilter(categoryFilter === cat.value ? '' : cat.value)}
+                className={cn("px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all border", categoryFilter === cat.value ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-500 border-slate-200 hover:border-violet-300")}
+              >
+                {cat.label}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -261,7 +295,10 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-              {clinics.filter(c => c.name.toLowerCase().includes(clinicSearch.toLowerCase())).map((clinic) => (
+              {clinics.filter(c =>
+                c.name.toLowerCase().includes(clinicSearch.toLowerCase()) &&
+                (categoryFilter === '' || c.category === categoryFilter)
+              ).map((clinic) => (
                 <motion.div
                   key={clinic.id}
                   whileHover={{ y: -1 }}
@@ -315,7 +352,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                   <div className={cn(
                     "flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-[10px] font-bold mb-1.5 border",
                     clinic.whatsapp_status === 'connected'
-                      ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+                      ? "bg-emerald-700 text-white border-emerald-800"
                       : "bg-slate-50 text-slate-400 border-slate-100"
                   )}>
                     {clinic.whatsapp_status === 'connected'
@@ -417,6 +454,19 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                       </button>
                     ))}
                   </div>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1">Categoria</label>
+                  <select
+                    value={clinicForm.category}
+                    onChange={e => setClinicForm(f => ({ ...f, category: e.target.value }))}
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white text-slate-700"
+                  >
+                    <option value="">Selecionar categoria...</option>
+                    {CLINIC_CATEGORIES.map(cat => (
+                      <option key={cat.value} value={cat.value}>{cat.label}</option>
+                    ))}
+                  </select>
                 </div>
                 <div className="pt-1 border-t border-slate-100">
                   <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Gestor Responsável</p>

@@ -10,6 +10,7 @@ import { cn } from "@/src/lib/utils";
 interface LeadChatProps {
   lead: Lead;
   onClose: () => void;
+  isDragging?: boolean;
 }
 
 function stripToolCallPrefix(text: string): string {
@@ -76,7 +77,7 @@ export function extractMessageText(message: any): string {
   return JSON.stringify(message);
 }
 
-export function LeadChat({ lead, onClose }: LeadChatProps) {
+export function LeadChat({ lead, onClose, isDragging = false }: LeadChatProps) {
   const { data: messages, loading, send } = useChatMessages(lead.id, lead.phone);
   const { update: updateLead } = useLeads();
   const [content, setContent] = useState("");
@@ -141,7 +142,7 @@ export function LeadChat({ lead, onClose }: LeadChatProps) {
       initial={{ opacity: 0, x: 300 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: 300 }}
-      className="fixed inset-y-0 right-0 w-full max-w-md bg-white shadow-2xl z-[70] flex flex-col border-l border-slate-200"
+      className={cn("fixed inset-y-0 right-0 w-full max-w-md bg-white shadow-2xl z-[70] flex flex-col border-l border-slate-200", isDragging && "pointer-events-none")}
     >
       {/* Header */}
       <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-white sticky top-0 z-10">

@@ -174,7 +174,7 @@ export function ConnectPage() {
             
             <div className="space-y-2">
                 <h1 className="text-3xl font-black text-slate-900 tracking-tight">Sucesso!</h1>
-                <p className="text-slate-500 font-medium italic">Seu WhatsApp foi integrado à {state.clinic_name || 'clínica'}.</p>
+                <p className="text-slate-500 font-medium italic">Seu WhatsApp foi integrado ao sistema.</p>
             </div>
 
             {state.phone_number && (

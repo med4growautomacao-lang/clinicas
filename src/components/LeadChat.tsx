@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { X, Send, Bot, User, Loader2, MessageSquare, Phone } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "./ui/button";
-import { useChatMessages, ChatMessage, Lead, useLeads } from "../hooks/useSupabase";
+import { useChatMessages, ChatMessage, Lead, useLeads, useFunnelStages } from "../hooks/useSupabase";
 import { format, parseISO, isToday, isYesterday, isSameDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/src/lib/utils";
@@ -80,6 +80,7 @@ export function extractMessageText(message: any): string {
 export function LeadChat({ lead, onClose, isDragging = false }: LeadChatProps) {
   const { data: messages, loading, send } = useChatMessages(lead.id, lead.phone);
   const { update: updateLead } = useLeads();
+  const { data: stages } = useFunnelStages();
   const [content, setContent] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -184,6 +185,22 @@ export function LeadChat({ lead, onClose, isDragging = false }: LeadChatProps) {
           <X className="w-5 h-5" />
         </button>
       </div>
+
+      {/* Stage selector */}
+      {stages.length > 0 && (
+        <div className="px-6 py-2 border-b border-slate-100 bg-slate-50/60 flex items-center gap-2">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider shrink-0">Etapa</span>
+          <select
+            value={lead.stage_id || ''}
+            onChange={e => updateLead(lead.id, { stage_id: e.target.value })}
+            className="flex-1 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 transition-all"
+          >
+            {stages.map(s => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden p-6 bg-slate-50/50 custom-scrollbar relative block">

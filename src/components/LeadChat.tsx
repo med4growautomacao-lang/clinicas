@@ -3,7 +3,7 @@ import { X, Send, Bot, User, Loader2, MessageSquare, Phone } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "./ui/button";
 import { useChatMessages, ChatMessage, Lead, useLeads, useFunnelStages } from "../hooks/useSupabase";
-import { format, parseISO, isToday, isYesterday, isSameDay } from "date-fns";
+import { format, isToday, isYesterday } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/src/lib/utils";
 
@@ -216,77 +216,83 @@ export function LeadChat({ lead, onClose, isDragging = false }: LeadChatProps) {
             </div>
             <p className="text-sm font-medium text-center max-w-[200px]">Nenhuma mensagem encontrada nesta jornada.</p>
           </div>
-        ) : (
-          <div className="space-y-6 pb-4">
-            {[...messages].sort((a, b) => parseISO(a.created_at).getTime() - parseISO(b.created_at).getTime()).map((msg, idx, sorted) => {
-              const isOutbound = msg.direction === 'outbound';
-              const isAI = msg.sender === 'ai';
-
-              const currentDate = parseISO(msg.created_at);
-              const prevDate = idx > 0 ? parseISO(sorted[idx - 1].created_at) : null;
-              const showDateSeparator = !prevDate || !isSameDay(currentDate, prevDate);
-
-              const getDateLabel = (date: Date) => {
-                if (isToday(date)) return 'Hoje';
-                if (isYesterday(date)) return 'Ontem';
-                return format(date, "d 'de' MMMM", { locale: ptBR });
-              };
-              
-              return (
-                <React.Fragment key={msg.id}>
-                  {showDateSeparator && (
-                    <div className="flex justify-center my-6">
-                      <span className="bg-white/90 backdrop-blur-sm border border-slate-100 text-[10px] font-bold text-slate-500 uppercase tracking-widest px-4 py-1.5 rounded-full shadow-sm">
-                        {getDateLabel(currentDate)}
-                      </span>
-                    </div>
-                  )}
-                  <div
-                    className={cn(
-                      "flex gap-4 max-w-[85%] min-w-0",
-                      isOutbound ? "ml-auto flex-row-reverse" : ""
-                    )}
-                  >
-                    <div className={cn(
-                      "w-8 h-8 rounded-lg shadow-sm flex-shrink-0 flex items-center justify-center",
-                      isAI ? "bg-teal-600 shadow-md" : 
-                      (isOutbound ? "bg-slate-800 shadow-md" : "bg-white border border-slate-200")
-                    )}>
-                      {isAI ? (
-                        <Bot className="w-5 h-5 text-white" />
-                      ) : (
-                        <User className={cn("w-4 h-4", isOutbound ? "text-white" : "text-slate-400")} />
-                      )}
-                    </div>
-                    
-                    <div className={cn(
-                      "px-4 py-3 rounded-2xl text-sm shadow-sm max-w-full overflow-hidden break-words",
-                      isAI 
-                        ? "bg-teal-600 text-white rounded-tr-none" 
-                        : (isOutbound 
-                            ? "bg-slate-800 text-white rounded-tr-none"
-                            : "bg-white border border-slate-200 text-slate-700 rounded-tl-none")
-                    )}>
-                      <p className="text-sm font-medium leading-relaxed whitespace-pre-wrap">
-                        {extractMessageText(msg.message)}
-                      </p>
-                      <div className="flex items-center justify-between gap-4 mt-1">
-                        <span className={cn(
-                          "text-[9px] block opacity-60 font-bold uppercase ml-auto",
-                          isOutbound || isAI ? "text-white text-right" : "text-slate-400"
-                        )}>
-                          {format(parseISO(msg.created_at), 'HH:mm')}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </React.Fragment>
+        ) : (() => {
+            const getDateLabel = (date: Date) => {
+              if (isToday(date)) return 'Hoje';
+              if (isYesterday(date)) return 'Ontem';
+              return format(date, "d 'de' MMMM", { locale: ptBR });
+            };
+            const sorted = [...messages].sort((a, b) =>
+              new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
             );
-          })}
-          {/* Elemento âncora invisível no final exato do container */}
-          <div ref={endRef} className="h-1 opacity-0 pointer-events-none" />
-        </div>
-      )}
+            const seenDates = new Set<string>();
+            return (
+              <div className="space-y-6 pb-4">
+                {sorted.map((msg) => {
+                  const isOutbound = msg.direction === 'outbound';
+                  const isAI = msg.sender === 'ai';
+                  const currentDate = new Date(msg.created_at);
+                  const dateKey = format(currentDate, 'yyyy-MM-dd');
+                  const showDateSeparator = !seenDates.has(dateKey);
+                  if (showDateSeparator) seenDates.add(dateKey);
+
+                  return (
+                    <React.Fragment key={msg.id}>
+                      {showDateSeparator && (
+                        <div className="flex justify-center my-6">
+                          <span className="bg-white/90 backdrop-blur-sm border border-slate-100 text-[10px] font-bold text-slate-500 uppercase tracking-widest px-4 py-1.5 rounded-full shadow-sm">
+                            {getDateLabel(currentDate)}
+                          </span>
+                        </div>
+                      )}
+                      <div
+                        className={cn(
+                          "flex gap-4 max-w-[85%] min-w-0",
+                          isOutbound ? "ml-auto flex-row-reverse" : ""
+                        )}
+                      >
+                        <div className={cn(
+                          "w-8 h-8 rounded-lg shadow-sm flex-shrink-0 flex items-center justify-center",
+                          isAI ? "bg-teal-600 shadow-md" :
+                          (isOutbound ? "bg-slate-800 shadow-md" : "bg-white border border-slate-200")
+                        )}>
+                          {isAI ? (
+                            <Bot className="w-5 h-5 text-white" />
+                          ) : (
+                            <User className={cn("w-4 h-4", isOutbound ? "text-white" : "text-slate-400")} />
+                          )}
+                        </div>
+
+                        <div className={cn(
+                          "px-4 py-3 rounded-2xl text-sm shadow-sm max-w-full overflow-hidden break-words",
+                          isAI
+                            ? "bg-teal-600 text-white rounded-tr-none"
+                            : (isOutbound
+                                ? "bg-slate-800 text-white rounded-tr-none"
+                                : "bg-white border border-slate-200 text-slate-700 rounded-tl-none")
+                        )}>
+                          <p className="text-sm font-medium leading-relaxed whitespace-pre-wrap">
+                            {extractMessageText(msg.message)}
+                          </p>
+                          <div className="flex items-center justify-between gap-4 mt-1">
+                            <span className={cn(
+                              "text-[9px] block opacity-60 font-bold uppercase ml-auto",
+                              isOutbound || isAI ? "text-white text-right" : "text-slate-400"
+                            )}>
+                              {format(new Date(msg.created_at), 'HH:mm')}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </React.Fragment>
+                  );
+                })}
+                {/* Elemento âncora invisível no final exato do container */}
+                <div ref={endRef} className="h-1 opacity-0 pointer-events-none" />
+              </div>
+            );
+          })()
+      }
     </div>
 
     {/* Input Area */}

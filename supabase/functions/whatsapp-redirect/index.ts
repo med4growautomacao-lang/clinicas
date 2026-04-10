@@ -46,8 +46,8 @@ serve(async (req) => {
   const utmContent  = url.searchParams.get('utm_content')  || null
   const utmTerm     = url.searchParams.get('utm_term')     || null
 
-  // Gera código de protocolo (8 hex chars)
-  const protocolo = crypto.randomUUID().replace(/-/g, '').slice(0, 8)
+  // Gera código de protocolo (4 dígitos numéricos, igual ao rastracking_nod)
+  const protocolo = String(Math.floor(1000 + Math.random() * 9000))
 
   // Salva sessão
   await supabase.from('link_sessions').insert({

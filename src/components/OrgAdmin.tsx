@@ -258,19 +258,28 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
           <div className="flex gap-1.5 flex-wrap">
             <button
               onClick={() => setCategoryFilter('')}
-              className={cn("px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all border", categoryFilter === '' ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-500 border-slate-200 hover:border-violet-300")}
+              className={cn("px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all border flex items-center gap-1", categoryFilter === '' ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-500 border-slate-200 hover:border-violet-300")}
             >
               Todas
+              <span className={cn("px-1.5 py-0.5 rounded-full text-[9px] font-black", categoryFilter === '' ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500")}>
+                {clinics.length}
+              </span>
             </button>
-            {CLINIC_CATEGORIES.map(cat => (
-              <button
-                key={cat.value}
-                onClick={() => setCategoryFilter(categoryFilter === cat.value ? '' : cat.value)}
-                className={cn("px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all border", categoryFilter === cat.value ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-500 border-slate-200 hover:border-violet-300")}
-              >
-                {cat.label}
-              </button>
-            ))}
+            {CLINIC_CATEGORIES.map(cat => {
+              const count = clinics.filter(c => c.category === cat.value).length;
+              return (
+                <button
+                  key={cat.value}
+                  onClick={() => setCategoryFilter(categoryFilter === cat.value ? '' : cat.value)}
+                  className={cn("px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all border flex items-center gap-1", categoryFilter === cat.value ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-500 border-slate-200 hover:border-violet-300")}
+                >
+                  {cat.label}
+                  <span className={cn("px-1.5 py-0.5 rounded-full text-[9px] font-black", categoryFilter === cat.value ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500")}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}

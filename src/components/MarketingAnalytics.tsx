@@ -44,7 +44,8 @@ import {
   Cell,
   BarChart,
   Bar,
-  Legend
+  Legend,
+  ReferenceLine
 } from 'recharts';
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -1193,48 +1194,67 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
               })}
             </div>
           </CardHeader>
-          <div className="h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData}>
-                <defs>
-                  <linearGradient id="colorMetric" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={activeMetric.color} stopOpacity={0.1} />
-                    <stop offset="95%" stopColor={activeMetric.color} stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 'bold' }} dy={10} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 'bold' }} />
-                <Tooltip
-                  contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', padding: '12px' }}
-                  formatter={(value: any) => [
-                    activeMetric.type === 'currency' ? `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : activeMetric.type === 'percent' ? `${value.toFixed(1)}%` : value,
-                    activeMetric.label
-                  ]}
-                />
-                <Area
-                  type="monotone"
-                  dataKey={selectedMetric}
-                  stroke={activeMetric.color}
-                  strokeWidth={3}
-                  fillOpacity={1}
-                  fill="url(#colorMetric)"
-                  name={activeMetric.label}
-                />
-                {isComparing && (
-                  <Area
-                    type="monotone"
-                    dataKey={`${selectedMetric}_prev`}
-                    stroke={activeMetric.color}
-                    strokeWidth={2}
-                    fill="none"
-                    strokeDasharray="5 5"
-                    name={`${activeMetric.label} (Anterior)`}
-                  />
-                )}
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+          {(() => {
+            const values = chartData.map((d: any) => d[selectedMetric]).filter((v: number) => v != null);
+            const avg = values.length > 0 ? values.reduce((a: number, b: number) => a + b, 0) / values.length : 0;
+            const avgLabel = activeMetric.type === 'currency'
+              ? `Média R$ ${avg.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              : activeMetric.type === 'percent'
+              ? `Média ${avg.toFixed(1)}%`
+              : `Média ${avg.toFixed(1)}`;
+            return (
+              <div className="h-[300px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={chartData}>
+                    <defs>
+                      <linearGradient id="colorMetric" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor={activeMetric.color} stopOpacity={0.1} />
+                        <stop offset="95%" stopColor={activeMetric.color} stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 'bold' }} dy={10} />
+                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 'bold' }} />
+                    <Tooltip
+                      contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', padding: '12px' }}
+                      formatter={(value: any) => [
+                        activeMetric.type === 'currency' ? `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : activeMetric.type === 'percent' ? `${value.toFixed(1)}%` : value,
+                        activeMetric.label
+                      ]}
+                    />
+                    <ReferenceLine
+                      y={avg}
+                      stroke={activeMetric.color}
+                      strokeDasharray="6 3"
+                      strokeWidth={1.5}
+                      strokeOpacity={0.6}
+                      label={{ value: avgLabel, position: 'insideTopRight', fontSize: 9, fontWeight: 'bold', fill: activeMetric.color, opacity: 0.8 }}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey={selectedMetric}
+                      stroke={activeMetric.color}
+                      strokeWidth={3}
+                      fillOpacity={1}
+                      fill="url(#colorMetric)"
+                      name={activeMetric.label}
+                    />
+                    {isComparing && (
+                      <Area
+                        type="monotone"
+                        dataKey={`${selectedMetric}_prev`}
+                        stroke={activeMetric.color}
+                        strokeWidth={2}
+                        fill="none"
+                        strokeDasharray="5 5"
+                        name={`${activeMetric.label} (Anterior)`}
+                      />
+                    )}
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            );
+          })()}
         </Card>
       </div>
     </div>

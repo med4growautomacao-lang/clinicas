@@ -35,13 +35,7 @@ const ORG_ROLES = [
 const CLINIC_ROLES = ['gestor', 'medico', 'secretaria'];
 const PLANS = ['free', 'pro', 'enterprise'];
 const CLINIC_CATEGORIES = [
-  { value: 'clinica_medica', label: 'Clínica Médica' },
-  { value: 'odontologia', label: 'Consultório Odontológico' },
-  { value: 'estetica', label: 'Clínica de Estética' },
-  { value: 'psicologia', label: 'Psicologia / Terapia' },
-  { value: 'fisioterapia', label: 'Fisioterapia' },
-  { value: 'nutricao', label: 'Nutrição' },
-  { value: 'veterinaria', label: 'Veterinária' },
+  { value: 'clinica', label: 'Clínica' },
   { value: 'outro', label: 'Outro' },
 ];
 

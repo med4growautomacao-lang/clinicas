@@ -218,12 +218,12 @@ export function LeadChat({ lead, onClose, isDragging = false }: LeadChatProps) {
           </div>
         ) : (
           <div className="space-y-6 pb-4">
-            {messages.map((msg, idx) => {
+            {[...messages].sort((a, b) => parseISO(a.created_at).getTime() - parseISO(b.created_at).getTime()).map((msg, idx, sorted) => {
               const isOutbound = msg.direction === 'outbound';
               const isAI = msg.sender === 'ai';
-              
+
               const currentDate = parseISO(msg.created_at);
-              const prevDate = idx > 0 ? parseISO(messages[idx - 1].created_at) : null;
+              const prevDate = idx > 0 ? parseISO(sorted[idx - 1].created_at) : null;
               const showDateSeparator = !prevDate || !isSameDay(currentDate, prevDate);
 
               const getDateLabel = (date: Date) => {

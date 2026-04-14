@@ -105,8 +105,8 @@ export function MarketingAnalytics() {
   const [period, setPeriod] = useState<Period>('dia');
   const [viewMode, setViewMode] = useState<'dashboard' | 'table'>('dashboard');
   const [dateRange, setDateRange] = useState({
-    start: subDays(new Date(), 6),
-    end: new Date()
+    start: subDays(new Date(), 7),
+    end: subDays(new Date(), 1)
   });
 
   const { data: leads, loading: leadsLoading } = useLeads();
@@ -211,15 +211,18 @@ export function MarketingAnalytics() {
         label = "ESTA SEMANA";
         break;
       case '7days':
-        start = subDays(today, 6);
+        start = subDays(today, 7);
+        end = subDays(today, 1);
         label = "ÚLTIMOS 7 DIAS";
         break;
       case '28days':
-        start = subDays(today, 27);
+        start = subDays(today, 28);
+        end = subDays(today, 1);
         label = "ÚLTIMOS 28 DIAS";
         break;
       case '30days':
-        start = subDays(today, 29);
+        start = subDays(today, 30);
+        end = subDays(today, 1);
         label = "ÚLTIMOS 30 DIAS";
         break;
       case 'month':

@@ -62,9 +62,11 @@ function getDateRangeStart(range: DateRange, customStart?: string): string {
   if (range === 'custom' && customStart) {
     return new Date(customStart).toISOString();
   }
-  const now = new Date();
   const days = range === '7d' ? 7 : range === '15d' ? 15 : 30;
-  return new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
+  const start = new Date();
+  start.setDate(start.getDate() - days);
+  start.setHours(0, 0, 0, 0);
+  return start.toISOString();
 }
 
 export function ServiceDashboard() {
@@ -95,9 +97,12 @@ export function ServiceDashboard() {
     try {
       const now = new Date();
       const rangeStart = getDateRangeStart(dateRange, customStartDate);
+      const yesterday = new Date(now);
+      yesterday.setDate(yesterday.getDate() - 1);
+      yesterday.setHours(23, 59, 59, 999);
       const rangeEnd = dateRange === 'custom' && customEndDate
         ? new Date(customEndDate + 'T23:59:59').toISOString()
-        : now.toISOString();
+        : yesterday.toISOString();
 
       const rangeDays = dateRange === '7d' ? 7 : dateRange === '15d' ? 15 : dateRange === '30d' ? 30 : 
         Math.min(Math.ceil((new Date(rangeEnd).getTime() - new Date(rangeStart).getTime()) / (24*60*60*1000)), 30);

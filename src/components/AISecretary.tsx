@@ -1236,6 +1236,12 @@ export function AISecretary() {
           </div>
           {aiConfig && (
             <div className="flex items-center gap-3">
+              {aiConfig.test_mode_enabled && (
+                <span className="flex items-center gap-1 text-[10px] font-bold text-red-600 bg-red-50 border border-red-200 px-2 py-1 rounded-full">
+                  <AlertTriangle className="w-3 h-3" />
+                  IA Teste Ativo
+                </span>
+              )}
               <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
                 {aiConfig.auto_schedule ? 'Comercial Ativo' : 'Comercial Pausado'}
               </span>
@@ -1243,7 +1249,9 @@ export function AISecretary() {
                 onClick={() => updateAI({ ...aiConfig, auto_schedule: !aiConfig.auto_schedule })}
                 className={cn(
                   "w-12 h-6 rounded-full relative transition-all",
-                  aiConfig.auto_schedule ? "bg-teal-600" : "bg-slate-300"
+                  aiConfig.auto_schedule
+                    ? (aiConfig.test_mode_enabled ? "bg-red-500" : "bg-teal-600")
+                    : "bg-slate-300"
                 )}
               >
                 <div className={cn(
@@ -1744,6 +1752,79 @@ function ConfigView() {
                 />
               </div>
               <p className="text-xs text-slate-400 pl-1">Pré-preenchido automaticamente em novos leads.</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border border-red-100 shadow-sm md:col-span-2">
+          <CardHeader className="pb-4">
+            <CardTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-red-500" />
+              Modo Teste IA
+            </CardTitle>
+            <CardDescription className="text-slate-500 font-medium">
+              Restringe a IA a responder apenas para números autorizados. Ideal para testar antes de ativar em produção.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-bold text-slate-700">Ativar Modo Teste</p>
+                  <p className="text-xs text-slate-400 mt-0.5">Quando ativo, a IA comercial também é ativada automaticamente.</p>
+                </div>
+                <button
+                  onClick={() => {
+                    const newVal = !localConfig.test_mode_enabled;
+                    const updates: any = { test_mode_enabled: newVal };
+                    if (newVal) updates.auto_schedule = true;
+                    setConfig(updates);
+                  }}
+                  className={cn(
+                    "w-12 h-6 rounded-full relative transition-all flex-shrink-0",
+                    localConfig.test_mode_enabled ? "bg-red-500" : "bg-slate-300"
+                  )}
+                >
+                  <div className={cn(
+                    "w-4 h-4 bg-white rounded-full absolute top-1 transition-all shadow-sm",
+                    localConfig.test_mode_enabled ? "right-1" : "left-1"
+                  )} />
+                </button>
+              </div>
+
+              {localConfig.test_mode_enabled && (
+                <div className="space-y-5 pt-2 border-t border-red-100">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">
+                      Números Permitidos
+                    </label>
+                    <textarea
+                      rows={4}
+                      value={(localConfig.test_numbers || []).join('\n')}
+                      onChange={(e) => setConfig({
+                        test_numbers: e.target.value.split('\n').map((n: string) => n.trim()).filter(Boolean)
+                      })}
+                      placeholder={"5511999990000\n5521988880000"}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg font-mono text-sm focus:ring-2 focus:ring-red-100 focus:border-red-400 outline-none resize-none"
+                    />
+                    <p className="text-xs text-slate-400 pl-1">Um número por linha, no formato internacional (ex: 5511999990000).</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">
+                      Frase de Reinício de Ciclo
+                    </label>
+                    <input
+                      type="text"
+                      value={localConfig.test_reset_phrase || ''}
+                      onChange={(e) => setConfig({ test_reset_phrase: e.target.value })}
+                      placeholder="ex: reiniciar teste"
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg font-medium text-sm focus:ring-2 focus:ring-red-100 focus:border-red-400 outline-none"
+                    />
+                    <p className="text-xs text-slate-400 pl-1">Quando enviada por um número permitido, reinicia o ciclo da conversa.</p>
+                  </div>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>

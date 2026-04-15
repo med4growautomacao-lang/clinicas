@@ -787,6 +787,9 @@ export interface AIConfig {
   welcome_message_enabled: boolean;
   welcome_message_text: string | null;
   welcome_message_delay: number;
+  test_mode_enabled: boolean;
+  test_numbers: string[];
+  test_reset_phrase: string;
   updated_at: string;
 }
 

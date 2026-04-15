@@ -1768,6 +1768,7 @@ function ConfigView() {
           </CardHeader>
           <CardContent>
             <div className="space-y-6">
+              {/* Toggle */}
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-bold text-slate-700">Ativar Modo Teste</p>
@@ -1776,9 +1777,10 @@ function ConfigView() {
                 <button
                   onClick={() => {
                     const newVal = !localConfig.test_mode_enabled;
-                    const updates: any = { test_mode_enabled: newVal };
-                    if (newVal) updates.auto_schedule = true;
-                    setConfig(updates);
+                    const updated = { ...localConfig, test_mode_enabled: newVal, ...(newVal ? { auto_schedule: true } : {}) };
+                    setLocalConfig(updated);
+                    setIsDirty(true);
+                    updateAI(updated);
                   }}
                   className={cn(
                     "w-12 h-6 rounded-full relative transition-all flex-shrink-0",
@@ -1792,39 +1794,61 @@ function ConfigView() {
                 </button>
               </div>
 
-              {localConfig.test_mode_enabled && (
-                <div className="space-y-5 pt-2 border-t border-red-100">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">
-                      Números Permitidos
-                    </label>
-                    <textarea
-                      rows={4}
-                      value={(localConfig.test_numbers || []).join('\n')}
-                      onChange={(e) => setConfig({
-                        test_numbers: e.target.value.split('\n').map((n: string) => n.trim()).filter(Boolean)
-                      })}
-                      placeholder={"5511999990000\n5521988880000"}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg font-mono text-sm focus:ring-2 focus:ring-red-100 focus:border-red-400 outline-none resize-none"
-                    />
-                    <p className="text-xs text-slate-400 pl-1">Um número por linha, no formato internacional (ex: 5511999990000).</p>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">
-                      Frase de Reinício de Ciclo
-                    </label>
-                    <input
-                      type="text"
-                      value={localConfig.test_reset_phrase || ''}
-                      onChange={(e) => setConfig({ test_reset_phrase: e.target.value })}
-                      placeholder="ex: reiniciar teste"
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg font-medium text-sm focus:ring-2 focus:ring-red-100 focus:border-red-400 outline-none"
-                    />
-                    <p className="text-xs text-slate-400 pl-1">Quando enviada por um número permitido, reinicia o ciclo da conversa.</p>
-                  </div>
+              {/* Números Permitidos — sempre visível */}
+              <div className="space-y-2 pt-2 border-t border-slate-100">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">
+                  Números Permitidos
+                </label>
+                <div className="space-y-2">
+                  {(localConfig.test_numbers || []).map((num: string, idx: number) => (
+                    <div key={idx} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={num}
+                        onChange={(e) => {
+                          const nums = [...(localConfig.test_numbers || [])];
+                          nums[idx] = e.target.value;
+                          setConfig({ test_numbers: nums });
+                        }}
+                        placeholder="5511999990000"
+                        className="flex-1 px-3 py-2 border border-slate-200 rounded-lg font-mono text-sm focus:ring-2 focus:ring-red-100 focus:border-red-400 outline-none"
+                      />
+                      <button
+                        onClick={() => {
+                          const nums = (localConfig.test_numbers || []).filter((_: string, i: number) => i !== idx);
+                          setConfig({ test_numbers: nums });
+                        }}
+                        className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    onClick={() => setConfig({ test_numbers: [...(localConfig.test_numbers || []), ''] })}
+                    className="flex items-center gap-1.5 text-xs font-bold text-teal-600 hover:text-teal-700 px-1 py-1 transition-colors"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Adicionar número
+                  </button>
                 </div>
-              )}
+                <p className="text-xs text-slate-400 pl-1">Formato internacional, sem espaços (ex: 5511999990000).</p>
+              </div>
+
+              {/* Frase de reinício — sempre visível */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">
+                  Frase de Reinício de Ciclo
+                </label>
+                <input
+                  type="text"
+                  value={localConfig.test_reset_phrase || ''}
+                  onChange={(e) => setConfig({ test_reset_phrase: e.target.value })}
+                  placeholder="ex: reiniciar teste"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg font-medium text-sm focus:ring-2 focus:ring-red-100 focus:border-red-400 outline-none"
+                />
+                <p className="text-xs text-slate-400 pl-1">Quando enviada por um número permitido, reinicia o ciclo da conversa.</p>
+              </div>
             </div>
           </CardContent>
         </Card>

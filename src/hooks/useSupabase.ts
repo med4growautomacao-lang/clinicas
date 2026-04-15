@@ -843,16 +843,23 @@ export function useSettings() {
     if (!activeClinicId) return;
 
     const channel = supabase
-      .channel('whatsapp_instances_realtime')
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
+      .channel('settings_realtime')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
         table: 'whatsapp_instances'
       }, (payload) => {
-        console.log('Realtime event received:', payload);
         if (payload.new && (payload.new as any).clinic_id === activeClinicId) {
           fetch(true);
         }
+      })
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'ai_config',
+        filter: `clinic_id=eq.${activeClinicId}`
+      }, () => {
+        fetch(true);
       })
       .subscribe();
 

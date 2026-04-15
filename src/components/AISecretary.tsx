@@ -1243,7 +1243,7 @@ export function AISecretary() {
                 </span>
               )}
               <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                {aiConfig.auto_schedule ? 'Comercial Ativo' : 'Comercial Pausado'}
+                {aiConfig.auto_schedule ? 'Agente IA Ativo' : 'Agente IA Pausado'}
               </span>
               <button
                 onClick={() => updateAI({ ...aiConfig, auto_schedule: !aiConfig.auto_schedule })}

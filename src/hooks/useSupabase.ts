@@ -1280,6 +1280,7 @@ export interface TransitionRule {
   context?: string | null;
   lead_response?: string | null;
   message_to_send?: string | null;
+  order_index: number;
   created_at: string;
 }
 
@@ -1296,8 +1297,9 @@ export function useTransitionRules() {
       .from('stage_transition_rules')
       .select('*')
       .eq('clinic_id', activeClinicId)
+      .order('order_index')
       .order('created_at');
-    
+
     if (error) { setError(error.message); setLoading(false); return; }
     setData(data || []);
     setError(null);
@@ -1308,13 +1310,15 @@ export function useTransitionRules() {
 
   const create = async (rule: Partial<TransitionRule>) => {
     if (!activeClinicId) return null;
-    const { data, error } = await supabase
+    // New rule goes to the end
+    const nextIndex = data.length;
+    const { data: created, error } = await supabase
       .from('stage_transition_rules')
-      .insert({ ...rule, clinic_id: activeClinicId })
+      .insert({ ...rule, clinic_id: activeClinicId, order_index: nextIndex })
       .select()
       .single();
     if (!error) await fetch();
-    return data;
+    return created;
   };
 
   const remove = async (id: string) => {
@@ -1324,17 +1328,31 @@ export function useTransitionRules() {
   };
 
   const update = async (id: string, rule: Partial<TransitionRule>) => {
-    const { data, error } = await supabase
+    const { data: updated, error } = await supabase
       .from('stage_transition_rules')
       .update(rule)
       .eq('id', id)
       .select()
       .single();
     if (!error) await fetch();
-    return data;
+    return updated;
   };
 
-  return { data, loading, error, refetch: fetch, create, remove, update };
+  const reorder = async (reordered: TransitionRule[]) => {
+    // Optimistic update
+    setData(reordered);
+    // Persist all positions in parallel
+    await Promise.all(
+      reordered.map((rule, idx) =>
+        supabase
+          .from('stage_transition_rules')
+          .update({ order_index: idx })
+          .eq('id', rule.id)
+      )
+    );
+  };
+
+  return { data, loading, error, refetch: fetch, create, remove, update, reorder };
 }
 
 // ==========================================

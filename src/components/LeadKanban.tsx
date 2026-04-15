@@ -470,7 +470,7 @@ export function LeadKanban() {
   const { data: stages, loading: stagesLoading, reorder: reorderStages, update: updateStage, create: createStage, remove: removeStage } = useFunnelStages();
   const { data: leads, loading: leadsLoading, create, update, remove } = useLeads();
   const { aiConfig, updateAI } = useSettings();
-  const { data: transitionRules, create: createRule, remove: removeRule, update: updateRule } = useTransitionRules();
+  const { data: transitionRules, create: createRule, remove: removeRule, update: updateRule, reorder: reorderRules } = useTransitionRules();
   const [showModal, setShowModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -745,6 +745,30 @@ export function LeadKanban() {
                   >
                     <div className="flex items-center justify-between px-6 py-4 bg-slate-50/80 border-b border-slate-100">
                       <div className="flex items-center gap-3">
+                        <div className="flex flex-col gap-0.5">
+                          <button
+                            disabled={idx === 0}
+                            onClick={() => {
+                              const next = [...transitionRules];
+                              [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
+                              reorderRules(next);
+                            }}
+                            className="p-0.5 rounded text-slate-300 hover:text-teal-600 disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                          >
+                            <ChevronUp className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            disabled={idx === transitionRules.length - 1}
+                            onClick={() => {
+                              const next = [...transitionRules];
+                              [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
+                              reorderRules(next);
+                            }}
+                            className="p-0.5 rounded text-slate-300 hover:text-teal-600 disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                          >
+                            <ChevronDown className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                         <span className="w-7 h-7 rounded-lg bg-teal-600 text-white text-xs font-black flex items-center justify-center shadow-sm">
                           {idx + 1}
                         </span>

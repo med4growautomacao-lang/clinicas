@@ -856,10 +856,11 @@ export function useSettings() {
       .on('postgres_changes', {
         event: 'UPDATE',
         schema: 'public',
-        table: 'ai_config',
-        filter: `clinic_id=eq.${activeClinicId}`
-      }, () => {
-        fetch(true);
+        table: 'ai_config'
+      }, (payload) => {
+        if ((payload.new as any)?.clinic_id === activeClinicId) {
+          fetch(true);
+        }
       })
       .subscribe();
 
@@ -887,14 +888,16 @@ export function useSettings() {
 
   const updateAI = async (updates: Partial<AIConfig>) => {
     if (!activeClinicId) return false;
+    // Optimistic update — atualiza o estado local imediatamente
+    setAIConfig(prev => prev ? { ...prev, ...updates } : prev);
     const { error } = await supabase
       .from('ai_config')
-      .upsert({ 
-        ...updates, 
+      .upsert({
+        ...updates,
         clinic_id: activeClinicId,
         updated_at: new Date().toISOString()
       }, { onConflict: 'clinic_id' });
-    if (!error) await fetch();
+    if (!error) fetch(true);
     return !error;
   };
 

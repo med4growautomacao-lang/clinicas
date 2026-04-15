@@ -17,15 +17,301 @@ import {
   Pencil,
   Send,
   ArrowLeft,
+  Download,
+  FileText,
+  Search,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { useFunnelStages, useLeads, useSettings, useTransitionRules } from "../hooks/useSupabase";
+import { supabase } from "../lib/supabase";
+import { useAuth } from "../contexts/AuthContext";
+import { format, parseISO, formatDistanceToNow } from "date-fns";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
 import WhatsAppLogo from "../assets/logos/Logo Whatsapp.png";
 import SemOrigemLogo from "../assets/logos/Logo Sem origem.png";
 import { Share2, Globe, Layout, Smartphone } from "lucide-react";
+
+const SOURCE_LABELS: Record<string, string> = {
+  'meta_ads': 'Meta Ads',
+  'google_ads': 'Google Ads',
+  'sincronizacao': 'Sincronização',
+  'whatsapp': 'WhatsApp',
+  'forms': 'Forms',
+  '': 'Sem Origem',
+};
+
+function ExportModal({ onClose }: { onClose: () => void }) {
+  const { activeClinicId } = useAuth();
+  const { data: leads } = useLeads();
+  const { data: stages } = useFunnelStages();
+
+  const today = format(new Date(), 'yyyy-MM-dd');
+  const thirtyAgo = format(new Date(Date.now() - 30 * 86400000), 'yyyy-MM-dd');
+
+  const [fmt, setFmt] = useState<'csv' | 'json'>('csv');
+  const [dateFrom, setDateFrom] = useState(thirtyAgo);
+  const [dateTo, setDateTo] = useState(today);
+  const [selectedLeadId, setSelectedLeadId] = useState('');
+  const [selectedLeadName, setSelectedLeadName] = useState('Todos os leads');
+  const [selectedSource, setSelectedSource] = useState<string | null>(null); // null = todas
+  const [selectedStageId, setSelectedStageId] = useState('');
+  const [leadSearch, setLeadSearch] = useState('');
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const allSources: string[] = Array.from(new Set<string>(leads.map((l: any) => ((l.source ?? '') as string)))).sort();
+
+  const filteredLeads = leads.filter(l =>
+    !leadSearch || l.name.toLowerCase().includes(leadSearch.toLowerCase()) || (l.phone || '').includes(leadSearch)
+  );
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const handleExport = async () => {
+    if (!activeClinicId) return;
+    setExporting(true);
+    try {
+      let query = supabase
+        .from('chat_messages')
+        .select('id, direction, sender, message, created_at, lead_id, leads!left(name, phone, source, capture_channel, stage_id)')
+        .eq('clinic_id', activeClinicId)
+        .gte('created_at', dateFrom + 'T00:00:00')
+        .lte('created_at', dateTo + 'T23:59:59')
+        .order('created_at', { ascending: true });
+
+      if (selectedLeadId) query = (query as any).eq('lead_id', selectedLeadId);
+
+      const { data: rows, error } = await query;
+      if (error) throw error;
+
+      const stageMap: Record<string, string> = {};
+      stages.forEach(s => { stageMap[s.id] = s.name; });
+
+      let filtered = (rows || []).filter((r: any) => {
+        const lead = r.leads;
+        if (selectedSource !== null && (lead?.source ?? '') !== selectedSource) return false;
+        if (selectedStageId && lead?.stage_id !== selectedStageId) return false;
+        return true;
+      });
+
+      const getContent = (msg: any): string => {
+        if (!msg) return '';
+        if (typeof msg === 'string') return msg;
+        return msg.content || msg.text || msg.output || JSON.stringify(msg);
+      };
+
+      const filename = `conversas_${dateFrom}_${dateTo}`;
+
+      if (fmt === 'csv') {
+        const header = ['Data', 'Lead', 'Telefone', 'Origem', 'Etapa', 'Direção', 'Remetente', 'Mensagem'];
+        const csvRows = filtered.map((r: any) => {
+          const lead = r.leads;
+          const stageName = lead?.stage_id ? (stageMap[lead.stage_id] || '') : '';
+          const source = SOURCE_LABELS[lead?.source ?? ''] || lead?.source || '';
+          const msg = getContent(r.message).replace(/"/g, '""').replace(/\n/g, ' ');
+          return [
+            r.created_at?.slice(0, 19).replace('T', ' '),
+            `"${lead?.name || ''}"`,
+            lead?.phone || '',
+            source,
+            `"${stageName}"`,
+            r.direction === 'inbound' ? 'Recebida' : 'Enviada',
+            r.sender,
+            `"${msg}"`
+          ].join(',');
+        });
+        const content = [header.join(','), ...csvRows].join('\n');
+        const blob = new Blob(['\uFEFF' + content], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = filename + '.csv'; a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        const grouped: Record<string, any> = {};
+        filtered.forEach((r: any) => {
+          const lid = r.lead_id || 'sem_lead';
+          if (!grouped[lid]) {
+            const lead = r.leads;
+            grouped[lid] = {
+              lead: { id: lid, name: lead?.name || '', phone: lead?.phone || '', source: lead?.source || '', stage: lead?.stage_id ? (stageMap[lead.stage_id] || '') : '' },
+              messages: []
+            };
+          }
+          grouped[lid].messages.push({ created_at: r.created_at, direction: r.direction, sender: r.sender, content: getContent(r.message) });
+        });
+        const blob = new Blob([JSON.stringify(Object.values(grouped), null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = filename + '.json'; a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (e) {
+      console.error('Export error:', e);
+    } finally {
+      setExporting(false);
+      onClose();
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[80] flex items-center justify-center p-4" onClick={onClose}>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        onClick={e => e.stopPropagation()}
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-lg border border-slate-100 overflow-hidden"
+      >
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 bg-teal-50 rounded-xl flex items-center justify-center">
+              <Download className="w-5 h-5 text-teal-600" />
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-900">Exportar Conversas</h3>
+              <p className="text-xs text-slate-400">Escolha os filtros e o formato</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-full transition-all">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="px-6 py-5 space-y-5 max-h-[70vh] overflow-y-auto">
+          {/* Formato */}
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Formato</label>
+            <div className="flex gap-2">
+              {(['csv', 'json'] as const).map(f => (
+                <button key={f} onClick={() => setFmt(f)}
+                  className={cn("flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold border transition-all",
+                    fmt === f ? "bg-teal-600 text-white border-teal-600" : "bg-white text-slate-600 border-slate-200 hover:border-teal-300"
+                  )}>
+                  <FileText className="w-4 h-4" />{f.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Período */}
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Período</label>
+            <div className="flex items-center gap-2">
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400" />
+              <span className="text-slate-400 text-sm font-medium">até</span>
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400" />
+            </div>
+          </div>
+
+          {/* Lead — dropdown com busca integrada */}
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Lead</label>
+            <div className="relative" ref={dropdownRef}>
+              <button
+                onClick={() => { setDropdownOpen(v => !v); setLeadSearch(''); }}
+                className="w-full flex items-center justify-between px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white text-slate-700 font-medium hover:border-teal-300 transition-all"
+              >
+                <span className="truncate">{selectedLeadName}</span>
+                <ChevronDown className="w-4 h-4 text-slate-400 shrink-0 ml-2" />
+              </button>
+              {dropdownOpen && (
+                <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden">
+                  <div className="p-2 border-b border-slate-100">
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                      <input
+                        autoFocus
+                        type="text"
+                        placeholder="Buscar lead..."
+                        value={leadSearch}
+                        onChange={e => setLeadSearch(e.target.value)}
+                        className="w-full pl-8 pr-3 py-1.5 text-sm border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-teal-200"
+                      />
+                    </div>
+                  </div>
+                  <div className="max-h-48 overflow-y-auto">
+                    <button
+                      onClick={() => { setSelectedLeadId(''); setSelectedLeadName('Todos os leads'); setDropdownOpen(false); }}
+                      className="w-full text-left px-3 py-2 text-sm font-medium text-slate-700 hover:bg-teal-50 hover:text-teal-700 transition-colors"
+                    >Todos os leads</button>
+                    {filteredLeads.map(l => (
+                      <button key={l.id}
+                        onClick={() => { setSelectedLeadId(l.id); setSelectedLeadName(l.name + (l.phone ? ` — ${l.phone}` : '')); setDropdownOpen(false); }}
+                        className={cn("w-full text-left px-3 py-2 text-sm hover:bg-teal-50 hover:text-teal-700 transition-colors",
+                          selectedLeadId === l.id ? "bg-teal-50 text-teal-700 font-semibold" : "text-slate-700")}
+                      >
+                        <span className="font-medium">{l.name}</span>
+                        {l.phone && <span className="text-slate-400 ml-1 text-xs">{l.phone}</span>}
+                      </button>
+                    ))}
+                    {filteredLeads.length === 0 && (
+                      <p className="px-3 py-3 text-sm text-slate-400 text-center">Nenhum lead encontrado</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Origem */}
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Origem</label>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => setSelectedSource(null)}
+                className={cn("px-3 py-1.5 rounded-full text-xs font-bold border transition-all",
+                  selectedSource === null ? "bg-teal-600 text-white border-teal-600" : "bg-white text-slate-600 border-slate-200 hover:border-teal-300"
+                )}>Todas</button>
+              {allSources.map(s => (
+                <button key={s === '' ? '__none__' : s} onClick={() => setSelectedSource(s)}
+                  className={cn("px-3 py-1.5 rounded-full text-xs font-bold border transition-all",
+                    selectedSource !== null && selectedSource === s ? "bg-teal-600 text-white border-teal-600" : "bg-white text-slate-600 border-slate-200 hover:border-teal-300"
+                  )}>{SOURCE_LABELS[s] || s || 'Sem Origem'}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* Etapa */}
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Etapa do Funil</label>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => setSelectedStageId('')}
+                className={cn("px-3 py-1.5 rounded-full text-xs font-bold border transition-all",
+                  selectedStageId === '' ? "bg-teal-600 text-white border-teal-600" : "bg-white text-slate-600 border-slate-200 hover:border-teal-300"
+                )}>Todas</button>
+              {stages.map(s => (
+                <button key={s.id} onClick={() => setSelectedStageId(s.id)}
+                  className={cn("px-3 py-1.5 rounded-full text-xs font-bold border transition-all",
+                    selectedStageId === s.id ? "bg-teal-600 text-white border-teal-600" : "bg-white text-slate-600 border-slate-200 hover:border-teal-300"
+                  )}>{s.name}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between gap-3 bg-slate-50/50">
+          <button onClick={onClose} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-800 transition-colors">
+            Cancelar
+          </button>
+          <button onClick={handleExport} disabled={exporting}
+            className="flex items-center gap-2 px-6 py-2.5 bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold rounded-xl transition-all shadow-sm disabled:opacity-50">
+            {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            {exporting ? 'Exportando...' : `Exportar ${fmt.toUpperCase()}`}
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
 
 function calcBusinessMinutes(since: Date, bh: { start: string; end: string; days: number[] }, endDate?: Date): number {
   const now = endDate || new Date();
@@ -59,7 +345,6 @@ function calcBusinessMinutes(since: Date, bh: { start: string; end: string; days
   }
   return total;
 }
-import { format, parseISO, formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { LeadChat } from "./LeadChat";
 
@@ -197,6 +482,7 @@ export function LeadKanban() {
   const [isAddingStage, setIsAddingStage] = useState(false);
   const [newStageName, setNewStageName] = useState("");
   const [showAutomationModal, setShowAutomationModal] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [isAddingRule, setIsAddingRule] = useState(false);
   const [newRule, setNewRule] = useState({ keywords: '', target_stage_id: '', context: '', lead_response: '', message_to_send: '' });
@@ -655,6 +941,9 @@ export function LeadKanban() {
           <p className="text-slate-500 font-medium text-base">Gerencie a jornada dos seus leads.</p>
         </div>
         <div className="flex items-center gap-3">
+          <Button variant="outline" size="icon" className="h-10 w-10 text-slate-400 hover:text-teal-600" onClick={() => setExportOpen(true)}>
+            <Download className="w-5 h-5" />
+          </Button>
           <Button variant="outline" size="icon" className="h-10 w-10 text-slate-400 hover:text-teal-600" onClick={() => { setShowAutomationModal(true); }}>
             <Zap className="w-5 h-5" />
           </Button>
@@ -1147,6 +1436,9 @@ export function LeadKanban() {
       </AnimatePresence>
 
 
+
+      {/* Export Modal */}
+      {exportOpen && <ExportModal onClose={() => setExportOpen(false)} />}
 
       {/* Lead Chat Drawer */}
       <AnimatePresence>

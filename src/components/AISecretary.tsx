@@ -23,7 +23,6 @@ import {
   X,
   BellRing,
   UserCheck,
-  Search,
   Plus,
   Trash2,
   DollarSign,

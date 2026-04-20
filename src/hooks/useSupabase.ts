@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -1227,11 +1227,13 @@ export function useMarketing() {
   const [data, setData] = useState<MarketingData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const currentRange = useRef<{ start: string; end: string } | null>(null);
 
   const fetch = useCallback(async (startDate: string, endDate: string) => {
     if (!activeClinicId) return;
+    currentRange.current = { start: startDate, end: endDate };
     setLoading(true);
-    
+
     const { data, error } = await supabase
       .from('marketing_data')
       .select('*')
@@ -1239,7 +1241,7 @@ export function useMarketing() {
       .gte('date', startDate)
       .lte('date', endDate)
       .order('date', { ascending: true });
-    
+
     if (error) {
       setError(error.message);
       setLoading(false);
@@ -1251,9 +1253,29 @@ export function useMarketing() {
     setLoading(false);
   }, [activeClinicId]);
 
+  useEffect(() => {
+    if (!activeClinicId) return;
+
+    const channel = supabase
+      .channel('marketing_realtime')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'marketing_data',
+        filter: `clinic_id=eq.${activeClinicId}`
+      }, () => {
+        if (currentRange.current) {
+          fetch(currentRange.current.start, currentRange.current.end);
+        }
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [activeClinicId, fetch]);
+
   const upsert = async (items: Partial<MarketingData>[]) => {
     if (!activeClinicId) return false;
-    
+
     const prepared = items.map(item => ({
       ...item,
       clinic_id: activeClinicId

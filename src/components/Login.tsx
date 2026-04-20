@@ -103,10 +103,29 @@ export function Login() {
           </button>
         </form>
 
-        <div className="mt-8 text-center">
+        <div className="mt-8 text-center space-y-3">
           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
             Exclusivo para parceiros MinhaClínica
           </p>
+          <div className="flex items-center justify-center gap-4">
+            <a
+              href="/politicas-de-privacidade"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-slate-400 hover:text-teal-600 transition-colors"
+            >
+              Políticas de Privacidade
+            </a>
+            <span className="text-slate-200">·</span>
+            <a
+              href="/termos-de-uso"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-slate-400 hover:text-teal-600 transition-colors"
+            >
+              Termos de Uso
+            </a>
+          </div>
         </div>
       </motion.div>
     </div>

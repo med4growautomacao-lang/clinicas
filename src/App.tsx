@@ -17,6 +17,8 @@ import { Login } from './components/Login';
 import { ConnectPage } from './components/ConnectPage';
 import { RedirectPage } from './components/RedirectPage';
 import { LandingPage } from './components/LandingPage';
+import { PrivacyPolicy } from './components/PrivacyPolicy';
+import { TermsOfUse } from './components/TermsOfUse';
 import { Loader2 } from 'lucide-react';
 
 function AppContent() {
@@ -106,6 +108,8 @@ export default function App() {
   if (path === '/connect') return <ConnectPage />;
   if (path === '/r') return <RedirectPage />;
   if (path === '/' || path === '/landing') return <LandingPage />;
+  if (path === '/politicas') return <PrivacyPolicy />;
+  if (path === '/termos') return <TermsOfUse />;
   return (
     <AuthProvider>
       <AppContent />

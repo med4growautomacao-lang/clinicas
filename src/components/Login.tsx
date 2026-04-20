@@ -109,7 +109,7 @@ export function Login() {
           </p>
           <div className="flex items-center justify-center gap-4">
             <a
-              href="https://med4growautomacao.com.br/politicas"
+              href="/politicas"
               target="_blank"
               rel="noopener noreferrer"
               className="text-xs text-slate-400 hover:text-teal-600 transition-colors"
@@ -118,7 +118,7 @@ export function Login() {
             </a>
             <span className="text-slate-200">·</span>
             <a
-              href="https://med4growautomacao.com.br/termos"
+              href="/termos"
               target="_blank"
               rel="noopener noreferrer"
               className="text-xs text-slate-400 hover:text-teal-600 transition-colors"

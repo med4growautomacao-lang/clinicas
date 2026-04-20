@@ -368,8 +368,8 @@ export function LandingPage() {
           </div>
           <p className="text-xs text-slate-400">© {new Date().getFullYear()} MedDesk. Todos os direitos reservados.</p>
           <div className="flex items-center gap-6">
-            <a href="https://med4growautomacao.com.br/politicas" target="_blank" rel="noopener noreferrer" className="text-xs text-slate-400 hover:text-teal-600 transition-colors">Políticas de Privacidade</a>
-            <a href="https://med4growautomacao.com.br/termos" target="_blank" rel="noopener noreferrer" className="text-xs text-slate-400 hover:text-teal-600 transition-colors">Termos de Uso</a>
+            <a href="/politicas" target="_blank" rel="noopener noreferrer" className="text-xs text-slate-400 hover:text-teal-600 transition-colors">Políticas de Privacidade</a>
+            <a href="/termos" target="_blank" rel="noopener noreferrer" className="text-xs text-slate-400 hover:text-teal-600 transition-colors">Termos de Uso</a>
           </div>
         </div>
       </footer>

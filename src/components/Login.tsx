@@ -41,7 +41,7 @@ export function Login() {
           <div className="w-16 h-16 rounded-2xl bg-teal-600 flex items-center justify-center text-white shadow-lg shadow-teal-100 mb-4">
             <Stethoscope className="w-10 h-10" />
           </div>
-          <h1 className="text-2xl font-black text-slate-900 tracking-tight">MinhaClínica</h1>
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight">MedDesk</h1>
           <p className="text-slate-500 text-sm font-medium">Gestão inteligente para sua clínica</p>
         </div>
 
@@ -109,7 +109,7 @@ export function Login() {
           </p>
           <div className="flex items-center justify-center gap-4">
             <a
-              href="/politicas-de-privacidade"
+              href="https://med4growautomacao.com.br/politicas"
               target="_blank"
               rel="noopener noreferrer"
               className="text-xs text-slate-400 hover:text-teal-600 transition-colors"
@@ -118,7 +118,7 @@ export function Login() {
             </a>
             <span className="text-slate-200">·</span>
             <a
-              href="/termos-de-uso"
+              href="https://med4growautomacao.com.br/termos"
               target="_blank"
               rel="noopener noreferrer"
               className="text-xs text-slate-400 hover:text-teal-600 transition-colors"

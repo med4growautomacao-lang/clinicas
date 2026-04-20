@@ -16,6 +16,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Login } from './components/Login';
 import { ConnectPage } from './components/ConnectPage';
 import { RedirectPage } from './components/RedirectPage';
+import { LandingPage } from './components/LandingPage';
 import { Loader2 } from 'lucide-react';
 
 function AppContent() {
@@ -101,12 +102,10 @@ function AppContent() {
 }
 
 export default function App() {
-  if (window.location.pathname === '/connect') {
-    return <ConnectPage />;
-  }
-  if (window.location.pathname === '/r') {
-    return <RedirectPage />;
-  }
+  const path = window.location.pathname;
+  if (path === '/connect') return <ConnectPage />;
+  if (path === '/r') return <RedirectPage />;
+  if (path === '/' || path === '/landing') return <LandingPage />;
   return (
     <AuthProvider>
       <AppContent />

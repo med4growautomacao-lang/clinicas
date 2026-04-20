@@ -81,8 +81,8 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
             <Stethoscope className="w-7 h-7" />
           </div>
           <div className="flex flex-col">
-            <span className="text-xl font-black text-slate-900 tracking-tight">{clinicName.split(' ')[0]}</span>
-            <span className="text-[10px] font-bold text-teal-600 uppercase tracking-widest -mt-1">{clinicName.split(' ')[1] || 'Clínica'}</span>
+            <span className="text-xl font-black text-slate-900 tracking-tight">MedDesk</span>
+            <span className="text-[10px] font-bold text-teal-600 uppercase tracking-widest -mt-1">{clinicName || 'Clínica'}</span>
           </div>
         </div>
       </div>

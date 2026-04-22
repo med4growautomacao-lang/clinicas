@@ -754,6 +754,9 @@ export interface Clinic {
   meta_pixel_id?: string | null;
   wa_pre_msg?: string | null;
   organization_id?: string | null;
+  google_ad_account_id?: string | null;
+  google_ad_mcc_id?: string | null;
+  google_ad_mcc_token?: string | null;
 }
 
 export interface AIConfig {
@@ -881,7 +884,9 @@ export function useSettings() {
 
   const updateClinic = async (updates: Partial<Clinic>) => {
     if (!activeClinicId) return false;
-    const { error } = await supabase.from('clinics').update(updates).eq('id', activeClinicId);
+    // Strip read-only/PK fields to avoid PostgREST conflicts and trigger side-effects
+    const { id, created_at, organization_id, ...safeUpdates } = updates as any;
+    const { error } = await supabase.from('clinics').update(safeUpdates).eq('id', activeClinicId);
     if (!error) await fetch();
     return !error;
   };
@@ -1386,6 +1391,8 @@ export interface Organization {
   plan: string;
   logo_url: string | null;
   created_at: string;
+  google_ad_mcc_id?: string | null;
+  google_ad_mcc_token?: string | null;
 }
 
 export function useOrganizations() {

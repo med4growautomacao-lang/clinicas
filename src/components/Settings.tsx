@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import {
@@ -50,15 +50,17 @@ export function Settings() {
     const [saving, setSaving] = useState(false);
     const [connecting, setConnecting] = useState(false);
     const [linkCopied, setLinkCopied] = useState(false);
+    const loadedClinicId = useRef<string | null>(null);
 
     useEffect(() => {
-        console.log('Settings: Auth values changed - WhatsApp:', !!whatsapp, 'Has QR:', !!whatsapp?.qr_code, 'Status:', whatsapp?.status);
-        if (clinic && Object.keys(localClinic).length === 0) setLocalClinic(clinic);
-        if (aiConfig && Object.keys(localAI).length === 0) setLocalAI(aiConfig);
-        if (whatsapp) {
-            console.log('Settings: Synchronizing localWA with WhatsApp from server');
-            setLocalWA(whatsapp);
+        // Reseta dados locais sempre que a clínica mudar (troca de visualização pelo org-admin)
+        const clinicChanged = clinic && clinic.id !== loadedClinicId.current;
+        if (clinic && (clinicChanged || Object.keys(localClinic).length === 0)) {
+            setLocalClinic(clinic);
+            loadedClinicId.current = clinic.id;
         }
+        if (aiConfig && (clinicChanged || Object.keys(localAI).length === 0)) setLocalAI(aiConfig);
+        if (whatsapp) setLocalWA(whatsapp);
     }, [clinic, aiConfig, whatsapp]);
 
     const hasChanges = useMemo(() => {
@@ -270,6 +272,7 @@ export function Settings() {
                                 onChange={(updates) => setLocalWA(prev => ({ ...prev, ...updates }))}
                                 clinicData={localClinic}
                                 onClinicChange={(updates) => setLocalClinic(prev => ({ ...prev, ...updates }))}
+                                onSaveClinic={updateClinic}
                                 onConnect={handleWhatsappConnect}
                                 onCancel={handleWhatsappCancel}
                                 connecting={connecting}
@@ -697,11 +700,12 @@ function RedirectLinkCard({ connectToken, redirectMessage, onMessageChange }: {
     );
 }
 
-function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onConnect, onCancel, connecting, onCopyLink, linkCopied }: {
+function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSaveClinic, onConnect, onCancel, connecting, onCopyLink, linkCopied }: {
     data: Partial<WhatsappInstance>,
     onChange: (updates: Partial<WhatsappInstance>) => void,
     clinicData: Partial<Clinic>,
     onClinicChange: (updates: Partial<Clinic>) => void,
+    onSaveClinic: (updates: Partial<Clinic>) => Promise<boolean>,
     onConnect: () => void,
     onCancel: () => void,
     connecting: boolean,
@@ -715,6 +719,8 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onCon
     const [groupResult, setGroupResult] = useState<'success' | 'error' | null>(null);
     const [showScripts, setShowScripts] = useState(false);
     const [activeIntTab, setActiveIntTab] = useState<'whatsapp' | 'meta' | 'google'>('whatsapp');
+    const [googleIdSaving, setGoogleIdSaving] = useState(false);
+    const [googleIdSaved, setGoogleIdSaved] = useState(false);
 
     const addParticipant = () => setParticipants(p => [...p, { name: '', phone: '' }]);
     const removeParticipant = (i: number) => setParticipants(p => p.filter((_, idx) => idx !== i));
@@ -1059,6 +1065,48 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onCon
             {/* Google Ads & Links */}
             {activeIntTab === 'google' && (
                 <div className="space-y-6">
+                    {/* Conta Google Ads — card independente com save próprio */}
+                    <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+                        <div className="flex items-center gap-3 px-6 py-4 border-b border-slate-100 bg-slate-50">
+                            <div className="w-9 h-9 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-200 p-1.5">
+                                <img src={GoogleLogo} alt="Google" className="w-full h-full object-contain opacity-90" />
+                            </div>
+                            <div>
+                                <p className="text-sm font-bold text-slate-800">Conta Google Ads</p>
+                                <p className="text-[11px] text-slate-400 font-medium">Vinculação da conta da clínica</p>
+                            </div>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <div className="space-y-2">
+                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">ID da Conta Google Ads</label>
+                                <input
+                                    type="text"
+                                    value={clinicData.google_ad_account_id || ''}
+                                    onChange={(e) => onClinicChange({ google_ad_account_id: e.target.value })}
+                                    placeholder="Ex: 1234567890"
+                                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-700 placeholder:text-slate-400 focus:ring-2 focus:ring-amber-100 focus:border-amber-400 outline-none transition-all"
+                                />
+                                <p className="text-[11px] text-slate-400 font-medium">
+                                    Insira apenas os números, sem traços. Ex: <span className="font-bold text-slate-500">1234567890</span>
+                                </p>
+                            </div>
+                            <button
+                                onClick={async () => {
+                                    setGoogleIdSaving(true);
+                                    await onSaveClinic({ google_ad_account_id: clinicData.google_ad_account_id || null });
+                                    setGoogleIdSaving(false);
+                                    setGoogleIdSaved(true);
+                                    setTimeout(() => setGoogleIdSaved(false), 2500);
+                                }}
+                                disabled={googleIdSaving}
+                                className="flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-sm font-bold rounded-xl transition-all shadow-sm"
+                            >
+                                {googleIdSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                                {googleIdSaved ? 'Salvo!' : 'Salvar'}
+                            </button>
+                        </div>
+                    </div>
+
                     <Card className="border border-amber-200 shadow-sm bg-white overflow-hidden">
                         <CardHeader className="bg-amber-100 border-b border-amber-200 pb-6 px-8">
                             <div className="flex items-center gap-4">

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
-import { Building2, Users, ArrowRight, LogIn, Loader2, X, Eye, EyeOff, Search, MoreVertical, UserPlus, Wifi, WifiOff } from "lucide-react";
+import { Building2, Users, ArrowRight, LogIn, Loader2, X, Eye, EyeOff, Search, MoreVertical, UserPlus, Wifi, WifiOff, Settings } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -44,7 +44,11 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
   const [clinics, setClinics] = useState<Clinic[]>([]);
   const [orgUsers, setOrgUsers] = useState<OrgUser[]>([]);
   const [loadingClinics, setLoadingClinics] = useState(true);
-  const [activeSubTab, setActiveSubTab] = useState<"clinics" | "users">("clinics");
+  const [activeSubTab, setActiveSubTab] = useState<"clinics" | "users" | "settings">("clinics");
+  const [orgSettings, setOrgSettings] = useState<{ google_ad_mcc_id: string; google_ad_mcc_token: string }>({ google_ad_mcc_id: '', google_ad_mcc_token: '' });
+  const [orgSettingsSaving, setOrgSettingsSaving] = useState(false);
+  const [orgSettingsSaved, setOrgSettingsSaved] = useState(false);
+  const [tokenFocused, setTokenFocused] = useState(false);
   const [clinicSearch, setClinicSearch] = useState('');
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
@@ -104,7 +108,25 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
   useEffect(() => {
     fetchClinics();
     fetchOrgUsers();
-  }, [fetchClinics, fetchOrgUsers]);
+    if (profile?.organization_id) {
+      supabase.from('organizations').select('google_ad_mcc_id, google_ad_mcc_token').eq('id', profile.organization_id).single()
+        .then(({ data }) => {
+          if (data) setOrgSettings({ google_ad_mcc_id: data.google_ad_mcc_id || '', google_ad_mcc_token: data.google_ad_mcc_token || '' });
+        });
+    }
+  }, [fetchClinics, fetchOrgUsers, profile?.organization_id]);
+
+  const handleSaveOrgSettings = async () => {
+    if (!profile?.organization_id) return;
+    setOrgSettingsSaving(true);
+    await supabase.from('organizations').update({
+      google_ad_mcc_id: orgSettings.google_ad_mcc_id || null,
+      google_ad_mcc_token: orgSettings.google_ad_mcc_token || null,
+    }).eq('id', profile.organization_id);
+    setOrgSettingsSaving(false);
+    setOrgSettingsSaved(true);
+    setTimeout(() => setOrgSettingsSaved(false), 2500);
+  };
 
   const handleCreateClinic = async () => {
     if (!clinicForm.name.trim() || !clinicForm.ownerName.trim() || !clinicForm.ownerEmail.trim() || !clinicForm.ownerPassword.trim()) {
@@ -207,6 +229,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
           {[
             { id: "clinics", label: "Clínicas", icon: Building2 },
             { id: "users", label: "Usuários", icon: Users },
+            { id: "settings", label: "Configurações", icon: Settings },
           ].map((t) => (
             <button
               key={t.id}
@@ -420,6 +443,65 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Settings Tab */}
+      {activeSubTab === "settings" && (
+        <div className="flex-1 max-w-xl space-y-6">
+          <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-3">
+              <div className="w-8 h-8 bg-amber-50 rounded-lg flex items-center justify-center">
+                <Settings className="w-4 h-4 text-amber-600" />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-slate-800">Google Ads — MCC</p>
+                <p className="text-xs text-slate-400">Credenciais da conta gerenciadora</p>
+              </div>
+            </div>
+            <div className="p-6 space-y-5">
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">ID do MCC</label>
+                <input
+                  type="text"
+                  value={orgSettings.google_ad_mcc_id}
+                  onChange={e => setOrgSettings(s => ({ ...s, google_ad_mcc_id: e.target.value }))}
+                  placeholder="Ex: 123-456-7890"
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-700 placeholder:text-slate-400 focus:ring-2 focus:ring-amber-100 focus:border-amber-400 outline-none transition-all"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Token de Acesso MCC</label>
+                {!tokenFocused && orgSettings.google_ad_mcc_token ? (
+                  <div
+                    onClick={() => setTokenFocused(true)}
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-700 bg-white cursor-text tracking-widest"
+                  >
+                    {orgSettings.google_ad_mcc_token.slice(0, 3)}{'•'.repeat(Math.max(0, Math.min(orgSettings.google_ad_mcc_token.length - 3, 24)))}
+                  </div>
+                ) : (
+                  <input
+                    type="password"
+                    autoFocus={tokenFocused}
+                    value={orgSettings.google_ad_mcc_token}
+                    onChange={e => setOrgSettings(s => ({ ...s, google_ad_mcc_token: e.target.value }))}
+                    onBlur={() => setTokenFocused(false)}
+                    placeholder="Token de desenvolvedor ou OAuth"
+                    autoComplete="new-password"
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-700 placeholder:text-slate-400 focus:ring-2 focus:ring-amber-100 focus:border-amber-400 outline-none transition-all"
+                  />
+                )}
+              </div>
+              <button
+                onClick={handleSaveOrgSettings}
+                disabled={orgSettingsSaving}
+                className="flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-sm font-bold rounded-xl transition-all shadow-sm"
+              >
+                {orgSettingsSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {orgSettingsSaved ? 'Salvo!' : 'Salvar'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

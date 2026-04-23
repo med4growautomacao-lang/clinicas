@@ -9,6 +9,7 @@ import { cn } from "@/src/lib/utils";
 interface DoctorScheduleSettingsProps {
   doctor: Doctor;
   onClose: () => void;
+  onSaved?: () => void;
 }
 
 const WEEKDAYS = [
@@ -21,7 +22,7 @@ const WEEKDAYS = [
   { id: '6', label: 'Sábado' },
 ];
 
-export function DoctorScheduleSettings({ doctor, onClose }: DoctorScheduleSettingsProps) {
+export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorScheduleSettingsProps) {
   const [activeTab, setActiveTab] = useState<'hours' | 'days_off'>('hours');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -94,7 +95,7 @@ export function DoctorScheduleSettings({ doctor, onClose }: DoctorScheduleSettin
         })
         .eq('id', doctor.id);
       if (dbError) setError(dbError.message);
-      else onClose();
+      else { onSaved?.(); onClose(); }
     } catch(err: any) {
       setError(err?.message || "Erro desconhecido");
     } finally {

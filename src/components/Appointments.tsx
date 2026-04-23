@@ -78,7 +78,7 @@ function getDoctorColor(doctorId: string) {
 export function Appointments() {
   const { userRole, profile } = useAuth();
   const { data: appointments, loading, create, update, remove } = useAppointments();
-  const { data: doctors } = useDoctors();
+  const { data: doctors, refetch: refetchDoctors } = useDoctors();
   const { data: patients, refetch: refetchPatients } = usePatients();
   const [lastCreatedPatient, setLastCreatedPatient] = useState<any>(null);
   const [filter, setFilter] = useState("Todos");
@@ -533,12 +533,13 @@ export function Appointments() {
 
       <AnimatePresence>
         {showScheduleSettings && doctorToConfigure && (
-          <DoctorScheduleSettings 
-            doctor={doctorToConfigure} 
+          <DoctorScheduleSettings
+            doctor={doctorToConfigure}
+            onSaved={() => refetchDoctors(true)}
             onClose={() => {
               setShowScheduleSettings(false);
               setDoctorToConfigure(null);
-            }} 
+            }}
           />
         )}
       </AnimatePresence>

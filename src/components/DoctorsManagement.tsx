@@ -18,7 +18,7 @@ import { useDoctors, Doctor } from "../hooks/useSupabase";
 import { DoctorScheduleSettings } from "./DoctorScheduleSettings";
 
 export function DoctorsManagement() {
-    const { data: doctors, loading, error, createWithAuth, update, remove } = useDoctors();
+    const { data: doctors, loading, error, refetch, createWithAuth, update, remove } = useDoctors();
     const [showModal, setShowModal] = useState(false);
     const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
     const [selectedDoctorId, setSelectedDoctorId] = useState<string | null>(null);
@@ -379,12 +379,13 @@ export function DoctorsManagement() {
 
             <AnimatePresence>
                 {showScheduleSettings && doctorToConfigure && (
-                    <DoctorScheduleSettings 
-                        doctor={doctorToConfigure} 
+                    <DoctorScheduleSettings
+                        doctor={doctorToConfigure}
+                        onSaved={() => refetch(true)}
                         onClose={() => {
                             setShowScheduleSettings(false);
                             setDoctorToConfigure(null);
-                        }} 
+                        }}
                     />
                 )}
             </AnimatePresence>

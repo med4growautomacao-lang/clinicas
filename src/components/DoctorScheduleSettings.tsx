@@ -2,7 +2,8 @@ import React, { useState, useEffect } from "react";
 import { X, Save, Clock, CalendarDays, Plus, Trash2, Loader2, AlertCircle } from "lucide-react";
 import { Button } from "./ui/button";
 import { motion, AnimatePresence } from "framer-motion";
-import { Doctor, useDoctors } from "../hooks/useSupabase";
+import { Doctor } from "../hooks/useSupabase";
+import { supabase } from "../lib/supabase";
 import { cn } from "@/src/lib/utils";
 
 interface DoctorScheduleSettingsProps {
@@ -21,7 +22,6 @@ const WEEKDAYS = [
 ];
 
 export function DoctorScheduleSettings({ doctor, onClose }: DoctorScheduleSettingsProps) {
-  const { update } = useDoctors();
   const [activeTab, setActiveTab] = useState<'hours' | 'days_off'>('hours');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,13 +85,16 @@ export function DoctorScheduleSettings({ doctor, onClose }: DoctorScheduleSettin
     setSubmitting(true);
     setError(null);
     try {
-      const success = await update(doctor.id, {
-        working_hours: workingHours,
-        consultation_duration: duration,
-        days_off: daysOff
-      });
-      if (success) onClose();
-      else setError("Erro ao salvar as configurações.");
+      const { error: dbError } = await supabase
+        .from('doctors')
+        .update({
+          working_hours: workingHours,
+          consultation_duration: duration,
+          days_off: daysOff
+        })
+        .eq('id', doctor.id);
+      if (dbError) setError(dbError.message);
+      else onClose();
     } catch(err: any) {
       setError(err?.message || "Erro desconhecido");
     } finally {

@@ -1449,7 +1449,7 @@ export function useSuperAdminData() {
   const fetchUsers = useCallback(async () => {
     setUsersLoading(true);
     const [cuRes, ouRes] = await Promise.all([
-      supabase.from('users').select('*').order('full_name'),
+      supabase.from('clinic_users').select('*').order('full_name'),
       supabase.from('org_users').select('*').order('full_name'),
     ]);
     const grouped: Record<string, ClinicUser[]> = {};

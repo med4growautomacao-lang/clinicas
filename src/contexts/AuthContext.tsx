@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useState, ReactNode } from
 import { supabase } from '../lib/supabase';
 import { Session, User } from '@supabase/supabase-js';
 
-export type UserRole = 'gestor' | 'medico' | 'secretaria' | 'super-admin' | 'org_admin';
+export type UserRole = 'gestor' | 'medico' | 'secretaria' | 'super-admin' | 'org_owner' | 'org_admin' | 'org_team';
 
 interface UserProfile {
   id: string;
@@ -12,6 +12,7 @@ interface UserProfile {
   // Org-admin fields
   organization_id?: string;
   organization_name?: string;
+  org_user_id?: string;
 }
 
 interface AuthContextType {
@@ -125,7 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       // 1. Tentar usuário de clínica normal primeiro
       const { data: userData, error: userError } = await supabase
-        .from('users')
+        .from('clinic_users')
         .select('*')
         .eq('id', userId)
         .maybeSingle();
@@ -169,10 +170,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setProfile({
           id: userId,
           clinic_id: null,
-          role: 'org_admin',
+          role: (orgUser.role as UserRole) || 'org_admin',
           full_name: orgUser.full_name || orgUser.email || '',
           organization_id: orgUser.organization_id,
-          organization_name: org?.name || ''
+          organization_name: org?.name || '',
+          org_user_id: orgUser.id,
         });
         // Não sobrescreve se org_admin já tem uma clínica ativa selecionada
         if (!sessionStorage.getItem('activeClinicId')) setActiveClinicId(null);

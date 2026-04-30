@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
-import { Building2, Users, ArrowRight, LogIn, Loader2, X, Eye, EyeOff, Search, MoreVertical, UserPlus, Wifi, WifiOff, Settings } from "lucide-react";
+import { Building2, Users, ArrowRight, LogIn, Loader2, X, Eye, EyeOff, Search, MoreVertical, UserPlus, Wifi, WifiOff, Settings, UserCheck, TrendingUp, UserCog, ChevronDown, Check, Trash2 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -13,6 +13,21 @@ interface Clinic {
   organization_id: string | null;
   whatsapp_status?: string | null;
   category?: string | null;
+}
+
+interface ClinicUser {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+  role: string;
+  created_at: string;
+}
+
+interface ClinicMember {
+  id: string;
+  clinic_id: string;
+  org_user_id: string;
+  function: string;
 }
 
 interface OrgUser {
@@ -29,8 +44,9 @@ interface OrgAdminProps {
 }
 
 const ORG_ROLES = [
-  { value: 'org_admin', label: 'Usuário' },
   { value: 'org_owner', label: 'Owner' },
+  { value: 'org_admin', label: 'Admin' },
+  { value: 'org_team', label: 'Team' },
 ];
 const CLINIC_ROLES = ['gestor', 'medico', 'secretaria'];
 const PLANS = ['free', 'pro', 'enterprise'];
@@ -39,9 +55,29 @@ const CLINIC_CATEGORIES = [
   { value: 'outro', label: 'Outro' },
 ];
 
+const CLINIC_FUNCTIONS: { value: string; label: string; Icon: React.ElementType; color: string }[] = [
+  { value: 'gestor_trafego', label: 'Gestor de Tráfego', Icon: TrendingUp, color: 'text-teal-500' },
+  { value: 'gestor_automacao', label: 'Gestor de Automação', Icon: Settings, color: 'text-amber-500' },
+  { value: 'admin_responsavel', label: 'Admin Responsável', Icon: UserCog, color: 'text-violet-500' },
+];
+
+function roleLabel(role: string) {
+  if (role === 'org_owner') return 'Owner';
+  if (role === 'org_admin') return 'Admin';
+  if (role === 'org_team') return 'Team';
+  return role;
+}
+
+function roleBadgeClass(role: string) {
+  if (role === 'org_owner') return 'bg-amber-100 text-amber-700';
+  if (role === 'org_admin') return 'bg-violet-100 text-violet-700';
+  return 'bg-blue-100 text-blue-700';
+}
+
 export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
-  const { profile, activeClinicId, setActiveClinicId, setActiveClinicName } = useAuth();
+  const { profile, userRole, activeClinicId, setActiveClinicId, setActiveClinicName } = useAuth();
   const [clinics, setClinics] = useState<Clinic[]>([]);
+  const [clinicMembers, setClinicMembers] = useState<ClinicMember[]>([]);
   const [orgUsers, setOrgUsers] = useState<OrgUser[]>([]);
   const [loadingClinics, setLoadingClinics] = useState(true);
   const [activeSubTab, setActiveSubTab] = useState<"clinics" | "users" | "settings">("clinics");
@@ -52,16 +88,25 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
   const [clinicSearch, setClinicSearch] = useState('');
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
+  // Permissions
+  const canManageClinics = userRole === 'org_owner' || userRole === 'org_admin';
+  const canManageOrgUsers = userRole === 'org_owner' || userRole === 'org_admin';
+  const canManageSettings = userRole === 'org_owner';
+  const canAddClinicUsers = userRole === 'org_owner' || userRole === 'org_admin' || userRole === 'org_team';
+  const canSetResponsaveis = userRole === 'org_owner' || userRole === 'org_admin';
+
   // Modal: nova clínica
   const [showClinicModal, setShowClinicModal] = useState(false);
   const [clinicForm, setClinicForm] = useState({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '' });
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [memberFilters, setMemberFilters] = useState<Record<string, string>>({});
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [clinicSaving, setClinicSaving] = useState(false);
   const [clinicError, setClinicError] = useState('');
 
   // Modal: novo usuário org
   const [showUserModal, setShowUserModal] = useState(false);
-  const [userForm, setUserForm] = useState({ name: '', email: '', password: '', role: 'org_admin' });
+  const [userForm, setUserForm] = useState({ name: '', email: '', password: '', role: 'org_team' });
   const [userSaving, setUserSaving] = useState(false);
   const [userError, setUserError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -73,27 +118,70 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
   const [clinicUserError, setClinicUserError] = useState('');
   const [showClinicUserPassword, setShowClinicUserPassword] = useState(false);
 
+  // Modal: usuários da clínica
+  const [clinicUsersView, setClinicUsersView] = useState<{ id: string; name: string } | null>(null);
+  const [clinicUsersData, setClinicUsersData] = useState<ClinicUser[]>([]);
+  const [clinicUsersLoading, setClinicUsersLoading] = useState(false);
+
+  // Modal: responsáveis da clínica
+  const [responsibleTarget, setResponsibleTarget] = useState<Clinic | null>(null);
+  const [responsibleForm, setResponsibleForm] = useState<Record<string, string>>({});
+  const [responsibleSaving, setResponsibleSaving] = useState(false);
+
+  useEffect(() => {
+    if (!openDropdown && !openMenuId) return;
+    const close = () => { setOpenDropdown(null); setOpenMenuId(null); };
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [openDropdown, openMenuId]);
+
   const fetchClinics = useCallback(async () => {
     if (!profile?.organization_id) return;
     setLoadingClinics(true);
-    const [{ data: clinicsData }, { data: waData }] = await Promise.all([
-      supabase
+    const canSeeAll = userRole === 'org_owner' || userRole === 'org_admin';
+
+    let clinicsData: any[] = [];
+
+    if (canSeeAll) {
+      const { data } = await supabase
         .from("clinics")
         .select("id, name, plan, logo_url, organization_id, category")
         .eq("organization_id", profile.organization_id)
-        .order("name"),
-      supabase
-        .from("whatsapp_instances")
-        .select("clinic_id, status"),
+        .order("name");
+      clinicsData = data || [];
+    } else if (profile.org_user_id) {
+      // Buscar apenas clínicas atribuídas via org_clinic_assignments
+      const { data: assignments } = await supabase
+        .from("org_clinic_assignments")
+        .select("clinic_id")
+        .eq("org_user_id", profile.org_user_id);
+      const assignedIds = (assignments || []).map((a: any) => a.clinic_id);
+      if (assignedIds.length > 0) {
+        const { data } = await supabase
+          .from("clinics")
+          .select("id, name, plan, logo_url, organization_id, category")
+          .in("id", assignedIds)
+          .order("name");
+        clinicsData = data || [];
+      }
+    }
+
+    const clinicIds = clinicsData.map((c: any) => c.id);
+    const [{ data: waData }, { data: membersData }] = await Promise.all([
+      supabase.from("whatsapp_instances").select("clinic_id, status"),
+      clinicIds.length > 0
+        ? supabase.from("org_clinic_assignments").select("*").in("clinic_id", clinicIds)
+        : { data: [] as any[] },
     ]);
     const waMap = Object.fromEntries((waData || []).map(w => [w.clinic_id, w.status]));
-    const mapped = (clinicsData || []).map((c: any) => ({
+    const mapped = clinicsData.map((c: any) => ({
       ...c,
       whatsapp_status: waMap[c.id] ?? null,
     }));
     setClinics(mapped);
+    setClinicMembers(membersData || []);
     setLoadingClinics(false);
-  }, [profile?.organization_id]);
+  }, [profile?.organization_id, profile?.org_user_id, userRole]);
 
   const fetchOrgUsers = useCallback(async () => {
     if (!profile?.organization_id) return;
@@ -170,7 +258,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
     setUserSaving(false);
     if (error) { setUserError(error.message); return; }
     setShowUserModal(false);
-    setUserForm({ name: '', email: '', password: '', role: 'usuario' });
+    setUserForm({ name: '', email: '', password: '', role: 'org_team' });
     fetchOrgUsers();
   };
 
@@ -193,7 +281,49 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
     if (error) { setClinicUserError(error.message); return; }
     setClinicUserTarget(null);
     setClinicUserForm({ name: '', email: '', password: '', role: 'gestor' });
+    if (clinicUsersView?.id === clinicUserTarget?.id) fetchClinicUsers(clinicUserTarget.id);
   };
+
+  const fetchClinicUsers = async (clinicId: string) => {
+    setClinicUsersLoading(true);
+    const { data } = await supabase
+      .from('clinic_users')
+      .select('id, full_name, email, role, created_at')
+      .eq('clinic_id', clinicId)
+      .order('role');
+    setClinicUsersData(data || []);
+    setClinicUsersLoading(false);
+  };
+
+  const handleChangeClinicUserRole = async (userId: string, newRole: string) => {
+    await supabase.from('clinic_users').update({ role: newRole }).eq('id', userId);
+    if (clinicUsersView) fetchClinicUsers(clinicUsersView.id);
+  };
+
+  const handleRemoveClinicUser = async (userId: string) => {
+    await supabase.from('clinic_users').delete().eq('id', userId);
+    if (clinicUsersView) fetchClinicUsers(clinicUsersView.id);
+  };
+
+  const handleSaveResponsaveis = async () => {
+    if (!responsibleTarget) return;
+    setResponsibleSaving(true);
+    await supabase.from('org_clinic_assignments').delete().eq('clinic_id', responsibleTarget.id);
+    const toInsert = CLINIC_FUNCTIONS
+      .filter(f => responsibleForm[f.value])
+      .map(f => ({ clinic_id: responsibleTarget.id, org_user_id: responsibleForm[f.value], function: f.value }));
+    if (toInsert.length > 0) await supabase.from('org_clinic_assignments').insert(toInsert);
+    setResponsibleSaving(false);
+    setResponsibleTarget(null);
+    fetchClinics();
+  };
+
+  // Tabs visible per role
+  const visibleTabs = [
+    { id: "clinics", label: "Clínicas", icon: Building2, show: true },
+    { id: "users", label: "Usuários", icon: Users, show: canManageOrgUsers },
+    { id: "settings", label: "Configurações", icon: Settings, show: canManageSettings },
+  ].filter(t => t.show);
 
   return (
     <div className="space-y-8 h-full flex flex-col font-sans">
@@ -226,11 +356,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
       {/* Sub-tabs + action button */}
       <div className="flex items-center justify-between">
         <div className="flex bg-white p-1 rounded-xl border border-slate-200 gap-1 w-fit">
-          {[
-            { id: "clinics", label: "Clínicas", icon: Building2 },
-            { id: "users", label: "Usuários", icon: Users },
-            { id: "settings", label: "Configurações", icon: Settings },
-          ].map((t) => (
+          {visibleTabs.map((t) => (
             <button
               key={t.id}
               onClick={() => setActiveSubTab(t.id as any)}
@@ -247,7 +373,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
           ))}
         </div>
 
-        {activeSubTab === "clinics" && (
+        {activeSubTab === "clinics" && canManageClinics && (
           <button
             onClick={() => setShowClinicModal(true)}
             className="flex items-center gap-1.5 px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
@@ -255,7 +381,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
             + Clínica
           </button>
         )}
-        {activeSubTab === "users" && (
+        {activeSubTab === "users" && canManageOrgUsers && (
           <button
             onClick={() => setShowUserModal(true)}
             className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
@@ -265,49 +391,100 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
         )}
       </div>
 
-      {/* Search bar + category filter */}
-      {activeSubTab === "clinics" && (
-        <div className="flex flex-col gap-2">
+      {/* Filters */}
+      {activeSubTab === "clinics" && (() => {
+        const DropdownFilter = ({
+          id, label, active, options, selected, onSelect,
+        }: {
+          id: string; label: string; active: boolean;
+          options: { value: string; label: string; count?: number }[];
+          selected: string; onSelect: (v: string) => void;
+        }) => (
           <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <input
-              type="text"
-              placeholder="Buscar clínica..."
-              value={clinicSearch}
-              onChange={e => setClinicSearch(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-300 transition-all"
-            />
-          </div>
-          <div className="flex gap-1.5 flex-wrap">
             <button
-              onClick={() => setCategoryFilter('')}
-              className={cn("px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all border flex items-center gap-1", categoryFilter === '' ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-500 border-slate-200 hover:border-violet-300")}
+              onClick={e => { e.stopPropagation(); setOpenDropdown(openDropdown === id ? null : id); }}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold border transition-all",
+                active ? "bg-violet-600 text-white border-violet-600 shadow-sm" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"
+              )}
             >
-              Todas
-              <span className={cn("px-1.5 py-0.5 rounded-full text-[9px] font-black", categoryFilter === '' ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500")}>
-                {clinics.length}
-              </span>
+              {label}
+              <ChevronDown className={cn("w-3 h-3 transition-transform", openDropdown === id && "rotate-180")} />
             </button>
-            {CLINIC_CATEGORIES.map(cat => {
-              const count = clinics.filter(c => c.category === cat.value).length;
-              return (
-                <button
-                  key={cat.value}
-                  onClick={() => setCategoryFilter(categoryFilter === cat.value ? '' : cat.value)}
-                  className={cn("px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all border flex items-center gap-1", categoryFilter === cat.value ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-500 border-slate-200 hover:border-violet-300")}
-                >
-                  {cat.label}
-                  <span className={cn("px-1.5 py-0.5 rounded-full text-[9px] font-black", categoryFilter === cat.value ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500")}>
-                    {count}
-                  </span>
-                </button>
-              );
-            })}
+            {openDropdown === id && (
+              <div className="absolute left-0 top-full mt-1 z-50 bg-white border border-slate-200 rounded-xl shadow-lg py-1 min-w-[160px]">
+                {options.map(opt => (
+                  <button
+                    key={opt.value}
+                    onClick={e => { e.stopPropagation(); onSelect(opt.value); setOpenDropdown(null); }}
+                    className="w-full flex items-center justify-between gap-3 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                  >
+                    <span>{opt.label}</span>
+                    <div className="flex items-center gap-1.5">
+                      {opt.count !== undefined && <span className="text-[9px] font-black text-slate-400">{opt.count}</span>}
+                      {selected === opt.value && <Check className="w-3 h-3 text-violet-600 shrink-0" />}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        );
 
-      {/* Content */}
+        // Filtros dinâmicos por função — aparece só se tiver ao menos 1 clínica com aquela função atribuída
+        const activeFunctions = CLINIC_FUNCTIONS.filter(fn =>
+          clinicMembers.some(m => m.function === fn.value)
+        );
+
+        return (
+          <div className="flex flex-col gap-2">
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Buscar clínica..."
+                value={clinicSearch}
+                onChange={e => setClinicSearch(e.target.value)}
+                className="w-full pl-9 pr-4 py-2 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-300 transition-all"
+              />
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <DropdownFilter
+                id="tipo"
+                label={categoryFilter ? (CLINIC_CATEGORIES.find(c => c.value === categoryFilter)?.label ?? 'Tipo') : 'Tipo'}
+                active={categoryFilter !== ''}
+                selected={categoryFilter}
+                options={[
+                  { value: '', label: 'Todas', count: clinics.length },
+                  ...CLINIC_CATEGORIES.map(cat => ({ value: cat.value, label: cat.label, count: clinics.filter(c => c.category === cat.value).length })),
+                ]}
+                onSelect={v => setCategoryFilter(v)}
+              />
+              {activeFunctions.map(fn => {
+                const usersWithFn = orgUsers.filter(u => clinicMembers.some(m => m.function === fn.value && m.org_user_id === u.id));
+                const selectedId = memberFilters[fn.value] || '';
+                const selectedUser = orgUsers.find(u => u.id === selectedId);
+                return (
+                  <DropdownFilter
+                    key={fn.value}
+                    id={fn.value}
+                    label={selectedUser ? (selectedUser.full_name || selectedUser.email || fn.label).split(' ')[0] : fn.label}
+                    active={!!selectedId}
+                    selected={selectedId}
+                    options={[
+                      { value: '', label: 'Todos' },
+                      ...usersWithFn.map(u => ({ value: u.id, label: u.full_name || u.email || u.id })),
+                    ]}
+                    onSelect={v => setMemberFilters(f => ({ ...f, [fn.value]: v }))}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Clinics grid */}
       {activeSubTab === "clinics" && (
         <div className="flex-1">
           {loadingClinics ? (
@@ -323,101 +500,148 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
               {clinics.filter(c =>
                 c.name.toLowerCase().includes(clinicSearch.toLowerCase()) &&
-                (categoryFilter === '' || c.category === categoryFilter)
-              ).map((clinic) => (
-                <motion.div
-                  key={clinic.id}
-                  whileHover={{ y: -1 }}
-                  className={cn(
-                    "p-3 rounded-xl border shadow-sm transition-all relative",
-                    activeClinicId === clinic.id
-                      ? "bg-violet-50 border-violet-300 shadow-violet-100"
-                      : "bg-white border-slate-200 hover:border-violet-200 hover:shadow-md"
-                  )}
-                >
-                  {/* Header */}
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="w-7 h-7 rounded-lg bg-violet-100 flex items-center justify-center">
-                      <Building2 className="w-3.5 h-3.5 text-violet-600" />
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <span className={cn(
-                        "text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-full",
-                        clinic.plan === 'enterprise' ? "bg-amber-100 text-amber-700"
-                          : clinic.plan === 'pro' ? "bg-violet-100 text-violet-700"
-                          : "bg-slate-100 text-slate-500"
-                      )}>
-                        {clinic.plan}
-                      </span>
-                      {/* Menu 3 pontos */}
-                      <div className="relative">
-                        <button
-                          onClick={e => { e.stopPropagation(); setOpenMenuId(openMenuId === clinic.id ? null : clinic.id); }}
-                          className="w-6 h-6 flex items-center justify-center rounded-lg hover:bg-slate-100 transition-colors"
-                        >
-                          <MoreVertical className="w-3.5 h-3.5 text-slate-400" />
-                        </button>
-                        {openMenuId === clinic.id && (
-                          <div className="absolute right-0 top-7 z-50 bg-white border border-slate-200 rounded-xl shadow-lg py-1 min-w-[140px]">
-                            <button
-                              onClick={e => { e.stopPropagation(); setClinicUserTarget({ id: clinic.id, name: clinic.name }); setOpenMenuId(null); }}
-                              className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
-                            >
-                              <UserPlus className="w-3.5 h-3.5 text-teal-600" />
-                              Adicionar Usuário
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <p className="text-xs font-bold text-slate-900 mb-2 truncate">{clinic.name}</p>
-
-                  {/* Status WhatsApp */}
-                  <div className={cn(
-                    "flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-[10px] font-bold mb-1.5 border",
-                    clinic.whatsapp_status === 'connected'
-                      ? "bg-emerald-700 text-white border-emerald-800"
-                      : "bg-slate-50 text-slate-400 border-slate-100"
-                  )}>
-                    {clinic.whatsapp_status === 'connected'
-                      ? <><Wifi className="w-3 h-3" /> WhatsApp Conectado</>
-                      : <><WifiOff className="w-3 h-3" /> WhatsApp Desconectado</>
-                    }
-                  </div>
-
-                  <button
-                    onClick={() => {
-                      if (activeClinicId === clinic.id) {
-                        setActiveClinicId(null);
-                        setActiveClinicName(null);
-                      } else {
-                        setActiveClinicId(clinic.id);
-                        setActiveClinicName(clinic.name);
-                        onEnterClinic();
-                      }
-                    }}
+                (categoryFilter === '' || c.category === categoryFilter) &&
+                Object.entries(memberFilters).every(([fn, uid]) =>
+                  !uid || clinicMembers.some(m => m.clinic_id === c.id && m.function === fn && m.org_user_id === uid)
+                )
+              ).map((clinic) => {
+                const members = clinicMembers.filter(m => m.clinic_id === clinic.id);
+                return (
+                  <motion.div
+                    key={clinic.id}
+                    whileHover={{ y: -1 }}
                     className={cn(
-                      "w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-[10px] font-bold transition-all",
+                      "p-3 rounded-xl border shadow-sm transition-all relative",
                       activeClinicId === clinic.id
-                        ? "bg-violet-600 text-white hover:bg-violet-700"
-                        : "bg-violet-500 text-white hover:bg-violet-600"
+                        ? "bg-violet-50 border-violet-300 shadow-violet-100"
+                        : "bg-white border-slate-200 hover:border-violet-200 hover:shadow-md"
                     )}
                   >
-                    {activeClinicId === clinic.id ? (
-                      <><LogIn className="w-3 h-3" /> Visualizando</>
-                    ) : (
-                      <><ArrowRight className="w-3 h-3" /> Visualizar</>
+                    {/* Header row */}
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="w-7 h-7 rounded-lg bg-violet-100 flex items-center justify-center">
+                        <Building2 className="w-3.5 h-3.5 text-violet-600" />
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className={cn(
+                          "text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-full",
+                          clinic.plan === 'enterprise' ? "bg-amber-100 text-amber-700"
+                            : clinic.plan === 'pro' ? "bg-violet-100 text-violet-700"
+                            : "bg-slate-100 text-slate-500"
+                        )}>
+                          {clinic.plan}
+                        </span>
+                        <div className="relative">
+                          <button
+                            onClick={e => { e.stopPropagation(); setOpenMenuId(openMenuId === clinic.id ? null : clinic.id); }}
+                            className="w-6 h-6 flex items-center justify-center rounded-lg hover:bg-slate-100 transition-colors"
+                          >
+                            <MoreVertical className="w-3.5 h-3.5 text-slate-400" />
+                          </button>
+                          {openMenuId === clinic.id && (
+                            <div className="absolute right-0 top-7 z-50 bg-white border border-slate-200 rounded-xl shadow-lg py-1 min-w-[160px]">
+                              {canAddClinicUsers && (
+                                <button
+                                  onClick={e => { e.stopPropagation(); setClinicUsersView({ id: clinic.id, name: clinic.name }); fetchClinicUsers(clinic.id); setOpenMenuId(null); }}
+                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                                >
+                                  <Users className="w-3.5 h-3.5 text-teal-600" />
+                                  Usuários da Clínica
+                                </button>
+                              )}
+                              {canSetResponsaveis && (
+                                <button
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    setResponsibleTarget(clinic);
+                                    const form: Record<string, string> = {};
+                                    CLINIC_FUNCTIONS.forEach(f => {
+                                      const m = clinicMembers.find(m => m.clinic_id === clinic.id && m.function === f.value);
+                                      form[f.value] = m?.org_user_id || '';
+                                    });
+                                    setResponsibleForm(form);
+                                    setOpenMenuId(null);
+                                  }}
+                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                                >
+                                  <UserCheck className="w-3.5 h-3.5 text-violet-600" />
+                                  Definir Responsáveis
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <p className="text-xs font-bold text-slate-900 mb-1.5 truncate">{clinic.name}</p>
+
+                    {/* Responsáveis */}
+                    {members.length > 0 && (
+                      <div className="mb-1.5 space-y-0.5">
+                        {CLINIC_FUNCTIONS.map(fn => {
+                          const m = members.find(m => m.function === fn.value);
+                          if (!m) return null;
+                          const u = orgUsers.find(u => u.id === m.org_user_id);
+                          if (!u) return null;
+                          return (
+                            <div key={fn.value} className="flex items-center gap-1 text-[9px] font-semibold text-slate-500 truncate">
+                              <fn.Icon className={cn("w-2.5 h-2.5 shrink-0", fn.color)} />
+                              <span className={cn("shrink-0", fn.color)}>{fn.label}</span>
+                              <span className="text-slate-300">·</span>
+                              <span className="truncate">{u.full_name || u.email}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
                     )}
-                  </button>
-                </motion.div>
-              ))}
+
+                    {/* Status WhatsApp */}
+                    <div className={cn(
+                      "flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-[10px] font-bold mb-1.5 border",
+                      clinic.whatsapp_status === 'connected'
+                        ? "bg-emerald-700 text-white border-emerald-800"
+                        : "bg-slate-50 text-slate-400 border-slate-100"
+                    )}>
+                      {clinic.whatsapp_status === 'connected'
+                        ? <><Wifi className="w-3 h-3" /> WhatsApp Conectado</>
+                        : <><WifiOff className="w-3 h-3" /> WhatsApp Desconectado</>
+                      }
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        if (activeClinicId === clinic.id) {
+                          setActiveClinicId(null);
+                          setActiveClinicName(null);
+                        } else {
+                          setActiveClinicId(clinic.id);
+                          setActiveClinicName(clinic.name);
+                          onEnterClinic();
+                        }
+                      }}
+                      className={cn(
+                        "w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-[10px] font-bold transition-all",
+                        activeClinicId === clinic.id
+                          ? "bg-violet-600 text-white hover:bg-violet-700"
+                          : "bg-violet-500 text-white hover:bg-violet-600"
+                      )}
+                    >
+                      {activeClinicId === clinic.id ? (
+                        <><LogIn className="w-3 h-3" /> Visualizando</>
+                      ) : (
+                        <><ArrowRight className="w-3 h-3" /> Visualizar</>
+                      )}
+                    </button>
+                  </motion.div>
+                );
+              })}
             </div>
           )}
         </div>
       )}
 
+      {/* Users tab */}
       {activeSubTab === "users" && (
         <div className="flex-1">
           {orgUsers.length === 0 ? (
@@ -427,8 +651,15 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
             </div>
           ) : (
             <div className="space-y-2">
-              {orgUsers.map((u) => (
-                <div key={u.id} className="flex items-center gap-4 p-4 bg-white rounded-xl border border-slate-200">
+              {orgUsers.map((u) => {
+                const isSelf = u.user_id === profile?.id;
+                const isOwner = userRole === 'org_owner';
+                // Roles disponíveis: owner só pode ser dado por owner
+                const availableRoles = isOwner
+                  ? ORG_ROLES
+                  : ORG_ROLES.filter(r => r.value !== 'org_owner');
+                return (
+                <div key={u.id} className="flex items-center gap-4 p-4 bg-white rounded-xl border border-slate-200 hover:border-violet-200 transition-all">
                   <div className="w-9 h-9 rounded-lg bg-violet-100 flex items-center justify-center text-violet-700 font-bold text-xs shrink-0">
                     {(u.full_name || u.email || '?').slice(0, 2).toUpperCase()}
                   </div>
@@ -436,11 +667,57 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                     <p className="text-sm font-bold text-slate-900 truncate">{u.full_name || '—'}</p>
                     <p className="text-xs text-slate-500 truncate">{u.email}</p>
                   </div>
-                  <span className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 shrink-0">
-                    {u.role === 'org_owner' || u.role === 'owner' ? 'Owner' : 'Usuário'}
-                  </span>
+
+                  {/* Role selector */}
+                  <div className="flex items-center gap-3 shrink-0">
+                    {isSelf ? (
+                      <span className={cn("text-[9px] font-bold uppercase tracking-widest px-3 py-1.5 rounded-lg border", roleBadgeClass(u.role))}>
+                        {roleLabel(u.role)}
+                      </span>
+                    ) : (
+                      <div className="relative group">
+                        <select
+                          value={u.role}
+                          onChange={async (e) => {
+                            const newRole = e.target.value;
+                            await supabase.from('org_users').update({ role: newRole }).eq('id', u.id);
+                            fetchOrgUsers();
+                          }}
+                          className={cn(
+                            "text-[10px] font-bold uppercase tracking-wider pl-3 pr-8 py-1.5 rounded-lg border cursor-pointer appearance-none transition-all focus:outline-none focus:ring-2 focus:ring-violet-200 w-full min-w-[100px]",
+                            u.role === 'org_owner' ? "bg-amber-50 text-amber-700 border-amber-200" :
+                            u.role === 'org_admin' ? "bg-violet-50 text-violet-700 border-violet-200" :
+                            "bg-blue-50 text-blue-700 border-blue-200"
+                          )}
+                        >
+                          {availableRoles.map(r => (
+                            <option key={r.value} value={r.value}>{r.label}</option>
+                          ))}
+                        </select>
+                        <ChevronDown className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-current pointer-events-none opacity-50 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                    )}
+
+                    {/* Delete button — não pode deletar a si mesmo */}
+                    {!isSelf && isOwner && (
+                      <button
+                        onClick={async () => {
+                          if (!confirm(`Remover ${u.full_name || u.email} da organização?`)) return;
+                          await supabase.from('org_clinic_assignments').delete().eq('org_user_id', u.id);
+                          await supabase.from('org_users').delete().eq('id', u.id);
+                          fetchOrgUsers();
+                          fetchClinics();
+                        }}
+                        className="p-2 text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded-xl border border-transparent hover:border-rose-100 transition-all shadow-sm hover:shadow-rose-100/50"
+                        title="Remover usuário"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -681,6 +958,142 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                 <button onClick={handleAddClinicUser} disabled={clinicUserSaving}
                   className="w-full py-3 bg-teal-600 hover:bg-teal-700 disabled:bg-slate-100 disabled:text-slate-400 text-white rounded-xl font-black text-sm transition-all flex items-center justify-center gap-2">
                   {clinicUserSaving ? <><Loader2 className="w-4 h-4 animate-spin" /> Adicionando...</> : 'Adicionar Usuário'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal: Usuários da Clínica */}
+      <AnimatePresence>
+        {clinicUsersView && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col max-h-[80vh]"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+                <div>
+                  <h3 className="text-base font-black text-slate-900">Usuários</h3>
+                  <p className="text-xs text-slate-400 font-medium">{clinicUsersView.name}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {canAddClinicUsers && (
+                    <button
+                      onClick={() => { setClinicUserTarget({ id: clinicUsersView.id, name: clinicUsersView.name }); }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold rounded-lg transition-colors"
+                    >
+                      <UserPlus className="w-3.5 h-3.5" /> Adicionar
+                    </button>
+                  )}
+                  <button onClick={() => setClinicUsersView(null)} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors">
+                    <X className="w-4 h-4 text-slate-500" />
+                  </button>
+                </div>
+              </div>
+
+              {/* List */}
+              <div className="overflow-y-auto flex-1 p-4">
+                {clinicUsersLoading ? (
+                  <div className="flex justify-center py-10">
+                    <Loader2 className="w-6 h-6 text-teal-500 animate-spin" />
+                  </div>
+                ) : clinicUsersData.length === 0 ? (
+                  <div className="text-center py-10 text-slate-400">
+                    <Users className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                    <p className="text-sm font-medium">Nenhum usuário nesta clínica.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {clinicUsersData.map(u => (
+                      <div key={u.id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                        <div className="w-8 h-8 rounded-lg bg-teal-100 flex items-center justify-center text-teal-700 font-bold text-xs shrink-0">
+                          {(u.full_name || u.email || '?').slice(0, 2).toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-bold text-slate-900 truncate">{u.full_name || '—'}</p>
+                          <p className="text-[10px] text-slate-400 truncate">{u.email}</p>
+                        </div>
+                        {canAddClinicUsers ? (
+                          <select
+                            value={u.role}
+                            onChange={e => handleChangeClinicUserRole(u.id, e.target.value)}
+                            className="text-[10px] font-bold border border-slate-200 rounded-lg px-1.5 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-teal-300 shrink-0"
+                          >
+                            {CLINIC_ROLES.map(r => (
+                              <option key={r} value={r}>
+                                {r === 'medico' ? 'Médico' : r === 'secretaria' ? 'Secretária' : 'Gestor'}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-100 text-teal-700 shrink-0">
+                            {u.role === 'medico' ? 'Médico' : u.role === 'secretaria' ? 'Secretária' : 'Gestor'}
+                          </span>
+                        )}
+                        {canManageClinics && (
+                          <button
+                            onClick={() => handleRemoveClinicUser(u.id)}
+                            className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors shrink-0"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal: Responsáveis da Clínica */}
+      <AnimatePresence>
+        {responsibleTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm"
+            >
+              <div className="flex items-center justify-between mb-1">
+                <h3 className="text-base font-black text-slate-900">Responsáveis</h3>
+                <button onClick={() => setResponsibleTarget(null)} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors">
+                  <X className="w-4 h-4 text-slate-500" />
+                </button>
+              </div>
+              <p className="text-xs text-slate-400 font-medium mb-5">{responsibleTarget.name}</p>
+
+              <div className="space-y-4">
+                {CLINIC_FUNCTIONS.map(fn => (
+                  <div key={fn.value}>
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1.5 mb-1.5">
+                      <fn.Icon className={cn("w-3 h-3", fn.color)} />
+                      {fn.label}
+                    </label>
+                    <select
+                      value={responsibleForm[fn.value] || ''}
+                      onChange={e => setResponsibleForm(f => ({ ...f, [fn.value]: e.target.value }))}
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white text-slate-700"
+                    >
+                      <option value="">— Nenhum —</option>
+                      {orgUsers.map(u => (
+                        <option key={u.id} value={u.id}>{u.full_name || u.email}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+
+                <button onClick={handleSaveResponsaveis} disabled={responsibleSaving}
+                  className="w-full py-3 bg-violet-600 hover:bg-violet-700 disabled:bg-slate-100 disabled:text-slate-400 text-white rounded-xl font-black text-sm transition-all flex items-center justify-center gap-2">
+                  {responsibleSaving ? <><Loader2 className="w-4 h-4 animate-spin" /> Salvando...</> : 'Salvar'}
                 </button>
               </div>
             </motion.div>

@@ -25,9 +25,10 @@ function AppContent() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const { user, loading, userRole, activeClinicId } = useAuth();
 
-  // Redireciona org_admin sem clínica ativa para a aba Organização
+  // Redireciona usuários org sem clínica ativa para a aba Organização
   useEffect(() => {
-    if (!loading && userRole === 'org_admin' && !activeClinicId) {
+    const isOrgUser = ['org_owner', 'org_admin', 'org_team'].includes(userRole);
+    if (!loading && isOrgUser && !activeClinicId) {
       setActiveTab('org-admin');
     }
   }, [loading, userRole, activeClinicId]);

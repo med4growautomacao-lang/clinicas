@@ -35,15 +35,32 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
   const pickerRef = useRef<HTMLDivElement>(null);
 
   // Carrega clínicas da org para o switcher
+  // org_owner e org_admin veem todas; org_team e gestor_trafego veem apenas as atribuídas
   useEffect(() => {
-    if (userRole !== 'org_admin' || !profile?.organization_id) return;
-    supabase
-      .from('clinics')
-      .select('id, name')
-      .eq('organization_id', profile.organization_id)
-      .order('name')
-      .then(({ data }) => setClinics(data || []));
-  }, [userRole, profile?.organization_id]);
+    if (!['org_owner', 'org_admin', 'org_team'].includes(userRole) || !profile?.organization_id) return;
+    const canSeeAll = userRole === 'org_owner' || userRole === 'org_admin';
+    if (canSeeAll) {
+      supabase
+        .from('clinics')
+        .select('id, name')
+        .eq('organization_id', profile.organization_id)
+        .order('name')
+        .then(({ data }) => setClinics(data || []));
+    } else if (profile.org_user_id) {
+      // Buscar apenas clínicas atribuídas via org_clinic_assignments
+      supabase
+        .from('org_clinic_assignments')
+        .select('clinic_id, clinics(id, name)')
+        .eq('org_user_id', profile.org_user_id)
+        .then(({ data }) => {
+          const mapped = (data || [])
+            .map((d: any) => d.clinics)
+            .filter(Boolean)
+            .sort((a: any, b: any) => a.name.localeCompare(b.name));
+          setClinics(mapped);
+        });
+    }
+  }, [userRole, profile?.organization_id, profile?.org_user_id]);
 
   // Fecha picker ao clicar fora
   useEffect(() => {
@@ -56,7 +73,8 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
   }, []);
 
   // Org-admin com clínica ativa navega como gestor
-  const effectiveRole = userRole === 'org_admin' && activeClinicId ? 'gestor' : userRole;
+  const isOrgUser = ['org_owner', 'org_admin', 'org_team'].includes(userRole);
+  const effectiveRole = isOrgUser && activeClinicId ? 'gestor' : userRole;
 
   const allNavItems = [
     { id: "dashboard", label: "Visão Geral", icon: LayoutDashboard, color: "text-emerald-600", roles: ['gestor', 'medico', 'secretaria'] },
@@ -68,7 +86,7 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
     { id: "finance", label: "Financeiro", icon: CircleDollarSign, color: "text-emerald-700", roles: ['gestor'] },
     { id: "settings", label: "Configurações", icon: Settings, color: "text-slate-500", roles: ['gestor'] },
     { id: "super-admin", label: "Super Admin", icon: ShieldCheck, color: "text-orange-600", roles: ['super-admin'] },
-    { id: "org-admin", label: "Organização", icon: Activity, color: "text-violet-600", roles: ['org_admin'] },
+    { id: "org-admin", label: "Organização", icon: Activity, color: "text-violet-600", roles: ['org_owner', 'org_admin', 'org_team'] },
   ];
 
   const navItems = allNavItems.filter(item => item.roles.includes(effectiveRole));
@@ -117,7 +135,7 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
       </nav>
 
       {/* Banner de clínica ativa para org-admin */}
-      {userRole === 'org_admin' && activeClinicId && (
+      {isOrgUser && activeClinicId && (
         <div className="mx-3 mb-2 p-3 bg-violet-50 border border-violet-200 rounded-xl">
           <p className="text-[9px] font-bold text-violet-500 uppercase tracking-widest mb-1">Visualizando clínica</p>
 

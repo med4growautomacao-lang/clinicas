@@ -963,7 +963,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
         apt_to_conv_rate_prev: compStats.appointments > 0 ? (compStats.convs / compStats.appointments) * 100 : 0,
       };
     });
-  }, [periods, metricsByPeriod, comparisonMetricsByPeriod, getTotals]);
+  }, [periods, metricsByPeriod, comparisonMetricsByPeriod, getTotals, selectedPlatform]);
 
   const activeMetric = METRICS_CONFIG.find(m => m.id === selectedMetric) || METRICS_CONFIG[0];
 

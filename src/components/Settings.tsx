@@ -41,7 +41,8 @@ import WhatsappLogo from "../assets/logos/Logo Whatsapp.png";
 
 export function Settings() {
     const { clinic, aiConfig, whatsapp, loading, updateClinic, updateAI, updateWhatsapp, generateConnectToken } = useSettings();
-    const [activeTab, setActiveTab] = useState<"branding" | "ai" | "clinic" | "integrations">("branding");
+    const [activeTab, setActiveTab] = useState<"clinic" | "integrations">("clinic");
+    const [activeIntTab, setActiveIntTab] = useState<'whatsapp' | 'meta' | 'google'>('whatsapp');
     
     // Local states for editing
     const [localClinic, setLocalClinic] = useState<Partial<Clinic>>({});
@@ -194,8 +195,6 @@ export function Settings() {
     }
 
     const tabs = [
-        { id: "branding", label: "Branding", icon: Palette, color: "text-teal-600" },
-        { id: "ai", label: "Comercial", icon: Bot, color: "text-teal-600" },
         { id: "clinic", label: "Dados da Clínica", icon: Building2, color: "text-emerald-600" },
         { id: "integrations", label: "Integrações", icon: Plug, color: "text-violet-600" },
     ];
@@ -238,6 +237,47 @@ export function Settings() {
                 </div>
             </div>
 
+            {activeTab === "integrations" && (
+                <div className="flex bg-slate-50 p-1 rounded-xl w-fit shadow-sm border border-slate-200/60">
+                    <button
+                        onClick={() => setActiveIntTab('whatsapp')}
+                        className={cn(
+                            "flex items-center gap-2.5 px-6 py-2 text-sm font-bold rounded-lg transition-all duration-200",
+                            activeIntTab === 'whatsapp' 
+                                ? "bg-teal-600 text-white shadow-md shadow-teal-100" 
+                                : "text-slate-500 hover:text-slate-900 hover:bg-white"
+                        )}
+                    >
+                        <MessageCircle className={cn("w-4 h-4", activeIntTab === 'whatsapp' ? "text-white" : "text-emerald-500")} /> 
+                        WhatsApp
+                    </button>
+                    <button
+                        onClick={() => setActiveIntTab('meta')}
+                        className={cn(
+                            "flex items-center gap-2.5 px-6 py-2 text-sm font-bold rounded-lg transition-all duration-200",
+                            activeIntTab === 'meta' 
+                                ? "bg-teal-600 text-white shadow-md shadow-teal-100" 
+                                : "text-slate-500 hover:text-slate-900 hover:bg-white"
+                        )}
+                    >
+                        <img src={MetaLogo} alt="Meta" className={cn("w-4 h-4 object-contain filter transition-all", activeIntTab === 'meta' ? 'brightness-0 invert' : 'brightness-100 opacity-60')} /> 
+                        Meta Ads
+                    </button>
+                    <button
+                        onClick={() => setActiveIntTab('google')}
+                        className={cn(
+                            "flex items-center gap-2.5 px-6 py-2 text-sm font-bold rounded-lg transition-all duration-200",
+                            activeIntTab === 'google' 
+                                ? "bg-teal-600 text-white shadow-md shadow-teal-100" 
+                                : "text-slate-500 hover:text-slate-900 hover:bg-white"
+                        )}
+                    >
+                        <img src={GoogleLogo} alt="Google" className={cn("w-4 h-4 object-contain filter transition-all", activeIntTab === 'google' ? 'brightness-0 invert' : 'brightness-100 opacity-60')} /> 
+                        Google Ads
+                    </button>
+                </div>
+            )}
+
             <div className="flex-1 overflow-y-auto pr-2 pb-8 custom-scrollbar">
                 <AnimatePresence mode="wait">
                     <motion.div
@@ -248,18 +288,7 @@ export function Settings() {
                         transition={{ duration: 0.2 }}
                         className="space-y-6"
                     >
-                        {activeTab === "branding" && (
-                            <BrandingSettings 
-                                data={localClinic} 
-                                onChange={(updates) => setLocalClinic(prev => ({ ...prev, ...updates }))} 
-                            />
-                        )}
-                        {activeTab === "ai" && (
-                            <AISettings 
-                                data={localAI} 
-                                onChange={(updates) => setLocalAI(prev => ({ ...prev, ...updates }))} 
-                            />
-                        )}
+
                         {activeTab === "clinic" && (
                             <ClinicSettings 
                                 data={localClinic} 
@@ -278,6 +307,7 @@ export function Settings() {
                                 connecting={connecting}
                                 onCopyLink={handleShowLink}
                                 linkCopied={linkCopied}
+                                activeIntTab={activeIntTab}
                             />
                         )}
                     </motion.div>
@@ -700,7 +730,7 @@ function RedirectLinkCard({ connectToken, redirectMessage, onMessageChange }: {
     );
 }
 
-function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSaveClinic, onConnect, onCancel, connecting, onCopyLink, linkCopied }: {
+function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSaveClinic, onConnect, onCancel, connecting, onCopyLink, linkCopied, activeIntTab }: {
     data: Partial<WhatsappInstance>,
     onChange: (updates: Partial<WhatsappInstance>) => void,
     clinicData: Partial<Clinic>,
@@ -710,7 +740,8 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
     onCancel: () => void,
     connecting: boolean,
     onCopyLink: () => void,
-    linkCopied: boolean
+    linkCopied: boolean,
+    activeIntTab: 'whatsapp' | 'meta' | 'google'
 }) {
     const { clinic, refetch, systemSettings } = useSettings();
     const [groupName, setGroupName] = useState('Informativos do Agente IA');
@@ -718,7 +749,6 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
     const [creatingGroup, setCreatingGroup] = useState(false);
     const [groupResult, setGroupResult] = useState<'success' | 'error' | null>(null);
     const [showScripts, setShowScripts] = useState(false);
-    const [activeIntTab, setActiveIntTab] = useState<'whatsapp' | 'meta' | 'google'>('whatsapp');
     const [googleIdSaving, setGoogleIdSaving] = useState(false);
     const [googleIdSaved, setGoogleIdSaved] = useState(false);
 
@@ -756,35 +786,6 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
 
     return (
         <div className="max-w-4xl mx-auto space-y-6">
-            <div className="flex bg-slate-100 p-1 rounded-lg w-full sm:w-fit shadow-sm border border-slate-200">
-                <button
-                    onClick={() => setActiveIntTab('whatsapp')}
-                    className={cn(
-                        "flex items-center gap-2 px-5 py-2 text-sm font-semibold rounded-md transition-all",
-                        activeIntTab === 'whatsapp' ? "bg-emerald-600 text-white shadow-sm" : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
-                    )}
-                >
-                    <MessageCircle className="w-4 h-4" /> WhatsApp
-                </button>
-                <button
-                    onClick={() => setActiveIntTab('meta')}
-                    className={cn(
-                        "flex items-center gap-2 px-5 py-2 text-sm font-semibold rounded-md transition-all",
-                        activeIntTab === 'meta' ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
-                    )}
-                >
-                    <img src={MetaLogo} alt="Meta" className={cn("w-4 h-4 object-contain filter transition-all", activeIntTab === 'meta' ? 'brightness-0 invert' : 'brightness-0 opacity-50')} /> Meta Ads
-                </button>
-                <button
-                    onClick={() => setActiveIntTab('google')}
-                    className={cn(
-                        "flex items-center gap-2 px-5 py-2 text-sm font-semibold rounded-md transition-all",
-                        activeIntTab === 'google' ? "bg-amber-500 text-white shadow-sm" : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
-                    )}
-                >
-                    <img src={GoogleLogo} alt="Google" className={cn("w-4 h-4 object-contain filter transition-all", activeIntTab === 'google' ? 'brightness-0 invert' : 'brightness-0 opacity-50')} /> Google Ads
-                </button>
-            </div>
 
             {activeIntTab === 'whatsapp' && (
                 <div className="space-y-6">

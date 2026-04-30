@@ -861,7 +861,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
       {/* Modal: Novo Usuário Org */}
       <AnimatePresence>
         {showUserModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -911,10 +911,10 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
         )}
       </AnimatePresence>
 
-      {/* Modal: Usuário da Clínica */}
+    {/* Modal: Usuário da Clínica */}
       <AnimatePresence>
         {clinicUserTarget && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}

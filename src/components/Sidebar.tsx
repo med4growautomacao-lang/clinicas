@@ -8,6 +8,7 @@ import {
   Users,
   Settings,
   Stethoscope,
+  Building2,
   Activity,
   ShieldCheck,
   LogOut,
@@ -28,7 +29,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
-  const { clinicName, userRole, signOut, profile, activeClinicId, setActiveClinicId, activeClinicName, setActiveClinicName } = useAuth();
+  const { clinicName, userRole, signOut, profile, activeClinicId, setActiveClinicId, activeClinicName, setActiveClinicName, activeClinicCategory } = useAuth();
   const [clinics, setClinics] = useState<{ id: string; name: string }[]>([]);
   const [showClinicPicker, setShowClinicPicker] = useState(false);
   const [clinicPickerSearch, setClinicPickerSearch] = useState('');
@@ -76,31 +77,35 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
   const isOrgUser = ['org_owner', 'org_admin', 'org_team'].includes(userRole);
   const effectiveRole = isOrgUser && activeClinicId ? 'gestor' : userRole;
 
+  const isOutro = activeClinicCategory === 'outro';
+
   const allNavItems = [
     { id: "dashboard", label: "Visão Geral", icon: LayoutDashboard, color: "text-emerald-600", roles: ['gestor', 'medico', 'secretaria'] },
     { id: "marketing", label: "Marketing", icon: BarChart3, color: "text-cyan-600", roles: ['gestor'] },
     { id: "ai-secretary", label: "Comercial", icon: Bot, color: "text-teal-600", roles: ['gestor', 'secretaria'] },
-    { id: "appointments", label: "Agendamentos", icon: CalendarDays, color: "text-teal-700", roles: ['gestor', 'medico', 'secretaria'] },
-    { id: "medical-records", label: "Prontuários", icon: ClipboardList, color: "text-slate-700", roles: ['gestor', 'medico', 'secretaria'] },
-    { id: "doctors", label: "Corpo Clínico", icon: Users, color: "text-emerald-800", roles: ['gestor'] },
+    { id: "appointments", label: "Agendamentos", icon: CalendarDays, color: "text-teal-700", roles: ['gestor', 'medico', 'secretaria'], clinicOnly: true },
+    { id: "medical-records", label: "Prontuários", icon: ClipboardList, color: "text-slate-700", roles: ['gestor', 'medico', 'secretaria'], clinicOnly: true },
+    { id: "doctors", label: "Corpo Clínico", icon: Users, color: "text-emerald-800", roles: ['gestor'], clinicOnly: true },
     { id: "finance", label: "Financeiro", icon: CircleDollarSign, color: "text-emerald-700", roles: ['gestor'] },
     { id: "settings", label: "Configurações", icon: Settings, color: "text-slate-500", roles: ['gestor'] },
     { id: "super-admin", label: "Super Admin", icon: ShieldCheck, color: "text-orange-600", roles: ['super-admin'] },
     { id: "org-admin", label: "Organização", icon: Activity, color: "text-violet-600", roles: ['org_owner', 'org_admin', 'org_team'] },
   ];
 
-  const navItems = allNavItems.filter(item => item.roles.includes(effectiveRole));
+  const navItems = allNavItems
+    .filter(item => item.roles.includes(effectiveRole))
+    .filter(item => !(isOutro && item.clinicOnly));
 
   return (
     <div className="w-72 bg-white flex flex-col h-full border-r border-slate-200 shadow-sm z-10 transition-all duration-200">
       <div className="p-8 pb-4">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-xl bg-teal-600 flex items-center justify-center text-white shadow-lg shadow-teal-100">
-            <Stethoscope className="w-7 h-7" />
+          <div className={cn("w-12 h-12 rounded-xl flex items-center justify-center text-white shadow-lg", isOutro ? "bg-slate-700 shadow-slate-200" : "bg-teal-600 shadow-teal-100")}>
+            {isOutro ? <Building2 className="w-7 h-7" /> : <Stethoscope className="w-7 h-7" />}
           </div>
           <div className="flex flex-col">
-            <span className="text-xl font-black text-slate-900 tracking-tight">MedDesk</span>
-            <span className="text-[10px] font-bold text-teal-600 uppercase tracking-widest -mt-1">{clinicName || 'Clínica'}</span>
+            <span className="text-xl font-black text-slate-900 tracking-tight">{isOutro ? 'WakeDesk' : 'MedDesk'}</span>
+            <span className="text-[10px] font-bold text-teal-600 uppercase tracking-widest -mt-1">{isOutro ? 'WAKEMARKETING' : 'MED4GROW'}</span>
           </div>
         </div>
       </div>

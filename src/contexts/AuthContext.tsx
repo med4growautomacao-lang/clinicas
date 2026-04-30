@@ -27,6 +27,7 @@ interface AuthContextType {
   setActiveClinicId: (id: string | null) => void;
   activeClinicName: string | null;
   setActiveClinicName: (name: string | null) => void;
+  activeClinicCategory: string | null;
   signOut: () => Promise<void>;
 }
 
@@ -56,6 +57,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (name) sessionStorage.setItem('activeClinicName', name);
     else sessionStorage.removeItem('activeClinicName');
   };
+
+  const [activeClinicCategory, setActiveClinicCategory] = useState<string | null>(
+    () => sessionStorage.getItem('activeClinicCategory')
+  );
+
+  // Carrega a categoria da clínica ativa quando muda
+  useEffect(() => {
+    if (!activeClinicId) {
+      setActiveClinicCategory(null);
+      sessionStorage.removeItem('activeClinicCategory');
+      return;
+    }
+    supabase
+      .from('clinics')
+      .select('category')
+      .eq('id', activeClinicId)
+      .maybeSingle()
+      .then(({ data }) => {
+        const cat = data?.category || 'clinica';
+        setActiveClinicCategory(cat);
+        sessionStorage.setItem('activeClinicCategory', cat);
+      });
+  }, [activeClinicId]);
 
   useEffect(() => {
     let ignore = false;
@@ -214,6 +238,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setActiveClinicId,
       activeClinicName,
       setActiveClinicName,
+      activeClinicCategory,
       signOut
     }}>
       {children}

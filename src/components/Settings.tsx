@@ -1157,16 +1157,18 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                             animate={{ opacity: 1, y: 0 }}
                             className="space-y-8"
                         >
-                            {/* Webhook */}
-                            <div className="space-y-3 p-5 bg-slate-50 border border-slate-100 rounded-2xl relative overflow-hidden group/item">
+                            {/* Webhook e Formulários */}
+                            <div className="space-y-4 p-5 bg-slate-50 border border-slate-100 rounded-2xl relative overflow-hidden group/item">
                                 <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
                                 <label className="text-xs font-bold text-slate-700 flex items-center gap-2">
                                     <Globe className="w-4 h-4 text-blue-500" />
-                                    Endereço Webhook <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-md text-[9px] uppercase tracking-wider ml-2">LP / Forms</span>
+                                    Integração de Formulários e Webhook <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-md text-[9px] uppercase tracking-wider ml-2">LP / Forms</span>
                                 </label>
-                                <p className="text-[12px] text-slate-500 font-medium leading-relaxed max-w-2xl">
-                                    Utilize este endereço no formulário da sua Landing Page para capturar os leads diretamente no sistema.
+                                <p className="text-[12px] text-slate-500 font-medium leading-relaxed max-w-3xl">
+                                    Utilize este endereço de Webhook e siga o padrão exato de nomenclatura ao criar os formulários na sua Landing Page para capturar os leads diretamente no sistema.
                                 </p>
+                                
+                                {/* URL Webhook */}
                                 <div className="flex flex-col sm:flex-row gap-3 pt-1">
                                     <div className="flex-1 px-4 py-3 bg-[#0d1117] border border-slate-800 rounded-xl flex items-center shadow-inner overflow-x-auto custom-scrollbar">
                                         <code className="text-[13px] font-mono text-blue-400 whitespace-nowrap">
@@ -1191,8 +1193,74 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                                         }}
                                         className="bg-white border-slate-200 text-slate-700 hover:bg-slate-50 gap-2 shrink-0 h-10 sm:h-auto rounded-xl shadow-sm transition-all font-bold"
                                     >
-                                        <Copy className="w-4 h-4" /> Copiar Link
+                                        <Copy className="w-4 h-4" /> Copiar Link Webhook
                                     </Button>
+                                </div>
+
+                                {/* Campos Padronizados */}
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+                                    <div className="p-3.5 bg-white border border-slate-200 rounded-xl shadow-sm hover:border-blue-300 transition-colors cursor-pointer group/copy"
+                                         onClick={(e) => {
+                                             const template = systemSettings?.form_default_name || 'formulario {{CLINIC_NAME}} {{PHONE}}';
+                                             const text = template.replace(/{{CLINIC_NAME}}/g, clinicData.name || 'clinica vaz')
+                                                                  .replace(/{{PHONE}}/g, clinicData.phone?.replace(/\D/g, '') || '5521973603891')
+                                                                  .toLowerCase();
+                                             navigator.clipboard.writeText(text);
+                                             const icon = e.currentTarget.querySelector('svg');
+                                             if (icon) {
+                                                 icon.classList.add('text-blue-500');
+                                                 setTimeout(() => icon.classList.remove('text-blue-500'), 1500);
+                                             }
+                                         }}>
+                                        <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-1.5 flex justify-between items-center">
+                                            Nome do Formulário
+                                            <Copy className="w-3.5 h-3.5 text-slate-300 transition-colors" />
+                                        </p>
+                                        <code className="text-xs font-mono text-slate-700 font-bold truncate block">
+                                            {(() => {
+                                                const template = systemSettings?.form_default_name || 'formulario {{CLINIC_NAME}} {{PHONE}}';
+                                                return template.replace(/{{CLINIC_NAME}}/g, clinicData.name || 'clinica vaz')
+                                                               .replace(/{{PHONE}}/g, clinicData.phone?.replace(/\D/g, '') || '5521973603891')
+                                                               .toLowerCase();
+                                            })()}
+                                        </code>
+                                    </div>
+                                    
+                                    <div className="p-3.5 bg-white border border-slate-200 rounded-xl shadow-sm hover:border-blue-300 transition-colors cursor-pointer group/copy"
+                                         onClick={(e) => {
+                                             navigator.clipboard.writeText(systemSettings?.form_default_label_name || "Nome completo");
+                                             const icon = e.currentTarget.querySelector('svg');
+                                             if (icon) {
+                                                 icon.classList.add('text-blue-500');
+                                                 setTimeout(() => icon.classList.remove('text-blue-500'), 1500);
+                                             }
+                                         }}>
+                                        <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-1.5 flex justify-between items-center">
+                                            Rótulo (Label) do Nome
+                                            <Copy className="w-3.5 h-3.5 text-slate-300 transition-colors" />
+                                        </p>
+                                        <code className="text-xs font-mono text-slate-700 font-bold block">
+                                            {systemSettings?.form_default_label_name || "Nome completo"}
+                                        </code>
+                                    </div>
+
+                                    <div className="p-3.5 bg-white border border-slate-200 rounded-xl shadow-sm hover:border-blue-300 transition-colors cursor-pointer group/copy"
+                                         onClick={(e) => {
+                                             navigator.clipboard.writeText(systemSettings?.form_default_label_phone || "WhatsApp com DDD");
+                                             const icon = e.currentTarget.querySelector('svg');
+                                             if (icon) {
+                                                 icon.classList.add('text-blue-500');
+                                                 setTimeout(() => icon.classList.remove('text-blue-500'), 1500);
+                                             }
+                                         }}>
+                                        <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-1.5 flex justify-between items-center">
+                                            Rótulo (Label) do Número
+                                            <Copy className="w-3.5 h-3.5 text-slate-300 transition-colors" />
+                                        </p>
+                                        <code className="text-xs font-mono text-slate-700 font-bold block">
+                                            {systemSettings?.form_default_label_phone || "WhatsApp com DDD"}
+                                        </code>
+                                    </div>
                                 </div>
                             </div>
 
@@ -1201,7 +1269,7 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                                 <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
                                 <label className="text-xs font-bold text-slate-700 flex items-center gap-2">
                                     <MessageCircle className="w-4 h-4 text-emerald-500" />
-                                    URL do WhatsApp <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-md text-[9px] uppercase tracking-wider ml-2">Direto</span>
+                                    URL para botão whatsapp <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-md text-[9px] uppercase tracking-wider ml-2">Direto</span>
                                 </label>
                                 <p className="text-[12px] text-slate-500 font-medium leading-relaxed max-w-2xl">
                                     Utilize este link no botão de "Enviar Mensagem" da sua Landing Page.
@@ -1237,6 +1305,60 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                                 </div>
                             </div>
 
+                            {/* Botão Flutuante WhatsApp */}
+                            <div className="space-y-3 p-5 bg-slate-50 border border-slate-100 rounded-2xl relative overflow-hidden group/item">
+                                <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
+                                <label className="text-xs font-bold text-slate-700 flex items-center gap-2">
+                                    <MessageCircle className="w-4 h-4 text-emerald-500" />
+                                    Script para adicionar botão Flutuante de whatsapp <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-md text-[9px] uppercase tracking-wider ml-2">Elemento Visual</span>
+                                </label>
+                                <p className="text-[12px] text-slate-500 font-medium leading-relaxed max-w-3xl">
+                                    Copie este código e insira no <strong>Footer/Body</strong> do seu site para exibir o ícone do WhatsApp no canto da tela.
+                                </p>
+                                <div className="relative group mt-3 rounded-xl overflow-hidden border border-slate-800 bg-[#0d1117] shadow-xl">
+                                    <div className="bg-[#161b22] px-4 py-2.5 flex items-center justify-between border-b border-slate-800">
+                                        <div className="flex gap-1.5">
+                                            <div className="w-3 h-3 rounded-full bg-rose-500/80"></div>
+                                            <div className="w-3 h-3 rounded-full bg-amber-500/80"></div>
+                                            <div className="w-3 h-3 rounded-full bg-emerald-500/80"></div>
+                                        </div>
+                                        <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">whatsapp_float.html</div>
+                                        <div className="w-10"></div>
+                                    </div>
+                                    <pre className="p-5 text-slate-300 text-[12px] font-mono overflow-x-auto whitespace-pre-wrap max-h-[350px] custom-scrollbar leading-relaxed">
+{(() => {
+    let script = systemSettings?.floating_whatsapp_button || '<!-- Botão flutuante não configurado no banco system_settings -->';
+    script = script.replace(/{{PHONE}}/g, clinicData.phone ? clinicData.phone.replace(/\D/g, '') : 'SEUNUMERO');
+    return script;
+})()}
+                                    </pre>
+                                    <div className="absolute top-12 right-6 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                                        <Button 
+                                            variant="outline"
+                                            onClick={(e) => {
+                                                const script = systemSettings?.floating_whatsapp_button || '<!-- Botão flutuante não configurado no banco system_settings -->';
+                                                const finalScript = script.replace(/{{PHONE}}/g, clinicData.phone ? clinicData.phone.replace(/\D/g, '') : 'SEUNUMERO');
+                                                
+                                                navigator.clipboard.writeText(finalScript);
+                                                const btn = e.currentTarget;
+                                                const orig = btn.innerHTML;
+                                                btn.innerHTML = '<svg class="w-4 h-4 mr-2 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg> Copiado!';
+                                                btn.classList.add('bg-emerald-500', 'border-emerald-500');
+                                                btn.classList.remove('bg-white/10', 'border-white/20');
+                                                setTimeout(() => {
+                                                    btn.innerHTML = orig;
+                                                    btn.classList.remove('bg-emerald-500', 'border-emerald-500');
+                                                    btn.classList.add('bg-white/10', 'border-white/20');
+                                                }, 2000);
+                                            }}
+                                            className="bg-white/10 hover:bg-white/20 border border-white/20 text-white backdrop-blur-md transition-all shadow-lg shadow-black/20 font-bold px-4 h-10 rounded-lg"
+                                        >
+                                            <Copy className="w-4 h-4 mr-2" /> Copiar Código
+                                        </Button>
+                                    </div>
+                                </div>
+                            </div>
+
                             {/* Script Global Navstracking */}
                             <div className="space-y-3 p-5 bg-slate-50 border border-slate-100 rounded-2xl relative overflow-hidden group/item">
                                 <div className="absolute top-0 left-0 w-1 h-full bg-slate-400"></div>
@@ -1263,6 +1385,7 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
     let script = systemSettings?.global_tracking_script || '<!-- Script Global não configurado no banco system_settings -->';
     script = script.replace(/{{WA_PRE_MSG}}/g, clinicData.wa_pre_msg || 'Olá! Vim do site.');
     script = script.replace(/{{PHONE}}/g, clinicData.phone ? clinicData.phone.replace(/\D/g, '') : 'SEUNUMERO');
+    script = script.replace(/{{CLINIC_ID}}/g, clinicData.id || '');
     return script;
 })()}
                                     </pre>
@@ -1271,7 +1394,8 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                                             vari                                            onClick={(e) => {
                                                 const script = systemSettings?.global_tracking_script || '<!-- Script Global não configurado no banco system_settings -->';
                                                 const finalScript = script.replace(/{{WA_PRE_MSG}}/g, clinicData.wa_pre_msg || 'Olá! Vim do site.')
-                                                                          .replace(/{{PHONE}}/g, clinicData.phone ? clinicData.phone.replace(/\D/g, '') : 'SEUNUMERO');
+                                                                          .replace(/{{PHONE}}/g, clinicData.phone ? clinicData.phone.replace(/\D/g, '') : 'SEUNUMERO')
+                                                                          .replace(/{{CLINIC_ID}}/g, clinicData.id || '');
                                                 
                                                 navigator.clipboard.writeText(finalScript);
                                                 const btn = e.currentTarget;
@@ -1292,6 +1416,8 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                                     </div>
                                 </div>
                             </div>
+
+
                         </motion.div>
                     )}
                 </CardContent>

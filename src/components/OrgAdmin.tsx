@@ -123,6 +123,9 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
   const [clinicUsersData, setClinicUsersData] = useState<ClinicUser[]>([]);
   const [clinicUsersLoading, setClinicUsersLoading] = useState(false);
 
+  // Modal: editar clínica
+  const [editClinicTarget, setEditClinicTarget] = useState<Clinic | null>(null);
+
   // Modal: responsáveis da clínica
   const [responsibleTarget, setResponsibleTarget] = useState<Clinic | null>(null);
   const [responsibleForm, setResponsibleForm] = useState<Record<string, string>>({});
@@ -237,6 +240,25 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
     setClinicSaving(false);
     if (error) { setClinicError(error.message); return; }
     setShowClinicModal(false);
+    setClinicForm({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '' });
+    fetchClinics();
+  };
+
+  const handleUpdateClinic = async () => {
+    if (!editClinicTarget || !clinicForm.name.trim()) return;
+    setClinicSaving(true);
+    const { error } = await supabase
+      .from('clinics')
+      .update({
+        name: clinicForm.name.trim(),
+        plan: clinicForm.plan,
+        category: clinicForm.category || 'clinica'
+      })
+      .eq('id', editClinicTarget.id);
+    
+    setClinicSaving(false);
+    if (error) { setClinicError(error.message); return; }
+    setEditClinicTarget(null);
     setClinicForm({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '' });
     fetchClinics();
   };
@@ -549,6 +571,25 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                                   Usuários da Clínica
                                 </button>
                               )}
+                              {canManageClinics && (
+                                <button
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    setEditClinicTarget(clinic);
+                                    setClinicForm({
+                                      name: clinic.name,
+                                      plan: clinic.plan,
+                                      category: clinic.category || '',
+                                      ownerName: '', ownerEmail: '', ownerPassword: ''
+                                    });
+                                    setOpenMenuId(null);
+                                  }}
+                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                                >
+                                  <Settings className="w-3.5 h-3.5 text-blue-600" />
+                                  Editar Clínica
+                                </button>
+                              )}
                               {canSetResponsaveis && (
                                 <button
                                   onClick={e => {
@@ -782,9 +823,9 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
         </div>
       )}
 
-      {/* Modal: Nova Clínica */}
+      {/* Modal: Nova / Editar Clínica */}
       <AnimatePresence>
-        {showClinicModal && (
+        {(showClinicModal || editClinicTarget) && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
@@ -793,8 +834,8 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
               className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md"
             >
               <div className="flex items-center justify-between mb-5">
-                <h3 className="text-base font-black text-slate-900">Nova Clínica</h3>
-                <button onClick={() => { setShowClinicModal(false); setClinicError(''); }} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors">
+                <h3 className="text-base font-black text-slate-900">{editClinicTarget ? 'Editar Clínica' : 'Nova Clínica'}</h3>
+                <button onClick={() => { setShowClinicModal(false); setEditClinicTarget(null); setClinicError(''); }} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors">
                   <X className="w-4 h-4 text-slate-500" />
                 </button>
               </div>
@@ -830,27 +871,29 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                     ))}
                   </select>
                 </div>
-                <div className="pt-1 border-t border-slate-100">
-                  <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Gestor Responsável</p>
-                  <div className="space-y-2">
-                    <input value={clinicForm.ownerName} onChange={e => setClinicForm(f => ({ ...f, ownerName: e.target.value }))}
-                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500" placeholder="Nome completo" />
-                    <input value={clinicForm.ownerEmail} onChange={e => setClinicForm(f => ({ ...f, ownerEmail: e.target.value }))}
-                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500" placeholder="Email" type="email" />
-                    <div className="relative">
-                      <input value={clinicForm.ownerPassword} onChange={e => setClinicForm(f => ({ ...f, ownerPassword: e.target.value }))}
-                        type={showPassword ? 'text' : 'password'}
-                        className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500 pr-10" placeholder="Senha" />
-                      <button type="button" onClick={() => setShowPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
-                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
+                {!editClinicTarget && (
+                  <div className="pt-1 border-t border-slate-100">
+                    <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Gestor Responsável</p>
+                    <div className="space-y-2">
+                      <input value={clinicForm.ownerName} onChange={e => setClinicForm(f => ({ ...f, ownerName: e.target.value }))}
+                        className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500" placeholder="Nome completo" />
+                      <input value={clinicForm.ownerEmail} onChange={e => setClinicForm(f => ({ ...f, ownerEmail: e.target.value }))}
+                        className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500" placeholder="Email" type="email" />
+                      <div className="relative">
+                        <input value={clinicForm.ownerPassword} onChange={e => setClinicForm(f => ({ ...f, ownerPassword: e.target.value }))}
+                          type={showPassword ? 'text' : 'password'}
+                          className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500 pr-10" placeholder="Senha" />
+                        <button type="button" onClick={() => setShowPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                          {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
                 {clinicError && <p className="text-xs text-red-500 font-bold">{clinicError}</p>}
-                <button onClick={handleCreateClinic} disabled={clinicSaving}
+                <button onClick={editClinicTarget ? handleUpdateClinic : handleCreateClinic} disabled={clinicSaving}
                   className="w-full py-3 bg-teal-600 hover:bg-teal-700 disabled:bg-slate-100 disabled:text-slate-400 text-white rounded-xl font-black text-sm transition-all flex items-center justify-center gap-2">
-                  {clinicSaving ? <><Loader2 className="w-4 h-4 animate-spin" /> Criando...</> : 'Criar Clínica'}
+                  {clinicSaving ? <><Loader2 className="w-4 h-4 animate-spin" /> Salvando...</> : (editClinicTarget ? 'Salvar Alterações' : 'Criar Clínica')}
                 </button>
               </div>
             </motion.div>

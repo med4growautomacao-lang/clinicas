@@ -1008,7 +1008,10 @@ export default function SuperAdmin() {
 
   const handleEditOrg = async (data: { name: string; plan: string }) => {
     if (modal?.type === 'edit-org') {
-      const ok = await updateOrg(modal.org.id, data);
+      const ok = await updateOrg(modal.org.id, {
+        name: data.name,
+        plan: data.plan
+      });
       if (!ok) alert('Erro ao atualizar organização.');
     }
   };

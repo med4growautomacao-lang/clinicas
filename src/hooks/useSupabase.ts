@@ -502,12 +502,14 @@ export interface DashboardStats {
   totalRevenue: number;
   totalMessages: number;
   newPatients: number;
+  totalSales: number;
+  totalInvestment: number;
 }
 
 export function useDashboardStats() {
   const { profile, activeClinicId } = useAuth();
   const [data, setData] = useState<DashboardStats>({
-    totalAppointments: 0, totalRevenue: 0, totalMessages: 0, newPatients: 0
+    totalAppointments: 0, totalRevenue: 0, totalMessages: 0, newPatients: 0, totalSales: 0, totalInvestment: 0
   });
   const [loading, setLoading] = useState(true);
 
@@ -520,7 +522,15 @@ export function useDashboardStats() {
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
     const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
 
-    const [aptsRes, revenueRes, patientsRes, messagesRes] = await Promise.all([
+    // Buscar o stage "Conversão" (is_fixed=true) da clínica
+    const { data: convStage } = await supabase
+      .from('funnel_stages')
+      .select('id')
+      .eq('clinic_id', clinicId)
+      .eq('is_fixed', true)
+      .maybeSingle();
+
+    const [aptsRes, revenueRes, patientsRes, messagesRes, salesRes, investRes] = await Promise.all([
       supabase.from('appointments').select('id', { count: 'exact', head: true })
         .eq('clinic_id', clinicId).gte('date', startOfMonth).lte('date', endOfMonth),
       supabase.from('financial_transactions').select('amount')
@@ -530,15 +540,26 @@ export function useDashboardStats() {
         .eq('clinic_id', clinicId).gte('created_at', startOfMonth),
       supabase.from('chat_messages').select('id', { count: 'exact', head: true })
         .eq('clinic_id', clinicId).gte('created_at', startOfMonth),
+      // Vendas: leads no stage de Conversão criados este mês
+      convStage?.id
+        ? supabase.from('leads').select('id', { count: 'exact', head: true })
+            .eq('clinic_id', clinicId).eq('stage_id', convStage.id).gte('created_at', startOfMonth)
+        : Promise.resolve({ count: 0 }),
+      // Investimento em marketing este mês
+      supabase.from('marketing_data').select('investment')
+        .eq('clinic_id', clinicId).gte('date', startOfMonth).lte('date', endOfMonth),
     ]);
 
     const totalRevenue = (revenueRes.data || []).reduce((sum, t) => sum + Number(t.amount || 0), 0);
+    const totalInvestment = (investRes.data || []).reduce((sum, t) => sum + Number(t.investment || 0), 0);
 
     setData({
       totalAppointments: aptsRes.count || 0,
       totalRevenue,
       totalMessages: messagesRes.count || 0,
       newPatients: patientsRes.count || 0,
+      totalSales: salesRes.count || 0,
+      totalInvestment,
     });
     if (!silent) setLoading(false);
   }, [activeClinicId]);

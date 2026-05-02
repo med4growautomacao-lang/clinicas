@@ -1,6 +1,6 @@
 import React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { Users, CalendarCheck, TrendingUp, MessageSquare, Activity, Loader2 } from "lucide-react";
+import { Users, CalendarCheck, TrendingUp, MessageSquare, Activity, Loader2, ShoppingCart, DollarSign, Target, BarChart3 } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -35,6 +35,17 @@ export function Dashboard() {
     );
   }
 
+  // Métricas de conversão derivadas
+  const cpl = stats.totalInvestment > 0 && stats.newPatients > 0
+    ? (stats.totalInvestment / stats.newPatients)
+    : 0;
+  const conversionRate = stats.newPatients > 0 && stats.totalSales > 0
+    ? ((stats.totalSales / stats.newPatients) * 100)
+    : 0;
+  const roas = stats.totalInvestment > 0 && stats.totalRevenue > 0
+    ? (stats.totalRevenue / stats.totalInvestment)
+    : 0;
+
   return (
     <div className="space-y-8">
       <div className="flex justify-between items-end">
@@ -52,12 +63,14 @@ export function Dashboard() {
         </div>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {[
           { title: "Agendamentos", value: stats.totalAppointments.toString(), trend: "Este mês", icon: CalendarCheck, color: "bg-teal-50 text-teal-600" },
           { title: "Faturamento", value: `R$ ${stats.totalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: "Este mês", icon: TrendingUp, color: "bg-emerald-50 text-emerald-600" },
           { title: "Conversas Digitais", value: stats.totalMessages.toString(), trend: "Conversas", icon: MessageSquare, color: "bg-slate-50 text-slate-600" },
-          { title: "Novos Pacientes", value: `+${stats.newPatients}`, trend: "Este mês", icon: Users, color: "bg-teal-50 text-teal-700" },
+          { title: "Novos Leads", value: `+${stats.newPatients}`, trend: "Este mês", icon: Users, color: "bg-teal-50 text-teal-700" },
+          { title: "Vendas", value: stats.totalSales.toString(), trend: "Leads convertidos", icon: ShoppingCart, color: "bg-rose-50 text-rose-600" },
+          { title: "Investimento", value: `R$ ${stats.totalInvestment.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: "Marketing este mês", icon: DollarSign, color: "bg-amber-50 text-amber-600" },
         ].map((stat, i) => (
           <motion.div key={stat.title} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }}>
             <Card className="overflow-hidden border border-slate-100 shadow-sm">
@@ -104,17 +117,28 @@ export function Dashboard() {
         <Card className="col-span-3 border border-slate-100 shadow-sm">
           <CardHeader>
             <CardTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
-              <MessageSquare className="w-5 h-5 text-teal-600" />
-              Resumo do Mês
+              <BarChart3 className="w-5 h-5 text-teal-600" />
+              Métricas de Conversão
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-6">
-              <div className="text-center py-12 text-slate-400">
-                <Activity className="w-12 h-12 mx-auto mb-4 text-slate-300" />
-                <p className="font-semibold text-lg">Comece a cadastrar dados</p>
-                <p className="text-sm mt-1">Os dados do sistema aparecerão aqui conforme você cadastrar pacientes, agendamentos e leads.</p>
-              </div>
+            <div className="space-y-5">
+              {[
+                { label: "CPL (Custo por Lead)", value: cpl > 0 ? `R$ ${cpl.toFixed(2).replace('.', ',')}` : "—", description: "Investimento ÷ Leads", icon: Target, color: "text-amber-600 bg-amber-50" },
+                { label: "Taxa de Conversão", value: conversionRate > 0 ? `${conversionRate.toFixed(1).replace('.', ',')}%` : "—", description: "Vendas ÷ Leads", icon: TrendingUp, color: "text-emerald-600 bg-emerald-50" },
+                { label: "ROAS", value: roas > 0 ? `${roas.toFixed(2).replace('.', ',')}x` : "—", description: "Faturamento ÷ Investimento", icon: DollarSign, color: "text-teal-600 bg-teal-50" },
+              ].map((metric) => (
+                <div key={metric.label} className="flex items-center gap-4 p-3 rounded-xl bg-slate-50/80 border border-slate-100">
+                  <div className={cn("p-2.5 rounded-xl", metric.color)}>
+                    <metric.icon className="w-5 h-5" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-slate-900">{metric.label}</p>
+                    <p className="text-[11px] text-slate-400 font-medium">{metric.description}</p>
+                  </div>
+                  <span className="text-xl font-bold text-slate-900 tabular-nums">{metric.value}</span>
+                </div>
+              ))}
             </div>
           </CardContent>
         </Card>

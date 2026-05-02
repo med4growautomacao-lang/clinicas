@@ -1,54 +1,207 @@
-import React from "react";
+import React, { useState, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { Users, CalendarCheck, TrendingUp, MessageSquare, Activity, Loader2, ShoppingCart, DollarSign, Target, BarChart3 } from "lucide-react";
+import { 
+  Users, 
+  CalendarCheck, 
+  TrendingUp, 
+  MessageSquare, 
+  Activity, 
+  Loader2, 
+  ShoppingCart, 
+  DollarSign, 
+  Target, 
+  BarChart3,
+  Calendar,
+  ChevronRight,
+  Clock,
+  Timer,
+  AlertCircle
+} from "lucide-react";
 import {
-  BarChart,
-  Bar,
+  ResponsiveContainer,
+  AreaChart,
+  Area,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
-  ResponsiveContainer,
+  ReferenceLine,
 } from "recharts";
 import { cn } from "@/src/lib/utils";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { useDashboardStats } from "../hooks/useSupabase";
+import {
+  format,
+  subDays,
+  startOfWeek,
+  endOfWeek,
+  startOfMonth,
+  endOfMonth,
+  subMonths,
+  subWeeks,
+  parseISO
+} from "date-fns";
+
+type Period = 'dia' | 'sem' | 'mês';
 
 export function Dashboard() {
-  const { data: stats, loading } = useDashboardStats();
+  const [period, setPeriod] = useState<Period>('mês');
+  const [isPeriodOpen, setIsPeriodOpen] = useState(false);
+  const [activeRangeLabel, setActiveRangeLabel] = useState("ESTE MÊS");
+  const [dateRange, setDateRange] = useState({
+    start: startOfMonth(new Date()),
+    end: endOfMonth(new Date())
+  });
 
-  const chartData = [
-    { name: "Seg", agendamentos: 0 },
-    { name: "Ter", agendamentos: 0 },
-    { name: "Qua", agendamentos: 0 },
-    { name: "Qui", agendamentos: 0 },
-    { name: "Sex", agendamentos: 0 },
-    { name: "Sáb", agendamentos: 0 },
-    { name: "Dom", agendamentos: 0 },
+  const statsDateRange = useMemo(() => ({
+    start: format(dateRange.start, 'yyyy-MM-dd'),
+    end: format(dateRange.end, 'yyyy-MM-dd')
+  }), [dateRange]);
+
+  const { data: stats, loading } = useDashboardStats(statsDateRange);
+
+  const setRangeById = (id: string) => {
+    const today = new Date();
+    let start = today;
+    let end = today;
+    let label = "";
+
+    switch (id) {
+      case 'today':
+        label = "HOJE";
+        break;
+      case 'yesterday':
+        start = subDays(today, 1);
+        end = subDays(today, 1);
+        label = "ONTEM";
+        break;
+      case 'week':
+        start = startOfWeek(today, { weekStartsOn: 0 });
+        label = "ESTA SEMANA";
+        break;
+      case '7days':
+        start = subDays(today, 7);
+        end = subDays(today, 1);
+        label = "ÚLTIMOS 7 DIAS";
+        break;
+      case '28days':
+        start = subDays(today, 28);
+        end = subDays(today, 1);
+        label = "ÚLTIMOS 28 DIAS";
+        break;
+      case '30days':
+        start = subDays(today, 30);
+        end = subDays(today, 1);
+        label = "ÚLTIMOS 30 DIAS";
+        break;
+      case 'month':
+        start = startOfMonth(today);
+        end = endOfMonth(today);
+        label = "ESTE MÊS";
+        break;
+      case 'last_month':
+        const lastMonth = subMonths(today, 1);
+        start = startOfMonth(lastMonth);
+        end = endOfMonth(lastMonth);
+        label = "MÊS PASSADO";
+        break;
+      case 'last_week':
+        const lastWeek = subWeeks(today, 1);
+        start = startOfWeek(lastWeek, { weekStartsOn: 0 });
+        end = endOfWeek(lastWeek, { weekStartsOn: 0 });
+        label = "SEMANA PASSADA";
+        break;
+    }
+
+    setDateRange({ start, end });
+    setActiveRangeLabel(label);
+    setIsPeriodOpen(false);
+  };
+
+  const [selectedMetric, setSelectedMetric] = useState<string>('agendamentos');
+
+  const chartMetrics = [
+    { id: 'faturamento', label: 'FATURAMENTO', type: 'currency', color: '#0d9488' },
+    { id: 'investimento', label: 'INVESTIMENTO', type: 'currency', color: '#f59e0b' },
+    { id: 'roas', label: 'ROAS', type: 'number', color: '#8b5cf6' },
+    { id: 'leads', label: 'LEADS', type: 'number', color: '#4f46e5' },
+    { id: 'agendamentos', label: 'AGENDAMENTOS', type: 'number', color: '#0ea5e9' },
+    { id: 'vendas', label: 'VENDAS', type: 'number', color: '#10b981' },
+    { id: 'cpl', label: 'CPL', type: 'currency', color: '#f43f5e' },
+    { id: 'cac', label: 'CAC', type: 'currency', color: '#ec4899' },
+    { id: 'cpApt', label: 'CUSTO P/ AGEND.', type: 'currency', color: '#8b5cf6' },
+    { id: 'convRate', label: 'TAXA CONV.', type: 'percent', color: '#06b6d4' },
+    { id: 'ticketMed', label: 'TICKET MÉDIO', type: 'currency', color: '#0d9488' },
   ];
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-8 h-8 text-teal-600 animate-spin" />
-      </div>
-    );
-  }
+  const processedChartData = useMemo(() => {
+    return stats.chartData.map(d => {
+      // Formatar data dd/MM sem parseISO para evitar problemas de timezone
+      const [year, month, day] = d.date.split('-');
+      const formattedDate = `${day}/${month}`;
+
+      return {
+        ...d,
+        name: formattedDate,
+        roas: d.investimento > 0 ? Number((d.faturamento / d.investimento).toFixed(2)) : 0,
+        cpl: d.leads > 0 ? Number((d.investimento / d.leads).toFixed(2)) : 0,
+        cac: d.vendas > 0 ? Number((d.investimento / d.vendas).toFixed(2)) : 0,
+        cpApt: d.agendamentos > 0 ? Number((d.investimento / d.agendamentos).toFixed(2)) : 0,
+        convRate: d.leads > 0 ? Number(((d.vendas / d.leads) * 100).toFixed(1)) : 0,
+        ticketMed: d.vendas > 0 ? Number((d.faturamento / d.vendas).toFixed(0)) : 0,
+      };
+    });
+  }, [stats.chartData]);
 
   // Métricas de conversão derivadas
-  const cpl = stats.totalInvestment > 0 && stats.newPatients > 0
-    ? (stats.totalInvestment / stats.newPatients)
+  const cpl = stats.totalInvestment > 0 && stats.totalLeads > 0
+    ? (stats.totalInvestment / stats.totalLeads)
     : 0;
-  const conversionRate = stats.newPatients > 0 && stats.totalSales > 0
-    ? ((stats.totalSales / stats.newPatients) * 100)
+  
+  const cac = stats.totalInvestment > 0 && stats.totalSales > 0
+    ? (stats.totalInvestment / stats.totalSales)
     : 0;
+
+  const cpApt = stats.totalInvestment > 0 && stats.totalAppointments > 0
+    ? (stats.totalInvestment / stats.totalAppointments)
+    : 0;
+
+  const conversionRate = stats.totalLeads > 0 && stats.totalSales > 0
+    ? ((stats.totalSales / stats.totalLeads) * 100)
+    : 0;
+
+  const averageTicket = stats.totalSales > 0 && stats.totalRevenue > 0
+    ? (stats.totalRevenue / stats.totalSales)
+    : 0;
+
   const roas = stats.totalInvestment > 0 && stats.totalRevenue > 0
     ? (stats.totalRevenue / stats.totalInvestment)
     : 0;
 
+  const trendLabel = activeRangeLabel === "Personalizado" 
+    ? "Período selecionado" 
+    : activeRangeLabel.toLowerCase();
+
+  const formatValue = (val: any) => {
+    const metric = chartMetrics.find(m => m.id === selectedMetric);
+    if (!metric) return val;
+    if (metric.type === 'currency') return `R$ ${val.toLocaleString('pt-BR')}`;
+    if (metric.type === 'percent') return `${val}%`;
+    return val;
+  };
+
   return (
-    <div className="space-y-8">
-      <div className="flex justify-between items-end">
+    <div className="space-y-8 relative">
+      {loading && (
+        <div className="absolute inset-0 bg-white/50 backdrop-blur-[1px] z-50 flex items-center justify-center rounded-3xl">
+          <div className="bg-white p-4 rounded-2xl shadow-xl border border-slate-100 flex items-center gap-3">
+            <Loader2 className="w-5 h-5 text-teal-600 animate-spin" />
+            <span className="text-xs font-bold text-slate-600 uppercase tracking-widest">Atualizando...</span>
+          </div>
+        </div>
+      )}
+      {/* Header com Filtros */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
         <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}>
           <h2 className="text-3xl font-bold tracking-tight text-slate-900">
             Painel <span className="text-teal-600">Administrativo</span>
@@ -57,92 +210,306 @@ export function Dashboard() {
             Visão geral do desempenho clínico e conversas.
           </p>
         </motion.div>
-        <div className="hidden md:flex items-center gap-2 bg-white px-4 py-2 rounded-lg border border-slate-200 shadow-sm text-slate-600 font-semibold text-sm">
-          <Activity className="w-4 h-4 text-teal-600" />
-          <span>Sistemas operantes</span>
+
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Date Pill Replicated from MarketingAnalytics */}
+          <div className="flex items-center gap-3 bg-white p-1.5 rounded-2xl border border-slate-200 shadow-sm">
+            <div className="flex bg-slate-50 rounded-xl p-1">
+              {(['dia', 'sem', 'mês'] as Period[]).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => {
+                    setPeriod(p);
+                    if (p === 'dia') setRangeById('today');
+                    else if (p === 'sem') setRangeById('week');
+                    else if (p === 'mês') setRangeById('month');
+                  }}
+                  className={cn(
+                    "px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all",
+                    period === p ? "bg-white text-teal-600 shadow-sm border border-slate-200" : "text-slate-400 hover:text-slate-600"
+                  )}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+
+            <div className="h-6 w-px bg-slate-200 mx-1" />
+
+            <div className="relative">
+              <div
+                onClick={() => setIsPeriodOpen(!isPeriodOpen)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-slate-50 cursor-pointer transition-all border border-transparent hover:border-slate-200 group"
+              >
+                <Calendar className={cn("w-4 h-4 transition-colors", isPeriodOpen ? "text-teal-600" : "text-slate-400 group-hover:text-teal-600")} />
+                <span className="text-xs font-bold text-slate-600 uppercase tracking-tight">{activeRangeLabel}</span>
+                <span className="text-[10px] font-medium text-slate-400">{format(dateRange.start, 'dd/MM')} - {format(dateRange.end, 'dd/MM')}</span>
+                <ChevronRight className={cn("w-3.5 h-3.5 text-slate-300 transition-transform", isPeriodOpen ? "rotate-90 text-teal-600" : "")} />
+              </div>
+
+              <AnimatePresence>
+                {isPeriodOpen && (
+                  <>
+                    <div className="fixed inset-0 z-[105]" onClick={() => setIsPeriodOpen(false)} />
+                    <motion.div
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      className="absolute top-full right-0 mt-3 w-72 bg-white rounded-2xl border border-slate-200 shadow-2xl z-[110] p-4 flex flex-col gap-1 overflow-hidden"
+                    >
+                      <PeriodOption label="HOJE" onClick={() => setRangeById('today')} active={activeRangeLabel === 'HOJE'} />
+                      <PeriodOption label="ONTEM" onClick={() => setRangeById('yesterday')} active={activeRangeLabel === 'ONTEM'} />
+                      <PeriodOption label="ESTA SEMANA" onClick={() => setRangeById('week')} active={activeRangeLabel === 'ESTA SEMANA'} />
+                      <PeriodOption label="SEMANA PASSADA" onClick={() => setRangeById('last_week')} active={activeRangeLabel === 'SEMANA PASSADA'} />
+                      <PeriodOption label="ÚLTIMOS 7 DIAS" onClick={() => setRangeById('7days')} active={activeRangeLabel === 'ÚLTIMOS 7 DIAS'} />
+                      <PeriodOption label="ÚLTIMOS 28 DIAS" onClick={() => setRangeById('28days')} active={activeRangeLabel === 'ÚLTIMOS 28 DIAS'} />
+                      <PeriodOption label="ÚLTIMOS 30 DIAS" onClick={() => setRangeById('30days')} active={activeRangeLabel === 'ÚLTIMOS 30 DIAS'} />
+                      <PeriodOption label="ESTE MÊS" onClick={() => setRangeById('month')} active={activeRangeLabel === 'ESTE MÊS'} />
+                      <PeriodOption label="MÊS PASSADO" onClick={() => setRangeById('last_month')} active={activeRangeLabel === 'MÊS PASSADO'} />
+
+                      <div className="pt-4 mt-2 border-t border-slate-100">
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-[2px] block mb-3 pl-1">Período Principal</span>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest pl-1">Início</label>
+                            <input
+                              type="date"
+                              value={format(dateRange.start, 'yyyy-MM-dd')}
+                              onChange={(e) => {
+                                const [year, month, day] = e.target.value.split('-').map(Number);
+                                setDateRange(v => ({ ...v, start: new Date(year, month - 1, day) }));
+                                setActiveRangeLabel("Personalizado");
+                              }}
+                              className="w-full bg-slate-50 border-slate-200 rounded-xl p-2.5 text-[10px] font-bold text-slate-600 outline-none border focus:ring-1 focus:ring-teal-500/20"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest pl-1">Fim</label>
+                            <input
+                              type="date"
+                              value={format(dateRange.end, 'yyyy-MM-dd')}
+                              onChange={(e) => {
+                                const [year, month, day] = e.target.value.split('-').map(Number);
+                                setDateRange(v => ({ ...v, end: new Date(year, month - 1, day) }));
+                                setActiveRangeLabel("Personalizado");
+                              }}
+                              className="w-full bg-slate-50 border-slate-200 rounded-xl p-2.5 text-[10px] font-bold text-slate-600 outline-none border focus:ring-1 focus:ring-teal-500/20"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        {[
-          { title: "Agendamentos", value: stats.totalAppointments.toString(), trend: "Este mês", icon: CalendarCheck, color: "bg-teal-50 text-teal-600" },
-          { title: "Faturamento", value: `R$ ${stats.totalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: "Este mês", icon: TrendingUp, color: "bg-emerald-50 text-emerald-600" },
-          { title: "Conversas Digitais", value: stats.totalMessages.toString(), trend: "Conversas", icon: MessageSquare, color: "bg-slate-50 text-slate-600" },
-          { title: "Novos Leads", value: `+${stats.newPatients}`, trend: "Este mês", icon: Users, color: "bg-teal-50 text-teal-700" },
-          { title: "Vendas", value: stats.totalSales.toString(), trend: "Leads convertidos", icon: ShoppingCart, color: "bg-rose-50 text-rose-600" },
-          { title: "Investimento", value: `R$ ${stats.totalInvestment.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: "Marketing este mês", icon: DollarSign, color: "bg-amber-50 text-amber-600" },
-        ].map((stat, i) => (
-          <motion.div key={stat.title} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }}>
-            <Card className="overflow-hidden border border-slate-100 shadow-sm">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{stat.title}</CardTitle>
-                <div className={cn("p-1.5 rounded-lg", stat.color)}>
-                  <stat.icon className="h-4 w-4" />
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-slate-900">{stat.value}</div>
-                <div className="flex items-center gap-1 mt-1">
-                  <p className="text-[10px] font-medium text-slate-400">{stat.trend}</p>
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-        ))}
-      </div>
+      {/* Grid de Cards - Reordenado conforme solicitação */}
+      {/* Layout Superior: Cards + Métricas de Conversão */}
+      <div className="grid gap-6 lg:grid-cols-4">
+        {/* Lado Esquerdo: Grid de Cards Principais (3 colunas) */}
+        <div className="lg:col-span-3 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {[
+            // Primeira Linha: Faturamento, Investimento, ROAS
+            { title: "Faturamento", value: `R$ ${stats.totalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: trendLabel, icon: TrendingUp, color: "bg-emerald-50 text-emerald-600" },
+            { title: "Investimento", value: `R$ ${stats.totalInvestment.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: "Investido no período", icon: DollarSign, color: "bg-amber-50 text-amber-600" },
+            { title: "ROAS", value: roas > 0 ? `${roas.toFixed(2).replace('.', ',')}x` : "—", trend: "Retorno sobre investimento", icon: Activity, color: "bg-teal-50 text-teal-600" },
+            
+            // Segunda Linha: Novos Leads, Agendamentos, Vendas
+            { title: "Novos Leads", value: `+${stats.totalLeads}`, trend: "Interações no período", icon: MessageSquare, color: "bg-indigo-50 text-indigo-600" },
+            { title: "Agendamentos", value: stats.totalAppointments.toString(), trend: trendLabel, icon: CalendarCheck, color: "bg-teal-50 text-teal-600" },
+            { title: "Vendas", value: stats.totalSales.toString(), trend: "Convertidos no período", icon: ShoppingCart, color: "bg-rose-50 text-rose-600" },
 
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-7">
-        <Card className="col-span-4 border border-slate-100 shadow-sm">
-          <CardHeader>
-            <CardTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
-              <TrendingUp className="w-5 h-5 text-teal-600" />
-              Volume de Agendamentos
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pl-2">
-            <div className="h-[350px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData}>
-                  <CartesianGrid strokeDasharray="8 8" vertical={false} stroke="#f1f5f9" />
-                  <XAxis dataKey="name" stroke="#94a3b8" fontSize={14} fontWeight="bold" tickLine={false} axisLine={false} dy={10} />
-                  <YAxis stroke="#94a3b8" fontSize={14} fontWeight="bold" tickLine={false} axisLine={false} />
-                  <Tooltip cursor={{ fill: "#f0f9ff", radius: 10 }} contentStyle={{ borderRadius: "20px", border: "2px solid #e0f2fe", boxShadow: "0 10px 15px -3px rgb(0 0 0 / 0.1)", fontWeight: "bold" }} />
-                  <Bar dataKey="agendamentos" fill="#0d9488" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
+            // Terceira Linha: Atendimento (SLA, Tempo Resposta, Ciclo Vendas)
+            { title: "Estouros de SLA", value: stats.totalSlaBreaches.toString(), trend: "Atrasos no atendimento", icon: AlertCircle, color: "bg-red-50 text-red-600" },
+            { title: "Tempo de Resposta", value: stats.avgResponseTime > 0 ? `${stats.avgResponseTime.toFixed(0)} min` : "—", trend: "Média p/ primeiro handoff", icon: Timer, color: "bg-blue-50 text-blue-600" },
+            { title: "Ciclo de Vendas", value: stats.avgSalesCycle > 0 ? `${stats.avgSalesCycle.toFixed(1)} dias` : "—", trend: "Lead → Conversão", icon: Clock, color: "bg-purple-50 text-purple-600" },
+          ].map((stat, i) => (
+            <motion.div key={stat.title} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }}>
+              <Card className="overflow-hidden border border-slate-100 shadow-sm h-full">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{stat.title}</CardTitle>
+                  <div className={cn("p-1.5 rounded-lg", stat.color)}>
+                    <stat.icon className="h-4 w-4" />
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-slate-900">{stat.value}</div>
+                  <div className="flex items-center gap-1 mt-1">
+                    <p className="text-[10px] font-medium text-slate-400 capitalize">{stat.trend}</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          ))}
+        </div>
 
-        <Card className="col-span-3 border border-slate-100 shadow-sm">
-          <CardHeader>
+        {/* Lado Direito: Métricas de Conversão (1 coluna) */}
+        <Card className="lg:col-span-1 border border-slate-100 shadow-sm flex flex-col">
+          <CardHeader className="pb-3">
             <CardTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
               <BarChart3 className="w-5 h-5 text-teal-600" />
-              Métricas de Conversão
+              Conversão
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="space-y-5">
+          <CardContent className="flex-1">
+            <div className="space-y-3">
               {[
-                { label: "CPL (Custo por Lead)", value: cpl > 0 ? `R$ ${cpl.toFixed(2).replace('.', ',')}` : "—", description: "Investimento ÷ Leads", icon: Target, color: "text-amber-600 bg-amber-50" },
+                { label: "CPL (Custo p/ Lead)", value: cpl > 0 ? `R$ ${cpl.toFixed(2).replace('.', ',')}` : "—", description: "Investimento ÷ Leads", icon: Target, color: "text-amber-600 bg-amber-50" },
+                { label: "CAC (Custo p/ Venda)", value: cac > 0 ? `R$ ${cac.toFixed(2).replace('.', ',')}` : "—", description: "Investimento ÷ Vendas", icon: Users, color: "text-indigo-600 bg-indigo-50" },
+                { label: "Custo p/ Agend.", value: cpApt > 0 ? `R$ ${cpApt.toFixed(2).replace('.', ',')}` : "—", description: "Investimento ÷ Agend.", icon: Calendar, color: "text-violet-600 bg-violet-50" },
                 { label: "Taxa de Conversão", value: conversionRate > 0 ? `${conversionRate.toFixed(1).replace('.', ',')}%` : "—", description: "Vendas ÷ Leads", icon: TrendingUp, color: "text-emerald-600 bg-emerald-50" },
-                { label: "ROAS", value: roas > 0 ? `${roas.toFixed(2).replace('.', ',')}x` : "—", description: "Faturamento ÷ Investimento", icon: DollarSign, color: "text-teal-600 bg-teal-50" },
+                { label: "Ticket Médio", value: averageTicket > 0 ? `R$ ${averageTicket.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}` : "—", description: "Receita ÷ Vendas", icon: DollarSign, color: "text-teal-600 bg-teal-50" },
               ].map((metric) => (
-                <div key={metric.label} className="flex items-center gap-4 p-3 rounded-xl bg-slate-50/80 border border-slate-100">
-                  <div className={cn("p-2.5 rounded-xl", metric.color)}>
-                    <metric.icon className="w-5 h-5" />
+                <div key={metric.label} className="flex items-center gap-3 p-2 rounded-xl bg-slate-50/80 border border-slate-100">
+                  <div className={cn("p-2 rounded-lg", metric.color)}>
+                    <metric.icon className="w-3.5 h-3.5" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold text-slate-900">{metric.label}</p>
-                    <p className="text-[11px] text-slate-400 font-medium">{metric.description}</p>
+                    <p className="text-[10px] font-bold text-slate-900 leading-tight">{metric.label}</p>
+                    <p className="text-[8px] text-slate-400 font-medium">{metric.description}</p>
                   </div>
-                  <span className="text-xl font-bold text-slate-900 tabular-nums">{metric.value}</span>
+                  <span className="text-xs font-bold text-slate-900 tabular-nums">{metric.value}</span>
                 </div>
               ))}
             </div>
           </CardContent>
         </Card>
       </div>
+
+      {/* Gráfico de Tendência (Largura Total) */}
+      <Card className="border border-slate-100 shadow-sm overflow-hidden">
+        <CardHeader className="flex flex-col space-y-4 pb-4">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <TrendingUp className="w-5 h-5 text-teal-600" />
+              Tendência de Performance
+            </CardTitle>
+          </div>
+          
+          {/* Metric Selector Pill */}
+          <div className="flex items-center gap-2 bg-slate-50 p-1 rounded-2xl border border-slate-100 overflow-x-auto no-scrollbar">
+            {chartMetrics.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => setSelectedMetric(m.id)}
+                className={cn(
+                  "whitespace-nowrap px-3 py-1.5 rounded-xl text-[9px] font-black tracking-widest transition-all",
+                  selectedMetric === m.id 
+                    ? "bg-white text-teal-600 shadow-sm border border-slate-200" 
+                    : "text-slate-400 hover:text-slate-600"
+                )}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+        </CardHeader>
+        <CardContent className="pl-2 pt-2">
+          {(() => {
+            const activeMetric = chartMetrics.find(m => m.id === selectedMetric) || chartMetrics[0];
+            const values = processedChartData.map((d: any) => d[selectedMetric]).filter((v: number) => v != null);
+            const avg = values.length > 0 ? values.reduce((a: number, b: number) => a + b, 0) / values.length : 0;
+            const avgLabel = activeMetric.type === 'currency'
+              ? `Média R$ ${avg.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`
+              : activeMetric.type === 'percent'
+              ? `Média ${avg.toFixed(1)}%`
+              : `Média ${avg.toFixed(1)}`;
+
+            return (
+              <div className="h-[400px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={processedChartData}>
+                    <defs>
+                      <linearGradient id="colorMetricDash" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor={activeMetric.color} stopOpacity={0.2} />
+                        <stop offset="95%" stopColor={activeMetric.color} stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="8 8" vertical={false} stroke="#f1f5f9" />
+                    <XAxis 
+                      dataKey="name" 
+                      stroke="#94a3b8" 
+                      fontSize={11} 
+                      fontWeight="bold" 
+                      tickLine={false} 
+                      axisLine={false} 
+                      dy={10} 
+                    />
+                    <YAxis 
+                      stroke="#94a3b8" 
+                      fontSize={11} 
+                      fontWeight="bold" 
+                      tickLine={false} 
+                      axisLine={false} 
+                      tickFormatter={(v) => {
+                        if (activeMetric.type === 'currency') return `R$ ${v >= 1000 ? (v/1000).toFixed(0)+'k' : v}`;
+                        if (activeMetric.type === 'percent') return `${v}%`;
+                        return v;
+                      }}
+                    />
+                    <Tooltip 
+                      cursor={{ stroke: activeMetric.color, strokeWidth: 2, strokeDasharray: '5 5' }} 
+                      contentStyle={{ 
+                        borderRadius: "20px", 
+                        border: "none", 
+                        boxShadow: "0 20px 25px -5px rgb(0 0 0 / 0.1)", 
+                        fontWeight: "bold", 
+                        fontSize: '12px',
+                        padding: '16px'
+                      }} 
+                      formatter={(v) => [formatValue(v), activeMetric.label]}
+                    />
+                    <ReferenceLine
+                      y={avg}
+                      stroke={activeMetric.color}
+                      strokeDasharray="6 3"
+                      strokeWidth={1.5}
+                      strokeOpacity={0.4}
+                      label={{ 
+                        value: avgLabel, 
+                        position: 'insideTopRight', 
+                        fontSize: 10, 
+                        fontWeight: 'black', 
+                        fill: activeMetric.color, 
+                        opacity: 0.6,
+                        dy: -10
+                      }}
+                    />
+                    <Area 
+                      type="monotone"
+                      dataKey={selectedMetric} 
+                      stroke={activeMetric.color} 
+                      strokeWidth={4}
+                      fillOpacity={1}
+                      fill="url(#colorMetricDash)"
+                      animationDuration={1500}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            );
+          })()}
+        </CardContent>
+      </Card>
     </div>
   );
 }
+
+function PeriodOption({ label, onClick, active }: { label: string; onClick: () => void; active?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "w-full text-left px-3 py-2 rounded-xl text-[10px] font-black tracking-widest transition-all",
+        active ? "bg-teal-600 text-white shadow-lg shadow-teal-100" : "text-slate-400 hover:bg-slate-50 hover:text-slate-600"
+      )}
+    >
+      {label}
+    </button>
+  );
+}
+

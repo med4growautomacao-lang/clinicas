@@ -500,16 +500,36 @@ export function useLeads() {
 export interface DashboardStats {
   totalAppointments: number;
   totalRevenue: number;
-  totalMessages: number;
+  totalLeads: number;
   newPatients: number;
   totalSales: number;
   totalInvestment: number;
+  totalSlaBreaches: number;
+  avgResponseTime: number; // minutes
+  avgSalesCycle: number; // days
+  chartData: {
+    date: string;
+    agendamentos: number;
+    faturamento: number;
+    leads: number;
+    vendas: number;
+    investimento: number;
+  }[];
 }
 
-export function useDashboardStats() {
+export function useDashboardStats(dateRange?: { start: string; end: string }) {
   const { profile, activeClinicId } = useAuth();
   const [data, setData] = useState<DashboardStats>({
-    totalAppointments: 0, totalRevenue: 0, totalMessages: 0, newPatients: 0, totalSales: 0, totalInvestment: 0
+    totalAppointments: 0, 
+    totalRevenue: 0, 
+    totalLeads: 0, 
+    newPatients: 0, 
+    totalSales: 0, 
+    totalInvestment: 0,
+    totalSlaBreaches: 0,
+    avgResponseTime: 0,
+    avgSalesCycle: 0,
+    chartData: []
   });
   const [loading, setLoading] = useState(true);
 
@@ -519,50 +539,138 @@ export function useDashboardStats() {
     const clinicId = activeClinicId;
 
     const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+    const startOfMonth = dateRange?.start || new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+    const endOfMonth = dateRange?.end || new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
 
-    // Buscar o stage "Conversão" (is_fixed=true) da clínica
-    const { data: convStage } = await supabase
-      .from('funnel_stages')
-      .select('id')
-      .eq('clinic_id', clinicId)
-      .eq('is_fixed', true)
-      .maybeSingle();
+    try {
+      // Buscar o stage "Conversão" (is_fixed=true) da clínica
+      const { data: convStage } = await supabase
+        .from('funnel_stages')
+        .select('id')
+        .eq('clinic_id', clinicId)
+        .eq('is_fixed', true)
+        .maybeSingle();
 
-    const [aptsRes, revenueRes, patientsRes, messagesRes, salesRes, investRes] = await Promise.all([
-      supabase.from('appointments').select('id', { count: 'exact', head: true })
-        .eq('clinic_id', clinicId).gte('date', startOfMonth).lte('date', endOfMonth),
-      supabase.from('financial_transactions').select('amount')
-        .eq('clinic_id', clinicId).eq('type', 'receita').eq('status', 'pago')
-        .gte('date', startOfMonth).lte('date', endOfMonth),
-      supabase.from('patients').select('id', { count: 'exact', head: true })
-        .eq('clinic_id', clinicId).gte('created_at', startOfMonth),
-      supabase.from('chat_messages').select('id', { count: 'exact', head: true })
-        .eq('clinic_id', clinicId).gte('created_at', startOfMonth),
-      // Vendas: leads no stage de Conversão criados este mês
-      convStage?.id
-        ? supabase.from('leads').select('id', { count: 'exact', head: true })
-            .eq('clinic_id', clinicId).eq('stage_id', convStage.id).gte('created_at', startOfMonth)
-        : Promise.resolve({ count: 0 }),
-      // Investimento em marketing este mês
-      supabase.from('marketing_data').select('investment')
-        .eq('clinic_id', clinicId).gte('date', startOfMonth).lte('date', endOfMonth),
-    ]);
+      const [aptsRes, revenueRes, patientsRes, leadsRes, salesRes, investRes, slaRes, cycleRes, responseTimeRes] = await Promise.all([
+        supabase.from('appointments').select('id, date')
+          .eq('clinic_id', clinicId).gte('date', startOfMonth).lte('date', endOfMonth),
+        supabase.from('financial_transactions').select('amount, date')
+          .eq('clinic_id', clinicId).eq('type', 'receita').eq('status', 'pago')
+          .gte('date', startOfMonth).lte('date', endOfMonth),
+        supabase.from('patients').select('id', { count: 'exact', head: true })
+          .eq('clinic_id', clinicId).gte('created_at', startOfMonth).lte('created_at', endOfMonth + 'T23:59:59'),
+        supabase.from('leads').select('id, created_at, sla_breach_count')
+          .eq('clinic_id', clinicId).gte('created_at', startOfMonth).lte('created_at', endOfMonth + 'T23:59:59'),
+        // Vendas: leads no stage de Conversão
+        convStage?.id
+          ? supabase.from('leads').select('id, created_at')
+              .eq('clinic_id', clinicId).eq('stage_id', convStage.id).gte('created_at', startOfMonth).lte('created_at', endOfMonth + 'T23:59:59')
+          : Promise.resolve({ data: [] }),
+        // Investimento em marketing
+        supabase.from('marketing_data').select('investment, date')
+          .eq('clinic_id', clinicId).gte('date', startOfMonth).lte('date', endOfMonth),
+        // Estouros de SLA (soma do campo na tabela leads no período)
+        supabase.from('leads').select('sla_breach_count')
+          .eq('clinic_id', clinicId).gte('created_at', startOfMonth).lte('created_at', endOfMonth + 'T23:59:59'),
+        // Ciclo de vendas (histórico de conversão)
+        convStage?.id
+          ? supabase.from('lead_stage_history')
+              .select('lead_id, changed_at, leads(created_at)')
+              .eq('clinic_id', clinicId)
+              .eq('new_stage_id', convStage.id)
+              .gte('changed_at', startOfMonth)
+              .lte('changed_at', endOfMonth + 'T23:59:59')
+          : Promise.resolve({ data: [] }),
+        // Tempo de resposta (estimativa simplificada baseada no handoff se existir, ou mensagens)
+        supabase.from('leads').select('created_at, handoff_triggered_at')
+          .eq('clinic_id', clinicId)
+          .not('handoff_triggered_at', 'is', null)
+          .gte('created_at', startOfMonth)
+          .lte('created_at', endOfMonth + 'T23:59:59')
+      ]);
 
-    const totalRevenue = (revenueRes.data || []).reduce((sum, t) => sum + Number(t.amount || 0), 0);
-    const totalInvestment = (investRes.data || []).reduce((sum, t) => sum + Number(t.investment || 0), 0);
+      const dailyData: Record<string, any> = {};
 
-    setData({
-      totalAppointments: aptsRes.count || 0,
-      totalRevenue,
-      totalMessages: messagesRes.count || 0,
-      newPatients: patientsRes.count || 0,
-      totalSales: salesRes.count || 0,
-      totalInvestment,
-    });
-    if (!silent) setLoading(false);
-  }, [activeClinicId]);
+      // Helper para inicializar datas no range sem problemas de timezone
+      const startParts = startOfMonth.split('-').map(Number);
+      const endParts = endOfMonth.split('-').map(Number);
+      const startDate = new Date(startParts[0], startParts[1] - 1, startParts[2]);
+      const endDate = new Date(endParts[0], endParts[1] - 1, endParts[2]);
+
+      for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const dateStr = `${year}-${month}-${day}`;
+        dailyData[dateStr] = { date: dateStr, agendamentos: 0, faturamento: 0, leads: 0, vendas: 0, investimento: 0 };
+      }
+
+      const toLocalDateStr = (utcString: string) => {
+        if (!utcString) return "";
+        const d = new Date(utcString);
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      };
+
+      (aptsRes.data || []).forEach(a => {
+        if (dailyData[a.date]) dailyData[a.date].agendamentos++;
+      });
+      (revenueRes.data || []).forEach(r => {
+        if (dailyData[r.date]) dailyData[r.date].faturamento += Number(r.amount || 0);
+      });
+      (leadsRes.data || []).forEach(l => {
+        const date = toLocalDateStr(l.created_at);
+        if (dailyData[date]) dailyData[date].leads++;
+      });
+      (salesRes.data || []).forEach(s => {
+        const date = toLocalDateStr(s.created_at);
+        if (dailyData[date]) dailyData[date].vendas++;
+      });
+      (investRes.data || []).forEach(i => {
+        if (dailyData[i.date]) dailyData[i.date].investimento += Number(i.investment || 0);
+      });
+
+      const totalRevenue = (revenueRes.data || []).reduce((sum, t) => sum + Number(t.amount || 0), 0);
+      const totalInvestment = (investRes.data || []).reduce((sum, t) => sum + Number(t.investment || 0), 0);
+      const totalSlaBreaches = (slaRes.data || []).reduce((sum, l) => sum + (l.sla_breach_count || 0), 0);
+
+      // Ciclo de Vendas (Dias)
+      const cycles = (cycleRes.data || []).filter((h: any) => h.leads?.created_at).map((h: any) => {
+        const created = new Date(h.leads.created_at);
+        const converted = new Date(h.changed_at);
+        return (converted.getTime() - created.getTime()) / (1000 * 60 * 60 * 24);
+      });
+      const avgSalesCycle = cycles.length > 0 ? cycles.reduce((a, b) => a + b, 0) / cycles.length : 0;
+
+      // Tempo de Resposta (Minutos)
+      const responseTimes = (responseTimeRes.data || []).map(l => {
+        const created = new Date(l.created_at);
+        const responded = new Date(l.handoff_triggered_at);
+        return (responded.getTime() - created.getTime()) / (1000 * 60);
+      });
+      const avgResponseTime = responseTimes.length > 0 ? responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length : 0;
+
+      setData({
+        totalAppointments: (aptsRes.data || []).length,
+        totalRevenue,
+        totalLeads: (leadsRes.data || []).length,
+        newPatients: patientsRes.count || 0,
+        totalSales: (salesRes.data || []).length,
+        totalInvestment,
+        totalSlaBreaches,
+        avgResponseTime,
+        avgSalesCycle,
+        chartData: Object.values(dailyData).sort((a, b) => a.date.localeCompare(b.date)) as any
+      });
+    } catch (error) {
+      console.error('Erro ao carregar estatísticas do dashboard:', error);
+    } finally {
+      if (!silent) setLoading(false);
+    }
+  }, [activeClinicId, dateRange?.start, dateRange?.end]);
+  }, [activeClinicId, dateRange?.start, dateRange?.end]);
 
   useEffect(() => {
     load();

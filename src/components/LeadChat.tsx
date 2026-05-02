@@ -148,9 +148,13 @@ export function LeadChat({ lead, onClose, isDragging = false }: LeadChatProps) {
       {/* Header */}
       <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-white sticky top-0 z-10">
         <div className="flex items-center gap-4">
-          <div className="w-12 h-12 bg-teal-100 rounded-full flex items-center justify-center text-teal-700 font-bold text-lg shadow-sm">
-            {lead.name[0]}
-          </div>
+          {lead.avatar_url ? (
+            <img src={lead.avatar_url} alt={lead.name} className="w-12 h-12 rounded-full object-cover border border-teal-100 shadow-sm" />
+          ) : (
+            <div className="w-12 h-12 bg-teal-100 rounded-full flex items-center justify-center text-teal-700 font-bold text-lg shadow-sm">
+              {lead.name[0]}
+            </div>
+          )}
           <div>
             <h3 className="font-bold text-slate-900 leading-tight">{lead.name}</h3>
             <div className="flex items-center gap-3 mt-0.5">
@@ -253,17 +257,21 @@ export function LeadChat({ lead, onClose, isDragging = false }: LeadChatProps) {
                           isOutbound ? "ml-auto flex-row-reverse" : ""
                         )}
                       >
-                        <div className={cn(
-                          "w-8 h-8 rounded-lg shadow-sm flex-shrink-0 flex items-center justify-center",
-                          isAI ? "bg-teal-600 shadow-md" :
-                          (isOutbound ? "bg-slate-800 shadow-md" : "bg-white border border-slate-200")
-                        )}>
-                          {isAI ? (
-                            <Bot className="w-5 h-5 text-white" />
-                          ) : (
-                            <User className={cn("w-4 h-4", isOutbound ? "text-white" : "text-slate-400")} />
-                          )}
-                        </div>
+                        {!isOutbound && !isAI && lead.avatar_url ? (
+                          <img src={lead.avatar_url} alt={lead.name} className="w-8 h-8 rounded-lg object-cover border border-slate-200 shadow-sm" />
+                        ) : (
+                          <div className={cn(
+                            "w-8 h-8 rounded-lg shadow-sm flex-shrink-0 flex items-center justify-center",
+                            isAI ? "bg-teal-600 shadow-md" :
+                            (isOutbound ? "bg-slate-800 shadow-md" : "bg-white border border-slate-200")
+                          )}>
+                            {isAI ? (
+                              <Bot className="w-5 h-5 text-white" />
+                            ) : (
+                              <User className={cn("w-4 h-4", isOutbound ? "text-white" : "text-slate-400")} />
+                            )}
+                          </div>
+                        )}
 
                         <div className={cn(
                           "px-4 py-3 rounded-2xl text-sm shadow-sm max-w-full overflow-hidden break-words",

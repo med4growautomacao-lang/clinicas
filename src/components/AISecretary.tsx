@@ -1402,17 +1402,21 @@ function ChatsView() {
               >
                 <div className="flex items-center gap-3">
                   <div className="relative">
-                    <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center font-bold text-slate-700 bg-slate-100")}>
-                      {lead.name[0]}
-                    </div>
+                    {lead.avatar_url ? (
+                      <img src={lead.avatar_url} alt={lead.name} className="w-10 h-10 rounded-full object-cover border border-slate-200 shadow-sm" />
+                    ) : (
+                      <div className={cn("w-10 h-10 rounded-full flex items-center justify-center font-bold text-slate-700 bg-slate-100 border border-slate-200")}>
+                        {lead.name[0]}
+                      </div>
+                    )}
                     {isMeta && (
-                      <img src={MetaLogo} alt="Meta" className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white shadow-sm" />
+                      <img src={MetaLogo} alt="Meta" className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white shadow-sm z-10 bg-white" />
                     )}
                     {isGoogle && !isMeta && (
-                      <img src={GoogleLogo} alt="Google" className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white shadow-sm" />
+                      <img src={GoogleLogo} alt="Google" className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white shadow-sm z-10 bg-white" />
                     )}
                     {!isMeta && !isGoogle && (
-                      <img src={SemOrigemLogo} alt="Sem Origem" className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white shadow-sm opacity-60" />
+                      <img src={SemOrigemLogo} alt="Sem Origem" className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white shadow-sm opacity-100 z-10 bg-white" />
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -1474,9 +1478,13 @@ function ChatsView() {
           <>
             <CardHeader className="border-b border-slate-100 py-4 flex flex-row items-center justify-between px-6 bg-white shrink-0">
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-lg bg-teal-50 flex items-center justify-center border border-teal-100">
-                  <User className="w-6 h-6 text-teal-700" />
-                </div>
+                {selectedLead.avatar_url ? (
+                  <img src={selectedLead.avatar_url} alt={selectedLead.name} className="w-12 h-12 rounded-lg object-cover border border-teal-100 shadow-sm" />
+                ) : (
+                  <div className="w-12 h-12 rounded-lg bg-teal-50 flex items-center justify-center border border-teal-100">
+                    <User className="w-6 h-6 text-teal-700" />
+                  </div>
+                )}
                 <div>
                   <CardTitle className="text-lg font-bold text-slate-900">{selectedLead.name}</CardTitle>
                   <div className="flex items-center gap-2 mt-0.5">
@@ -1548,17 +1556,21 @@ function ChatsView() {
                           isOutbound ? "ml-auto flex-row-reverse" : ""
                         )}
                       >
-                      <div className={cn(
-                        "w-8 h-8 rounded-lg shadow-sm flex-shrink-0 flex items-center justify-center",
-                        isAI ? "bg-teal-600 shadow-md" : 
-                        (isOutbound ? "bg-slate-800 shadow-md" : "bg-white border border-slate-200")
-                      )}>
-                        {isAI ? (
-                          <Bot className="w-5 h-5 text-white" />
+                        {!isOutbound && !isAI && selectedLead.avatar_url ? (
+                          <img src={selectedLead.avatar_url} alt={selectedLead.name} className="w-8 h-8 rounded-lg object-cover border border-slate-200 shadow-sm" />
                         ) : (
-                          <User className={cn("w-4 h-4", isOutbound ? "text-white" : "text-slate-400")} />
+                          <div className={cn(
+                            "w-8 h-8 rounded-lg shadow-sm flex-shrink-0 flex items-center justify-center",
+                            isAI ? "bg-teal-600 shadow-md" : 
+                            (isOutbound ? "bg-slate-800 shadow-md" : "bg-white border border-slate-200")
+                          )}>
+                            {isAI ? (
+                              <Bot className="w-5 h-5 text-white" />
+                            ) : (
+                              <User className={cn("w-4 h-4", isOutbound ? "text-white" : "text-slate-400")} />
+                            )}
+                          </div>
                         )}
-                      </div>
                   <div className={cn(
                     "px-4 py-3 rounded-2xl text-sm shadow-sm max-w-full overflow-hidden break-words",
                     isAI 

@@ -338,6 +338,7 @@ export interface Lead {
   rast_id: string | null;
   created_at: string;
   updated_at: string;
+  avatar_url: string | null;
 }
 
 export function useFunnelStages() {

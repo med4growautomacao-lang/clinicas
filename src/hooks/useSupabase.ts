@@ -1414,7 +1414,20 @@ export function useOrganizations() {
     return { data, error };
   };
 
-  return { data, loading, create, refetch: fetch };
+  const update = async (id: string, updates: Partial<Organization>) => {
+    const { error } = await supabase.from('organizations').update(updates).eq('id', id);
+    if (!error) fetch();
+    return !error;
+  };
+
+  const remove = async (id: string) => {
+    // Requires a cascade delete via RPC if there are dependencies, but let's assume we can delete if empty.
+    const { error } = await supabase.from('organizations').delete().eq('id', id);
+    if (!error) fetch();
+    return !error;
+  };
+
+  return { data, loading, create, update, remove, refetch: fetch };
 }
 
 // ==========================================
@@ -1439,6 +1452,35 @@ export interface OrgUser {
   full_name: string;
   email: string;
   created_at: string;
+}
+
+export function useGlobalSystemSettings() {
+  const [settings, setSettings] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+
+  const fetch = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase.from('system_settings').select('*');
+    if (data) {
+      const map: Record<string, string> = {};
+      data.forEach(s => { map[s.id] = s.value; });
+      setSettings(map);
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { fetch(); }, [fetch]);
+
+  const updateSetting = async (id: string, value: string) => {
+    const { error } = await supabase.from('system_settings').upsert({ id, value });
+    if (!error) {
+      setSettings(prev => ({ ...prev, [id]: value }));
+      return true;
+    }
+    return false;
+  };
+
+  return { settings, loading, updateSetting, refetch: fetch };
 }
 
 export function useSuperAdminData() {

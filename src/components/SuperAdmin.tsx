@@ -1,19 +1,21 @@
 import React, { useState } from 'react';
 import {
-  useClinics, useOrganizations, useSuperAdminData,
+  useClinics, useOrganizations, useSuperAdminData, useGlobalSystemSettings,
   Clinic, Organization, ClinicUser, OrgUser,
 } from '../hooks/useSupabase';
 import {
   Building2, Plus, Search, ShieldCheck, Loader2, X, Network, User, Mail, Lock,
-  ChevronDown, ChevronRight, Trash2, Users, Crown, Stethoscope, KeyRound,
-  MoreHorizontal, UserPlus, Eye, EyeOff,
+  ChevronDown, ChevronRight, Trash2, Users, Edit3, Settings as SettingsIcon,
+  Eye, EyeOff, Save, KeyRound
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 
 // ─── tipos de modal ───────────────────────────────────────────────────────────
 type ModalState =
   | { type: 'org' }
+  | { type: 'edit-org'; org: Organization }
   | { type: 'clinic'; orgId: string | null }
+  | { type: 'edit-clinic'; clinic: Clinic }
   | { type: 'clinic-user'; clinicId: string; clinicName: string }
   | { type: 'org-user'; orgId: string; orgName: string }
   | null;
@@ -33,18 +35,18 @@ const roleBadge = (role: string) => {
     secretaria: 'bg-pink-100 text-pink-700',
     org_owner:  'bg-amber-100 text-amber-700',
     org_admin:  'bg-violet-100 text-violet-700',
+    org_team:   'bg-blue-100 text-blue-700',
     'super-admin': 'bg-rose-100 text-rose-700',
   };
   const roleLabels: Record<string, string> = {
     gestor: 'Gestor', medico: 'Médico', secretaria: 'Secretária',
-    org_owner: 'Owner', org_admin: 'Admin', 'super-admin': 'Super',
+    org_owner: 'Owner', org_admin: 'Admin', org_team: 'Equipe', 'super-admin': 'Super',
   };
   return { cls: cn('text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full', map[role] || 'bg-slate-100 text-slate-500'), label: roleLabels[role] || role };
 };
 
 const initials = (name: string) => name.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase();
 
-// ─── Avatar ───────────────────────────────────────────────────────────────────
 function Avatar({ name, size = 'sm' }: { name: string; size?: 'sm' | 'md' }) {
   const colors = ['bg-teal-500', 'bg-violet-500', 'bg-amber-500', 'bg-blue-500', 'bg-pink-500', 'bg-emerald-500'];
   const color = colors[name.charCodeAt(0) % colors.length];
@@ -104,18 +106,18 @@ function UserRow({ name, email, role, onRemove }: { name: string; email: string;
 
 // ─── ClinicCard ───────────────────────────────────────────────────────────────
 function ClinicCard({
-  clinic, users, onAddUser, onDelete, onRemoveUser, showId = false,
+  clinic, users, onAddUser, onEdit, onDelete, onRemoveUser, showId = false,
 }: {
   clinic: Clinic;
   users: ClinicUser[];
   onAddUser: () => void;
+  onEdit: () => void;
   onDelete: () => void;
   onRemoveUser: (userId: string) => void;
   showId?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const { label: planLabel } = { label: clinic.plan };
 
   return (
     <div className="rounded-2xl border border-slate-100 bg-white overflow-hidden">
@@ -135,13 +137,17 @@ function ClinicCard({
           >
             + Usuário
           </button>
+          
+          <div className="w-px h-4 bg-slate-200 mx-1"></div>
+
           <button
-            onClick={() => setExpanded(v => !v)}
-            className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-lg text-xs font-bold transition-colors"
+            onClick={onEdit}
+            className="p-1.5 text-slate-400 hover:text-blue-600 transition-colors rounded-lg hover:bg-blue-50"
+            title="Editar Clínica"
           >
-            <span>{users.length}</span>
-            {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+            <Edit3 className="w-3.5 h-3.5" />
           </button>
+
           {confirmingDelete ? (
             <button
               onClick={() => { onDelete(); setConfirmingDelete(false); }}
@@ -149,12 +155,13 @@ function ClinicCard({
               onBlur={() => setConfirmingDelete(false)}
               autoFocus
             >
-              <Trash2 className="w-3 h-3" /> Excluir
+              <Trash2 className="w-3 h-3" /> Confirmar Exclusão
             </button>
           ) : (
             <button
               onClick={() => setConfirmingDelete(true)}
-              className="p-1.5 text-slate-300 hover:text-red-500 transition-colors rounded-lg hover:bg-red-50"
+              className="p-1.5 text-slate-400 hover:text-red-500 transition-colors rounded-lg hover:bg-red-50"
+              title="Excluir Clínica"
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
@@ -162,19 +169,28 @@ function ClinicCard({
         </div>
       </div>
 
-      {expanded && (
-        <div className="border-t border-slate-50 px-4 py-2 bg-slate-50/50">
-          {users.length === 0 ? (
-            <p className="text-xs text-slate-400 italic py-2 text-center">Nenhum usuário cadastrado</p>
-          ) : (
-            <div className="space-y-0.5">
-              {users.map(u => (
+      <div className="border-t border-slate-50 p-3 bg-slate-50/30">
+        <button
+          onClick={() => setExpanded(v => !v)}
+          className="flex items-center justify-between w-full text-left"
+        >
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+            Membros da Clínica ({users.length})
+          </p>
+          {expanded ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400" />}
+        </button>
+        {expanded && (
+          <div className="mt-2 space-y-0.5">
+            {users.length === 0 ? (
+              <p className="text-xs text-slate-400 italic py-2 text-center">Nenhum membro cadastrado</p>
+            ) : (
+              users.map(u => (
                 <UserRow key={u.id} name={u.full_name} email={u.email} role={u.role} onRemove={() => onRemoveUser(u.id)} />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+              ))
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -182,7 +198,9 @@ function ClinicCard({
 // ─── OrgSection ───────────────────────────────────────────────────────────────
 function OrgSection({
   org, orgClinics, clinicUsers, orgUsers,
-  onAddClinic, onAddOrgUser, onAddClinicUser, onDeleteClinic, onRemoveClinicUser,
+  onAddClinic, onAddOrgUser, onAddClinicUser,
+  onEditOrg, onEditClinic,
+  onDeleteOrg, onDeleteClinic, onRemoveClinicUser,
 }: {
   org: Organization;
   orgClinics: Clinic[];
@@ -191,15 +209,20 @@ function OrgSection({
   onAddClinic: () => void;
   onAddOrgUser: () => void;
   onAddClinicUser: (clinicId: string, clinicName: string) => void;
+  onEditOrg: () => void;
+  onEditClinic: (clinic: Clinic) => void;
+  onDeleteOrg: () => void;
   onDeleteClinic: (clinic: Clinic) => void;
   onRemoveClinicUser: (userId: string, clinicId: string) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const [showOrgUsers, setShowOrgUsers] = useState(false);
+  const [showClinics, setShowClinics] = useState(true);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const totalUsers = orgClinics.reduce((s, c) => s + (clinicUsers[c.id]?.length || 0), 0) + orgUsers.length;
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden mb-4">
       {/* Org Header */}
       <div
         className="flex items-center gap-3 px-5 py-4 cursor-pointer hover:bg-slate-50 transition-colors select-none"
@@ -228,7 +251,38 @@ function OrgSection({
           >
             + Clínica
           </button>
-          {expanded ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
+          
+          <div className="w-px h-5 bg-slate-200 mx-1"></div>
+
+          <button
+            onClick={e => { e.stopPropagation(); onEditOrg(); }}
+            className="p-1.5 text-slate-400 hover:text-blue-600 transition-colors rounded-lg hover:bg-blue-50"
+            title="Editar Organização"
+          >
+            <Edit3 className="w-4 h-4" />
+          </button>
+          
+          {confirmingDelete ? (
+            <button
+              onClick={e => { e.stopPropagation(); onDeleteOrg(); setConfirmingDelete(false); }}
+              className="flex items-center gap-1 px-2 py-1 bg-red-500 hover:bg-red-600 text-white rounded-lg text-xs font-bold transition-all"
+              onBlur={() => setConfirmingDelete(false)}
+            >
+              <Trash2 className="w-3 h-3" /> Excluir
+            </button>
+          ) : (
+            <button
+              onClick={e => { e.stopPropagation(); setConfirmingDelete(true); }}
+              className="p-1.5 text-slate-400 hover:text-red-500 transition-colors rounded-lg hover:bg-red-50"
+              title="Excluir Organização"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
+
+          <div className="ml-2">
+            {expanded ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
+          </div>
         </div>
       </div>
 
@@ -236,25 +290,36 @@ function OrgSection({
         <div className="border-t border-slate-100">
           {/* Clinics */}
           <div className="p-4 space-y-2">
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Clínicas</p>
-            {orgClinics.length === 0 ? (
-              <div className="text-center py-6 text-slate-400 text-sm">
-                <Building2 className="w-6 h-6 mx-auto mb-1 opacity-30" />
-                Nenhuma clínica vinculada
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {orgClinics.map(clinic => (
-                  <ClinicCard
-                    key={clinic.id}
-                    clinic={clinic}
-                    users={clinicUsers[clinic.id] || []}
-                    onAddUser={() => onAddClinicUser(clinic.id, clinic.name)}
-                    onDelete={() => onDeleteClinic(clinic)}
-                    onRemoveUser={(userId) => onRemoveClinicUser(userId, clinic.id)}
-                  />
-                ))}
-              </div>
+            <button
+              onClick={() => setShowClinics(v => !v)}
+              className="flex items-center justify-between w-full text-left mb-1"
+            >
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                Clínicas ({orgClinics.length})
+              </p>
+              {showClinics ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400" />}
+            </button>
+            {showClinics && (
+              orgClinics.length === 0 ? (
+                <div className="text-center py-6 text-slate-400 text-sm">
+                  <Building2 className="w-6 h-6 mx-auto mb-1 opacity-30" />
+                  Nenhuma clínica vinculada
+                </div>
+              ) : (
+                <div className="space-y-2 mt-2">
+                  {orgClinics.map(clinic => (
+                    <ClinicCard
+                      key={clinic.id}
+                      clinic={clinic}
+                      users={clinicUsers[clinic.id] || []}
+                      onAddUser={() => onAddClinicUser(clinic.id, clinic.name)}
+                      onEdit={() => onEditClinic(clinic)}
+                      onDelete={() => onDeleteClinic(clinic)}
+                      onRemoveUser={(userId) => onRemoveClinicUser(userId, clinic.id)}
+                    />
+                  ))}
+                </div>
+              )
             )}
           </div>
 
@@ -265,14 +330,14 @@ function OrgSection({
               className="flex items-center justify-between w-full text-left"
             >
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                Admins da Organização ({orgUsers.length})
+                Membros da Organização ({orgUsers.length})
               </p>
               {showOrgUsers ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400" />}
             </button>
             {showOrgUsers && (
               <div className="mt-2 space-y-0.5">
                 {orgUsers.length === 0 ? (
-                  <p className="text-xs text-slate-400 italic py-2 text-center">Nenhum admin cadastrado</p>
+                  <p className="text-xs text-slate-400 italic py-2 text-center">Nenhum membro cadastrado</p>
                 ) : (
                   orgUsers.map(u => (
                     <UserRow key={u.id} name={u.full_name} email={u.email} role={u.role} />
@@ -287,7 +352,7 @@ function OrgSection({
   );
 }
 
-// ─── AddUserModal ─────────────────────────────────────────────────────────────
+// ─── Add/Edit User Modal ──────────────────────────────────────────────────────
 function AddUserModal({
   type, targetName, onSubmit, onClose,
 }: {
@@ -298,7 +363,7 @@ function AddUserModal({
 }) {
   const isOrg = type === 'org-user';
   const roles = isOrg
-    ? [{ v: 'org_admin', l: 'Usuário' }, { v: 'org_owner', l: 'Owner' }]
+    ? [{ v: 'org_admin', l: 'Admin' }, { v: 'org_owner', l: 'Owner' }, { v: 'org_team', l: 'Equipe' }]
     : [{ v: 'gestor', l: 'Gestor' }, { v: 'medico', l: 'Médico' }, { v: 'secretaria', l: 'Secretária' }];
 
   const [form, setForm] = useState({ name: '', email: '', password: '', role: roles[0].v });
@@ -320,7 +385,7 @@ function AddUserModal({
         <div className="flex items-center justify-between p-6 border-b border-slate-100">
           <div>
             <h3 className="text-base font-black text-slate-900">
-              {isOrg ? 'Adicionar Admin' : 'Adicionar Usuário'}
+              {isOrg ? 'Adicionar Membro' : 'Adicionar Usuário'}
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
               {isOrg ? 'Organização: ' : 'Clínica: '}<span className="font-bold">{targetName}</span>
@@ -389,18 +454,22 @@ function AddUserModal({
   );
 }
 
-// ─── AddClinicModal ───────────────────────────────────────────────────────────
-function AddClinicModal({
-  orgs, defaultOrgId, onSubmit, onClose,
+// ─── Add/Edit Clinic Modal ────────────────────────────────────────────────────
+function EditClinicModal({
+  orgs, defaultOrgId, clinic, onSubmit, onClose,
 }: {
   orgs: Organization[];
   defaultOrgId: string | null;
+  clinic?: Clinic; // If provided, we are editing
   onSubmit: (data: any) => Promise<void>;
   onClose: () => void;
 }) {
+  const isEditing = !!clinic;
   const [form, setForm] = useState({
-    name: '', plan: 'pro', organization_id: defaultOrgId,
-    ownerName: '', ownerEmail: '', ownerPassword: '',
+    name: clinic?.name || '', 
+    plan: clinic?.plan || 'pro', 
+    organization_id: clinic?.organization_id || defaultOrgId || '',
+    ownerName: '', ownerEmail: '', ownerPassword: '', // Only for creation
   });
   const [saving, setSaving] = useState(false);
   const [showPass, setShowPass] = useState(false);
@@ -408,73 +477,89 @@ function AddClinicModal({
   const handle = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
-    await onSubmit(form);
+    await onSubmit({
+      ...form, 
+      organization_id: form.organization_id === '' ? null : form.organization_id
+    });
     setSaving(false);
     onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto custom-scrollbar">
         <div className="flex items-center justify-between p-6 border-b border-slate-100 sticky top-0 bg-white z-10">
-          <h3 className="text-base font-black text-slate-900">Nova Clínica</h3>
+          <h3 className="text-base font-black text-slate-900">{isEditing ? 'Editar Clínica' : 'Nova Clínica'}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1"><X className="w-5 h-5" /></button>
         </div>
         <form onSubmit={handle} className="p-6 space-y-4">
-          <input required type="text" value={form.name} placeholder="Nome da clínica"
-            onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-            className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-sm"
-          />
+          <div>
+            <label className="block text-xs font-bold text-slate-600 mb-1.5">Nome da Clínica</label>
+            <input required type="text" value={form.name} placeholder="Nome da clínica"
+              onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+              className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-sm"
+            />
+          </div>
           <div className="grid grid-cols-2 gap-3">
-            <select value={form.plan} onChange={e => setForm(f => ({ ...f, plan: e.target.value }))}
-              className="px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 bg-white text-sm">
-              <option value="free">Free</option>
-              <option value="pro">Pro</option>
-              <option value="enterprise">Enterprise</option>
-            </select>
-            <select value={form.organization_id || ''} onChange={e => setForm(f => ({ ...f, organization_id: e.target.value || null }))}
-              className="px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 bg-white text-sm">
-              <option value="">Sem organização</option>
-              {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-            </select>
-          </div>
-          <div className="border-t border-slate-100 pt-4 space-y-3">
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Gestor (opcional)</p>
-            <div className="relative">
-              <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input type="text" value={form.ownerName} placeholder="Nome"
-                onChange={e => setForm(f => ({ ...f, ownerName: e.target.value }))}
-                className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-sm"
-              />
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1.5">Plano</label>
+              <select value={form.plan} onChange={e => setForm(f => ({ ...f, plan: e.target.value }))}
+                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 bg-white text-sm">
+                <option value="free">Free</option>
+                <option value="pro">Pro</option>
+                <option value="enterprise">Enterprise</option>
+              </select>
             </div>
-            <div className="relative">
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input type="email" value={form.ownerEmail} placeholder="Email"
-                onChange={e => setForm(f => ({ ...f, ownerEmail: e.target.value }))}
-                className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-sm"
-              />
-            </div>
-            <div className="relative">
-              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input type={showPass ? 'text' : 'password'} value={form.ownerPassword} placeholder="Senha"
-                onChange={e => setForm(f => ({ ...f, ownerPassword: e.target.value }))}
-                className="w-full pl-10 pr-10 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-sm"
-              />
-              <button type="button" onClick={() => setShowPass(v => !v)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1.5">Organização</label>
+              <select value={form.organization_id} onChange={e => setForm(f => ({ ...f, organization_id: e.target.value }))}
+                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 bg-white text-sm">
+                <option value="">Independente</option>
+                {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </select>
             </div>
           </div>
-          <div className="flex gap-3 pt-2">
+          
+          {!isEditing && (
+            <div className="border-t border-slate-100 pt-4 space-y-3">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Criar Gestor (opcional)</p>
+              <div className="relative">
+                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input type="text" value={form.ownerName} placeholder="Nome"
+                  onChange={e => setForm(f => ({ ...f, ownerName: e.target.value }))}
+                  className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-sm"
+                />
+              </div>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input type="email" value={form.ownerEmail} placeholder="Email"
+                  onChange={e => setForm(f => ({ ...f, ownerEmail: e.target.value }))}
+                  className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-sm"
+                />
+              </div>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input type={showPass ? 'text' : 'password'} value={form.ownerPassword} placeholder="Senha"
+                  onChange={e => setForm(f => ({ ...f, ownerPassword: e.target.value }))}
+                  className="w-full pl-10 pr-10 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-sm"
+                />
+                <button type="button" onClick={() => setShowPass(v => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                  {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-4 border-t border-slate-100">
             <button type="button" onClick={onClose}
               className="flex-1 py-2.5 border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 text-sm font-bold">
               Cancelar
             </button>
             <button type="submit" disabled={saving}
               className="flex-1 py-2.5 bg-teal-600 text-white rounded-xl hover:bg-teal-700 text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-60">
-              {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-              Criar Clínica
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              {isEditing ? 'Salvar Alterações' : 'Criar Clínica'}
             </button>
           </div>
         </form>
@@ -483,9 +568,16 @@ function AddClinicModal({
   );
 }
 
-// ─── AddOrgModal ──────────────────────────────────────────────────────────────
-function AddOrgModal({ onSubmit, onClose }: { onSubmit: (d: { name: string; plan: string }) => Promise<void>; onClose: () => void }) {
-  const [form, setForm] = useState({ name: '', plan: 'pro' });
+// ─── Add/Edit Org Modal ───────────────────────────────────────────────────────
+function EditOrgModal({ 
+  org, onSubmit, onClose 
+}: { 
+  org?: Organization; 
+  onSubmit: (d: { name: string; plan: string }) => Promise<void>; 
+  onClose: () => void 
+}) {
+  const isEditing = !!org;
+  const [form, setForm] = useState({ name: org?.name || '', plan: org?.plan || 'pro' });
   const [saving, setSaving] = useState(false);
 
   const handle = async (e: React.FormEvent) => {
@@ -497,32 +589,38 @@ function AddOrgModal({ onSubmit, onClose }: { onSubmit: (d: { name: string; plan
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4">
         <div className="flex items-center justify-between p-6 border-b border-slate-100">
-          <h3 className="text-base font-black text-slate-900">Nova Organização</h3>
+          <h3 className="text-base font-black text-slate-900">{isEditing ? 'Editar Organização' : 'Nova Organização'}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1"><X className="w-5 h-5" /></button>
         </div>
         <form onSubmit={handle} className="p-6 space-y-4">
-          <input required autoFocus type="text" value={form.name} placeholder="Nome da organização"
-            onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-            className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 text-sm"
-          />
-          <select value={form.plan} onChange={e => setForm(f => ({ ...f, plan: e.target.value }))}
-            className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none bg-white text-sm">
-            <option value="free">Free</option>
-            <option value="pro">Pro</option>
-            <option value="enterprise">Enterprise</option>
-          </select>
-          <div className="flex gap-3 pt-2">
+          <div>
+            <label className="block text-xs font-bold text-slate-600 mb-1.5">Nome da Organização</label>
+            <input required autoFocus type="text" value={form.name} placeholder="Nome da organização"
+              onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+              className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-600 mb-1.5">Plano Padrão</label>
+            <select value={form.plan} onChange={e => setForm(f => ({ ...f, plan: e.target.value }))}
+              className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 bg-white text-sm">
+              <option value="free">Free</option>
+              <option value="pro">Pro</option>
+              <option value="enterprise">Enterprise</option>
+            </select>
+          </div>
+          <div className="flex gap-3 pt-4 border-t border-slate-100">
             <button type="button" onClick={onClose}
               className="flex-1 py-2.5 border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 text-sm font-bold">
               Cancelar
             </button>
             <button type="submit" disabled={saving}
               className="flex-1 py-2.5 bg-violet-600 text-white rounded-xl hover:bg-violet-700 text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-60">
-              {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-              Criar
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              {isEditing ? 'Salvar Alterações' : 'Criar'}
             </button>
           </div>
         </form>
@@ -531,12 +629,169 @@ function AddOrgModal({ onSubmit, onClose }: { onSubmit: (d: { name: string; plan
   );
 }
 
+// ─── SystemSettingsTab ────────────────────────────────────────────────────────
+function SystemSettingsTab() {
+  const { settings, loading, updateSetting } = useGlobalSystemSettings();
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [newKey, setNewKey] = useState('');
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[300px]">
+        <Loader2 className="w-8 h-8 text-teal-600 animate-spin" />
+      </div>
+    );
+  }
+
+  const handleSave = async (key: string) => {
+    setSaving(true);
+    const ok = await updateSetting(key, editValue);
+    setSaving(false);
+    if (ok) {
+      setEditingKey(null);
+      setNewKey('');
+    } else {
+      alert('Erro ao salvar configuração.');
+    }
+  };
+
+  const settingsList = Object.entries(settings).sort(([a], [b]) => a.localeCompare(b));
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="p-5 border-b border-slate-100 bg-slate-50/50">
+          <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
+            <SettingsIcon className="w-5 h-5 text-slate-500" />
+            Variáveis de Sistema
+          </h2>
+          <p className="text-sm text-slate-500 mt-1">
+            Estas chaves controlam configurações globais, integrações e templates que se aplicam a todas as clínicas e instâncias no n8n.
+          </p>
+        </div>
+        
+        <div className="divide-y divide-slate-100">
+          {settingsList.map(([key, value]) => {
+            const isEditing = editingKey === key;
+            return (
+              <div key={key} className="p-5 hover:bg-slate-50/50 transition-colors">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-mono text-xs font-bold text-slate-700 bg-slate-100 inline-flex px-2 py-1 rounded-md mb-2">
+                      {key}
+                    </p>
+                    
+                    {isEditing ? (
+                      <div className="space-y-3 mt-2">
+                        <textarea
+                          value={editValue}
+                          onChange={(e) => setEditValue(e.target.value)}
+                          className="w-full h-32 p-3 font-mono text-xs bg-slate-900 text-green-400 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 shadow-inner"
+                          placeholder="Valor da variável..."
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleSave(key)}
+                            disabled={saving}
+                            className="flex items-center gap-1.5 px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-xs font-bold transition-colors shadow-sm disabled:opacity-50"
+                          >
+                            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                            Salvar
+                          </button>
+                          <button
+                            onClick={() => setEditingKey(null)}
+                            disabled={saving}
+                            className="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-lg text-xs font-bold transition-colors"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="relative group">
+                        <pre className="font-mono text-xs text-slate-600 bg-slate-50 p-3 rounded-xl overflow-x-auto whitespace-pre-wrap border border-slate-100 max-h-40 custom-scrollbar">
+                          {value || <span className="text-slate-400 italic">Vazio</span>}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {!isEditing && (
+                    <button
+                      onClick={() => { setEditingKey(key); setEditValue(value); }}
+                      className="p-2 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded-lg transition-colors"
+                      title="Editar"
+                    >
+                      <Edit3 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Add New Key */}
+      <div className="bg-slate-50 rounded-2xl border border-slate-200 border-dashed p-6 text-center">
+        {editingKey === 'NEW' ? (
+          <div className="max-w-xl mx-auto text-left space-y-4">
+            <h3 className="font-bold text-slate-900">Adicionar Nova Variável</h3>
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1.5">Chave (Key)</label>
+              <input type="text" value={newKey} onChange={e => setNewKey(e.target.value)}
+                placeholder="ex: webhook_nova_url"
+                className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 font-mono text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1.5">Valor</label>
+              <textarea value={editValue} onChange={e => setEditValue(e.target.value)}
+                placeholder="Conteúdo..."
+                className="w-full h-24 p-3 font-mono text-xs bg-slate-900 text-green-400 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500"
+              />
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleSave(newKey)}
+                disabled={saving || !newKey.trim()}
+                className="flex items-center gap-1.5 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-bold transition-colors shadow-sm disabled:opacity-50"
+              >
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                Adicionar
+              </button>
+              <button
+                onClick={() => setEditingKey(null)}
+                disabled={saving}
+                className="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-lg text-sm font-bold transition-colors"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => { setEditingKey('NEW'); setEditValue(''); setNewKey(''); }}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 shadow-sm hover:border-teal-300 hover:text-teal-600 text-slate-600 rounded-xl font-bold transition-all"
+          >
+            <Plus className="w-4 h-4" /> Nova Variável de Sistema
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function SuperAdmin() {
-  const { data: clinics, loading: clinicsLoading, create: createClinic, deleteClinic } = useClinics();
-  const { data: orgs, loading: orgsLoading, create: createOrg } = useOrganizations();
+  const { data: clinics, loading: clinicsLoading, create: createClinic, update: updateClinic, deleteClinic } = useClinics();
+  const { data: orgs, loading: orgsLoading, create: createOrg, update: updateOrg, remove: deleteOrg } = useOrganizations();
   const { clinicUsers, orgUsers, usersLoading, addClinicUser, addOrgUser, removeClinicUser, totalUsers, refetchUsers } = useSuperAdminData();
 
+  const [activeTab, setActiveTab] = useState<'gestao' | 'settings'>('gestao');
   const [search, setSearch] = useState('');
   const [modal, setModal] = useState<ModalState>(null);
 
@@ -552,8 +807,9 @@ export default function SuperAdmin() {
   const clinicsInOrg = (orgId: string) => filteredClinics.filter(c => c.organization_id === orgId);
   const standaloneClinics = filteredClinics.filter(c => !c.organization_id);
 
+  // Handlers Clínicas
   const handleDeleteClinic = async (clinic: Clinic) => {
-    if (!confirm(`Excluir "${clinic.name}" e todos os seus dados? Esta ação não pode ser desfeita.`)) return;
+    // Delete validation already done in component
     const ok = await deleteClinic(clinic.id);
     if (!ok) alert('Erro ao excluir clínica.');
   };
@@ -563,9 +819,36 @@ export default function SuperAdmin() {
     if (error) alert('Erro: ' + error.message);
   };
 
+  const handleEditClinic = async (data: any) => {
+    // Assuming data contains id and all fields.
+    const ok = await updateClinic(data.id, { 
+      name: data.name, 
+      plan: data.plan as 'free'|'pro'|'enterprise', 
+      organization_id: data.organization_id 
+    });
+    if (!ok) alert('Erro ao atualizar clínica.');
+  };
+
+  // Handlers Orgs
+  const handleDeleteOrg = async (org: Organization) => {
+    if (clinicsInOrg(org.id).length > 0) {
+      alert('Não é possível excluir uma organização que possui clínicas. Exclua ou mova as clínicas primeiro.');
+      return;
+    }
+    const ok = await deleteOrg(org.id);
+    if (!ok) alert('Erro ao excluir organização.');
+  };
+
   const handleCreateOrg = async (data: { name: string; plan: string }) => {
     const { error } = await createOrg(data);
     if (error) alert('Erro: ' + error.message);
+  };
+
+  const handleEditOrg = async (data: { name: string; plan: string }) => {
+    if (modal?.type === 'edit-org') {
+      const ok = await updateOrg(modal.org.id, data);
+      if (!ok) alert('Erro ao atualizar organização.');
+    }
   };
 
   if (loading) {
@@ -577,113 +860,162 @@ export default function SuperAdmin() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 pb-20">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-black text-slate-900">Super Admin</h1>
-          <p className="text-sm text-slate-500">Gestão completa de organizações, clínicas e usuários.</p>
+          <p className="text-sm text-slate-500">Gestão global de organizações, clínicas e variáveis de sistema.</p>
         </div>
-        <div className="flex gap-2">
-          <button onClick={() => setModal({ type: 'org' })}
-            className="bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2 text-sm transition-colors shadow-sm">
-            <Plus className="w-4 h-4" /> Nova Org
+        
+        {/* Tabs */}
+        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+          <button
+            onClick={() => setActiveTab('gestao')}
+            className={cn(
+              "px-4 py-2 rounded-lg text-sm font-bold transition-all",
+              activeTab === 'gestao' ? "bg-white text-teal-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+            )}
+          >
+            Organizações e Clínicas
           </button>
-          <button onClick={() => setModal({ type: 'clinic', orgId: null })}
-            className="bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2 text-sm transition-colors shadow-sm">
-            <Plus className="w-4 h-4" /> Nova Clínica
+          <button
+            onClick={() => setActiveTab('settings')}
+            className={cn(
+              "px-4 py-2 rounded-lg text-sm font-bold transition-all",
+              activeTab === 'settings' ? "bg-white text-teal-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+            )}
+          >
+            System Settings
           </button>
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: 'Organizações', value: orgs.length, icon: Network, color: 'bg-violet-50 text-violet-600' },
-          { label: 'Clínicas', value: clinics.length, icon: Building2, color: 'bg-teal-50 text-teal-600' },
-          { label: 'Usuários', value: totalUsers, icon: Users, color: 'bg-blue-50 text-blue-600' },
-          { label: 'Planos Ativos', value: clinics.filter(c => c.plan !== 'free').length, icon: ShieldCheck, color: 'bg-amber-50 text-amber-600' },
-        ].map(s => (
-          <div key={s.label} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex items-center gap-3">
-            <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0', s.color)}>
-              <s.icon className="w-5 h-5" />
+      {activeTab === 'gestao' ? (
+        <>
+          {/* Stats */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[
+              { label: 'Organizações', value: orgs.length, icon: Network, color: 'bg-violet-50 text-violet-600' },
+              { label: 'Clínicas', value: clinics.length, icon: Building2, color: 'bg-teal-50 text-teal-600' },
+              { label: 'Usuários', value: totalUsers, icon: Users, color: 'bg-blue-50 text-blue-600' },
+              { label: 'Planos Pagos', value: clinics.filter(c => c.plan !== 'free').length, icon: ShieldCheck, color: 'bg-amber-50 text-amber-600' },
+            ].map(s => (
+              <div key={s.label} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex items-center gap-3">
+                <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0', s.color)}>
+                  <s.icon className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-xl font-black text-slate-900">{s.value}</p>
+                  <p className="text-xs text-slate-500 font-medium">{s.label}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            {/* Search */}
+            <div className="relative max-w-md w-full">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input type="text" placeholder="Buscar organização ou clínica..."
+                value={search} onChange={e => setSearch(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all"
+              />
             </div>
-            <div>
-              <p className="text-xl font-black text-slate-900">{s.value}</p>
-              <p className="text-xs text-slate-500 font-medium">{s.label}</p>
+            
+            <div className="flex gap-2">
+              <button onClick={() => setModal({ type: 'org' })}
+                className="bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2 text-sm transition-colors shadow-sm">
+                <Plus className="w-4 h-4" /> Nova Org
+              </button>
+              <button onClick={() => setModal({ type: 'clinic', orgId: null })}
+                className="bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2 text-sm transition-colors shadow-sm">
+                <Plus className="w-4 h-4" /> Nova Clínica
+              </button>
             </div>
           </div>
-        ))}
-      </div>
 
-      {/* Search */}
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-        <input type="text" placeholder="Buscar organização ou clínica..."
-          value={search} onChange={e => setSearch(e.target.value)}
-          className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all"
-        />
-      </div>
-
-      {/* Organizações */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest">Organizações ({filteredOrgs.length})</h2>
-        </div>
-        {filteredOrgs.length === 0 && (
-          <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center">
-            <Network className="w-8 h-8 text-slate-200 mx-auto mb-2" />
-            <p className="text-slate-400 text-sm">Nenhuma organização encontrada.</p>
-          </div>
-        )}
-        {filteredOrgs.map(org => (
-          <OrgSection
-            key={org.id}
-            org={org}
-            orgClinics={clinicsInOrg(org.id)}
-            clinicUsers={clinicUsers}
-            orgUsers={orgUsers[org.id] || []}
-            onAddClinic={() => setModal({ type: 'clinic', orgId: org.id })}
-            onAddOrgUser={() => setModal({ type: 'org-user', orgId: org.id, orgName: org.name })}
-            onAddClinicUser={(clinicId, clinicName) => setModal({ type: 'clinic-user', clinicId, clinicName })}
-            onDeleteClinic={handleDeleteClinic}
-            onRemoveClinicUser={removeClinicUser}
-          />
-        ))}
-      </div>
-
-      {/* Clínicas Independentes */}
-      {standaloneClinics.length > 0 && (
-        <div className="space-y-4">
-          <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest">
-            Clínicas Independentes ({standaloneClinics.length})
-          </h2>
-          <div className="space-y-2">
-            {standaloneClinics.map(clinic => (
-              <ClinicCard
-                key={clinic.id}
-                clinic={clinic}
-                users={clinicUsers[clinic.id] || []}
-                onAddUser={() => setModal({ type: 'clinic-user', clinicId: clinic.id, clinicName: clinic.name })}
-                onDelete={() => handleDeleteClinic(clinic)}
-                onRemoveUser={(userId) => removeClinicUser(userId, clinic.id)}
-                showId
+          {/* Organizações */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest">Organizações ({filteredOrgs.length})</h2>
+            </div>
+            {filteredOrgs.length === 0 && search && (
+              <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center">
+                <Network className="w-8 h-8 text-slate-200 mx-auto mb-2" />
+                <p className="text-slate-400 text-sm">Nenhuma organização encontrada.</p>
+              </div>
+            )}
+            {filteredOrgs.map(org => (
+              <OrgSection
+                key={org.id}
+                org={org}
+                orgClinics={clinicsInOrg(org.id)}
+                clinicUsers={clinicUsers}
+                orgUsers={orgUsers[org.id] || []}
+                onAddClinic={() => setModal({ type: 'clinic', orgId: org.id })}
+                onAddOrgUser={() => setModal({ type: 'org-user', orgId: org.id, orgName: org.name })}
+                onAddClinicUser={(clinicId, clinicName) => setModal({ type: 'clinic-user', clinicId, clinicName })}
+                onEditOrg={() => setModal({ type: 'edit-org', org })}
+                onEditClinic={(clinic) => setModal({ type: 'edit-clinic', clinic })}
+                onDeleteOrg={() => handleDeleteOrg(org)}
+                onDeleteClinic={handleDeleteClinic}
+                onRemoveClinicUser={removeClinicUser}
               />
             ))}
           </div>
-        </div>
+
+          {/* Clínicas Independentes */}
+          {standaloneClinics.length > 0 && (
+            <div className="space-y-4">
+              <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest">
+                Clínicas Independentes ({standaloneClinics.length})
+              </h2>
+              <div className="space-y-2">
+                {standaloneClinics.map(clinic => (
+                  <ClinicCard
+                    key={clinic.id}
+                    clinic={clinic}
+                    users={clinicUsers[clinic.id] || []}
+                    onAddUser={() => setModal({ type: 'clinic-user', clinicId: clinic.id, clinicName: clinic.name })}
+                    onEdit={() => setModal({ type: 'edit-clinic', clinic })}
+                    onDelete={() => handleDeleteClinic(clinic)}
+                    onRemoveUser={(userId) => removeClinicUser(userId, clinic.id)}
+                    showId
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      ) : (
+        <SystemSettingsTab />
       )}
 
-      {/* Modais */}
+      {/* Modais de Criação e Edição */}
       {modal?.type === 'org' && (
-        <AddOrgModal onSubmit={handleCreateOrg} onClose={() => setModal(null)} />
+        <EditOrgModal onSubmit={handleCreateOrg} onClose={() => setModal(null)} />
+      )}
+
+      {modal?.type === 'edit-org' && (
+        <EditOrgModal org={modal.org} onSubmit={handleEditOrg} onClose={() => setModal(null)} />
       )}
 
       {modal?.type === 'clinic' && (
-        <AddClinicModal
+        <EditClinicModal
           orgs={orgs}
           defaultOrgId={modal.orgId}
           onSubmit={handleCreateClinic}
+          onClose={() => setModal(null)}
+        />
+      )}
+
+      {modal?.type === 'edit-clinic' && (
+        <EditClinicModal
+          orgs={orgs}
+          defaultOrgId={modal.clinic.organization_id}
+          clinic={modal.clinic}
+          onSubmit={async (data) => handleEditClinic({ id: modal.clinic.id, ...data })}
           onClose={() => setModal(null)}
         />
       )}

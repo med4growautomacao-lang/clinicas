@@ -93,7 +93,7 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
   ];
 
   const navItems = allNavItems
-    .filter(item => item.roles.includes(effectiveRole))
+    .filter(item => item.roles.includes(effectiveRole) || (item.id === 'org-admin' && isOrgUser))
     .filter(item => !(isOutro && item.clinicOnly));
 
   return (

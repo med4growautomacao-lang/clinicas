@@ -125,7 +125,10 @@ function ClinicCard({
       "rounded-2xl border border-slate-100 bg-white overflow-hidden transition-all",
       !clinic.is_active && "opacity-60 grayscale-[0.5]"
     )}>
-      <div className="flex items-center gap-3 px-4 py-3">
+      <div 
+        className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-slate-50/50 transition-colors"
+        onClick={() => setExpanded(v => !v)}
+      >
         <div className={cn(
           "w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0",
           clinic.is_active ? "bg-teal-50" : "bg-slate-100"
@@ -140,7 +143,7 @@ function ClinicCard({
           {showId && <p className="text-[10px] text-slate-400 font-mono truncate">{clinic.id}</p>}
         </div>
         <span className={planBadge(clinic.plan)}>{clinic.plan}</span>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
           <button
             onClick={onToggleActive}
             className={cn(
@@ -243,9 +246,9 @@ function OrgSection({
   onToggleActive: () => void;
   onToggleClinicActive: (clinic: Clinic) => void;
 }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const [showOrgUsers, setShowOrgUsers] = useState(false);
-  const [showClinics, setShowClinics] = useState(true);
+  const [showClinics, setShowClinics] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const totalUsers = orgClinics.reduce((s, c) => s + (clinicUsers[c.id]?.length || 0), 0) + orgUsers.length;
 
@@ -254,8 +257,10 @@ function OrgSection({
       "bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden mb-4 transition-all",
       !org.is_active && "opacity-60 grayscale-[0.5]"
     )}>
-      {/* Header Org */}
-      <div className="bg-slate-50/50 px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+      <div 
+        className="bg-slate-50/50 px-6 py-4 border-b border-slate-100 flex items-center justify-between cursor-pointer hover:bg-slate-100/50 transition-colors"
+        onClick={() => setExpanded(v => !v)}
+      >
         <div className="flex items-center gap-4">
           <div className={cn(
             "w-10 h-10 rounded-xl flex items-center justify-center",
@@ -276,7 +281,7 @@ function OrgSection({
           </div>
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
           <button
             onClick={onToggleActive}
             className={cn(
@@ -523,6 +528,7 @@ function EditClinicModal({
     name: clinic?.name || '', 
     plan: clinic?.plan || 'pro', 
     organization_id: clinic?.organization_id || defaultOrgId || '',
+    category: clinic?.category || 'clinica',
     ownerName: '', ownerEmail: '', ownerPassword: '', // Only for creation
   });
   const [saving, setSaving] = useState(false);
@@ -572,6 +578,18 @@ function EditClinicModal({
                 {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
               </select>
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-600 mb-1.5">Categoria / Tipo</label>
+            <select value={form.category || 'clinica'} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
+              className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 bg-white text-sm">
+              <option value="clinica">Clínica Médica (Padrão)</option>
+              <option value="outro">Outro (Landing Page / Comercial)</option>
+            </select>
+            <p className="mt-1.5 text-[10px] text-slate-400 italic">
+              "Outro" oculta funções médicas como prontuários e corpo clínico na barra lateral.
+            </p>
           </div>
           
           {!isEditing && (
@@ -954,7 +972,8 @@ export default function SuperAdmin() {
     const ok = await updateClinic(data.id, { 
       name: data.name, 
       plan: data.plan as 'free'|'pro'|'enterprise', 
-      organization_id: data.organization_id 
+      organization_id: data.organization_id,
+      category: data.category
     });
     if (!ok) alert('Erro ao atualizar clínica.');
   };

@@ -756,6 +756,7 @@ export interface Clinic {
   meta_pixel_id?: string | null;
   wa_pre_msg?: string | null;
   organization_id?: string | null;
+  category: string | null;
   google_ad_account_id?: string | null;
   google_ad_mcc_id?: string | null;
   google_ad_mcc_token?: string | null;
@@ -961,6 +962,7 @@ export function useClinics() {
         p_owner_email: clinic.ownerEmail,
         p_owner_password: clinic.ownerPassword || '',
         p_owner_role: (clinic as any).ownerRole || 'gestor',
+        p_category: clinic.category || 'clinica',
       });
       if (!error) fetch();
       return { data, error };

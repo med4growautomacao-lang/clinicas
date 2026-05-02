@@ -181,11 +181,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // 2. Verificar se é org-admin
+      // 2. Verificar se é org-admin (limit 1 pois pode ter múltiplas orgs)
       const { data: orgUser } = await supabase
         .from('org_users')
         .select('*, organizations(id, name)')
         .eq('user_id', userId)
+        .limit(1)
         .maybeSingle();
 
       if (orgUser) {

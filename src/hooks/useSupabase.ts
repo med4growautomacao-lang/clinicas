@@ -749,6 +749,7 @@ export interface Clinic {
   logo_url: string | null;
   primary_color: string | null;
   plan: 'free' | 'pro' | 'enterprise';
+  is_active: boolean;
   notification_group_id: string | null;
   meta_token?: string | null;
   meta_ad_account_id?: string | null;
@@ -959,6 +960,7 @@ export function useClinics() {
         p_owner_name: clinic.ownerName || '',
         p_owner_email: clinic.ownerEmail,
         p_owner_password: clinic.ownerPassword || '',
+        p_owner_role: (clinic as any).ownerRole || 'gestor',
       });
       if (!error) fetch();
       return { data, error };
@@ -1391,6 +1393,7 @@ export interface Organization {
   name: string;
   plan: string;
   logo_url: string | null;
+  is_active: boolean;
   created_at: string;
   google_ad_mcc_id?: string | null;
   google_ad_mcc_token?: string | null;
@@ -1409,8 +1412,20 @@ export function useOrganizations() {
 
   useEffect(() => { fetch(); }, [fetch]);
 
-  const create = async (org: { name: string; plan: string }) => {
-    const { data, error } = await supabase.from('organizations').insert(org).select().single();
+  const create = async (org: { name: string; plan: string; ownerName?: string; ownerEmail?: string; ownerPassword?: string; ownerRole?: string }) => {
+    if (org.ownerEmail) {
+      const { data, error } = await supabase.rpc('create_org_with_owner', {
+        p_org_name: org.name,
+        p_plan: org.plan || 'pro',
+        p_owner_name: org.ownerName || '',
+        p_owner_email: org.ownerEmail,
+        p_owner_password: org.ownerPassword || '',
+        p_owner_role: org.ownerRole || 'org_owner',
+      });
+      if (!error) fetch();
+      return { data, error };
+    }
+    const { data, error } = await supabase.from('organizations').insert({ name: org.name, plan: org.plan }).select().single();
     if (!error) fetch();
     return { data, error };
   };
@@ -1422,8 +1437,7 @@ export function useOrganizations() {
   };
 
   const remove = async (id: string) => {
-    // Requires a cascade delete via RPC if there are dependencies, but let's assume we can delete if empty.
-    const { error } = await supabase.from('organizations').delete().eq('id', id);
+    const { error } = await supabase.rpc('delete_organization_cascade', { p_org_id: id });
     if (!error) fetch();
     return !error;
   };

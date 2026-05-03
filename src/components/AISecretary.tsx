@@ -626,7 +626,7 @@ function WelcomeFollowupView() {
 }
 
 function AllFollowupsView() {
-  const [subTab, setSubTab] = useState<"welcome" | "reengagement" | "confirmation">("welcome");
+  const [subTab, setSubTab] = useState<"welcome" | "reengagement" | "confirmation" | "finish_service">("welcome");
 
   return (
     <div className="space-y-6 h-full flex flex-col">
@@ -635,6 +635,7 @@ function AllFollowupsView() {
           { id: "welcome", label: "Boas-vindas" },
           { id: "reengagement", label: "Reengajamento" },
           { id: "confirmation", label: "Confirmação" },
+          { id: "finish_service", label: "Encerramento" },
         ].map((t) => (
           <button
             key={t.id}
@@ -662,6 +663,7 @@ function AllFollowupsView() {
           {subTab === "welcome" && <WelcomeFollowupView />}
           {subTab === "reengagement" && <FollowupsView />}
           {subTab === "confirmation" && <ConfirmationsView />}
+          {subTab === "finish_service" && <FinishServiceView />}
         </motion.div>
       </AnimatePresence>
     </div>
@@ -1218,8 +1220,11 @@ function FinishServiceView() {
 }
 
 export function AISecretary() {
-  const [activeTab, setActiveTab] = useState<"chats" | "leads" | "dashboard" | "config" | "followups" | "handoff" | "finish_service">("chats");
-  const { aiConfig, updateAI } = useSettings();
+  const [activeTab, setActiveTab] = useState<"chats" | "leads" | "dashboard" | "config" | "followups" | "handoff">("chats");
+  const { aiConfig, updateAI, clinic } = useSettings();
+  const features = clinic?.features;
+  const hasFollowup = features?.feature_followup !== false;
+  const hasIA = features?.feature_ia !== false;
 
   return (
     <div className="space-y-8 h-full flex flex-col">
@@ -1233,7 +1238,7 @@ export function AISecretary() {
               Gestão de conversas e automação comercial.
             </p>
           </div>
-          {aiConfig && (
+          {aiConfig && hasIA && (
             <div className="flex items-center gap-3">
               {aiConfig.test_mode_enabled && (
                 <span className="flex items-center gap-1 text-[10px] font-bold text-red-600 bg-red-50 border border-red-200 px-2 py-1 rounded-full">
@@ -1263,14 +1268,13 @@ export function AISecretary() {
         </div>
         <div className="flex bg-slate-50 p-1.5 rounded-2xl border border-slate-200 overflow-x-auto scrollbar-hide gap-1 w-full min-w-0">
           {[
-            { id: "chats", label: "Conversas" },
-            { id: "leads", label: "Funil de Leads" },
-            { id: "dashboard", label: "Dashboard" },
-            { id: "followups", label: "Follow-up" },
-            { id: "handoff", label: "Transbordo" },
-            { id: "finish_service", label: "Encerramento" },
-            { id: "config", label: "Configurações" }
-          ].map((tab) => (
+            { id: "chats", label: "Conversas", show: true },
+            { id: "leads", label: "Funil de Leads", show: true },
+            { id: "dashboard", label: "Dashboard", show: true },
+            { id: "followups", label: "Follow-up", show: hasFollowup },
+            { id: "handoff", label: "Transbordo", show: hasIA },
+            { id: "config", label: "Configurações IA", show: hasIA },
+          ].filter(t => t.show).map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
@@ -1301,7 +1305,7 @@ export function AISecretary() {
           {activeTab === "dashboard" && <ServiceDashboard />}
           {activeTab === "followups" && <AllFollowupsView />}
           {activeTab === "handoff" && <HandoffView />}
-          {activeTab === "finish_service" && <FinishServiceView />}
+
           {activeTab === "config" && <ConfigView />}
         </motion.div>
       </AnimatePresence>
@@ -1674,99 +1678,6 @@ function ConfigView() {
       </Card>
 
       <div className="space-y-8">
-        <Card className="border border-slate-200 shadow-sm">
-          <CardHeader>
-            <CardTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
-              <Clock className="w-5 h-5 text-teal-600" />
-              SLA e Expediente
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Tempo de resposta (SLA)</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min={1}
-                  value={localConfig.sla_minutes ?? 120}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfig({ sla_minutes: Number(e.target.value) })}
-                  className="w-24 px-3 py-2 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none text-sm"
-                />
-                <span className="text-sm text-slate-500 font-medium">minutos</span>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Início do expediente</label>
-                <input
-                  type="time"
-                  value={localConfig.business_hours?.start ?? '08:00'}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfig({ business_hours: { ...(localConfig.business_hours ?? { end: '18:00', days: [1,2,3,4,5] }), start: e.target.value } })}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none text-sm"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Fim do expediente</label>
-                <input
-                  type="time"
-                  value={localConfig.business_hours?.end ?? '18:00'}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfig({ business_hours: { ...(localConfig.business_hours ?? { start: '08:00', days: [1,2,3,4,5] }), end: e.target.value } })}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none text-sm"
-                />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Dias de atendimento</label>
-              <div className="flex gap-1.5 flex-wrap">
-                {['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'].map((d, i) => {
-                  const days: number[] = localConfig.business_hours?.days ?? [1,2,3,4,5];
-                  const active = days.includes(i);
-                  return (
-                    <button
-                      key={i}
-                      onClick={() => {
-                        const newDays = active ? days.filter(x => x !== i) : [...days, i].sort();
-                        setConfig({ business_hours: { ...(localConfig.business_hours ?? { start: '08:00', end: '18:00' }), days: newDays } });
-                      }}
-                      className={cn(
-                        "px-2.5 py-1 rounded text-xs font-bold border transition-all",
-                        active ? "bg-teal-50 border-teal-600 text-teal-700" : "bg-white border-slate-200 text-slate-400 hover:border-teal-200"
-                      )}
-                    >{d}</button>
-                  );
-                })}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border border-slate-200 shadow-sm">
-          <CardHeader>
-            <CardTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
-              <DollarSign className="w-5 h-5 text-teal-600" />
-              Ticket Médio
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Valor padrão por lead</label>
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-bold text-slate-500">R$</span>
-                <input
-                  type="number"
-                  min={0}
-                  step={0.01}
-                  value={localConfig.default_ticket_value ?? 0}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfig({ default_ticket_value: Number(e.target.value) })}
-                  className="w-36 px-3 py-2 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none text-sm"
-                  placeholder="0,00"
-                />
-              </div>
-              <p className="text-xs text-slate-400 pl-1">Pré-preenchido automaticamente em novos leads.</p>
-            </div>
-          </CardContent>
-        </Card>
-
         <Card className="border border-red-100 shadow-sm md:col-span-2">
           <CardHeader className="pb-4">
             <CardTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">

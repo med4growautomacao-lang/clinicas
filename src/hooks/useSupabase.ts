@@ -670,7 +670,6 @@ export function useDashboardStats(dateRange?: { start: string; end: string }) {
       if (!silent) setLoading(false);
     }
   }, [activeClinicId, dateRange?.start, dateRange?.end]);
-  }, [activeClinicId, dateRange?.start, dateRange?.end]);
 
   useEffect(() => {
     load();
@@ -889,6 +888,7 @@ export interface Clinic {
   google_ad_account_id?: string | null;
   google_ad_mcc_id?: string | null;
   google_ad_mcc_token?: string | null;
+  features?: { feature_followup?: boolean; feature_ia?: boolean } | null;
 }
 
 export interface AIConfig {

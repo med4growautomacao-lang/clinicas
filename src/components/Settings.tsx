@@ -30,6 +30,8 @@ import {
     X,
     Plus,
     UserCircle,
+    Clock,
+    DollarSign,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -82,7 +84,7 @@ export function Settings() {
         setSaving(true);
         try {
             if (activeTab === 'branding' || activeTab === 'clinic') {
-                await updateClinic(localClinic);
+                await Promise.all([updateClinic(localClinic), updateAI(localAI)]);
             } else if (activeTab === 'ai') {
                 await updateAI(localAI);
             } else if (activeTab === 'integrations') {
@@ -290,10 +292,106 @@ export function Settings() {
                     >
 
                         {activeTab === "clinic" && (
-                            <ClinicSettings 
-                                data={localClinic} 
-                                onChange={(updates) => setLocalClinic(prev => ({ ...prev, ...updates }))} 
+                            <>
+                            <ClinicSettings
+                                data={localClinic}
+                                onChange={(updates) => setLocalClinic(prev => ({ ...prev, ...updates }))}
                             />
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
+                                <Card className="border border-slate-200 shadow-sm">
+                                    <CardHeader>
+                                        <CardTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                                            <Clock className="w-5 h-5 text-teal-600" />
+                                            SLA e Expediente
+                                        </CardTitle>
+                                    </CardHeader>
+                                    <CardContent className="space-y-4">
+                                        <div className="space-y-1.5">
+                                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Tempo de resposta (SLA)</label>
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="number"
+                                                    min={1}
+                                                    value={(localAI as any).sla_minutes ?? 120}
+                                                    onChange={(e) => setLocalAI(prev => ({ ...prev, sla_minutes: Number(e.target.value) }))}
+                                                    className="w-24 px-3 py-2 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none text-sm"
+                                                />
+                                                <span className="text-sm text-slate-500 font-medium">minutos</span>
+                                            </div>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div className="space-y-1.5">
+                                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Início do expediente</label>
+                                                <input
+                                                    type="time"
+                                                    value={(localAI as any).business_hours?.start ?? '08:00'}
+                                                    onChange={(e) => setLocalAI(prev => ({ ...prev, business_hours: { ...((prev as any).business_hours ?? { end: '18:00', days: [1,2,3,4,5] }), start: e.target.value } }))}
+                                                    className="w-full px-3 py-2 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none text-sm"
+                                                />
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Fim do expediente</label>
+                                                <input
+                                                    type="time"
+                                                    value={(localAI as any).business_hours?.end ?? '18:00'}
+                                                    onChange={(e) => setLocalAI(prev => ({ ...prev, business_hours: { ...((prev as any).business_hours ?? { start: '08:00', days: [1,2,3,4,5] }), end: e.target.value } }))}
+                                                    className="w-full px-3 py-2 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none text-sm"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Dias de atendimento</label>
+                                            <div className="flex gap-1.5 flex-wrap">
+                                                {['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'].map((d, i) => {
+                                                    const days: number[] = (localAI as any).business_hours?.days ?? [1,2,3,4,5];
+                                                    const active = days.includes(i);
+                                                    return (
+                                                        <button
+                                                            key={i}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                const newDays = active ? days.filter(x => x !== i) : [...days, i].sort();
+                                                                setLocalAI(prev => ({ ...prev, business_hours: { ...((prev as any).business_hours ?? { start: '08:00', end: '18:00' }), days: newDays } }));
+                                                            }}
+                                                            className={cn(
+                                                                "px-2.5 py-1 rounded text-xs font-bold border transition-all",
+                                                                active ? "bg-teal-50 border-teal-600 text-teal-700" : "bg-white border-slate-200 text-slate-400 hover:border-teal-200"
+                                                            )}
+                                                        >{d}</button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                                <Card className="border border-slate-200 shadow-sm">
+                                    <CardHeader>
+                                        <CardTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                                            <DollarSign className="w-5 h-5 text-teal-600" />
+                                            Ticket Médio
+                                        </CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <div className="space-y-1.5">
+                                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Valor padrão por lead</label>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-sm font-bold text-slate-500">R$</span>
+                                                <input
+                                                    type="number"
+                                                    min={0}
+                                                    step={0.01}
+                                                    value={(localAI as any).default_ticket_value ?? 0}
+                                                    onChange={(e) => setLocalAI(prev => ({ ...prev, default_ticket_value: Number(e.target.value) }))}
+                                                    className="w-36 px-3 py-2 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none text-sm"
+                                                    placeholder="0,00"
+                                                />
+                                            </div>
+                                            <p className="text-xs text-slate-400 pl-1">Pré-preenchido automaticamente em novos leads.</p>
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            </div>
+                            </>
                         )}
                         {activeTab === "integrations" && (
                             <IntegrationSettings

@@ -148,8 +148,8 @@ function ClinicCard({
             onClick={onToggleActive}
             className={cn(
               "p-1.5 transition-colors rounded-lg",
-              clinic.is_active 
-                ? "text-green-500 hover:bg-green-50 hover:text-green-600" 
+              clinic.is_active
+                ? "text-green-500 hover:bg-green-50 hover:text-green-600"
                 : "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
             )}
             title={clinic.is_active ? "Desativar Clínica" : "Ativar Clínica"}
@@ -525,11 +525,13 @@ function EditClinicModal({
 }) {
   const isEditing = !!clinic;
   const [form, setForm] = useState({
-    name: clinic?.name || '', 
-    plan: clinic?.plan || 'pro', 
+    name: clinic?.name || '',
+    plan: clinic?.plan || 'pro',
     organization_id: clinic?.organization_id || defaultOrgId || '',
     category: clinic?.category || 'clinica',
     ownerName: '', ownerEmail: '', ownerPassword: '', // Only for creation
+    feature_followup: clinic?.features?.feature_followup !== false,
+    feature_ia: clinic?.features?.feature_ia !== false,
   });
   const [saving, setSaving] = useState(false);
   const [showPass, setShowPass] = useState(false);
@@ -538,8 +540,9 @@ function EditClinicModal({
     e.preventDefault();
     setSaving(true);
     await onSubmit({
-      ...form, 
-      organization_id: form.organization_id === '' ? null : form.organization_id
+      ...form,
+      organization_id: form.organization_id === '' ? null : form.organization_id,
+      features: { feature_followup: form.feature_followup, feature_ia: form.feature_ia },
     });
     setSaving(false);
     onClose();
@@ -639,6 +642,36 @@ function EditClinicModal({
                     </button>
                   ))}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {isEditing && (
+            <div className="border-t border-slate-100 pt-4 space-y-2">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Funcionalidades</p>
+              <div className="flex items-center justify-between py-2 px-3 rounded-xl bg-slate-50 border border-slate-100">
+                <div>
+                  <p className="text-xs font-bold text-slate-700">Follow-up</p>
+                  <p className="text-[10px] text-slate-400">Disparos automáticos de mensagens</p>
+                </div>
+                <button type="button"
+                  onClick={() => setForm(f => ({ ...f, feature_followup: !f.feature_followup }))}
+                  className={cn("w-10 h-5 rounded-full relative transition-all flex-shrink-0", form.feature_followup ? "bg-teal-600" : "bg-slate-300")}
+                >
+                  <div className={cn("w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all shadow-sm", form.feature_followup ? "right-0.5" : "left-0.5")} />
+                </button>
+              </div>
+              <div className="flex items-center justify-between py-2 px-3 rounded-xl bg-slate-50 border border-slate-100">
+                <div>
+                  <p className="text-xs font-bold text-slate-700">Configurações IA</p>
+                  <p className="text-[10px] text-slate-400">Agente IA e configurações avançadas</p>
+                </div>
+                <button type="button"
+                  onClick={() => setForm(f => ({ ...f, feature_ia: !f.feature_ia }))}
+                  className={cn("w-10 h-5 rounded-full relative transition-all flex-shrink-0", form.feature_ia ? "bg-violet-600" : "bg-slate-300")}
+                >
+                  <div className={cn("w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all shadow-sm", form.feature_ia ? "right-0.5" : "left-0.5")} />
+                </button>
               </div>
             </div>
           )}
@@ -968,13 +1001,13 @@ export default function SuperAdmin() {
   };
 
   const handleEditClinic = async (data: any) => {
-    // Assuming data contains id and all fields.
-    const ok = await updateClinic(data.id, { 
-      name: data.name, 
-      plan: data.plan as 'free'|'pro'|'enterprise', 
+    const ok = await updateClinic(data.id, {
+      name: data.name,
+      plan: data.plan as 'free'|'pro'|'enterprise',
       organization_id: data.organization_id,
-      category: data.category
-    });
+      category: data.category,
+      features: data.features,
+    } as any);
     if (!ok) alert('Erro ao atualizar clínica.');
   };
 
@@ -994,6 +1027,13 @@ export default function SuperAdmin() {
   const handleToggleClinicActive = async (clinic: Clinic) => {
     const ok = await updateClinic(clinic.id, { is_active: !clinic.is_active });
     if (!ok) alert('Erro ao alterar status da clínica.');
+  };
+
+  const handleToggleClinicFeature = async (clinic: Clinic, feature: 'feature_followup' | 'feature_ia') => {
+    const current = clinic.features ?? { feature_followup: true, feature_ia: true };
+    const newFeatures = { ...current, [feature]: current[feature] === false ? true : false };
+    const ok = await updateClinic(clinic.id, { features: newFeatures } as any);
+    if (!ok) alert('Erro ao alterar funcionalidade.');
   };
 
   const handleToggleOrgActive = async (org: Organization) => {

@@ -13,6 +13,7 @@ interface Clinic {
   organization_id: string | null;
   whatsapp_status?: string | null;
   category?: string | null;
+  features?: { feature_followup?: boolean; feature_ia?: boolean } | null;
 }
 
 interface ClinicUser {
@@ -97,7 +98,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
 
   // Modal: nova clínica
   const [showClinicModal, setShowClinicModal] = useState(false);
-  const [clinicForm, setClinicForm] = useState({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '' });
+  const [clinicForm, setClinicForm] = useState<{ name: string; plan: string; category: string; ownerName: string; ownerEmail: string; ownerPassword: string; feature_followup: boolean; feature_ia: boolean }>({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '', feature_followup: true, feature_ia: true });
   const [categoryFilter, setCategoryFilter] = useState('');
   const [memberFilters, setMemberFilters] = useState<Record<string, string>>({});
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
@@ -148,7 +149,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
     if (canSeeAll) {
       const { data } = await supabase
         .from("clinics")
-        .select("id, name, plan, logo_url, organization_id, category")
+        .select("id, name, plan, logo_url, organization_id, category, features")
         .eq("organization_id", profile.organization_id)
         .order("name");
       clinicsData = data || [];
@@ -162,7 +163,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
       if (assignedIds.length > 0) {
         const { data } = await supabase
           .from("clinics")
-          .select("id, name, plan, logo_url, organization_id, category")
+          .select("id, name, plan, logo_url, organization_id, category, features")
           .in("id", assignedIds)
           .order("name");
         clinicsData = data || [];
@@ -207,6 +208,13 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
     }
   }, [fetchClinics, fetchOrgUsers, profile?.organization_id]);
 
+  const handleToggleClinicFeature = async (clinic: Clinic, feature: 'feature_followup' | 'feature_ia') => {
+    const current = clinic.features ?? { feature_followup: true, feature_ia: true };
+    const newFeatures = { ...current, [feature]: current[feature] === false ? true : false };
+    await supabase.from('clinics').update({ features: newFeatures }).eq('id', clinic.id);
+    setClinics(prev => prev.map(c => c.id === clinic.id ? { ...c, features: newFeatures } : c));
+  };
+
   const handleSaveOrgSettings = async () => {
     if (!profile?.organization_id) return;
     setOrgSettingsSaving(true);
@@ -240,7 +248,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
     setClinicSaving(false);
     if (error) { setClinicError(error.message); return; }
     setShowClinicModal(false);
-    setClinicForm({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '' });
+    setClinicForm({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '', feature_followup: true, feature_ia: true });
     fetchClinics();
   };
 
@@ -252,14 +260,15 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
       .update({
         name: clinicForm.name.trim(),
         plan: clinicForm.plan,
-        category: clinicForm.category || 'clinica'
+        category: clinicForm.category || 'clinica',
+        features: { feature_followup: clinicForm.feature_followup, feature_ia: clinicForm.feature_ia },
       })
       .eq('id', editClinicTarget.id);
     
     setClinicSaving(false);
     if (error) { setClinicError(error.message); return; }
     setEditClinicTarget(null);
-    setClinicForm({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '' });
+    setClinicForm({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '', feature_followup: true, feature_ia: true });
     fetchClinics();
   };
 
@@ -571,25 +580,6 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                                   Usuários da Clínica
                                 </button>
                               )}
-                              {canManageClinics && (
-                                <button
-                                  onClick={e => {
-                                    e.stopPropagation();
-                                    setEditClinicTarget(clinic);
-                                    setClinicForm({
-                                      name: clinic.name,
-                                      plan: clinic.plan,
-                                      category: clinic.category || '',
-                                      ownerName: '', ownerEmail: '', ownerPassword: ''
-                                    });
-                                    setOpenMenuId(null);
-                                  }}
-                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
-                                >
-                                  <Settings className="w-3.5 h-3.5 text-blue-600" />
-                                  Editar Clínica
-                                </button>
-                              )}
                               {canSetResponsaveis && (
                                 <button
                                   onClick={e => {
@@ -607,6 +597,27 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                                 >
                                   <UserCheck className="w-3.5 h-3.5 text-violet-600" />
                                   Definir Responsáveis
+                                </button>
+                              )}
+                              {canManageClinics && (
+                                <button
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    setEditClinicTarget(clinic);
+                                    setClinicForm({
+                                      name: clinic.name,
+                                      plan: clinic.plan,
+                                      category: clinic.category || '',
+                                      ownerName: '', ownerEmail: '', ownerPassword: '',
+                                      feature_followup: clinic.features?.feature_followup !== false,
+                                      feature_ia: clinic.features?.feature_ia !== false,
+                                    });
+                                    setOpenMenuId(null);
+                                  }}
+                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                                >
+                                  <Settings className="w-3.5 h-3.5 text-blue-600" />
+                                  Editar Clínica
                                 </button>
                               )}
                             </div>
@@ -871,6 +882,39 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                     ))}
                   </select>
                 </div>
+                {editClinicTarget && (
+                  <div className="pt-1 border-t border-slate-100">
+                    <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Funcionalidades</p>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between py-2 px-3 rounded-xl bg-slate-50 border border-slate-100">
+                        <div>
+                          <p className="text-xs font-bold text-slate-700">Follow-up</p>
+                          <p className="text-[10px] text-slate-400">Disparos automáticos de mensagens</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setClinicForm(f => ({ ...f, feature_followup: !f.feature_followup }))}
+                          className={cn("w-10 h-5 rounded-full relative transition-all flex-shrink-0", clinicForm.feature_followup ? "bg-teal-600" : "bg-slate-300")}
+                        >
+                          <div className={cn("w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all shadow-sm", clinicForm.feature_followup ? "right-0.5" : "left-0.5")} />
+                        </button>
+                      </div>
+                      <div className="flex items-center justify-between py-2 px-3 rounded-xl bg-slate-50 border border-slate-100">
+                        <div>
+                          <p className="text-xs font-bold text-slate-700">Configurações IA</p>
+                          <p className="text-[10px] text-slate-400">Agente IA e configurações avançadas</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setClinicForm(f => ({ ...f, feature_ia: !f.feature_ia }))}
+                          className={cn("w-10 h-5 rounded-full relative transition-all flex-shrink-0", clinicForm.feature_ia ? "bg-violet-600" : "bg-slate-300")}
+                        >
+                          <div className={cn("w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all shadow-sm", clinicForm.feature_ia ? "right-0.5" : "left-0.5")} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 {!editClinicTarget && (
                   <div className="pt-1 border-t border-slate-100">
                     <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Gestor Responsável</p>

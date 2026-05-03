@@ -1220,7 +1220,7 @@ function FinishServiceView() {
 }
 
 export function AISecretary() {
-  const [activeTab, setActiveTab] = useState<"chats" | "leads" | "dashboard" | "config" | "followups" | "handoff">("chats");
+  const [activeTab, setActiveTab] = useState<"chats" | "leads" | "dashboard" | "config" | "followups">("chats");
   const { aiConfig, updateAI, clinic } = useSettings();
   const features = clinic?.features;
   const hasFollowup = features?.feature_followup !== false;
@@ -1272,7 +1272,6 @@ export function AISecretary() {
             { id: "leads", label: "Funil de Leads", show: true },
             { id: "dashboard", label: "Dashboard", show: true },
             { id: "followups", label: "Follow-up", show: hasFollowup },
-            { id: "handoff", label: "Transbordo", show: hasIA },
             { id: "config", label: "Configurações IA", show: hasIA },
           ].filter(t => t.show).map((tab) => (
             <button
@@ -1304,7 +1303,6 @@ export function AISecretary() {
           {activeTab === "leads" && <LeadKanban />}
           {activeTab === "dashboard" && <ServiceDashboard />}
           {activeTab === "followups" && <AllFollowupsView />}
-          {activeTab === "handoff" && <HandoffView />}
 
           {activeTab === "config" && <ConfigView />}
         </motion.div>
@@ -1611,6 +1609,7 @@ function ChatsView() {
 
 function ConfigView() {
   const { aiConfig, updateAI, loading } = useSettings();
+  const [subTab, setSubTab] = useState<"config" | "handoff">("config");
   const [saving, setSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [localConfig, setLocalConfig] = useState<any>(null);
@@ -1643,7 +1642,28 @@ function ConfigView() {
   };
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 h-full">
+    <div className="space-y-6 h-full flex flex-col">
+      <div className="flex bg-white p-1 rounded-xl border border-slate-200 gap-1 w-fit">
+        {[
+          { id: "config", label: "Configurações IA" },
+          { id: "handoff", label: "Transbordo" },
+        ].map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setSubTab(t.id as any)}
+            className={cn(
+              "px-5 py-2 text-xs font-bold rounded-lg transition-all",
+              subTab === t.id
+                ? "bg-teal-600 text-white shadow-sm"
+                : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+            )}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {subTab === "handoff" && <div className="flex-1 min-h-0"><HandoffView /></div>}
+      <div className={cn("grid grid-cols-1 md:grid-cols-2 gap-8 flex-1", subTab !== "config" && "hidden")}>
       <Card className="border border-slate-200 shadow-sm">
         <CardHeader className="pb-4">
           <CardTitle className="text-xl font-bold text-slate-900 flex items-center gap-3">
@@ -1777,5 +1797,7 @@ function ConfigView() {
 
       </div>
     </div>
+  </div>
   );
 }
+

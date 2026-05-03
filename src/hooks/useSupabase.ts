@@ -1687,3 +1687,61 @@ export function useSuperAdminData() {
 
   return { clinicUsers, orgUsers, usersLoading, addClinicUser, addOrgUser, removeClinicUser, totalUsers, refetchUsers: fetchUsers };
 }
+
+// ==========================================
+// CONVERSIONS
+// ==========================================
+export interface Conversion {
+  id: string;
+  clinic_id: string;
+  lead_id: string;
+  value: number;
+  description: string | null;
+  payment_method: string | null;
+  converted_at: string;
+  created_at: string;
+}
+
+export function useConversions() {
+  const { activeClinicId } = useAuth();
+  const [data, setData] = useState<Conversion[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = useCallback(async () => {
+    if (!activeClinicId) return;
+    const { data } = await supabase
+      .from('conversions')
+      .select('*')
+      .eq('clinic_id', activeClinicId)
+      .order('converted_at', { ascending: false });
+    setData(data || []);
+    setLoading(false);
+  }, [activeClinicId]);
+
+  useEffect(() => { fetch(); }, [fetch]);
+
+  const create = async (conversion: Omit<Conversion, 'id' | 'clinic_id' | 'created_at'>) => {
+    if (!activeClinicId) return false;
+    const { error } = await supabase.from('conversions').insert({
+      ...conversion,
+      clinic_id: activeClinicId,
+    });
+    if (!error) fetch();
+    return !error;
+  };
+
+  const remove = async (id: string) => {
+    const { error } = await supabase.from('conversions').delete().eq('id', id);
+    if (!error) fetch();
+    return !error;
+  };
+
+  // Agrupa por lead_id para uso no Kanban
+  const byLead = data.reduce<Record<string, Conversion[]>>((acc, c) => {
+    if (!acc[c.lead_id]) acc[c.lead_id] = [];
+    acc[c.lead_id].push(c);
+    return acc;
+  }, {});
+
+  return { data, loading, byLead, create, remove, refetch: fetch };
+}

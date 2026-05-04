@@ -1391,10 +1391,20 @@ export function LeadKanban() {
                     {/* Nome + telefone */}
                     <div className="flex items-center gap-3 mt-1.5">
                       {lead.avatar_url ? (
-                        <img src={lead.avatar_url} alt={lead.name} className="w-8 h-8 rounded-full object-cover border border-slate-100" />
+                        <div className="relative w-8 h-8 shrink-0">
+                          <img
+                            src={lead.avatar_url}
+                            alt={lead.name}
+                            className="w-8 h-8 rounded-full object-cover border border-slate-100"
+                            onError={e => { e.currentTarget.style.display = 'none'; (e.currentTarget.nextElementSibling as HTMLElement).style.display = 'flex'; }}
+                          />
+                          <div style={{ display: 'none' }} className="absolute inset-0 w-8 h-8 rounded-full bg-teal-100 items-center justify-center border border-teal-100 text-teal-700 text-[10px] font-black">
+                            {lead.name.charAt(0).toUpperCase()}
+                          </div>
+                        </div>
                       ) : (
-                        <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center border border-slate-100">
-                          <Users className="w-4 h-4 text-slate-300" />
+                        <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center border border-slate-100 text-slate-500 text-[10px] font-black shrink-0">
+                          {lead.name.charAt(0).toUpperCase()}
                         </div>
                       )}
                       <div className="min-w-0">
@@ -1840,11 +1850,10 @@ export function LeadKanban() {
         <ConversionModal
           lead={conversionLead}
           onClose={() => setConversionLead(null)}
-          onCancel={async () => {
-            if (conversionLead.prevStageId) {
-              await update(conversionLead.id, { stage_id: conversionLead.prevStageId });
-            }
+          onCancel={() => {
+            const { id, prevStageId } = conversionLead;
             setConversionLead(null);
+            if (prevStageId) update(id, { stage_id: prevStageId });
           }}
           onCreate={createConversion}
         />
@@ -1855,11 +1864,10 @@ export function LeadKanban() {
         <LossModal
           lead={lossLead}
           onClose={() => setLossLead(null)}
-          onCancel={async () => {
-            if (lossLead.prevStageId) {
-              await update(lossLead.id, { stage_id: lossLead.prevStageId });
-            }
+          onCancel={() => {
+            const { id, prevStageId } = lossLead;
             setLossLead(null);
+            if (prevStageId) update(id, { stage_id: prevStageId });
           }}
           onConfirm={async (reason) => {
             await update(lossLead.id, { loss_reason: reason || null });

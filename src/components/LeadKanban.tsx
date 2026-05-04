@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { useFunnelStages, useLeads, useSettings, useTransitionRules, useConversions, Conversion } from "../hooks/useSupabase";
+import { useFunnelStages, useLeads, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, Conversion } from "../hooks/useSupabase";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { format, parseISO, formatDistanceToNow } from "date-fns";
@@ -444,8 +444,8 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
       {/* Barra de scroll superior */}
       <div
         ref={topScrollRef}
-        className="overflow-x-scroll custom-scrollbar mb-4"
-        style={{ height: 12 }}
+        className="overflow-x-scroll custom-scrollbar mb-3"
+        style={{ height: 16 }}
         onScroll={onTopScroll}
       >
         <div ref={innerRef} style={{ height: 1 }} />
@@ -469,17 +469,116 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
   );
 }
 
-function ConversionModal({ lead, onClose, onCreate }: {
+function LossModal({ lead, onClose, onCancel, onConfirm }: {
   lead: { id: string; name: string };
   onClose: () => void;
+  onCancel: () => void;
+  onConfirm: (reason: string) => Promise<void>;
+}) {
+  const [selected, setSelected] = useState('');
+  const [customText, setCustomText] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const REASONS = ['Preço alto', 'Escolheu concorrente', 'Não respondeu', 'Sem interesse', 'Fora do perfil', 'Agendou e não compareceu', 'Tentativas de follow-up esgotadas', 'Outro'];
+  const isOutro = selected === 'Outro';
+  const finalReason = isOutro ? customText.trim() : selected;
+  const canConfirm = !saving && finalReason.length > 0;
+
+  const handleConfirm = async () => {
+    if (!canConfirm) return;
+    setSaving(true);
+    await onConfirm(finalReason);
+    setSaving(false);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onCancel}>
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="h-1.5 bg-rose-500" />
+        <div className="p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-black text-slate-900">Motivo da Perda</h3>
+              <p className="text-xs text-slate-500 font-medium mt-0.5">{lead.name}</p>
+            </div>
+            <button onClick={onCancel} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4 text-slate-400" /></button>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Motivo</label>
+            <div className="flex flex-wrap gap-1.5">
+              {REASONS.map(r => (
+                <button key={r} type="button" onClick={() => setSelected(r)}
+                  className={cn("px-3 py-1.5 rounded-lg text-xs font-bold border transition-all",
+                    selected === r ? "bg-rose-600 text-white border-rose-600" : "bg-white text-slate-600 border-slate-200 hover:border-rose-300"
+                  )}>
+                  {r}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {isOutro && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-rose-500 uppercase tracking-wider">Qual o motivo? *</label>
+              <textarea
+                autoFocus
+                value={customText}
+                onChange={e => setCustomText(e.target.value)}
+                placeholder="Descreva o motivo da perda..."
+                rows={3}
+                className={cn(
+                  "w-full px-3 py-2.5 border rounded-xl text-sm font-medium focus:outline-none focus:ring-2 resize-none transition-colors",
+                  customText.trim() ? "border-slate-200 focus:ring-rose-500/20 focus:border-rose-500" : "border-rose-300 focus:ring-rose-500/20 focus:border-rose-500 bg-rose-50/30"
+                )}
+              />
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-1">
+            <button onClick={onCancel} className="flex-1 py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-500 hover:bg-slate-50 transition-all">
+              Cancelar
+            </button>
+            <button
+              onClick={handleConfirm}
+              disabled={!canConfirm}
+              className="flex-1 py-2.5 rounded-xl text-sm font-black bg-rose-600 hover:bg-rose-700 text-white transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirmar Perda'}
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function ConversionModal({ lead, onClose, onCancel, onCreate }: {
+  lead: { id: string; name: string };
+  onClose: () => void;
+  onCancel: () => void;
   onCreate: (data: Omit<Conversion, 'id' | 'clinic_id' | 'created_at'>) => Promise<boolean>;
 }) {
+  const { create: createTransaction } = useFinancial();
+  const { data: protocols } = useProtocols();
+
   const [value, setValue] = useState('');
   const [description, setDescription] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('pix');
+  const [txStatus, setTxStatus] = useState<'pago' | 'pendente'>('pago');
+  const [protocolIds, setProtocolIds] = useState<string[]>([]);
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
+
+  const toggleProtocol = (id: string) =>
+    setProtocolIds(prev => prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]);
 
   const handleSave = async () => {
     if (!value || Number(value) <= 0) return;
@@ -489,59 +588,85 @@ function ConversionModal({ lead, onClose, onCreate }: {
       value: Number(value),
       description: description || null,
       payment_method: paymentMethod,
+      protocol_ids: protocolIds,
       converted_at: new Date(date + 'T12:00:00').toISOString(),
     });
+    if (ok) {
+      await createTransaction({
+        type: 'receita',
+        category: 'Consulta',
+        amount: Number(value),
+        description: description || 'Venda registrada',
+        payment_method: paymentMethod as any,
+        status: txStatus,
+        date,
+        protocol_ids: protocolIds,
+      });
+      setDone(true);
+      setTimeout(onClose, 1000);
+    }
     setSaving(false);
-    if (ok) { setDone(true); setTimeout(onClose, 1000); }
   };
 
   const METHODS = [
     { id: 'pix', label: 'Pix' },
     { id: 'cartao', label: 'Cartão' },
     { id: 'dinheiro', label: 'Dinheiro' },
-    { id: 'boleto', label: 'Boleto' },
-    { id: 'transferencia', label: 'Transferência' },
+    { id: 'plano', label: 'Plano' },
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onCancel}>
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
         <div className="h-1.5 bg-emerald-500" />
-        <div className="p-6 space-y-4">
+        <div className="p-6 space-y-4 max-h-[85vh] overflow-y-auto custom-scrollbar">
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-base font-black text-slate-900">Registrar Venda</h3>
               <p className="text-xs text-slate-500 font-medium mt-0.5">{lead.name}</p>
             </div>
-            <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4 text-slate-400" /></button>
+            <button onClick={onCancel} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4 text-slate-400" /></button>
           </div>
 
+          {/* Valor */}
           <div className="space-y-1.5">
             <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Valor (R$)</label>
             <input
-              autoFocus
-              type="number" min="0" step="0.01"
-              value={value}
-              onChange={e => setValue(e.target.value)}
+              autoFocus type="number" min="0" step="0.01"
+              value={value} onChange={e => setValue(e.target.value)}
               placeholder="0,00"
               className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
             />
           </div>
 
+          {/* Status */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Status do Pagamento</label>
+            <div className="flex gap-2">
+              {(['pago', 'pendente'] as const).map(s => (
+                <button key={s} type="button" onClick={() => setTxStatus(s)}
+                  className={cn("flex-1 py-2 rounded-xl text-xs font-bold border transition-all capitalize",
+                    txStatus === s ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-slate-600 border-slate-200 hover:border-emerald-300"
+                  )}>
+                  {s === 'pago' ? 'Pago' : 'Pendente'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Forma de Pagamento */}
           <div className="space-y-1.5">
             <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Forma de Pagamento</label>
             <div className="flex flex-wrap gap-1.5">
               {METHODS.map(m => (
                 <button key={m.id} type="button" onClick={() => setPaymentMethod(m.id)}
                   className={cn("px-3 py-1.5 rounded-lg text-xs font-bold border transition-all",
-                    paymentMethod === m.id
-                      ? "bg-emerald-600 text-white border-emerald-600"
-                      : "bg-white text-slate-600 border-slate-200 hover:border-emerald-300"
+                    paymentMethod === m.id ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-slate-600 border-slate-200 hover:border-emerald-300"
                   )}>
                   {m.label}
                 </button>
@@ -549,6 +674,24 @@ function ConversionModal({ lead, onClose, onCreate }: {
             </div>
           </div>
 
+          {/* Protocolos */}
+          {protocols.length > 0 && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Protocolos</label>
+              <div className="flex flex-wrap gap-1.5">
+                {protocols.filter(p => p.is_active).map(p => (
+                  <button key={p.id} type="button" onClick={() => toggleProtocol(p.id)}
+                    className={cn("px-3 py-1.5 rounded-lg text-xs font-bold border transition-all",
+                      protocolIds.includes(p.id) ? "bg-teal-600 text-white border-teal-600" : "bg-white text-slate-600 border-slate-200 hover:border-teal-300"
+                    )}>
+                    {p.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Descrição */}
           <div className="space-y-1.5">
             <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Descrição (opcional)</label>
             <input
@@ -558,6 +701,7 @@ function ConversionModal({ lead, onClose, onCreate }: {
             />
           </div>
 
+          {/* Data */}
           <div className="space-y-1.5">
             <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Data</label>
             <input
@@ -573,7 +717,7 @@ function ConversionModal({ lead, onClose, onCreate }: {
               "w-full py-3 rounded-xl text-sm font-black transition-all flex items-center justify-center gap-2",
               done ? "bg-emerald-500 text-white" :
               saving ? "bg-slate-100 text-slate-400" :
-              !value || Number(value) <= 0 ? "bg-slate-100 text-slate-400 cursor-default" :
+              !value || Number(value) <= 0 ? "bg-slate-100 text-slate-400 cursor-not-allowed" :
               "bg-emerald-600 hover:bg-emerald-700 text-white"
             )}
           >
@@ -589,10 +733,11 @@ function ConversionModal({ lead, onClose, onCreate }: {
 
 export function LeadKanban() {
   const { data: stages, loading: stagesLoading, reorder: reorderStages, update: updateStage, create: createStage, remove: removeStage } = useFunnelStages();
-  const { data: leads, loading: leadsLoading, create, update, remove } = useLeads();
+  const { data: leads, loading: leadsLoading, loadingMore, hasMore, loadMore, create, update, remove } = useLeads({ pageSize: 150 });
   const { byLead: conversionsByLead, create: createConversion } = useConversions();
   const { aiConfig, updateAI } = useSettings();
-  const [conversionLead, setConversionLead] = useState<{ id: string; name: string } | null>(null);
+  const [conversionLead, setConversionLead] = useState<{ id: string; name: string; prevStageId: string | null } | null>(null);
+  const [lossLead, setLossLead] = useState<{ id: string; name: string; prevStageId: string | null } | null>(null);
   const { data: transitionRules, create: createRule, remove: removeRule, update: updateRule, reorder: reorderRules } = useTransitionRules();
   const [showModal, setShowModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -606,6 +751,8 @@ export function LeadKanban() {
   const [newStageName, setNewStageName] = useState("");
   const [showAutomationModal, setShowAutomationModal] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [expandedStages, setExpandedStages] = useState<Set<string>>(new Set());
+  const CARDS_PER_STAGE = 20;
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [isAddingRule, setIsAddingRule] = useState(false);
   const [newRule, setNewRule] = useState({ keywords: '', target_stage_id: '', context: '', lead_response: '', message_to_send: '' });
@@ -627,10 +774,16 @@ export function LeadKanban() {
   const handleDrop = async (e: React.DragEvent, targetStageId: string) => {
     e.preventDefault();
     setDragOverStage(null);
-    const leadId = e.dataTransfer.getData("leadId");
-    
+
     if (draggedLead && draggedLead.stage_id !== targetStageId) {
+      const targetStage = stages.find(s => s.id === targetStageId);
       await update(draggedLead.id, { stage_id: targetStageId });
+
+      if (targetStage?.name.toLowerCase().includes('convers')) {
+        setConversionLead({ id: draggedLead.id, name: draggedLead.name, prevStageId: draggedLead.stage_id });
+      } else if (targetStage?.name === 'Perdido') {
+        setLossLead({ id: draggedLead.id, name: draggedLead.name, prevStageId: draggedLead.stage_id });
+      }
     }
     setDraggedLead(null);
   };
@@ -1110,6 +1263,9 @@ export function LeadKanban() {
         {stages.map((stage) => {
           const stageLeads = leads.filter(l => l.stage_id === stage.id);
           const stageTotal = stageLeads.reduce((sum, l) => sum + (Number(l.estimated_value) || 0), 0);
+          const isExpanded = expandedStages.has(stage.id);
+          const visibleLeads = isExpanded ? stageLeads : stageLeads.slice(0, CARDS_PER_STAGE);
+          const hiddenCount = stageLeads.length - visibleLeads.length;
           return (
             <div key={stage.id} className="w-[300px] shrink-0 flex flex-col gap-4">
               <div className="flex items-center gap-2 px-2">
@@ -1133,7 +1289,7 @@ export function LeadKanban() {
                 onDragLeave={() => setDragOverStage(null)}
                 onDrop={(e) => handleDrop(e, stage.id)}
               >
-                {stageLeads.map((lead) => {
+                {visibleLeads.map((lead) => {
                   const isPerdido = stage.name === 'Perdido';
                   const semMotivo = isPerdido && !lead.loss_reason;
                   const lastContact = lead.last_message_at ?? lead.created_at;
@@ -1163,6 +1319,7 @@ export function LeadKanban() {
                     className={cn(
                       "px-3 py-2.5 rounded-lg border shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md transition-all group",
                       draggedLead?.id === lead.id && "opacity-50",
+                      semMotivo && "animate-pulse",
                       isPerdido ? "bg-white border-rose-200"
                         : (!!lead.fb_campaign_name || lead.source === 'meta_ads') ? "bg-blue-50/60 border-blue-200/80"
                         : (!!lead.g_campaign_name || lead.source === 'google_ads') ? "bg-emerald-50/60 border-emerald-200/80"
@@ -1310,7 +1467,7 @@ export function LeadKanban() {
                           {formatDistanceToNow(parseISO(lastContact), { addSuffix: true, locale: ptBR })}
                         </span>
                         <button
-                          onClick={() => setConversionLead({ id: lead.id, name: lead.name })}
+                          onClick={() => setConversionLead({ id: lead.id, name: lead.name, prevStageId: null })}
                           className="flex items-center gap-0.5 px-1.5 py-0.5 bg-emerald-50 text-emerald-700 rounded text-[9px] font-bold border border-emerald-100 hover:bg-emerald-100 transition-colors"
                         >
                           <ShoppingCart className="w-2.5 h-2.5" />
@@ -1329,6 +1486,22 @@ export function LeadKanban() {
                   );
                 })}
 
+                {hiddenCount > 0 && (
+                  <button
+                    onClick={() => setExpandedStages(prev => new Set([...prev, stage.id]))}
+                    className="w-full py-1.5 rounded-lg bg-slate-200/70 text-slate-500 text-[11px] font-semibold hover:bg-slate-200 transition-colors"
+                  >
+                    + {hiddenCount} leads
+                  </button>
+                )}
+                {isExpanded && stageLeads.length > CARDS_PER_STAGE && (
+                  <button
+                    onClick={() => setExpandedStages(prev => { const s = new Set(prev); s.delete(stage.id); return s; })}
+                    className="w-full py-1.5 rounded-lg bg-slate-200/70 text-slate-500 text-[11px] font-semibold hover:bg-slate-200 transition-colors"
+                  >
+                    Recolher
+                  </button>
+                )}
                 <button onClick={() => { setFormData(p => ({ ...p, stage_id: stage.id, avatar_url: '' })); setShowModal(true); }} className="w-full py-2 border border-dashed border-slate-300 rounded-lg text-slate-400 text-xs font-semibold hover:bg-white hover:border-slate-400 transition-all flex items-center justify-center gap-2 mt-auto">
                   <Plus className="w-3 h-3" />
                   Adicionar Lead
@@ -1338,6 +1511,19 @@ export function LeadKanban() {
           );
         })}
       </KanbanScrollContainer>
+
+      {hasMore && (
+        <div className="flex justify-center py-4">
+          <button
+            onClick={loadMore}
+            disabled={loadingMore}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-medium transition-colors disabled:opacity-50"
+          >
+            {loadingMore ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+            {loadingMore ? 'Carregando...' : 'Carregar mais leads'}
+          </button>
+        </div>
+      )}
 
       {/* Create Lead Modal */}
       <AnimatePresence>
@@ -1429,6 +1615,31 @@ export function LeadKanban() {
                   </div>
                 )}
               </div>
+
+              {selectedLead && conversionsByLead[selectedLead.id]?.length > 0 && (
+                <div className="px-6 pb-4">
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Histórico de Conversões</label>
+                  <div className="space-y-1.5 max-h-40 overflow-y-auto custom-scrollbar">
+                    {[...conversionsByLead[selectedLead.id]].sort((a, b) => new Date(b.converted_at).getTime() - new Date(a.converted_at).getTime()).map(conv => (
+                      <div key={conv.id} className="flex items-center justify-between px-3 py-2 bg-teal-50 border border-teal-100 rounded-lg">
+                        <span className="text-xs text-slate-500">
+                          {new Date(conv.converted_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                        </span>
+                        <span className="text-sm font-semibold text-teal-700">
+                          R$ {Number(conv.value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-2 flex items-center justify-between text-xs">
+                    <span className="text-slate-400">{conversionsByLead[selectedLead.id].length} conversão{conversionsByLead[selectedLead.id].length !== 1 ? 'ões' : ''}</span>
+                    <span className="font-semibold text-teal-600">
+                      Total: R$ {conversionsByLead[selectedLead.id].reduce((sum, c) => sum + Number(c.value || 0), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               <div className="flex gap-3 p-6 border-t border-slate-100 bg-slate-50">
                 <Button variant="outline" className="flex-1" onClick={() => setShowModal(false)}>Cancelar</Button>
                 <Button className="flex-1" onClick={handleSubmit} disabled={!formData.name.trim() || submitting}>
@@ -1629,7 +1840,30 @@ export function LeadKanban() {
         <ConversionModal
           lead={conversionLead}
           onClose={() => setConversionLead(null)}
+          onCancel={async () => {
+            if (conversionLead.prevStageId) {
+              await update(conversionLead.id, { stage_id: conversionLead.prevStageId });
+            }
+            setConversionLead(null);
+          }}
           onCreate={createConversion}
+        />
+      )}
+
+      {/* Loss Modal */}
+      {lossLead && (
+        <LossModal
+          lead={lossLead}
+          onClose={() => setLossLead(null)}
+          onCancel={async () => {
+            if (lossLead.prevStageId) {
+              await update(lossLead.id, { stage_id: lossLead.prevStageId });
+            }
+            setLossLead(null);
+          }}
+          onConfirm={async (reason) => {
+            await update(lossLead.id, { loss_reason: reason || null });
+          }}
         />
       )}
 

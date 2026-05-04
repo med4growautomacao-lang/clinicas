@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { AISecretary } from './components/AISecretary';
@@ -10,7 +10,6 @@ import { Settings } from './components/Settings';
 import SuperAdmin from './components/SuperAdmin';
 import { MarketingAnalytics } from './components/MarketingAnalytics';
 import { OrgAdmin } from './components/OrgAdmin';
-import { motion, AnimatePresence } from 'framer-motion';
 
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Login } from './components/Login';
@@ -23,15 +22,32 @@ import { Loader2 } from 'lucide-react';
 
 function AppContent() {
   const [activeTab, setActiveTab] = useState('dashboard');
+  // Abas já visitadas — componentes ficam montados em memória após a primeira visita
+  const [visitedTabs, setVisitedTabs] = useState<Set<string>>(new Set(['dashboard']));
   const { user, loading, userRole, activeClinicId } = useAuth();
+  const prevClinicRef = useRef(activeClinicId);
+
+  // Reseta abas visitadas ao trocar de clínica
+  useEffect(() => {
+    if (prevClinicRef.current && prevClinicRef.current !== activeClinicId) {
+      setVisitedTabs(new Set(['dashboard']));
+      setActiveTab('dashboard');
+    }
+    prevClinicRef.current = activeClinicId;
+  }, [activeClinicId]);
+
+  const handleSetActiveTab = useCallback((tab: string) => {
+    setActiveTab(tab);
+    setVisitedTabs(prev => new Set([...prev, tab]));
+  }, []);
 
   // Redireciona usuários org sem clínica ativa para a aba Organização
   useEffect(() => {
     const isOrgUser = ['org_owner', 'org_admin', 'org_team'].includes(userRole);
     if (!loading && isOrgUser && !activeClinicId) {
-      setActiveTab('org-admin');
+      handleSetActiveTab('org-admin');
     }
-  }, [loading, userRole, activeClinicId]);
+  }, [loading, userRole, activeClinicId, handleSetActiveTab]);
 
   if (loading) {
     return (
@@ -46,58 +62,34 @@ function AppContent() {
     return <Login />;
   }
 
-  const renderContent = () => {
-    switch (activeTab) {
-      case 'dashboard':
-        return <Dashboard />;
-      case 'ai-secretary':
-        return <AISecretary />;
-      case 'finance':
-        return <Finance />;
-      case 'appointments':
-        return <Appointments />;
-      case 'medical-records':
-        return <MedicalRecords />;
-      case 'doctors':
-        return <DoctorsManagement />;
-      case 'settings':
-        return <Settings />;
-      case 'marketing':
-        return <MarketingAnalytics />;
-      case 'super-admin':
-        return <SuperAdmin />;
-      case 'org-admin':
-        return <OrgAdmin onEnterClinic={() => setActiveTab('dashboard')} />;
-      default:
-        return (
-          <div className="flex items-center justify-center h-full text-slate-500 font-medium italic">
-            Módulo em desenvolvimento...
-          </div>
-        );
-    }
-  };
+  const tabs = [
+    { id: 'dashboard',       el: <Dashboard /> },
+    { id: 'ai-secretary',    el: <AISecretary /> },
+    { id: 'finance',         el: <Finance /> },
+    { id: 'appointments',    el: <Appointments /> },
+    { id: 'medical-records', el: <MedicalRecords /> },
+    { id: 'doctors',         el: <DoctorsManagement /> },
+    { id: 'settings',        el: <Settings /> },
+    { id: 'marketing',       el: <MarketingAnalytics /> },
+    { id: 'super-admin',     el: <SuperAdmin /> },
+    { id: 'org-admin',       el: <OrgAdmin onEnterClinic={() => handleSetActiveTab('dashboard')} /> },
+  ];
 
   return (
     <div className="flex h-screen bg-slate-50 font-sans text-slate-900 overflow-hidden">
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
+      <Sidebar activeTab={activeTab} setActiveTab={handleSetActiveTab} />
 
       <main className="flex-1 overflow-y-auto relative">
-        {/* Professional Background Gradient */}
         <div className="absolute top-0 right-0 w-full h-full bg-[radial-gradient(circle_at_top_right,rgba(13,148,136,0.03),transparent_50%)] pointer-events-none" />
 
         <div className="max-w-7xl mx-auto h-full p-8 relative z-10">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={activeTab}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              transition={{ duration: 0.3, type: "spring", stiffness: 100 }}
-              className="h-full"
-            >
-              {renderContent()}
-            </motion.div>
-          </AnimatePresence>
+          {tabs.map(({ id, el }) =>
+            visitedTabs.has(id) ? (
+              <div key={id} className="h-full" style={{ display: activeTab === id ? 'block' : 'none' }}>
+                {el}
+              </div>
+            ) : null
+          )}
         </div>
       </main>
     </div>

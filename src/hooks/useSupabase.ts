@@ -2,6 +2,19 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
+// Cache module-level: persiste entre re-renders e remontagens de componentes
+const _cache = new Map<string, { data: any; ts: number }>();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutos
+
+function getCached<T>(key: string): T | null {
+  const entry = _cache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > CACHE_TTL) { _cache.delete(key); return null; }
+  return entry.data as T;
+}
+function setCached(key: string, data: any) { _cache.set(key, { data, ts: Date.now() }); }
+function invalidateCache(key: string) { _cache.delete(key); }
+
 // ==========================================
 // DOCTORS
 // ==========================================
@@ -28,31 +41,36 @@ export function useDoctors() {
 
   const fetch = useCallback(async (silent = false) => {
     if (!activeClinicId) return;
+    const cacheKey = `doctors:${activeClinicId}`;
+    const cached = getCached<Doctor[]>(cacheKey);
+    if (cached) { setData(cached); setLoading(false); return; }
     if (!silent) setLoading(true);
     const { data, error } = await supabase
       .from('doctors')
       .select('*')
       .eq('clinic_id', activeClinicId)
       .order('name');
-    
+
     if (error) { setError(error.message); if (!silent) setLoading(false); return; }
+    setCached(cacheKey, data || []);
     setData(data || []);
     setError(null);
     if (!silent) setLoading(false);
   }, [activeClinicId]);
 
-  useEffect(() => { 
-    fetch(); 
+  useEffect(() => {
+    fetch();
     if (!activeClinicId) return;
 
     const channel = supabase
       .channel('doctors_realtime')
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
         table: 'doctors',
         filter: `clinic_id=eq.${activeClinicId}`
       }, () => {
+        invalidateCache(`doctors:${activeClinicId}`);
         fetch(true);
       })
       .subscribe();
@@ -68,7 +86,8 @@ export function useDoctors() {
       .select()
       .single();
     if (error) { setError(error.message); return null; }
-    await fetch(true);
+    invalidateCache(`doctors:${activeClinicId}`);
+    setData(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
     return data;
   };
 
@@ -79,21 +98,24 @@ export function useDoctors() {
     });
     if (error) { setError(error.message); return null; }
     if (data.error) { setError(data.error); return null; }
-    await fetch(true);
+    invalidateCache(`doctors:${activeClinicId}`);
+    fetch(true);
     return data;
   };
 
   const update = async (id: string, updates: Partial<Doctor>) => {
     const { error } = await supabase.from('doctors').update(updates).eq('id', id);
     if (error) { setError(error.message); return false; }
-    await fetch(true);
+    invalidateCache(`doctors:${activeClinicId}`);
+    setData(prev => prev.map(d => d.id === id ? { ...d, ...updates } : d));
     return true;
   };
 
   const remove = async (id: string) => {
     const { error } = await supabase.from('doctors').delete().eq('id', id);
     if (error) { setError(error.message); return false; }
-    await fetch(true);
+    invalidateCache(`doctors:${activeClinicId}`);
+    setData(prev => prev.filter(d => d.id !== id));
     return true;
   };
 
@@ -177,21 +199,18 @@ export function usePatients() {
       .select()
       .single();
     if (error) { setError(error.message); return null; }
-    await fetch(true);
     return data;
   };
 
   const update = async (id: string, updates: Partial<Patient>) => {
     const { error } = await supabase.from('patients').update(updates).eq('id', id);
     if (error) { setError(error.message); return false; }
-    await fetch(true);
     return true;
   };
 
   const remove = async (id: string) => {
     const { error } = await supabase.from('patients').delete().eq('id', id);
     if (error) { setError(error.message); return false; }
-    await fetch(true);
     return true;
   };
 
@@ -217,7 +236,9 @@ export interface Appointment {
   doctor?: { name: string };
 }
 
-export function useAppointments() {
+export function useAppointments(options?: { daysBack?: number; daysForward?: number }) {
+  const DAYS_BACK = options?.daysBack ?? 365;
+  const DAYS_FORWARD = options?.daysForward ?? 180;
   const { profile, userRole, activeClinicId } = useAuth();
   const [data, setData] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -226,11 +247,19 @@ export function useAppointments() {
   const fetch = useCallback(async (silent = false) => {
     if (!activeClinicId) return;
     if (!silent) setLoading(true);
-    
+
+    const today = new Date();
+    const fromDate = new Date(today); fromDate.setDate(today.getDate() - DAYS_BACK);
+    const toDate = new Date(today); toDate.setDate(today.getDate() + DAYS_FORWARD);
+    const fromStr = fromDate.toISOString().split('T')[0];
+    const toStr = toDate.toISOString().split('T')[0];
+
     let query = supabase
       .from('appointments')
       .select('*, patient:patients(name, cpf, phone), doctor:doctors!inner(name, user_id)')
-      .eq('clinic_id', activeClinicId);
+      .eq('clinic_id', activeClinicId)
+      .gte('date', fromStr)
+      .lte('date', toStr);
 
     if (userRole === 'medico') {
       query = query.eq('doctor.user_id', profile.id);
@@ -239,12 +268,12 @@ export function useAppointments() {
     const { data, error } = await query
       .order('date', { ascending: false })
       .order('time', { ascending: true });
-    
+
     if (error) { setError(error.message); if (!silent) setLoading(false); return; }
     setData(data || []);
     setError(null);
     if (!silent) setLoading(false);
-  }, [activeClinicId, userRole, profile?.id]);
+  }, [activeClinicId, userRole, profile?.id, DAYS_BACK, DAYS_FORWARD]);
 
   useEffect(() => { 
     fetch(); 
@@ -273,21 +302,18 @@ export function useAppointments() {
       .select('*, patient:patients(name, cpf, phone), doctor:doctors!inner(name, user_id)')
       .single();
     if (error) { setError(error.message); return null; }
-    await fetch(true);
     return data;
   };
 
   const update = async (id: string, updates: Partial<Appointment>) => {
     const { error } = await supabase.from('appointments').update(updates).eq('id', id);
     if (error) { setError(error.message); return false; }
-    await fetch(true);
     return true;
   };
 
   const remove = async (id: string) => {
     const { error } = await supabase.from('appointments').delete().eq('id', id);
     if (error) { setError(error.message); return false; }
-    await fetch(true);
     return true;
   };
 
@@ -339,6 +365,7 @@ export interface Lead {
   created_at: string;
   updated_at: string;
   avatar_url: string | null;
+  loss_reason: string | null;
 }
 
 export function useFunnelStages() {
@@ -346,31 +373,36 @@ export function useFunnelStages() {
   const [data, setData] = useState<FunnelStage[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const fetch = useCallback(async () => {
+  const fetch = useCallback(async (silent = false) => {
     if (!activeClinicId) return;
-    setLoading(true);
+    const cacheKey = `funnel_stages:${activeClinicId}`;
+    const cached = getCached<FunnelStage[]>(cacheKey);
+    if (cached) { setData(cached); setLoading(false); return; }
+    if (!silent) setLoading(true);
     const { data } = await supabase
       .from('funnel_stages')
       .select('*')
       .eq('clinic_id', activeClinicId)
       .order('position');
+    setCached(cacheKey, data || []);
     setData(data || []);
     setLoading(false);
   }, [activeClinicId]);
 
-  useEffect(() => { 
-    fetch(); 
+  useEffect(() => {
+    fetch();
     if (!activeClinicId) return;
 
     const channel = supabase
       .channel('funnel_stages_realtime')
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
         table: 'funnel_stages',
         filter: `clinic_id=eq.${activeClinicId}`
       }, () => {
-        fetch();
+        invalidateCache(`funnel_stages:${activeClinicId}`);
+        fetch(true);
       })
       .subscribe();
 
@@ -380,23 +412,26 @@ export function useFunnelStages() {
   const update = async (id: string, updates: Partial<FunnelStage>) => {
     const { error } = await supabase.from('funnel_stages').update(updates).eq('id', id);
     if (error) return false;
-    await fetch();
+    invalidateCache(`funnel_stages:${activeClinicId}`);
+    setData(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
     return true;
   };
 
   const remove = async (id: string) => {
     const { error } = await supabase.from('funnel_stages').delete().eq('id', id);
     if (error) return false;
-    await fetch();
+    invalidateCache(`funnel_stages:${activeClinicId}`);
+    setData(prev => prev.filter(s => s.id !== id));
     return true;
   };
 
   const reorder = async (stages: FunnelStage[]) => {
-    const updates = stages.map((s, idx) => 
+    setData(stages);
+    invalidateCache(`funnel_stages:${activeClinicId}`);
+    const updates = stages.map((s, idx) =>
       supabase.from('funnel_stages').update({ position: idx }).eq('id', s.id)
     );
     await Promise.all(updates);
-    await fetch();
     return true;
   };
 
@@ -417,37 +452,65 @@ export function useFunnelStages() {
       .select()
       .single();
     if (error) return null;
-    await fetch();
+    invalidateCache(`funnel_stages:${activeClinicId}`);
+    setData(prev => [...prev, data]);
     return data;
   };
 
   return { data, loading, refetch: fetch, create, update, remove, reorder };
 }
 
-export function useLeads() {
+export function useLeads(options?: { pageSize?: number }) {
+  const PAGE_SIZE = options?.pageSize ?? null;
   const { profile, activeClinicId } = useAuth();
   const [data, setData] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const loadedCountRef = useRef(0);
+
+  const baseQuery = useCallback(() => {
+    return supabase
+      .from('leads')
+      .select('*')
+      .eq('clinic_id', activeClinicId!)
+      .order('last_activity_at', { ascending: false, nullsFirst: false })
+      .order('updated_at', { ascending: false, nullsFirst: false });
+  }, [activeClinicId]);
 
   const fetch = useCallback(async (silent = false) => {
     if (!activeClinicId) return;
     if (!silent) setLoading(true);
-    const { data, error } = await supabase
-      .from('leads')
-      .select('*')
-      .eq('clinic_id', activeClinicId)
-      .order('last_activity_at', { ascending: false, nullsFirst: false })
-      .order('updated_at', { ascending: false, nullsFirst: false });
-    
+    let query = baseQuery();
+    if (PAGE_SIZE) query = query.range(0, PAGE_SIZE - 1);
+    const { data, error } = await query;
     if (error) { setError(error.message); if (!silent) setLoading(false); return; }
-    setData(data || []);
+    const result = data || [];
+    setData(result);
+    loadedCountRef.current = result.length;
+    setHasMore(!!PAGE_SIZE && result.length >= PAGE_SIZE);
     setError(null);
     if (!silent) setLoading(false);
-  }, [activeClinicId]);
+  }, [activeClinicId, PAGE_SIZE, baseQuery]);
 
-  useEffect(() => { 
-    fetch(); 
+  const loadMore = useCallback(async () => {
+    if (!PAGE_SIZE || !hasMore || !activeClinicId) return;
+    setLoadingMore(true);
+    const from = loadedCountRef.current;
+    const { data: more } = await baseQuery().range(from, from + PAGE_SIZE - 1);
+    if (more && more.length > 0) {
+      setData(prev => [...prev, ...more]);
+      loadedCountRef.current += more.length;
+      setHasMore(more.length >= PAGE_SIZE);
+    } else {
+      setHasMore(false);
+    }
+    setLoadingMore(false);
+  }, [activeClinicId, PAGE_SIZE, hasMore, baseQuery]);
+
+  useEffect(() => {
+    fetch();
     if (!activeClinicId) return;
 
     const channel = supabase
@@ -473,25 +536,28 @@ export function useLeads() {
       .select()
       .single();
     if (error) { setError(error.message); return null; }
-    await fetch(true);
     return data;
   };
 
   const update = async (id: string, updates: Partial<Lead>) => {
+    // Atualização otimista: move imediatamente na UI
+    setData(prev => prev.map(l => l.id === id ? { ...l, ...updates } : l));
     const { error } = await supabase.from('leads').update(updates).eq('id', id);
-    if (error) { setError(error.message); return false; }
-    await fetch(true);
+    if (error) {
+      setError(error.message);
+      fetch(true); // reverte ao estado real do banco
+      return false;
+    }
     return true;
   };
 
   const remove = async (id: string) => {
     const { error } = await supabase.from('leads').delete().eq('id', id);
     if (error) { setError(error.message); return false; }
-    await fetch(true);
     return true;
   };
 
-  return { data, loading, error, refetch: fetch, create, update, remove };
+  return { data, loading, loadingMore, hasMore, error, refetch: fetch, loadMore, create, update, remove };
 }
 
 // ==========================================
@@ -681,7 +747,6 @@ export function useDashboardStats(dateRange?: { start: string; end: string }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'appointments', filter: `clinic_id=eq.${activeClinicId}` }, () => load(true))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'financial_transactions', filter: `clinic_id=eq.${activeClinicId}` }, () => load(true))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'patients', filter: `clinic_id=eq.${activeClinicId}` }, () => load(true))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages', filter: `clinic_id=eq.${activeClinicId}` }, () => load(true))
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
@@ -758,21 +823,18 @@ export function useFinancial() {
       .select()
       .single();
     if (error) { setError(error.message); return null; }
-    await fetch(true);
     return data;
   };
 
   const update = async (id: string, updates: Partial<FinancialTransaction>) => {
     const { error } = await supabase.from('financial_transactions').update(updates).eq('id', id);
     if (error) { setError(error.message); return false; }
-    await fetch(true);
     return true;
   };
 
   const remove = async (id: string) => {
     const { error } = await supabase.from('financial_transactions').delete().eq('id', id);
     if (error) { setError(error.message); return false; }
-    await fetch(true);
     return true;
   };
 
@@ -846,21 +908,18 @@ export function useMedicalRecords(patientId: string | null) {
       .select('*, doctor:doctors(name)')
       .single();
     if (error) { setError(error.message); return null; }
-    await fetch(true);
     return data;
   };
 
   const update = async (id: string, updates: Partial<MedicalRecord>) => {
     const { error } = await supabase.from('medical_records').update(updates).eq('id', id);
     if (error) { setError(error.message); return false; }
-    await fetch(true);
     return true;
   };
 
   const remove = async (id: string) => {
     const { error } = await supabase.from('medical_records').delete().eq('id', id);
     if (error) { setError(error.message); return false; }
-    await fetch(true);
     return true;
   };
 
@@ -1453,9 +1512,12 @@ export function useTransitionRules() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetch = useCallback(async () => {
+  const fetch = useCallback(async (silent = false) => {
     if (!activeClinicId) return;
-    setLoading(true);
+    const cacheKey = `transition_rules:${activeClinicId}`;
+    const cached = getCached<TransitionRule[]>(cacheKey);
+    if (cached) { setData(cached); setLoading(false); return; }
+    if (!silent) setLoading(true);
     const { data, error } = await supabase
       .from('stage_transition_rules')
       .select('*')
@@ -1464,6 +1526,7 @@ export function useTransitionRules() {
       .order('created_at');
 
     if (error) { setError(error.message); setLoading(false); return; }
+    setCached(cacheKey, data || []);
     setData(data || []);
     setError(null);
     setLoading(false);
@@ -1473,20 +1536,25 @@ export function useTransitionRules() {
 
   const create = async (rule: Partial<TransitionRule>) => {
     if (!activeClinicId) return null;
-    // New rule goes to the end
     const nextIndex = data.length;
     const { data: created, error } = await supabase
       .from('stage_transition_rules')
       .insert({ ...rule, clinic_id: activeClinicId, order_index: nextIndex })
       .select()
       .single();
-    if (!error) await fetch();
+    if (!error) {
+      invalidateCache(`transition_rules:${activeClinicId}`);
+      setData(prev => [...prev, created]);
+    }
     return created;
   };
 
   const remove = async (id: string) => {
     const { error } = await supabase.from('stage_transition_rules').delete().eq('id', id);
-    if (!error) await fetch();
+    if (!error) {
+      invalidateCache(`transition_rules:${activeClinicId}`);
+      setData(prev => prev.filter(r => r.id !== id));
+    }
     return !error;
   };
 
@@ -1497,14 +1565,16 @@ export function useTransitionRules() {
       .eq('id', id)
       .select()
       .single();
-    if (!error) await fetch();
+    if (!error) {
+      invalidateCache(`transition_rules:${activeClinicId}`);
+      setData(prev => prev.map(r => r.id === id ? { ...r, ...rule } : r));
+    }
     return updated;
   };
 
   const reorder = async (reordered: TransitionRule[]) => {
-    // Optimistic update
     setData(reordered);
-    // Persist all positions in parallel
+    invalidateCache(`transition_rules:${activeClinicId}`);
     await Promise.all(
       reordered.map((rule, idx) =>
         supabase
@@ -1725,17 +1795,17 @@ export function useConversions() {
 
   const create = async (conversion: Omit<Conversion, 'id' | 'clinic_id' | 'created_at'>) => {
     if (!activeClinicId) return false;
-    const { error } = await supabase.from('conversions').insert({
+    const { data, error } = await supabase.from('conversions').insert({
       ...conversion,
       clinic_id: activeClinicId,
-    });
-    if (!error) fetch();
+    }).select().single();
+    if (!error && data) setData(prev => [data, ...prev]);
     return !error;
   };
 
   const remove = async (id: string) => {
     const { error } = await supabase.from('conversions').delete().eq('id', id);
-    if (!error) fetch();
+    if (!error) setData(prev => prev.filter(c => c.id !== id));
     return !error;
   };
 
@@ -1767,13 +1837,18 @@ export function useProtocols() {
   const [data, setData] = useState<Protocol[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const fetch = useCallback(async () => {
+  const fetch = useCallback(async (silent = false) => {
     if (!activeClinicId) return;
+    const cacheKey = `protocols:${activeClinicId}`;
+    const cached = getCached<Protocol[]>(cacheKey);
+    if (cached) { setData(cached); setLoading(false); return; }
+    if (!silent) setLoading(true);
     const { data } = await supabase
       .from('protocols')
       .select('*')
       .eq('clinic_id', activeClinicId)
       .order('name');
+    setCached(cacheKey, data || []);
     setData(data || []);
     setLoading(false);
   }, [activeClinicId]);
@@ -1787,19 +1862,28 @@ export function useProtocols() {
       .insert({ ...protocol, clinic_id: activeClinicId })
       .select()
       .single();
-    if (!error) fetch();
+    if (!error) {
+      invalidateCache(`protocols:${activeClinicId}`);
+      setData(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
+    }
     return error ? null : data;
   };
 
   const update = async (id: string, updates: Partial<Protocol>) => {
     const { error } = await supabase.from('protocols').update(updates).eq('id', id);
-    if (!error) fetch();
+    if (!error) {
+      invalidateCache(`protocols:${activeClinicId}`);
+      setData(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+    }
     return !error;
   };
 
   const remove = async (id: string) => {
     const { error } = await supabase.from('protocols').delete().eq('id', id);
-    if (!error) fetch();
+    if (!error) {
+      invalidateCache(`protocols:${activeClinicId}`);
+      setData(prev => prev.filter(p => p.id !== id));
+    }
     return !error;
   };
 

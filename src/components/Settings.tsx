@@ -848,18 +848,6 @@ function ClinicSettings({ data, onChange }: { data: Partial<Clinic>, onChange: (
                     </div>
                 </div>
 
-                <div className="mt-8 p-4 bg-rose-50 rounded-lg border border-rose-100 flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                        <div className="p-2 bg-white rounded-lg text-rose-500 shadow-sm">
-                            <Trash2 className="w-5 h-5" />
-                        </div>
-                        <div>
-                            <p className="font-bold text-slate-700">Zona de Perigo</p>
-                            <p className="text-xs font-medium text-slate-400">Apagar todos os dados da clínica permanentemente.</p>
-                        </div>
-                    </div>
-                    <Button variant="outline" className="text-rose-500 hover:bg-rose-100 border-rose-200">Apagar Clínica</Button>
-                </div>
             </CardContent>
         </Card>
     );

@@ -20,7 +20,8 @@ import {
   AlertCircle,
   Settings,
   FileText,
-  Check
+  Check,
+  Info
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -207,11 +208,39 @@ export function Appointments() {
       protocol_ids: protocolIds,
     });
 
-    const { data: leadData } = await supabase
+    // 1. Busca lead vinculado diretamente ao paciente
+    let leadData: { id: string; stage_id: string } | null = null;
+    const { data: byPatient } = await supabase
       .from('leads')
       .select('id, stage_id')
       .eq('converted_patient_id', patientId)
       .maybeSingle();
+
+    if (byPatient) {
+      leadData = byPatient;
+    } else {
+      // 2. Fallback: busca pelo telefone do paciente
+      const { data: patient } = await supabase
+        .from('patients')
+        .select('phone')
+        .eq('id', patientId)
+        .maybeSingle();
+      if (patient?.phone) {
+        const { data: byPhone } = await supabase
+          .from('leads')
+          .select('id, stage_id')
+          .eq('clinic_id', activeClinicId)
+          .eq('phone', patient.phone)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (byPhone) {
+          leadData = byPhone;
+          // Vincula o lead ao paciente para futuras buscas
+          await supabase.from('leads').update({ converted_patient_id: patientId }).eq('id', byPhone.id);
+        }
+      }
+    }
 
     if (leadData?.id) {
       await createConversion({
@@ -232,15 +261,8 @@ export function Appointments() {
         .limit(1)
         .maybeSingle();
 
-      if (conversaoStage) {
-        const { data: currentStage } = await supabase
-          .from('funnel_stages')
-          .select('position')
-          .eq('id', leadData.stage_id)
-          .maybeSingle();
-        if (!currentStage || currentStage.position < conversaoStage.position) {
-          await supabase.from('leads').update({ stage_id: conversaoStage.id }).eq('id', leadData.id);
-        }
+      if (conversaoStage && leadData.stage_id !== conversaoStage.id) {
+        await supabase.from('leads').update({ stage_id: conversaoStage.id }).eq('id', leadData.id);
       }
     }
   };
@@ -444,6 +466,18 @@ export function Appointments() {
                             <div className="flex items-center gap-3">
                               <div className="w-10 h-10 rounded-lg bg-slate-50 flex items-center justify-center"><User className="w-5 h-5 text-slate-600" /></div>
                               <span className="font-semibold text-slate-800">{apt.patient?.name || '—'}</span>
+                              {apt.patient?.phone && (
+                                <div className="relative group/phone">
+                                  <button className="text-slate-300 hover:text-slate-500 transition-colors">
+                                    <Info className="w-3.5 h-3.5" />
+                                  </button>
+                                  <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-1.5 hidden group-hover/phone:flex items-center gap-1.5 bg-slate-800 text-white text-xs rounded-lg px-2.5 py-1.5 whitespace-nowrap shadow-lg z-50 pointer-events-none">
+                                    <Phone className="w-3 h-3 text-slate-300" />
+                                    {apt.patient.phone}
+                                    <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-slate-800" />
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           </td>
                           <td className="px-6 py-4 font-medium">

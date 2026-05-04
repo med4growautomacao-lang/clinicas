@@ -11,6 +11,7 @@ import {
   Search,
   ChevronRight,
   ChevronLeft,
+  ChevronDown,
   Stethoscope,
   Loader2,
   X,
@@ -18,7 +19,8 @@ import {
   Trash2,
   AlertCircle,
   Settings,
-  FileText
+  FileText,
+  Check
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -38,7 +40,7 @@ import {
 } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useAuth } from "../contexts/AuthContext";
-import { useAppointments, useDoctors, usePatients } from "../hooks/useSupabase";
+import { useAppointments, useDoctors, usePatients, useConversions, useFinancial, useProtocols } from "../hooks/useSupabase";
 import { supabase } from "../lib/supabase";
 import { DoctorScheduleSettings } from "./DoctorScheduleSettings";
 import { PatientModal } from "./PatientModal";
@@ -76,10 +78,13 @@ function getDoctorColor(doctorId: string) {
 }
 
 export function Appointments() {
-  const { userRole, profile } = useAuth();
+  const { userRole, profile, activeClinicId } = useAuth();
   const { data: appointments, loading, create, update, remove } = useAppointments();
   const { data: doctors, refetch: refetchDoctors } = useDoctors();
   const { data: patients, refetch: refetchPatients } = usePatients();
+  const { create: createConversion } = useConversions();
+  const { create: createTransaction } = useFinancial();
+  const { data: protocols } = useProtocols();
   const [lastCreatedPatient, setLastCreatedPatient] = useState<any>(null);
   const [filter, setFilter] = useState("Todos");
   const [dateFilter, setDateFilter] = useState<"all" | "today">("all");
@@ -98,6 +103,15 @@ export function Appointments() {
   const [showDayModal, setShowDayModal] = useState(false);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [openStatusApt, setOpenStatusApt] = useState<string | null>(null);
+  const [realizadoDialog, setRealizadoDialog] = useState<{
+    apt: any;
+    value: string;
+    paymentMethod: string;
+    status: 'pago' | 'pendente';
+    description: string;
+    protocolIds: string[];
+  } | null>(null);
 
   const currentDoctor = useMemo(() => {
     return doctors.find(d => d.user_id === profile?.id);
@@ -165,12 +179,108 @@ export function Appointments() {
     setShowDayModal(true);
   };
 
+  const onAppointmentRealizado = async (
+    patientId: string,
+    appointmentId: string,
+    date: string,
+    time: string,
+    value: number,
+    paymentMethod: string | null,
+    txStatus: 'pago' | 'pendente' = 'pago',
+    description: string = '',
+    protocolIds: string[] = []
+  ) => {
+    const finMethod = (['pix', 'cartao', 'dinheiro', 'plano'] as const).includes(paymentMethod as any)
+      ? (paymentMethod as 'pix' | 'cartao' | 'dinheiro' | 'plano')
+      : null;
+
+    await createTransaction({
+      patient_id: patientId,
+      appointment_id: appointmentId,
+      type: 'receita',
+      category: 'Consulta',
+      amount: value,
+      description: description || 'Consulta realizada',
+      payment_method: finMethod,
+      status: txStatus,
+      date,
+      protocol_ids: protocolIds,
+    });
+
+    const { data: leadData } = await supabase
+      .from('leads')
+      .select('id, stage_id')
+      .eq('converted_patient_id', patientId)
+      .maybeSingle();
+
+    if (leadData?.id) {
+      await createConversion({
+        lead_id: leadData.id,
+        value,
+        description: description || 'Consulta realizada',
+        payment_method: paymentMethod,
+        protocol_ids: protocolIds,
+        converted_at: `${date}T${time?.substring(0, 5)}:00`,
+      });
+
+      const { data: conversaoStage } = await supabase
+        .from('funnel_stages')
+        .select('id, position')
+        .eq('clinic_id', activeClinicId)
+        .ilike('name', '%convers%')
+        .order('position')
+        .limit(1)
+        .maybeSingle();
+
+      if (conversaoStage) {
+        const { data: currentStage } = await supabase
+          .from('funnel_stages')
+          .select('position')
+          .eq('id', leadData.stage_id)
+          .maybeSingle();
+        if (!currentStage || currentStage.position < conversaoStage.position) {
+          await supabase.from('leads').update({ stage_id: conversaoStage.id }).eq('id', leadData.id);
+        }
+      }
+    }
+  };
+
+  const handleInlineStatus = async (apt: any, newStatus: string) => {
+    setOpenStatusApt(null);
+    if (newStatus === apt.status) return;
+    if (newStatus === 'realizado') {
+      setRealizadoDialog({ apt, value: '', paymentMethod: '', status: 'pago', description: '', protocolIds: [] });
+      return;
+    }
+    await update(apt.id, { status: newStatus });
+  };
+
+  const handleConfirmRealizado = async () => {
+    if (!realizadoDialog) return;
+    const { apt, value, paymentMethod, status, description, protocolIds } = realizadoDialog;
+    setRealizadoDialog(null);
+    await update(apt.id, { status: 'realizado' });
+    await onAppointmentRealizado(
+      apt.patient_id, apt.id, apt.date, apt.time,
+      parseFloat(value.replace(',', '.')) || 0,
+      paymentMethod || null,
+      status,
+      description,
+      protocolIds
+    );
+  };
+
   const handleSubmit = async () => {
     if (!formData.patient_id || !formData.doctor_id || !formData.date || !formData.time) return;
     setSubmitting(true);
-    
+
     if (selectedAppointment) {
+      const becomingRealizado = selectedAppointment.status !== 'realizado' && formData.status === 'realizado';
       await update(selectedAppointment.id, formData);
+
+      if (becomingRealizado) {
+        await onAppointmentRealizado(formData.patient_id, selectedAppointment.id, formData.date, formData.time, 0, null);
+      }
     } else {
       await create({
         patient_id: formData.patient_id,
@@ -364,9 +474,33 @@ export function Appointments() {
                             )}
                           </td>
                           <td className="px-6 py-4">
-                            <span className={cn("inline-flex items-center rounded-md px-2.5 py-1 text-xs font-semibold border", statusColor[apt.status] || statusColor.pendente)}>
-                              {statusLabel[apt.status] || apt.status}
-                            </span>
+                            <div className="relative">
+                              <button
+                                onClick={() => setOpenStatusApt(openStatusApt === apt.id ? null : apt.id)}
+                                className={cn("inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold border cursor-pointer hover:opacity-75 transition-opacity", statusColor[apt.status] || statusColor.pendente)}
+                              >
+                                {statusLabel[apt.status] || apt.status}
+                                <ChevronDown className="w-3 h-3" />
+                              </button>
+                              {openStatusApt === apt.id && (
+                                <div className="absolute z-50 top-full mt-1 left-0 bg-white border border-slate-200 rounded-xl shadow-lg py-1 min-w-[150px]">
+                                  {Object.entries(statusLabel).map(([val, lbl]) => (
+                                    <button
+                                      key={val}
+                                      onClick={() => handleInlineStatus(apt, val)}
+                                      className={cn(
+                                        "w-full text-left flex items-center gap-2 px-3 py-1.5 text-xs font-semibold hover:bg-slate-50 transition-colors",
+                                        val === apt.status ? "text-teal-600" : "text-slate-700"
+                                      )}
+                                    >
+                                      {val === apt.status && <Check className="w-3 h-3" />}
+                                      {val !== apt.status && <span className="w-3" />}
+                                      {lbl}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
                           </td>
                           <td className="px-6 py-4 text-right">
                             <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -609,6 +743,113 @@ export function Appointments() {
               <div className="p-6 border-t border-slate-100 bg-slate-50">
                 <Button className="w-full py-6 font-bold" onClick={() => { setShowDayModal(false); setFormData({ patient_id: '', doctor_id: '', date: selectedDay!, time: '', notes: '', status: 'pendente' }); setShowModal(true); }}>
                   <Plus className="w-5 h-5 mr-2" /> Agendar Nova Consulta
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Overlay to close status dropdown */}
+      {openStatusApt && (
+        <div className="fixed inset-0 z-40" onClick={() => setOpenStatusApt(null)} />
+      )}
+
+      {/* Realizado value dialog */}
+      <AnimatePresence>
+        {realizadoDialog && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Registrar Consulta Realizada</h3>
+                  <p className="text-slate-500 text-sm">{realizadoDialog.apt.patient?.name}</p>
+                </div>
+                <button onClick={() => setRealizadoDialog(null)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+              </div>
+
+              <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
+                {/* Valor */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Valor (R$)</label>
+                  <input
+                    type="text" inputMode="decimal" placeholder="0,00"
+                    value={realizadoDialog.value}
+                    onChange={e => setRealizadoDialog(prev => prev ? { ...prev, value: e.target.value } : null)}
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    autoFocus
+                  />
+                </div>
+
+                {/* Status */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Status do pagamento</label>
+                  <div className="flex gap-2">
+                    {([{ value: 'pago', label: 'Pago' }, { value: 'pendente', label: 'Pendente' }] as const).map(s => (
+                      <button key={s.value} type="button"
+                        onClick={() => setRealizadoDialog(prev => prev ? { ...prev, status: s.value } : null)}
+                        className={cn("px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all",
+                          realizadoDialog.status === s.value ? "bg-teal-600 text-white border-teal-600" : "bg-white text-slate-600 border-slate-200 hover:border-teal-300"
+                        )}>{s.label}</button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Forma de pagamento */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Forma de pagamento</label>
+                  <div className="flex flex-wrap gap-2">
+                    {[{ value: 'pix', label: 'Pix' }, { value: 'cartao', label: 'Cartão' }, { value: 'dinheiro', label: 'Dinheiro' }, { value: 'plano', label: 'Plano' }].map(m => (
+                      <button key={m.value} type="button"
+                        onClick={() => setRealizadoDialog(prev => prev ? { ...prev, paymentMethod: prev.paymentMethod === m.value ? '' : m.value } : null)}
+                        className={cn("px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all",
+                          realizadoDialog.paymentMethod === m.value ? "bg-teal-600 text-white border-teal-600" : "bg-white text-slate-600 border-slate-200 hover:border-teal-300"
+                        )}>{m.label}</button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Protocolos */}
+                {protocols.filter(p => p.is_active).length > 0 && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Protocolos</label>
+                    <div className="flex flex-wrap gap-2">
+                      {protocols.filter(p => p.is_active).map(p => {
+                        const selected = realizadoDialog.protocolIds.includes(p.id);
+                        return (
+                          <button key={p.id} type="button"
+                            onClick={() => setRealizadoDialog(prev => prev ? {
+                              ...prev,
+                              protocolIds: selected ? prev.protocolIds.filter(id => id !== p.id) : [...prev.protocolIds, p.id]
+                            } : null)}
+                            className={cn("px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all",
+                              selected ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"
+                            )}>
+                            {p.name}{p.price ? ` · R$${Number(p.price).toLocaleString('pt-BR', { minimumFractionDigits: 0 })}` : ''}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Descrição */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Descrição</label>
+                  <textarea
+                    placeholder="Observações sobre a consulta..."
+                    value={realizadoDialog.description}
+                    onChange={e => setRealizadoDialog(prev => prev ? { ...prev, description: e.target.value } : null)}
+                    rows={2}
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2 mt-5">
+                <Button variant="outline" className="flex-1" onClick={() => setRealizadoDialog(null)}>Cancelar</Button>
+                <Button className="flex-1" onClick={handleConfirmRealizado}>
+                  <Check className="w-4 h-4 mr-1.5" /> Confirmar
                 </Button>
               </div>
             </motion.div>

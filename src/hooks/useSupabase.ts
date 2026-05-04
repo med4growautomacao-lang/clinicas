@@ -702,9 +702,11 @@ export interface FinancialTransaction {
   category: string | null;
   amount: number;
   description: string | null;
+  notes: string | null;
   payment_method: 'pix' | 'cartao' | 'dinheiro' | 'plano' | null;
   status: 'pago' | 'pendente' | 'cancelado';
   date: string;
+  protocol_ids: string[];
   created_at: string;
 }
 
@@ -1698,6 +1700,7 @@ export interface Conversion {
   value: number;
   description: string | null;
   payment_method: string | null;
+  protocol_ids: string[];
   converted_at: string;
   created_at: string;
 }
@@ -1744,4 +1747,61 @@ export function useConversions() {
   }, {});
 
   return { data, loading, byLead, create, remove, refetch: fetch };
+}
+
+// ==========================================
+// PROTOCOLS
+// ==========================================
+export interface Protocol {
+  id: string;
+  clinic_id: string;
+  name: string;
+  description: string | null;
+  price: number | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export function useProtocols() {
+  const { activeClinicId } = useAuth();
+  const [data, setData] = useState<Protocol[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = useCallback(async () => {
+    if (!activeClinicId) return;
+    const { data } = await supabase
+      .from('protocols')
+      .select('*')
+      .eq('clinic_id', activeClinicId)
+      .order('name');
+    setData(data || []);
+    setLoading(false);
+  }, [activeClinicId]);
+
+  useEffect(() => { fetch(); }, [fetch]);
+
+  const create = async (protocol: Pick<Protocol, 'name' | 'description' | 'price' | 'is_active'>) => {
+    if (!activeClinicId) return null;
+    const { data, error } = await supabase
+      .from('protocols')
+      .insert({ ...protocol, clinic_id: activeClinicId })
+      .select()
+      .single();
+    if (!error) fetch();
+    return error ? null : data;
+  };
+
+  const update = async (id: string, updates: Partial<Protocol>) => {
+    const { error } = await supabase.from('protocols').update(updates).eq('id', id);
+    if (!error) fetch();
+    return !error;
+  };
+
+  const remove = async (id: string) => {
+    const { error } = await supabase.from('protocols').delete().eq('id', id);
+    if (!error) fetch();
+    return !error;
+  };
+
+  return { data, loading, create, update, remove, refetch: fetch };
 }

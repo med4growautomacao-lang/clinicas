@@ -32,10 +32,14 @@ import {
     UserCircle,
     Clock,
     DollarSign,
+    ClipboardList,
+    Edit2,
+    ToggleLeft,
+    ToggleRight,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { useSettings, Clinic, AIConfig, WhatsappInstance } from "../hooks/useSupabase";
+import { useSettings, useProtocols, Protocol, Clinic, AIConfig, WhatsappInstance } from "../hooks/useSupabase";
 import { supabase } from "../lib/supabase";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
@@ -43,7 +47,7 @@ import WhatsappLogo from "../assets/logos/Logo Whatsapp.png";
 
 export function Settings() {
     const { clinic, aiConfig, whatsapp, loading, updateClinic, updateAI, updateWhatsapp, generateConnectToken } = useSettings();
-    const [activeTab, setActiveTab] = useState<"clinic" | "integrations">("clinic");
+    const [activeTab, setActiveTab] = useState<"clinic" | "integrations" | "protocols">("clinic");
     const [activeIntTab, setActiveIntTab] = useState<'whatsapp' | 'meta' | 'google'>('whatsapp');
     
     // Local states for editing
@@ -53,6 +57,11 @@ export function Settings() {
     const [saving, setSaving] = useState(false);
     const [connecting, setConnecting] = useState(false);
     const [linkCopied, setLinkCopied] = useState(false);
+
+    // Protocols
+    const { data: protocols, create: createProtocol, update: updateProtocol, remove: removeProtocol } = useProtocols();
+    const [protocolModal, setProtocolModal] = useState<{ open: boolean; item: Partial<Protocol> | null }>({ open: false, item: null });
+    const [savingProtocol, setSavingProtocol] = useState(false);
     const loadedClinicId = useRef<string | null>(null);
 
     useEffect(() => {
@@ -199,7 +208,30 @@ export function Settings() {
     const tabs = [
         { id: "clinic", label: "Dados da Clínica", icon: Building2, color: "text-emerald-600" },
         { id: "integrations", label: "Integrações", icon: Plug, color: "text-violet-600" },
+        { id: "protocols", label: "Protocolos", icon: ClipboardList, color: "text-teal-600" },
     ];
+
+    const handleSaveProtocol = async () => {
+        if (!protocolModal.item?.name?.trim()) return;
+        setSavingProtocol(true);
+        if (protocolModal.item.id) {
+            await updateProtocol(protocolModal.item.id, {
+                name: protocolModal.item.name,
+                description: protocolModal.item.description ?? null,
+                price: protocolModal.item.price ?? null,
+                is_active: protocolModal.item.is_active ?? true,
+            });
+        } else {
+            await createProtocol({
+                name: protocolModal.item.name,
+                description: protocolModal.item.description ?? null,
+                price: protocolModal.item.price ?? null,
+                is_active: true,
+            });
+        }
+        setSavingProtocol(false);
+        setProtocolModal({ open: false, item: null });
+    };
 
     return (
         <div className="space-y-8 h-full flex flex-col">
@@ -408,9 +440,116 @@ export function Settings() {
                                 activeIntTab={activeIntTab}
                             />
                         )}
+
+                        {activeTab === "protocols" && (
+                            <Card className="border border-slate-200 shadow-sm max-w-3xl mx-auto">
+                                <CardHeader className="flex flex-row items-center justify-between">
+                                    <CardTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                                        <ClipboardList className="w-5 h-5 text-teal-600" />
+                                        Protocolos de Atendimento
+                                    </CardTitle>
+                                    <Button onClick={() => setProtocolModal({ open: true, item: { name: '', description: '', price: null, is_active: true } })} className="gap-2">
+                                        <Plus className="w-4 h-4" /> Novo Protocolo
+                                    </Button>
+                                </CardHeader>
+                                <CardContent>
+                                    {protocols.length === 0 ? (
+                                        <div className="text-center py-12 text-slate-400">
+                                            <ClipboardList className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                                            <p className="font-medium">Nenhum protocolo cadastrado</p>
+                                            <p className="text-sm">Crie protocolos para vincular às consultas realizadas</p>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {protocols.map(p => (
+                                                <div key={p.id} className="flex items-center justify-between p-3 rounded-xl border border-slate-100 hover:border-slate-200 bg-white transition-all group">
+                                                    <div className="flex items-center gap-3 min-w-0">
+                                                        <button onClick={() => updateProtocol(p.id, { is_active: !p.is_active })} className="shrink-0">
+                                                            {p.is_active
+                                                                ? <ToggleRight className="w-6 h-6 text-teal-500" />
+                                                                : <ToggleLeft className="w-6 h-6 text-slate-300" />}
+                                                        </button>
+                                                        <div className="min-w-0">
+                                                            <p className={cn("font-semibold text-sm truncate", !p.is_active && "text-slate-400 line-through")}>{p.name}</p>
+                                                            {p.description && <p className="text-xs text-slate-400 truncate">{p.description}</p>}
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-3 shrink-0 ml-4">
+                                                        {p.price != null && (
+                                                            <span className="text-sm font-semibold text-emerald-600">
+                                                                R$ {Number(p.price).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                            </span>
+                                                        )}
+                                                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                            <button onClick={() => setProtocolModal({ open: true, item: { ...p } })} className="p-1.5 rounded-lg text-slate-400 hover:text-teal-600 hover:bg-teal-50 transition-colors"><Edit2 className="w-3.5 h-3.5" /></button>
+                                                            <button onClick={() => removeProtocol(p.id)} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </CardContent>
+                            </Card>
+                        )}
                     </motion.div>
                 </AnimatePresence>
             </div>
+
+            {/* Modal: Protocolo */}
+            <AnimatePresence>
+                {protocolModal.open && protocolModal.item && (
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setProtocolModal({ open: false, item: null })}>
+                        <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4" onClick={e => e.stopPropagation()}>
+                            <div className="flex items-center justify-between">
+                                <h3 className="font-bold text-slate-900 text-base">{protocolModal.item.id ? 'Editar Protocolo' : 'Novo Protocolo'}</h3>
+                                <button onClick={() => setProtocolModal({ open: false, item: null })} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+                            </div>
+                            <div className="space-y-3">
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Nome *</label>
+                                    <input
+                                        type="text"
+                                        placeholder="Ex: Consulta de Avaliação"
+                                        value={protocolModal.item.name ?? ''}
+                                        onChange={e => setProtocolModal(prev => ({ ...prev, item: { ...prev.item!, name: e.target.value } }))}
+                                        className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                                        autoFocus
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Descrição</label>
+                                    <input
+                                        type="text"
+                                        placeholder="Descrição opcional"
+                                        value={protocolModal.item.description ?? ''}
+                                        onChange={e => setProtocolModal(prev => ({ ...prev, item: { ...prev.item!, description: e.target.value } }))}
+                                        className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Valor padrão (R$)</label>
+                                    <input
+                                        type="text"
+                                        inputMode="decimal"
+                                        placeholder="0,00"
+                                        value={protocolModal.item.price ?? ''}
+                                        onChange={e => setProtocolModal(prev => ({ ...prev, item: { ...prev.item!, price: e.target.value === '' ? null : Number(e.target.value.replace(',', '.')) } }))}
+                                        className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                                    />
+                                </div>
+                            </div>
+                            <div className="flex gap-2 pt-2">
+                                <Button variant="outline" className="flex-1" onClick={() => setProtocolModal({ open: false, item: null })}>Cancelar</Button>
+                                <Button className="flex-1" onClick={handleSaveProtocol} disabled={savingProtocol || !protocolModal.item.name?.trim()}>
+                                    {savingProtocol ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Check className="w-4 h-4 mr-2" />}
+                                    Salvar
+                                </Button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             {/* Modal: Link de Conexão WhatsApp */}
             {connectLink && (

@@ -49,7 +49,7 @@ import {
 } from 'recharts';
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { useLeads, useMarketing, MarketingData, Lead, useAppointments, useFunnelStages } from "../hooks/useSupabase";
+import { useLeads, useMarketing, MarketingData, Lead, useAppointments, useFunnelStages, useConversions } from "../hooks/useSupabase";
 import {
   format,
   startOfDay,
@@ -112,6 +112,7 @@ export function MarketingAnalytics() {
   const { data: leads, loading: leadsLoading } = useLeads();
   const { data: appointments, loading: aptsLoading } = useAppointments();
   const { data: marketingData, loading: mktLoading, fetch: fetchMkt, upsert: upsertMkt } = useMarketing();
+  const { data: conversions } = useConversions();
   const { data: stages } = useFunnelStages();
   const conversionStageId = stages.find(s => s.name.toLowerCase().includes('convers'))?.id || null;
   const [isEditing, setIsEditing] = useState(false);
@@ -366,20 +367,39 @@ export function MarketingAnalytics() {
         }
       });
 
-      // Count conversions by updated_at (when lead moved to Conversão stage)
+      // Count conversions from conversions table (primary source)
+      const countedLeadDates = new Set<string>();
+      conversions.forEach(conv => {
+        const convDate = parseISO(conv.converted_at);
+        if (convDate >= p.start && convDate <= p.end) {
+          const lead = leads.find(l => l.id === conv.lead_id);
+          const platform = lead ? getPlatformForLead(lead) : 'no_track';
+          const dateStr = format(convDate, 'yyyy-MM-dd');
+          const manualConvs = marketingData.find(d => d.date === dateStr && d.platform === platform)?.manual_conversions_count;
+          if (manualConvs === null || manualConvs === undefined || manualConvs === 0) {
+            stats[pKey][platform].convs += 1;
+            const manualConvValue = marketingData.find(d => d.date === dateStr && d.platform === platform)?.conversions_value;
+            if (!manualConvValue) {
+              stats[pKey][platform].conv_value += Number(conv.value || 0);
+            }
+          }
+          countedLeadDates.add(`${conv.lead_id}`);
+        }
+      });
+
+      // Fallback: count leads in Conversão stage not already in conversions table
       if (conversionStageId) {
         leads.forEach(lead => {
           if (lead.stage_id !== conversionStageId) return;
+          if (countedLeadDates.has(lead.id)) return;
           const convDate = lead.updated_at ? parseISO(lead.updated_at) : null;
           if (convDate && convDate >= p.start && convDate <= p.end) {
             const platform = getPlatformForLead(lead);
             const dateStr = format(convDate, 'yyyy-MM-dd');
             const manualConvs = marketingData.find(d => d.date === dateStr && d.platform === platform)?.manual_conversions_count;
-
             if (manualConvs === null || manualConvs === undefined || manualConvs === 0) {
               stats[pKey][platform].convs += 1;
             }
-            // Auto-sum estimated_value if no manual conv_value
             const manualConvValue = marketingData.find(d => d.date === dateStr && d.platform === platform)?.conversions_value;
             if (!manualConvValue) {
               stats[pKey][platform].conv_value += Number(lead.estimated_value || 0);
@@ -405,7 +425,7 @@ export function MarketingAnalytics() {
     return stats;
   };
 
-  const metricsByPeriod = useMemo(() => calculateStats(periods), [periods, leads, marketingData, appointments, conversionStageId]);
+  const metricsByPeriod = useMemo(() => calculateStats(periods), [periods, leads, marketingData, appointments, conversions, conversionStageId]);
 
   const comparisonMetricsByPeriod = useMemo(() => {
     if (!isComparing) return {};
@@ -426,7 +446,7 @@ export function MarketingAnalytics() {
     });
 
     return calculateStats(compPeriods as any);
-  }, [isComparing, periods, dateRange, compareDateRange, leads, marketingData, appointments, conversionStageId]);
+  }, [isComparing, periods, dateRange, compareDateRange, leads, marketingData, appointments, conversions, conversionStageId]);
 
   const handleEditData = () => {
     const initial: Record<string, any> = {};

@@ -1889,3 +1889,121 @@ export function useProtocols() {
 
   return { data, loading, create, update, remove, refetch: fetch };
 }
+
+// ==========================================
+// PRESCRIPTIONS
+// ==========================================
+export interface PrescriptionMed {
+  name: string;
+  dosage: string;
+  quantity: string;
+  instructions: string;
+}
+
+export interface Prescription {
+  id: string;
+  clinic_id: string;
+  patient_id: string;
+  doctor_id: string | null;
+  record_id: string | null;
+  medications: PrescriptionMed[];
+  notes: string | null;
+  created_at: string;
+}
+
+export function usePrescriptions(patientId: string | null) {
+  const { activeClinicId } = useAuth();
+  const [data, setData] = useState<Prescription[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = useCallback(async () => {
+    if (!activeClinicId || !patientId) { setData([]); setLoading(false); return; }
+    const { data } = await supabase
+      .from('prescriptions')
+      .select('*')
+      .eq('clinic_id', activeClinicId)
+      .eq('patient_id', patientId)
+      .order('created_at', { ascending: false });
+    setData(data || []);
+    setLoading(false);
+  }, [activeClinicId, patientId]);
+
+  useEffect(() => { fetch(); }, [fetch]);
+
+  const create = async (payload: Omit<Prescription, 'id' | 'clinic_id' | 'created_at'>) => {
+    if (!activeClinicId) return false;
+    const { data: row, error } = await supabase
+      .from('prescriptions')
+      .insert({ ...payload, clinic_id: activeClinicId })
+      .select()
+      .single();
+    if (!error && row) setData(prev => [row, ...prev]);
+    return !error;
+  };
+
+  const remove = async (id: string) => {
+    await supabase.from('prescriptions').delete().eq('id', id);
+    setData(prev => prev.filter(p => p.id !== id));
+  };
+
+  return { data, loading, create, remove, refetch: fetch };
+}
+
+// ==========================================
+// EXAM REQUESTS
+// ==========================================
+export interface ExamItem {
+  name: string;
+  type: 'laboratorial' | 'imagem' | 'funcional' | 'outro';
+  urgency: 'rotina' | 'urgente';
+}
+
+export interface ExamRequest {
+  id: string;
+  clinic_id: string;
+  patient_id: string;
+  doctor_id: string | null;
+  record_id: string | null;
+  exams: ExamItem[];
+  clinical_indication: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export function useExamRequests(patientId: string | null) {
+  const { activeClinicId } = useAuth();
+  const [data, setData] = useState<ExamRequest[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = useCallback(async () => {
+    if (!activeClinicId || !patientId) { setData([]); setLoading(false); return; }
+    const { data } = await supabase
+      .from('exam_requests')
+      .select('*')
+      .eq('clinic_id', activeClinicId)
+      .eq('patient_id', patientId)
+      .order('created_at', { ascending: false });
+    setData(data || []);
+    setLoading(false);
+  }, [activeClinicId, patientId]);
+
+  useEffect(() => { fetch(); }, [fetch]);
+
+  const create = async (payload: Omit<ExamRequest, 'id' | 'clinic_id' | 'created_at'>) => {
+    if (!activeClinicId) return false;
+    const { data: row, error } = await supabase
+      .from('exam_requests')
+      .insert({ ...payload, clinic_id: activeClinicId })
+      .select()
+      .single();
+    if (!error && row) setData(prev => [row, ...prev]);
+    return !error;
+  };
+
+  const remove = async (id: string) => {
+    await supabase.from('exam_requests').delete().eq('id', id);
+    setData(prev => prev.filter(e => e.id !== id));
+  };
+
+  return { data, loading, create, remove, refetch: fetch };
+}

@@ -332,8 +332,6 @@ export interface FunnelStage {
   is_system: boolean;
   is_fixed: boolean;
   color: string | null;
-  is_system: boolean;
-  is_fixed: boolean;
   created_at: string;
 }
 

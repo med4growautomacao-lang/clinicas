@@ -1297,7 +1297,7 @@ export function AISecretary() {
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.98 }}
           transition={{ duration: 0.2 }}
-          className="flex-1 min-h-0"
+          className="flex-1 min-h-0 h-full"
         >
           {activeTab === "chats" && <ChatsView />}
           {activeTab === "leads" && <LeadKanban />}

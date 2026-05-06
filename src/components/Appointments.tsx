@@ -273,7 +273,7 @@ export function Appointments() {
       setRealizadoDialog({ apt, value: '', paymentMethod: '', status: 'pago', description: '', protocolIds: [] });
       return;
     }
-    await update(apt.id, { status: newStatus });
+    await update(apt.id, { status: newStatus as any });
 
     if (newStatus === 'compareceu' && apt.status !== 'compareceu') {
       // 1. Cria registro no prontuário se ainda não existir

@@ -23,10 +23,11 @@ import {
   Users,
   ShoppingCart,
   Check,
+  CalendarPlus,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { useFunnelStages, useLeads, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, Conversion } from "../hooks/useSupabase";
+import { useFunnelStages, useLeads, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useAppointments, useDoctors, usePatients, Conversion, Lead } from "../hooks/useSupabase";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { format, parseISO, formatDistanceToNow } from "date-fns";
@@ -454,7 +455,7 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
       {/* Container principal */}
       <div
         ref={mainRef}
-        className="flex gap-4 overflow-x-scroll pb-2 h-full custom-scrollbar min-h-[600px]"
+        className="flex gap-4 overflow-x-scroll pb-2 h-full custom-scrollbar"
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
         onScroll={onMainScroll}
@@ -746,6 +747,12 @@ export function LeadKanban() {
   const [formData, setFormData] = useState({ name: '', phone: '', source: 'sincronizacao', capture_channel: 'whatsapp', stage_id: '', estimated_value: '', loss_reason: '', avatar_url: '' });
   const [submitting, setSubmitting] = useState(false);
   const [chatLead, setChatLead] = useState<any>(null);
+  const [scheduleLead, setScheduleLead] = useState<Lead | null>(null);
+  const [scheduleForm, setScheduleForm] = useState({ doctor_id: '', date: '', time: '', notes: '' });
+  const [scheduleSubmitting, setScheduleSubmitting] = useState(false);
+  const { create: createAppointment } = useAppointments();
+  const { data: doctors } = useDoctors();
+  const { data: patients, create: createPatient } = usePatients();
   const [localStages, setLocalStages] = useState<any[]>([]);
   const [isAddingStage, setIsAddingStage] = useState(false);
   const [newStageName, setNewStageName] = useState("");
@@ -753,8 +760,11 @@ export function LeadKanban() {
   const [editingStageName, setEditingStageName] = useState("");
   const [showAutomationModal, setShowAutomationModal] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
-  const [expandedStages, setExpandedStages] = useState<Set<string>>(new Set());
-  const CARDS_PER_STAGE = 20;
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'meta' | 'google' | 'sem_origem'>('all');
+  const [entryDateFrom, setEntryDateFrom] = useState('');
+  const [entryDateTo, setEntryDateTo] = useState('');
+  const [convDateFrom, setConvDateFrom] = useState('');
+  const [convDateTo, setConvDateTo] = useState('');
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [isAddingRule, setIsAddingRule] = useState(false);
   const [newRule, setNewRule] = useState({ keywords: '', target_stage_id: '', context: '', lead_response: '', message_to_send: '' });
@@ -858,6 +868,41 @@ export function LeadKanban() {
     'bg-indigo-500': 'bg-indigo-500',
     'bg-slate-500': 'bg-slate-500',
   };
+
+  const filteredLeads = React.useMemo(() => {
+    const hasSourceFilter = sourceFilter !== 'all';
+    const hasEntryFilter = entryDateFrom || entryDateTo;
+    const hasConvFilter = convDateFrom || convDateTo;
+    if (!hasSourceFilter && !hasEntryFilter && !hasConvFilter) return leads;
+
+    return leads.filter(lead => {
+      if (hasSourceFilter) {
+        const isMeta = !!lead.fb_campaign_name || lead.source === 'meta_ads';
+        const isGoogle = !!lead.g_campaign_name || lead.source === 'google_ads';
+        if (sourceFilter === 'meta' && !isMeta) return false;
+        if (sourceFilter === 'google' && !isGoogle) return false;
+        if (sourceFilter === 'sem_origem' && (isMeta || isGoogle)) return false;
+      }
+      if (hasEntryFilter) {
+        const created = lead.created_at.slice(0, 10);
+        if (entryDateFrom && created < entryDateFrom) return false;
+        if (entryDateTo && created > entryDateTo) return false;
+      }
+      if (hasConvFilter) {
+        const convs = conversionsByLead[lead.id] || [];
+        const inRange = convs.some(c => {
+          const d = (c.converted_at || '').slice(0, 10);
+          if (convDateFrom && d < convDateFrom) return false;
+          if (convDateTo && d > convDateTo) return false;
+          return true;
+        });
+        if (!inRange) return false;
+      }
+      return true;
+    });
+  }, [leads, sourceFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo, conversionsByLead]);
+
+  const hasActiveFilters = sourceFilter !== 'all' || entryDateFrom || entryDateTo || convDateFrom || convDateTo;
 
   if (stagesLoading || leadsLoading) {
     return (
@@ -1236,8 +1281,8 @@ export function LeadKanban() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col h-full gap-4">
+      <div className="flex items-center justify-between shrink-0">
         <div>
           <h2 className="text-3xl font-bold tracking-tight text-slate-900">
             Funil de <span className="text-teal-600">Leads</span>
@@ -1261,15 +1306,66 @@ export function LeadKanban() {
         </div>
       </div>
 
+      {/* ── Barra de Filtros ── */}
+      <div className="flex flex-wrap items-center gap-3 shrink-0">
+        {/* Filtro de origem */}
+        <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-xl p-1 shadow-sm">
+          {([
+            { id: 'all',       label: 'Todos',      logo: null },
+            { id: 'meta',      label: 'Meta',        logo: MetaLogo },
+            { id: 'google',    label: 'Google',      logo: GoogleLogo },
+            { id: 'sem_origem',label: 'Sem Origem',  logo: SemOrigemLogo },
+          ] as const).map(opt => (
+            <button
+              key={opt.id}
+              onClick={() => setSourceFilter(opt.id)}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                sourceFilter === opt.id
+                  ? "bg-slate-900 text-white shadow-sm"
+                  : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+              )}
+            >
+              {opt.logo && <img src={opt.logo} className={cn("w-3.5 h-3.5 rounded", opt.id === 'sem_origem' && "opacity-60")} />}
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Filtro de entrada */}
+        <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-3 py-1.5 shadow-sm">
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider shrink-0">Entrada</span>
+          <input type="date" value={entryDateFrom} onChange={e => setEntryDateFrom(e.target.value)} className="text-xs font-medium text-slate-700 outline-none border-none bg-transparent w-[120px]" />
+          <span className="text-slate-300 text-xs">—</span>
+          <input type="date" value={entryDateTo} onChange={e => setEntryDateTo(e.target.value)} className="text-xs font-medium text-slate-700 outline-none border-none bg-transparent w-[120px]" />
+        </div>
+
+        {/* Filtro de conversão */}
+        <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-3 py-1.5 shadow-sm">
+          <span className="text-[10px] font-black text-emerald-500 uppercase tracking-wider shrink-0">Conversão</span>
+          <input type="date" value={convDateFrom} onChange={e => setConvDateFrom(e.target.value)} className="text-xs font-medium text-slate-700 outline-none border-none bg-transparent w-[120px]" />
+          <span className="text-slate-300 text-xs">—</span>
+          <input type="date" value={convDateTo} onChange={e => setConvDateTo(e.target.value)} className="text-xs font-medium text-slate-700 outline-none border-none bg-transparent w-[120px]" />
+        </div>
+
+        {/* Limpar filtros */}
+        {hasActiveFilters && (
+          <button
+            onClick={() => { setSourceFilter('all'); setEntryDateFrom(''); setEntryDateTo(''); setConvDateFrom(''); setConvDateTo(''); }}
+            className="text-[10px] font-bold text-rose-500 hover:text-rose-700 uppercase tracking-wider flex items-center gap-1"
+          >
+            <X className="w-3 h-3" /> Limpar
+          </button>
+        )}
+      </div>
+
+      <div className="flex-1 min-h-0">
       <KanbanScrollContainer>
         {stages.map((stage) => {
-          const stageLeads = leads.filter(l => l.stage_id === stage.id);
+          const stageLeads = filteredLeads.filter(l => l.stage_id === stage.id);
           const stageTotal = stageLeads.reduce((sum, l) => sum + (Number(l.estimated_value) || 0), 0);
-          const isExpanded = expandedStages.has(stage.id);
-          const visibleLeads = isExpanded ? stageLeads : stageLeads.slice(0, CARDS_PER_STAGE);
-          const hiddenCount = stageLeads.length - visibleLeads.length;
           return (
-            <div key={stage.id} className="w-[300px] shrink-0 flex flex-col gap-4">
+            <div key={stage.id} className="w-[300px] shrink-0 flex flex-col gap-2 h-full">
               <div className="flex items-center gap-2 px-2">
                 <div className={cn("w-2 h-2 shrink-0 rounded-full", stageColors[stage.color || 'bg-slate-500'] || 'bg-slate-500')} />
                 <h3 className="font-bold text-slate-700 text-xs uppercase tracking-wider truncate flex-1">{stage.name}</h3>
@@ -1282,16 +1378,16 @@ export function LeadKanban() {
                 </button>
               </div>
 
-              <div 
+              <div
                 className={cn(
-                  "flex-1 bg-slate-100/50 rounded-xl p-3 flex flex-col gap-3 min-h-[400px] transition-colors border-2 border-transparent",
+                  "flex-1 min-h-0 bg-slate-100/50 rounded-xl p-3 flex flex-col gap-3 overflow-y-auto overflow-x-hidden custom-scrollbar transition-colors border-2 border-transparent",
                   dragOverStage === stage.id && "bg-teal-50 border-teal-200"
                 )}
                 onDragOver={(e) => handleDragOver(e, stage.id)}
                 onDragLeave={() => setDragOverStage(null)}
                 onDrop={(e) => handleDrop(e, stage.id)}
               >
-                {visibleLeads.map((lead) => {
+                {stageLeads.map((lead) => {
                   const isPerdido = stage.slug === 'perdido';
                   const semMotivo = isPerdido && !lead.loss_reason;
                   const lastContact = lead.last_message_at ?? lead.created_at;
@@ -1383,8 +1479,10 @@ export function LeadKanban() {
                         )}
                       </div>
                       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-2">
-                        <button onClick={() => openEditModal(lead)} className="p-0.5 text-slate-400 hover:text-teal-600 rounded transition-colors"><Edit2 className="w-3 h-3" /></button>
-                        <button onClick={() => openDeleteConfirm(lead)} className="p-0.5 text-slate-400 hover:text-rose-600 rounded transition-colors"><Trash2 className="w-3 h-3" /></button>
+                        <button title="Agendar consulta" onClick={() => { setScheduleLead(lead); setScheduleForm({ doctor_id: doctors[0]?.id || '', date: '', time: '', notes: '' }); }} className="p-0.5 text-slate-400 hover:text-indigo-600 rounded transition-colors"><CalendarPlus className="w-3 h-3" /></button>
+                        <button title="Registrar venda" onClick={() => setConversionLead({ id: lead.id, name: lead.name, prevStageId: null })} className="p-0.5 text-slate-400 hover:text-emerald-600 rounded transition-colors"><ShoppingCart className="w-3 h-3" /></button>
+                        <button title="Editar" onClick={() => openEditModal(lead)} className="p-0.5 text-slate-400 hover:text-teal-600 rounded transition-colors"><Edit2 className="w-3 h-3" /></button>
+                        <button title="Excluir" onClick={() => openDeleteConfirm(lead)} className="p-0.5 text-slate-400 hover:text-rose-600 rounded transition-colors"><Trash2 className="w-3 h-3" /></button>
                       </div>
                     </div>
                       );
@@ -1469,60 +1567,36 @@ export function LeadKanban() {
                       );
                     })()}
 
-                    {/* Footer: valor | tempo + chat + venda */}
-                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-100">
-                      <div className="bg-teal-50 text-teal-700 text-[9px] font-bold px-1.5 py-0.5 rounded border border-teal-100">
+                    {/* Footer: valor | tempo + chat */}
+                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-100 gap-2">
+                      <div className="bg-teal-50 text-teal-700 text-[9px] font-bold px-1.5 py-0.5 rounded border border-teal-100 shrink-0">
                         R$ {Number(lead.estimated_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                       </div>
-                      <div className="flex items-center gap-1">
-                        <span className="text-[9px] font-medium text-slate-400">
-                          {formatDistanceToNow(parseISO(lastContact), { addSuffix: true, locale: ptBR })}
-                        </span>
-                        <button
-                          onClick={() => setConversionLead({ id: lead.id, name: lead.name, prevStageId: null })}
-                          className="flex items-center gap-0.5 px-1.5 py-0.5 bg-emerald-50 text-emerald-700 rounded text-[9px] font-bold border border-emerald-100 hover:bg-emerald-100 transition-colors"
-                        >
-                          <ShoppingCart className="w-2.5 h-2.5" />
-                          Venda
-                        </button>
-                        <button
-                          onClick={() => setChatLead(lead)}
-                          className="flex items-center gap-1 px-1.5 py-0.5 bg-teal-50 text-teal-700 rounded text-[9px] font-bold border border-teal-100 hover:bg-teal-100 transition-colors"
-                        >
-                          <MessageSquare className="w-2.5 h-2.5" />
-                          Chat
-                        </button>
-                      </div>
+                      <span className="text-[9px] font-medium text-slate-400 truncate text-right flex-1">
+                        {formatDistanceToNow(parseISO(lastContact), { addSuffix: true, locale: ptBR })}
+                      </span>
+                      <button
+                        onClick={() => setChatLead(lead)}
+                        className="p-1 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded transition-colors shrink-0"
+                        title="Abrir chat"
+                      >
+                        <MessageSquare className="w-3 h-3" />
+                      </button>
                     </div>
                   </motion.div>
                   );
                 })}
 
-                {hiddenCount > 0 && (
-                  <button
-                    onClick={() => setExpandedStages(prev => new Set([...prev, stage.id]))}
-                    className="w-full py-1.5 rounded-lg bg-slate-200/70 text-slate-500 text-[11px] font-semibold hover:bg-slate-200 transition-colors"
-                  >
-                    + {hiddenCount} leads
-                  </button>
-                )}
-                {isExpanded && stageLeads.length > CARDS_PER_STAGE && (
-                  <button
-                    onClick={() => setExpandedStages(prev => { const s = new Set(prev); s.delete(stage.id); return s; })}
-                    className="w-full py-1.5 rounded-lg bg-slate-200/70 text-slate-500 text-[11px] font-semibold hover:bg-slate-200 transition-colors"
-                  >
-                    Recolher
-                  </button>
-                )}
-                <button onClick={() => { setFormData(p => ({ ...p, stage_id: stage.id, avatar_url: '' })); setShowModal(true); }} className="w-full py-2 border border-dashed border-slate-300 rounded-lg text-slate-400 text-xs font-semibold hover:bg-white hover:border-slate-400 transition-all flex items-center justify-center gap-2 mt-auto">
-                  <Plus className="w-3 h-3" />
-                  Adicionar Lead
-                </button>
               </div>
+              <button onClick={() => { setFormData(p => ({ ...p, stage_id: stage.id, avatar_url: '' })); setShowModal(true); }} className="w-full py-1.5 border border-dashed border-slate-300 rounded-lg text-slate-400 text-xs font-semibold hover:bg-white hover:border-slate-400 transition-all flex items-center justify-center gap-1.5 shrink-0">
+                <Plus className="w-3 h-3" />
+                Adicionar Lead
+              </button>
             </div>
           );
         })}
       </KanbanScrollContainer>
+      </div>
 
       {hasMore && (
         <div className="flex justify-center py-4">
@@ -1911,6 +1985,85 @@ export function LeadKanban() {
       <AnimatePresence>
         {chatLead && (
           <LeadChat lead={chatLead} onClose={() => setChatLead(null)} isDragging={!!draggedLead} />
+        )}
+      </AnimatePresence>
+
+      {/* Quick Schedule Modal */}
+      <AnimatePresence>
+        {scheduleLead && (
+          <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4" onClick={() => setScheduleLead(null)}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between p-5 border-b border-slate-100">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Agendar Consulta</h3>
+                  <p className="text-xs text-slate-400 mt-0.5">{scheduleLead.name}</p>
+                </div>
+                <button onClick={() => setScheduleLead(null)} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-full"><X className="w-4 h-4" /></button>
+              </div>
+              <div className="p-5 space-y-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Médico *</label>
+                  <select value={scheduleForm.doctor_id} onChange={e => setScheduleForm(p => ({ ...p, doctor_id: e.target.value }))} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium outline-none focus:ring-2 focus:ring-teal-200">
+                    <option value="">Selecione</option>
+                    {doctors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Data *</label>
+                    <input type="date" value={scheduleForm.date} onChange={e => setScheduleForm(p => ({ ...p, date: e.target.value }))} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium outline-none focus:ring-2 focus:ring-teal-200" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Hora *</label>
+                    <input type="time" value={scheduleForm.time} onChange={e => setScheduleForm(p => ({ ...p, time: e.target.value }))} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium outline-none focus:ring-2 focus:ring-teal-200" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Observações</label>
+                  <input type="text" value={scheduleForm.notes} onChange={e => setScheduleForm(p => ({ ...p, notes: e.target.value }))} placeholder="Opcional..." className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium outline-none focus:ring-2 focus:ring-teal-200" />
+                </div>
+              </div>
+              <div className="flex gap-3 p-5 border-t border-slate-100 bg-slate-50">
+                <Button variant="outline" className="flex-1 font-bold" onClick={() => setScheduleLead(null)}>Cancelar</Button>
+                <Button
+                  className="flex-1 font-bold bg-teal-600 hover:bg-teal-700"
+                  disabled={!scheduleForm.doctor_id || !scheduleForm.date || !scheduleForm.time || scheduleSubmitting}
+                  onClick={async () => {
+                    setScheduleSubmitting(true);
+                    // Garante que o lead tem um paciente vinculado
+                    let patientId = scheduleLead.converted_patient_id;
+                    if (!patientId) {
+                      const existing = patients.find(p => p.phone === scheduleLead.phone);
+                      if (existing) {
+                        patientId = existing.id;
+                        supabase.from('leads').update({ converted_patient_id: existing.id }).eq('id', scheduleLead.id);
+                      } else {
+                        const newPatient = await createPatient({ name: scheduleLead.name, phone: scheduleLead.phone || null, email: scheduleLead.email || null });
+                        if (newPatient) {
+                          patientId = newPatient.id;
+                          supabase.from('leads').update({ converted_patient_id: newPatient.id }).eq('id', scheduleLead.id);
+                        }
+                      }
+                    }
+                    if (patientId) {
+                      await createAppointment({ patient_id: patientId, doctor_id: scheduleForm.doctor_id, date: scheduleForm.date, time: scheduleForm.time, notes: scheduleForm.notes || null, status: 'pendente', source: 'manual' });
+                    }
+                    setScheduleLead(null);
+                    setScheduleSubmitting(false);
+                  }}
+                >
+                  {scheduleSubmitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CalendarPlus className="w-4 h-4 mr-2" />}
+                  Agendar
+                </Button>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { DayPicker, DateRange } from "react-day-picker";
 import { ptBR } from "date-fns/locale";
 import { format, parseISO } from "date-fns";
@@ -12,7 +12,6 @@ interface DateRangePickerProps {
   to: string;
   onFromChange: (v: string) => void;
   onToChange: (v: string) => void;
-  /** Render only the calendar (no trigger button) */
   inline?: boolean;
   numberOfMonths?: number;
 }
@@ -28,7 +27,9 @@ export function DateRangePicker({
   numberOfMonths = 2,
 }: DateRangePickerProps) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [popupPos, setPopupPos] = useState<{ top: number; left: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
 
   const selected: DateRange | undefined =
     from || to
@@ -44,14 +45,27 @@ export function DateRangePicker({
     return "Qualquer período";
   };
 
+  const openPopup = useCallback(() => {
+    if (!buttonRef.current) return;
+    const rect = buttonRef.current.getBoundingClientRect();
+    setPopupPos({ top: rect.bottom + 6, left: rect.left });
+    setOpen(true);
+  }, []);
+
   useEffect(() => {
-    if (inline) return;
+    if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (
+        popupRef.current && !popupRef.current.contains(target) &&
+        buttonRef.current && !buttonRef.current.contains(target)
+      ) {
+        setOpen(false);
+      }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [inline]);
+  }, [open]);
 
   const handleSelect = (range: DateRange | undefined) => {
     onFromChange(range?.from ? format(range.from, "yyyy-MM-dd") : "");
@@ -64,38 +78,43 @@ export function DateRangePicker({
     onToChange("");
   };
 
-  const picker = (
-    <div className="rdp-custom">
-      <DayPicker
-        mode="range"
-        selected={selected}
-        onSelect={handleSelect}
-        numberOfMonths={numberOfMonths}
-        locale={ptBR}
-        weekStartsOn={0}
-      />
-    </div>
-  );
-
-  if (inline) return picker;
+  if (inline) {
+    return (
+      <div className="rdp-custom">
+        <DayPicker
+          mode="range"
+          selected={selected}
+          onSelect={handleSelect}
+          numberOfMonths={numberOfMonths}
+          locale={ptBR}
+          weekStartsOn={0}
+        />
+      </div>
+    );
+  }
 
   return (
-    <div className="relative" ref={ref}>
+    <>
       <button
-        onClick={() => setOpen(v => !v)}
+        ref={buttonRef}
+        type="button"
+        onClick={() => open ? setOpen(false) : openPopup()}
         className={cn(
-          "flex items-center gap-2 bg-white border rounded-xl px-3 py-1.5 shadow-sm transition-all text-xs font-medium",
+          "flex items-center gap-2 bg-white border rounded-xl px-3 shadow-sm transition-all h-full",
           open ? "border-teal-400 ring-2 ring-teal-100" : "border-slate-200 hover:border-slate-300",
-          hasValue ? "text-slate-700" : "text-slate-400"
         )}
       >
-        <CalendarDays className={cn("w-3.5 h-3.5 shrink-0", labelColor || "text-slate-400")} />
+        <CalendarDays className="w-3.5 h-3.5 shrink-0 text-slate-400" />
         {label && (
-          <span className={cn("font-black text-[10px] uppercase tracking-wider shrink-0", labelColor || "text-slate-400")}>
-            {label}
-          </span>
+          <div className="flex flex-col items-start leading-tight shrink-0">
+            <span className="font-black text-[8px] uppercase tracking-wider text-slate-400">
+              {label}
+            </span>
+            <span className={cn("font-bold text-[9px]", hasValue ? "text-slate-700" : "text-slate-400")}>
+              {displayText()}
+            </span>
+          </div>
         )}
-        <span className="text-slate-600 text-[11px]">{displayText()}</span>
         {hasValue && (
           <X
             className="w-3 h-3 text-slate-400 hover:text-rose-500 shrink-0 transition-colors"
@@ -104,8 +123,12 @@ export function DateRangePicker({
         )}
       </button>
 
-      {open && (
-        <div className="absolute top-full left-0 mt-2 z-[70] bg-white border border-slate-200 rounded-2xl shadow-2xl p-3 rdp-custom">
+      {open && popupPos && (
+        <div
+          ref={popupRef}
+          className="fixed z-[200] bg-white border border-slate-200 rounded-2xl shadow-2xl p-3 rdp-custom"
+          style={{ top: popupPos.top, left: popupPos.left }}
+        >
           <DayPicker
             mode="range"
             selected={selected}
@@ -116,6 +139,6 @@ export function DateRangePicker({
           />
         </div>
       )}
-    </div>
+    </>
   );
 }

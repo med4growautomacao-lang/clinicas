@@ -456,7 +456,7 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
       {/* Container principal */}
       <div
         ref={mainRef}
-        className="flex gap-4 overflow-x-scroll pb-2 h-full custom-scrollbar"
+        className="flex gap-4 overflow-x-scroll pb-2 h-full scrollbar-hide"
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
         onScroll={onMainScroll}
@@ -1312,7 +1312,7 @@ export function LeadKanban() {
       </div>
 
       {/* ── Barra de Filtros ── */}
-      <div className="flex flex-wrap items-center gap-3 shrink-0">
+      <div className="flex items-stretch gap-3 shrink-0 flex-wrap">
         {/* Filtro de origem */}
         <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-xl p-1 shadow-sm">
           {([
@@ -1338,7 +1338,7 @@ export function LeadKanban() {
         </div>
 
         <DateRangePicker
-          label="Entrada"
+          label="Data de entrada do lead"
           from={entryDateFrom}
           to={entryDateTo}
           onFromChange={setEntryDateFrom}
@@ -1346,7 +1346,7 @@ export function LeadKanban() {
         />
 
         <DateRangePicker
-          label="Conversão"
+          label="Data de conversão do lead"
           labelColor="text-emerald-500"
           from={convDateFrom}
           to={convDateTo}
@@ -1619,18 +1619,6 @@ export function LeadKanban() {
       </KanbanScrollContainer>
       </div>
 
-      {hasMore && (
-        <div className="flex justify-center py-4">
-          <button
-            onClick={loadMore}
-            disabled={loadingMore}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-medium transition-colors disabled:opacity-50"
-          >
-            {loadingMore ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-            {loadingMore ? 'Carregando...' : 'Carregar mais leads'}
-          </button>
-        </div>
-      )}
 
       {/* Create Lead Modal */}
       <AnimatePresence>

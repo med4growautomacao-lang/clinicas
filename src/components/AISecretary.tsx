@@ -1314,7 +1314,9 @@ export function AISecretary() {
 function ChatsView() {
   const { data: leads, loading: leadsLoading } = useLeads();
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const [visibleCount, setVisibleCount] = useState(20);
   const selectedLead = leads.find(l => l.id === selectedLeadId);
+  const visibleLeads = leads.slice(0, visibleCount);
   const { data: messages, loading: messagesLoading } = useChatMessages(selectedLeadId || undefined, selectedLead?.phone);
 
   const scrollRef = React.useRef<HTMLDivElement>(null);
@@ -1379,13 +1381,21 @@ function ChatsView() {
             <User className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
           </div>
         </CardHeader>
-        <CardContent className="flex-1 overflow-y-auto p-2 space-y-1 mt-2">
+        <CardContent
+          className="flex-1 overflow-y-auto p-2 space-y-1 mt-2 custom-scrollbar"
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            if (el.scrollTop + el.clientHeight >= el.scrollHeight - 80 && visibleCount < leads.length) {
+              setVisibleCount(v => v + 20);
+            }
+          }}
+        >
           {leads.length === 0 ? (
             <div className="p-8 text-center text-slate-400">
               <p className="text-sm font-medium">Nenhum atendimento ativo no momento.</p>
             </div>
           ) : (
-            leads.map((lead) => {
+            visibleLeads.map((lead) => {
               const isMeta = !!lead.fb_campaign_name || lead.source === 'meta_ads';
               const isGoogle = !!lead.g_campaign_name || lead.source === 'google_ads';
               return (

@@ -41,7 +41,7 @@ import {
 } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useAuth } from "../contexts/AuthContext";
-import { useAppointments, useDoctors, usePatients, useConversions, useFinancial, useProtocols } from "../hooks/useSupabase";
+import { useAppointments, useDoctors, usePatients, useLeads, useConversions, useFinancial, useProtocols, Lead } from "../hooks/useSupabase";
 import { supabase } from "../lib/supabase";
 import { DoctorScheduleSettings } from "./DoctorScheduleSettings";
 import { PatientModal } from "./PatientModal";
@@ -82,7 +82,8 @@ export function Appointments() {
   const { userRole, profile, activeClinicId } = useAuth();
   const { data: appointments, loading, create, update, remove } = useAppointments();
   const { data: doctors, refetch: refetchDoctors } = useDoctors();
-  const { data: patients, refetch: refetchPatients } = usePatients();
+  const { data: patients, refetch: refetchPatients, create: createPatient } = usePatients();
+  const { data: leads } = useLeads();
   const { create: createConversion } = useConversions();
   const { create: createTransaction } = useFinancial();
   const { data: protocols } = useProtocols();
@@ -104,7 +105,7 @@ export function Appointments() {
   const [showDayModal, setShowDayModal] = useState(false);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [openStatusApt, setOpenStatusApt] = useState<string | null>(null);
+  const [openStatusApt, setOpenStatusApt] = useState<{ id: string; top: number; left: number } | null>(null);
   const [realizadoDialog, setRealizadoDialog] = useState<{
     apt: any;
     value: string;
@@ -254,11 +255,9 @@ export function Appointments() {
 
       const { data: conversaoStage } = await supabase
         .from('funnel_stages')
-        .select('id, position')
+        .select('id')
         .eq('clinic_id', activeClinicId)
-        .ilike('name', '%convers%')
-        .order('position')
-        .limit(1)
+        .eq('slug', 'conversao')
         .maybeSingle();
 
       if (conversaoStage && leadData.stage_id !== conversaoStage.id) {
@@ -275,6 +274,80 @@ export function Appointments() {
       return;
     }
     await update(apt.id, { status: newStatus });
+
+    if (newStatus === 'compareceu' && apt.status !== 'compareceu') {
+      // 1. Cria registro no prontuário se ainda não existir
+      const { data: existing } = await supabase
+        .from('medical_records')
+        .select('id')
+        .eq('appointment_id', apt.id)
+        .maybeSingle();
+      if (!existing) {
+        await supabase.from('medical_records').insert({
+          clinic_id: activeClinicId,
+          patient_id: apt.patient_id,
+          doctor_id: apt.doctor_id,
+          appointment_id: apt.id,
+          type: 'consulta',
+          description: null,
+          diagnosis: null,
+          prescription: null,
+        });
+      }
+
+      // 2. Move lead para etapa "Compareceu" (cria a etapa se não existir)
+      let { data: compareceuStage } = await supabase
+        .from('funnel_stages')
+        .select('id')
+        .eq('clinic_id', activeClinicId)
+        .eq('slug', 'compareceu')
+        .maybeSingle();
+
+      if (!compareceuStage) {
+        const { data: lastStage } = await supabase
+          .from('funnel_stages')
+          .select('position')
+          .eq('clinic_id', activeClinicId)
+          .order('position', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const { data: newStage } = await supabase
+          .from('funnel_stages')
+          .insert({ name: 'Compareceu', slug: 'compareceu', is_system: true, clinic_id: activeClinicId, position: (lastStage?.position ?? -1) + 1 })
+          .select()
+          .single();
+        compareceuStage = newStage;
+      }
+
+      if (compareceuStage) {
+        // Busca lead pelo converted_patient_id ou pelo telefone do paciente
+        let leadId: string | null = null;
+        const { data: byPatient } = await supabase
+          .from('leads')
+          .select('id')
+          .eq('converted_patient_id', apt.patient_id)
+          .eq('clinic_id', activeClinicId)
+          .maybeSingle();
+        leadId = byPatient?.id ?? null;
+
+        if (!leadId) {
+          const patient = patients.find(p => p.id === apt.patient_id);
+          if (patient?.phone) {
+            const { data: byPhone } = await supabase
+              .from('leads')
+              .select('id')
+              .eq('phone', patient.phone)
+              .eq('clinic_id', activeClinicId)
+              .maybeSingle();
+            leadId = byPhone?.id ?? null;
+          }
+        }
+
+        if (leadId) {
+          await supabase.from('leads').update({ stage_id: compareceuStage.id }).eq('id', leadId);
+        }
+      }
+    }
   };
 
   const handleConfirmRealizado = async () => {
@@ -328,6 +401,25 @@ export function Appointments() {
     setShowPatientModal(false);
   };
 
+  const handleSelectLead = async (lead: Lead) => {
+    // If lead is already linked to a patient, just use that patient
+    if (lead.converted_patient_id) {
+      setFormData(prev => ({ ...prev, patient_id: lead.converted_patient_id! }));
+      return;
+    }
+    // Create patient from lead data and link them
+    const newPatient = await createPatient({
+      name: lead.name,
+      phone: lead.phone || null,
+      email: lead.email || null,
+    });
+    if (!newPatient) return;
+    supabase.from('leads').update({ converted_patient_id: newPatient.id }).eq('id', lead.id);
+    setLastCreatedPatient(newPatient);
+    setFormData(prev => ({ ...prev, patient_id: newPatient.id }));
+    refetchPatients();
+  };
+
   const handleDelete = async () => {
     if (!selectedAppointment) return;
     setSubmitting(true);
@@ -356,11 +448,12 @@ export function Appointments() {
   };
 
   const statusLabel: Record<string, string> = {
-    pendente: 'Pendente', confirmado: 'Confirmado', realizado: 'Realizado', cancelado: 'Cancelado', faltou: 'Faltou'
+    pendente: 'Pendente', confirmado: 'Confirmado', compareceu: 'Compareceu', realizado: 'Realizado', cancelado: 'Cancelado', faltou: 'Faltou'
   };
   const statusColor: Record<string, string> = {
     confirmado: "bg-emerald-50 text-emerald-700 border-emerald-100",
     pendente: "bg-amber-50 text-amber-700 border-amber-100",
+    compareceu: "bg-blue-50 text-blue-700 border-blue-100",
     realizado: "bg-teal-50 text-teal-700 border-teal-100",
     cancelado: "bg-rose-50 text-rose-600 border-rose-100",
     faltou: "bg-slate-50 text-slate-600 border-slate-100",
@@ -508,32 +601,18 @@ export function Appointments() {
                             )}
                           </td>
                           <td className="px-6 py-4">
-                            <div className="relative">
+                            <div>
                               <button
-                                onClick={() => setOpenStatusApt(openStatusApt === apt.id ? null : apt.id)}
+                                onClick={(e) => {
+                                  if (openStatusApt?.id === apt.id) { setOpenStatusApt(null); return; }
+                                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                  setOpenStatusApt({ id: apt.id, top: rect.bottom + 4, left: rect.left });
+                                }}
                                 className={cn("inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold border cursor-pointer hover:opacity-75 transition-opacity", statusColor[apt.status] || statusColor.pendente)}
                               >
                                 {statusLabel[apt.status] || apt.status}
                                 <ChevronDown className="w-3 h-3" />
                               </button>
-                              {openStatusApt === apt.id && (
-                                <div className="absolute z-50 top-full mt-1 left-0 bg-white border border-slate-200 rounded-xl shadow-lg py-1 min-w-[150px]">
-                                  {Object.entries(statusLabel).map(([val, lbl]) => (
-                                    <button
-                                      key={val}
-                                      onClick={() => handleInlineStatus(apt, val)}
-                                      className={cn(
-                                        "w-full text-left flex items-center gap-2 px-3 py-1.5 text-xs font-semibold hover:bg-slate-50 transition-colors",
-                                        val === apt.status ? "text-teal-600" : "text-slate-700"
-                                      )}
-                                    >
-                                      {val === apt.status && <Check className="w-3 h-3" />}
-                                      {val !== apt.status && <span className="w-3" />}
-                                      {lbl}
-                                    </button>
-                                  ))}
-                                </div>
-                              )}
                             </div>
                           </td>
                           <td className="px-6 py-4 text-right">
@@ -585,6 +664,8 @@ export function Appointments() {
                     onSelect={(p) => setFormData(prev => ({ ...prev, patient_id: p.id }))}
                     onNewPatient={() => setShowPatientModal(true)}
                     lastCreatedPatient={lastCreatedPatient}
+                    leads={leads}
+                    onSelectLead={handleSelectLead}
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
@@ -784,9 +865,34 @@ export function Appointments() {
         )}
       </AnimatePresence>
 
-      {/* Overlay to close status dropdown */}
+      {/* Status dropdown — rendered outside card to escape overflow-hidden */}
       {openStatusApt && (
-        <div className="fixed inset-0 z-40" onClick={() => setOpenStatusApt(null)} />
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpenStatusApt(null)} />
+          <div
+            className="fixed z-50 bg-white border border-slate-200 rounded-xl shadow-lg py-1 min-w-[150px]"
+            style={{ top: openStatusApt.top, left: openStatusApt.left }}
+          >
+            {Object.entries(statusLabel).map(([val, lbl]) => {
+              const apt = filteredAppointments.find(a => a.id === openStatusApt.id);
+              if (!apt) return null;
+              return (
+                <button
+                  key={val}
+                  onClick={() => handleInlineStatus(apt, val)}
+                  className={cn(
+                    "w-full text-left flex items-center gap-2 px-3 py-1.5 text-xs font-semibold hover:bg-slate-50 transition-colors",
+                    val === apt.status ? "text-teal-600" : "text-slate-700"
+                  )}
+                >
+                  {val === apt.status && <Check className="w-3 h-3" />}
+                  {val !== apt.status && <span className="w-3" />}
+                  {lbl}
+                </button>
+              );
+            })}
+          </div>
+        </>
       )}
 
       {/* Realizado value dialog */}

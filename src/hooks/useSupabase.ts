@@ -227,7 +227,7 @@ export interface Appointment {
   doctor_id: string;
   date: string;
   time: string;
-  status: 'pendente' | 'confirmado' | 'realizado' | 'cancelado' | 'faltou';
+  status: 'pendente' | 'confirmado' | 'compareceu' | 'realizado' | 'cancelado' | 'faltou';
   source: 'ia' | 'manual' | 'site' | null;
   notes: string | null;
   created_at: string;
@@ -328,6 +328,9 @@ export interface FunnelStage {
   clinic_id: string;
   name: string;
   position: number;
+  slug: string | null;
+  is_system: boolean;
+  is_fixed: boolean;
   color: string | null;
   is_system: boolean;
   is_fixed: boolean;
@@ -854,6 +857,10 @@ export interface MedicalRecord {
   description: string | null;
   diagnosis: string | null;
   prescription: string | null;
+  weight: string | null;
+  height: string | null;
+  blood_pressure: string | null;
+  temperature: string | null;
   attachments: any;
   created_at: string;
   // Joined

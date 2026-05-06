@@ -749,6 +749,8 @@ export function LeadKanban() {
   const [localStages, setLocalStages] = useState<any[]>([]);
   const [isAddingStage, setIsAddingStage] = useState(false);
   const [newStageName, setNewStageName] = useState("");
+  const [editingStageId, setEditingStageId] = useState<string | null>(null);
+  const [editingStageName, setEditingStageName] = useState("");
   const [showAutomationModal, setShowAutomationModal] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [expandedStages, setExpandedStages] = useState<Set<string>>(new Set());
@@ -779,9 +781,9 @@ export function LeadKanban() {
       const targetStage = stages.find(s => s.id === targetStageId);
       await update(draggedLead.id, { stage_id: targetStageId });
 
-      if (targetStage?.name.toLowerCase().includes('convers')) {
+      if (targetStage?.slug === 'conversao') {
         setConversionLead({ id: draggedLead.id, name: draggedLead.name, prevStageId: draggedLead.stage_id });
-      } else if (targetStage?.name === 'Perdido') {
+      } else if (targetStage?.slug === 'perdido') {
         setLossLead({ id: draggedLead.id, name: draggedLead.name, prevStageId: draggedLead.stage_id });
       }
     }
@@ -792,7 +794,7 @@ export function LeadKanban() {
     if (!formData.name.trim()) return;
     setSubmitting(true);
     
-    const isPerdido = stages.find(s => s.id === formData.stage_id)?.name === 'Perdido';
+    const isPerdido = stages.find(s => s.id === formData.stage_id)?.slug === 'perdido';
 
     const payload = {
       name: formData.name,
@@ -1290,7 +1292,7 @@ export function LeadKanban() {
                 onDrop={(e) => handleDrop(e, stage.id)}
               >
                 {visibleLeads.map((lead) => {
-                  const isPerdido = stage.name === 'Perdido';
+                  const isPerdido = stage.slug === 'perdido';
                   const semMotivo = isPerdido && !lead.loss_reason;
                   const lastContact = lead.last_message_at ?? lead.created_at;
                   const frozen = !!lead.converted_patient_id || isPerdido;
@@ -1601,7 +1603,7 @@ export function LeadKanban() {
                     {stages.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 </div>
-                {stages.find(s => s.id === formData.stage_id)?.name === 'Perdido' && (
+                {stages.find(s => s.id === formData.stage_id)?.slug === 'perdido' && (
                   <div>
                     <label className="block text-xs font-semibold text-rose-500 uppercase tracking-wider mb-1.5 flex items-center gap-1">
                       <AlertCircle className="w-3 h-3" />
@@ -1711,47 +1713,79 @@ export function LeadKanban() {
               <div className="p-6 max-h-[400px] overflow-y-auto space-y-4 custom-scrollbar">
                 <div className="space-y-2">
                   {localStages.map((stage, idx) => (
-                    <div 
-                      key={stage.id} 
+                    <div
+                      key={stage.id}
                       className={cn(
                         "flex items-center justify-between p-3 rounded-xl border transition-all",
-                        stage.is_fixed ? "bg-slate-50 border-slate-200 opacity-80" : "bg-white border-slate-200 hover:border-teal-300 hover:shadow-sm"
+                        stage.slug ? "bg-slate-50 border-slate-200" : "bg-white border-slate-200 hover:border-teal-300 hover:shadow-sm"
                       )}
                     >
-                      <div className="flex items-center gap-3">
-                        <div className={cn("w-3 h-3 rounded-full", stageColors[stage.color] || 'bg-slate-500')} />
-                        <div>
-                          <p className="text-sm font-bold text-slate-700">{stage.name}</p>
-                          {stage.is_fixed && <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Posicao Fixa</span>}
-                        </div>
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <div className={cn("w-3 h-3 rounded-full shrink-0", stageColors[stage.color] || 'bg-slate-500')} />
+                        {editingStageId === stage.id ? (
+                          <input
+                            autoFocus
+                            type="text"
+                            value={editingStageName}
+                            onChange={e => setEditingStageName(e.target.value)}
+                            onKeyDown={async (e) => {
+                              if (e.key === 'Enter' && editingStageName.trim()) {
+                                await updateStage(stage.id, { name: editingStageName.trim() });
+                                setLocalStages(p => p.map(s => s.id === stage.id ? { ...s, name: editingStageName.trim() } : s));
+                                setEditingStageId(null);
+                              } else if (e.key === 'Escape') {
+                                setEditingStageId(null);
+                              }
+                            }}
+                            onBlur={async () => {
+                              if (editingStageName.trim() && editingStageName.trim() !== stage.name) {
+                                await updateStage(stage.id, { name: editingStageName.trim() });
+                                setLocalStages(p => p.map(s => s.id === stage.id ? { ...s, name: editingStageName.trim() } : s));
+                              }
+                              setEditingStageId(null);
+                            }}
+                            className="flex-1 px-2 py-1 text-sm font-bold bg-white border border-teal-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200"
+                          />
+                        ) : (
+                          <div className="min-w-0">
+                            <p className="text-sm font-bold text-slate-700 truncate">{stage.name}</p>
+                            {stage.slug && <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Sistema</span>}
+                          </div>
+                        )}
                       </div>
 
-                      <div className="flex items-center gap-1">
-                        {!stage.is_fixed ? (
+                      <div className="flex items-center gap-1 shrink-0 ml-2">
+                        <button
+                          disabled={idx === 0}
+                          onClick={() => {
+                            const newStages = [...localStages];
+                            [newStages[idx], newStages[idx-1]] = [newStages[idx-1], newStages[idx]];
+                            setLocalStages(newStages);
+                          }}
+                          className="p-1.5 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded-md disabled:opacity-30"
+                        >
+                          <ChevronUp className="w-4 h-4" />
+                        </button>
+                        <button
+                          disabled={idx === localStages.length - 1}
+                          onClick={() => {
+                            const newStages = [...localStages];
+                            [newStages[idx], newStages[idx+1]] = [newStages[idx+1], newStages[idx]];
+                            setLocalStages(newStages);
+                          }}
+                          className="p-1.5 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded-md disabled:opacity-30"
+                        >
+                          <ChevronDown className="w-4 h-4" />
+                        </button>
+                        {!stage.slug && (
                           <>
-                            <button 
-                              disabled={idx <= 1} // Can't move above Fixed stages index
-                              onClick={() => {
-                                const newStages = [...localStages];
-                                [newStages[idx], newStages[idx-1]] = [newStages[idx-1], newStages[idx]];
-                                setLocalStages(newStages);
-                              }}
-                              className="p-1.5 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded-md disabled:opacity-30"
+                            <button
+                              onClick={() => { setEditingStageId(stage.id); setEditingStageName(stage.name); }}
+                              className="p-1.5 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded-md"
                             >
-                              <ChevronUp className="w-4 h-4" />
+                              <Edit2 className="w-4 h-4" />
                             </button>
-                            <button 
-                              disabled={idx === localStages.length - 1}
-                              onClick={() => {
-                                const newStages = [...localStages];
-                                [newStages[idx], newStages[idx+1]] = [newStages[idx+1], newStages[idx]];
-                                setLocalStages(newStages);
-                              }}
-                              className="p-1.5 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded-md disabled:opacity-30"
-                            >
-                              <ChevronDown className="w-4 h-4" />
-                            </button>
-                            <button 
+                            <button
                               onClick={async () => {
                                 if (confirm(`Deseja realmente excluir a etapa "${stage.name}"?`)) {
                                   await removeStage(stage.id);
@@ -1763,8 +1797,6 @@ export function LeadKanban() {
                               <Trash2 className="w-4 h-4" />
                             </button>
                           </>
-                        ) : (
-                          <GripVertical className="w-4 h-4 text-slate-300" />
                         )}
                       </div>
                     </div>

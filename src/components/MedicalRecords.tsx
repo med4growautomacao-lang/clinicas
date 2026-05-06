@@ -5,6 +5,7 @@ import {
     Search, FileText, History, Plus, User, Calendar, Scale, Ruler,
     AlertCircle, Stethoscope, Loader2, Trash2, Edit2, X,
     ClipboardList, Printer, Pill, FlaskConical, Microscope, ChevronDown, ChevronUp,
+    Heart, Thermometer,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -175,7 +176,7 @@ export function MedicalRecords() {
     // Record Modal
     const [showRecordModal, setShowRecordModal] = useState(false);
     const [selectedRecord, setSelectedRecord] = useState<MedicalRecord | null>(null);
-    const [recordFormData, setRecordFormData] = useState({ type: 'consulta' as any, description: '', diagnosis: '', prescription: '', doctor_id: '' });
+    const [recordFormData, setRecordFormData] = useState({ type: 'consulta' as any, description: '', diagnosis: '', prescription: '', doctor_id: '', weight: '', height: '', blood_pressure: '', temperature: '' });
     const [showDeleteRecordConfirm, setShowDeleteRecordConfirm] = useState(false);
 
     // Prescription Modal (linked to a record)
@@ -226,12 +227,12 @@ export function MedicalRecords() {
     const handleOpenCreateRecord = () => {
         if (!selectedPatient) return;
         setSelectedRecord(null);
-        setRecordFormData({ type: 'consulta', description: '', diagnosis: '', prescription: '', doctor_id: doctors[0]?.id || '' });
+        setRecordFormData({ type: 'consulta', description: '', diagnosis: '', prescription: '', doctor_id: doctors[0]?.id || '', weight: selectedPatient?.weight?.toString() || '', height: selectedPatient?.height?.toString() || '', blood_pressure: '', temperature: '' });
         setShowRecordModal(true);
     };
     const handleOpenEditRecord = (record: MedicalRecord) => {
         setSelectedRecord(record);
-        setRecordFormData({ type: record.type, description: record.description || '', diagnosis: record.diagnosis || '', prescription: record.prescription || '', doctor_id: record.doctor_id || '' });
+        setRecordFormData({ type: record.type, description: record.description || '', diagnosis: record.diagnosis || '', prescription: record.prescription || '', doctor_id: record.doctor_id || '', weight: record.weight || '', height: record.height || '', blood_pressure: record.blood_pressure || '', temperature: record.temperature || '' });
         setShowRecordModal(true);
     };
     const handleRecordSubmit = async () => {
@@ -334,11 +335,16 @@ export function MedicalRecords() {
                                         </div>
                                     </div>
                                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                                        {[{ icon: User, label: "Idade", val: getAge(selectedPatient.birth_date) }, { icon: Scale, label: "Peso", val: selectedPatient.weight ? `${selectedPatient.weight}kg` : '—' }, { icon: Ruler, label: "Altura", val: selectedPatient.height ? `${selectedPatient.height}m` : '—' }, { icon: Calendar, label: "Gênero", val: selectedPatient.gender || '—' }].map(it => (
+                                        {[
+                                            { icon: User, label: "Nome Completo", val: selectedPatient.name },
+                                            { icon: Calendar, label: "Nascimento", val: selectedPatient.birth_date ? new Date(selectedPatient.birth_date + 'T12:00:00').toLocaleDateString('pt-BR') : '—' },
+                                            { icon: User, label: "Gênero", val: selectedPatient.gender || '—' },
+                                            { icon: FileText, label: "CPF", val: selectedPatient.cpf || '—' },
+                                        ].map(it => (
                                             <div key={it.label} className="p-3 bg-slate-50 rounded-lg border border-slate-100 text-center">
                                                 <it.icon className="w-4 h-4 text-teal-600 mx-auto mb-1" />
                                                 <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">{it.label}</p>
-                                                <p className="text-base font-bold text-slate-900 capitalize">{it.val}</p>
+                                                <p className="text-sm font-bold text-slate-900 capitalize truncate">{it.val}</p>
                                             </div>
                                         ))}
                                     </div>
@@ -398,6 +404,16 @@ export function MedicalRecords() {
                                                         <button onClick={() => { setSelectedRecord(item); setShowDeleteRecordConfirm(true); }} className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md"><Trash2 className="w-3.5 h-3.5" /></button>
                                                     </div>
                                                 </div>
+
+                                                {/* Sinais vitais */}
+                                                {(item.weight || item.height || item.blood_pressure || item.temperature) && (
+                                                    <div className="flex flex-wrap gap-2 mb-3">
+                                                        {item.weight && <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 border border-blue-100 rounded-lg text-[11px] font-bold text-blue-700"><Scale className="w-3 h-3" />{item.weight} kg</span>}
+                                                        {item.height && <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 border border-blue-100 rounded-lg text-[11px] font-bold text-blue-700"><Ruler className="w-3 h-3" />{item.height} m</span>}
+                                                        {item.blood_pressure && <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-rose-50 border border-rose-100 rounded-lg text-[11px] font-bold text-rose-700"><Heart className="w-3 h-3" />{item.blood_pressure} mmHg</span>}
+                                                        {item.temperature && <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 border border-amber-100 rounded-lg text-[11px] font-bold text-amber-700"><Thermometer className="w-3 h-3" />{item.temperature} °C</span>}
+                                                    </div>
+                                                )}
 
                                                 {/* Content */}
                                                 {item.description && <p className="text-slate-600 text-sm leading-relaxed mb-3 whitespace-pre-wrap">{item.description}</p>}
@@ -466,6 +482,28 @@ export function MedicalRecords() {
                                             <option value="">Selecione</option>
                                             {doctors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                                         </select>
+                                    </div>
+                                </div>
+                                {/* Sinais vitais */}
+                                <div>
+                                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">Sinais Vitais / Medidas</label>
+                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                        <div>
+                                            <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Peso (kg)</label>
+                                            <input type="text" value={recordFormData.weight} onChange={e => setRecordFormData(p => ({ ...p, weight: e.target.value }))} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-teal-200 font-bold text-sm" placeholder="ex: 90" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Altura (m)</label>
+                                            <input type="text" value={recordFormData.height} onChange={e => setRecordFormData(p => ({ ...p, height: e.target.value }))} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-teal-200 font-bold text-sm" placeholder="ex: 1.80" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Pressão (mmHg)</label>
+                                            <input type="text" value={recordFormData.blood_pressure} onChange={e => setRecordFormData(p => ({ ...p, blood_pressure: e.target.value }))} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-teal-200 font-bold text-sm" placeholder="ex: 120/80" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Temperatura (°C)</label>
+                                            <input type="text" value={recordFormData.temperature} onChange={e => setRecordFormData(p => ({ ...p, temperature: e.target.value }))} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-teal-200 font-bold text-sm" placeholder="ex: 36.5" />
+                                        </div>
                                     </div>
                                 </div>
                                 <div>

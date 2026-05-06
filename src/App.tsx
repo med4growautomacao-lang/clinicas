@@ -23,7 +23,10 @@ import { Loader2 } from 'lucide-react';
 function AppContent() {
   const [activeTab, setActiveTab] = useState(() => localStorage.getItem('activeTab') || 'dashboard');
   // Abas já visitadas — componentes ficam montados em memória após a primeira visita
-  const [visitedTabs, setVisitedTabs] = useState<Set<string>>(new Set(['dashboard']));
+  const [visitedTabs, setVisitedTabs] = useState<Set<string>>(() => {
+    const saved = localStorage.getItem('activeTab');
+    return new Set(saved ? ['dashboard', saved] : ['dashboard']);
+  });
   const { user, loading, userRole, activeClinicId } = useAuth();
   const prevClinicRef = useRef(activeClinicId);
 

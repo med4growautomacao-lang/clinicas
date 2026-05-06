@@ -1220,7 +1220,9 @@ function FinishServiceView() {
 }
 
 export function AISecretary() {
-  const [activeTab, setActiveTab] = useState<"chats" | "leads" | "dashboard" | "config" | "followups">("chats");
+  const [activeTab, setActiveTab] = useState<"chats" | "leads" | "dashboard" | "config" | "followups">(
+    () => (localStorage.getItem('aiSecretaryTab') as any) || "chats"
+  );
   const { aiConfig, updateAI, clinic } = useSettings();
   const features = clinic?.features;
   const hasFollowup = features?.feature_followup !== false;
@@ -1276,7 +1278,7 @@ export function AISecretary() {
           ].filter(t => t.show).map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
+              onClick={() => { setActiveTab(tab.id as any); localStorage.setItem('aiSecretaryTab', tab.id); }}
               className={cn(
                 "flex-1 px-3 py-2.5 text-xs sm:text-sm font-bold rounded-xl transition-all whitespace-nowrap text-center",
                 activeTab === tab.id

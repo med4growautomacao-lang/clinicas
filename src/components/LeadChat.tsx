@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { X, Send, Bot, User, Loader2, MessageSquare, Phone } from "lucide-react";
+import { X, Send, Bot, User, Loader2, MessageSquare, Phone, CheckCircle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "./ui/button";
 import { useChatMessages, ChatMessage, Lead, useLeads, useFunnelStages } from "../hooks/useSupabase";
@@ -11,6 +11,8 @@ interface LeadChatProps {
   lead: Lead;
   onClose: () => void;
   isDragging?: boolean;
+  ticketId?: string;
+  onCloseTicket?: () => Promise<void>;
 }
 
 function stripToolCallPrefix(text: string): string {
@@ -77,7 +79,7 @@ export function extractMessageText(message: any): string {
   return JSON.stringify(message);
 }
 
-export function LeadChat({ lead, onClose, isDragging = false }: LeadChatProps) {
+export function LeadChat({ lead, onClose, isDragging = false, ticketId, onCloseTicket }: LeadChatProps) {
   const { data: messages, loading, send } = useChatMessages(lead.id, lead.phone);
   const { update: updateLead } = useLeads();
   const { data: stages } = useFunnelStages();
@@ -195,9 +197,21 @@ export function LeadChat({ lead, onClose, isDragging = false }: LeadChatProps) {
             </div>
           </div>
         </div>
-        <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-full transition-all">
-          <X className="w-5 h-5" />
-        </button>
+        <div className="flex items-center gap-2">
+          {onCloseTicket && ticketId && (
+            <button
+              onClick={onCloseTicket}
+              title="Encerrar ticket"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition-all"
+            >
+              <CheckCircle className="w-3.5 h-3.5" />
+              Encerrar
+            </button>
+          )}
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-full transition-all">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
       </div>
 
       {/* Stage selector */}

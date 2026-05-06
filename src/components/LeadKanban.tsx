@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { useFunnelStages, useLeads, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useAppointments, useDoctors, usePatients, Conversion, Lead } from "../hooks/useSupabase";
+import { useFunnelStages, useLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useAppointments, useDoctors, usePatients, Conversion, Lead, Ticket } from "../hooks/useSupabase";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { format, parseISO, formatDistanceToNow } from "date-fns";
@@ -735,11 +735,12 @@ function ConversionModal({ lead, onClose, onCancel, onCreate }: {
 
 export function LeadKanban() {
   const { data: stages, loading: stagesLoading, reorder: reorderStages, update: updateStage, create: createStage, remove: removeStage } = useFunnelStages();
-  const { data: leads, loading: leadsLoading, loadingMore, hasMore, loadMore, create, update, remove } = useLeads({ pageSize: 150 });
+  const { data: leads, create, update, remove } = useLeads({ pageSize: 150 });
+  const { tickets, loading: ticketsLoading, moveTicket, openTicket, closeTicket } = useTickets();
   const { byLead: conversionsByLead, create: createConversion } = useConversions();
   const { aiConfig, updateAI } = useSettings();
-  const [conversionLead, setConversionLead] = useState<{ id: string; name: string; prevStageId: string | null } | null>(null);
-  const [lossLead, setLossLead] = useState<{ id: string; name: string; prevStageId: string | null } | null>(null);
+  const [conversionLead, setConversionLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
+  const [lossLead, setLossLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
   const { data: transitionRules, create: createRule, remove: removeRule, update: updateRule, reorder: reorderRules } = useTransitionRules();
   const [showModal, setShowModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -747,7 +748,7 @@ export function LeadKanban() {
   const [selectedLead, setSelectedLead] = useState<any>(null);
   const [formData, setFormData] = useState({ name: '', phone: '', source: 'sincronizacao', capture_channel: 'whatsapp', stage_id: '', estimated_value: '', loss_reason: '', avatar_url: '' });
   const [submitting, setSubmitting] = useState(false);
-  const [chatLead, setChatLead] = useState<any>(null);
+  const [chatLead, setChatLead] = useState<{ lead: any; ticketId: string } | null>(null);
   const [scheduleLead, setScheduleLead] = useState<Lead | null>(null);
   const [scheduleForm, setScheduleForm] = useState({ doctor_id: '', date: '', time: '', notes: '' });
   const [scheduleSubmitting, setScheduleSubmitting] = useState(false);
@@ -775,9 +776,9 @@ export function LeadKanban() {
   const [draggedLead, setDraggedLead] = useState<any>(null);
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
 
-  const handleDragStart = (e: React.DragEvent, lead: any) => {
-    setDraggedLead(lead);
-    e.dataTransfer.setData("leadId", lead.id);
+  const handleDragStart = (e: React.DragEvent, ticket: Ticket) => {
+    setDraggedLead(ticket);
+    e.dataTransfer.setData("ticketId", ticket.id);
     e.dataTransfer.effectAllowed = "move";
   };
 
@@ -792,12 +793,12 @@ export function LeadKanban() {
 
     if (draggedLead && draggedLead.stage_id !== targetStageId) {
       const targetStage = stages.find(s => s.id === targetStageId);
-      await update(draggedLead.id, { stage_id: targetStageId });
+      await moveTicket(draggedLead.id, targetStageId);
 
       if (targetStage?.slug === 'conversao') {
-        setConversionLead({ id: draggedLead.id, name: draggedLead.name, prevStageId: draggedLead.stage_id });
+        setConversionLead({ id: draggedLead.lead_id, name: draggedLead.lead?.name ?? '', prevStageId: draggedLead.stage_id, ticketId: draggedLead.id });
       } else if (targetStage?.slug === 'perdido') {
-        setLossLead({ id: draggedLead.id, name: draggedLead.name, prevStageId: draggedLead.stage_id });
+        setLossLead({ id: draggedLead.lead_id, name: draggedLead.lead?.name ?? '', prevStageId: draggedLead.stage_id, ticketId: draggedLead.id });
       }
     }
     setDraggedLead(null);
@@ -806,15 +807,16 @@ export function LeadKanban() {
   const handleSubmit = async () => {
     if (!formData.name.trim()) return;
     setSubmitting(true);
-    
-    const isPerdido = stages.find(s => s.id === formData.stage_id)?.slug === 'perdido';
+
+    const targetStageId = formData.stage_id || (stages[0]?.id ?? '');
+    const isPerdido = stages.find(s => s.id === targetStageId)?.slug === 'perdido';
 
     const payload = {
       name: formData.name,
       phone: formData.phone || null,
       source: formData.source || null,
       capture_channel: formData.capture_channel || 'whatsapp',
-      stage_id: formData.stage_id || (stages[0]?.id ?? null),
+      stage_id: targetStageId || null,
       estimated_value: formData.estimated_value ? Number(formData.estimated_value) : 0,
       loss_reason: isPerdido ? (formData.loss_reason || null) : null,
       avatar_url: formData.avatar_url || null,
@@ -822,8 +824,22 @@ export function LeadKanban() {
 
     if (selectedLead) {
       await update(selectedLead.id, payload);
+      // Move ticket if stage changed
+      if (targetStageId && selectedLead._ticketId) {
+        const openT = tickets.find(t => t.id === selectedLead._ticketId);
+        if (openT && targetStageId !== openT.stage_id) {
+          if (isPerdido) {
+            await closeTicket(openT.id, 'perdido');
+          } else {
+            await moveTicket(openT.id, targetStageId);
+          }
+        }
+      }
     } else {
-      await create(payload);
+      const newLead = await create(payload);
+      if (newLead && targetStageId && !isPerdido) {
+        await openTicket(newLead.id, targetStageId);
+      }
     }
 
     setFormData({ name: '', phone: '', source: 'sincronizacao', capture_channel: 'whatsapp', stage_id: '', estimated_value: '', loss_reason: '', avatar_url: '' });
@@ -841,14 +857,15 @@ export function LeadKanban() {
     setSubmitting(false);
   };
 
-  const openEditModal = (lead: any) => {
-    setSelectedLead(lead);
+  const openEditModal = (ticket: Ticket) => {
+    const lead = ticket.lead!;
+    setSelectedLead({ ...lead, _ticketId: ticket.id });
     setFormData({
       name: lead.name,
       phone: lead.phone || '',
       source: lead.source || '',
       capture_channel: lead.capture_channel || 'whatsapp',
-      stage_id: lead.stage_id || '',
+      stage_id: ticket.stage_id || '',
       estimated_value: lead.estimated_value?.toString() || '',
       loss_reason: lead.loss_reason || '',
       avatar_url: lead.avatar_url || ''
@@ -856,8 +873,8 @@ export function LeadKanban() {
     setShowModal(true);
   };
 
-  const openDeleteConfirm = (lead: any) => {
-    setSelectedLead(lead);
+  const openDeleteConfirm = (ticket: Ticket) => {
+    setSelectedLead({ ...ticket.lead!, _ticketId: ticket.id });
     setShowDeleteConfirm(true);
   };
 
@@ -872,13 +889,15 @@ export function LeadKanban() {
     'bg-slate-500': 'bg-slate-500',
   };
 
-  const filteredLeads = React.useMemo(() => {
+  const filteredTickets = React.useMemo(() => {
     const hasSourceFilter = sourceFilter !== 'all';
     const hasEntryFilter = entryDateFrom || entryDateTo;
     const hasConvFilter = convDateFrom || convDateTo;
-    if (!hasSourceFilter && !hasEntryFilter && !hasConvFilter) return leads;
+    if (!hasSourceFilter && !hasEntryFilter && !hasConvFilter) return tickets;
 
-    return leads.filter(lead => {
+    return tickets.filter(ticket => {
+      const lead = ticket.lead;
+      if (!lead) return true;
       if (hasSourceFilter) {
         const isMeta = !!lead.fb_campaign_name || lead.source === 'meta_ads';
         const isGoogle = !!lead.g_campaign_name || lead.source === 'google_ads';
@@ -887,9 +906,9 @@ export function LeadKanban() {
         if (sourceFilter === 'sem_origem' && (isMeta || isGoogle)) return false;
       }
       if (hasEntryFilter) {
-        const created = lead.created_at.slice(0, 10);
-        if (entryDateFrom && created < entryDateFrom) return false;
-        if (entryDateTo && created > entryDateTo) return false;
+        const opened = ticket.opened_at.slice(0, 10);
+        if (entryDateFrom && opened < entryDateFrom) return false;
+        if (entryDateTo && opened > entryDateTo) return false;
       }
       if (hasConvFilter) {
         const convs = conversionsByLead[lead.id] || [];
@@ -903,13 +922,13 @@ export function LeadKanban() {
       }
       return true;
     });
-  }, [leads, sourceFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo, conversionsByLead]);
+  }, [tickets, sourceFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo, conversionsByLead]);
 
   const hasActiveFilters = sourceFilter !== 'all' || entryDateFrom || entryDateTo || convDateFrom || convDateTo;
 
   React.useEffect(() => { setColumnPages({}); }, [sourceFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo]);
 
-  if (stagesLoading || leadsLoading) {
+  if (stagesLoading || ticketsLoading) {
     return (
       <div className="flex items-center justify-center h-64">
         <Loader2 className="w-8 h-8 text-teal-600 animate-spin" />
@@ -1290,7 +1309,7 @@ export function LeadKanban() {
       <div className="flex items-center justify-between shrink-0">
         <div>
           <h2 className="text-3xl font-bold tracking-tight text-slate-900">
-            Funil de <span className="text-teal-600">Leads</span>
+            Funil de <span className="text-teal-600">Oportunidades</span>
           </h2>
           <p className="text-slate-500 font-medium text-base">Gerencie a jornada dos seus leads.</p>
         </div>
@@ -1368,17 +1387,17 @@ export function LeadKanban() {
       <div className="flex-1 min-h-0">
       <KanbanScrollContainer>
         {stages.map((stage) => {
-          const stageLeads = filteredLeads.filter(l => l.stage_id === stage.id);
-          const stageTotal = stageLeads.reduce((sum, l) => sum + (Number(l.estimated_value) || 0), 0);
+          const stageTickets = filteredTickets.filter(t => t.stage_id === stage.id);
+          const stageTotal = stageTickets.reduce((sum, t) => sum + (Number(t.lead?.estimated_value) || 0), 0);
           const visibleCount = (columnPages[stage.id] || 1) * COLUMN_PAGE_SIZE;
-          const visibleLeads = stageLeads.slice(0, visibleCount);
-          const hasMoreInColumn = visibleCount < stageLeads.length;
+          const visibleTickets = stageTickets.slice(0, visibleCount);
+          const hasMoreInColumn = visibleCount < stageTickets.length;
           return (
             <div key={stage.id} className="w-[300px] shrink-0 flex flex-col gap-2 h-full">
               <div className="flex items-center gap-2 px-2">
                 <div className={cn("w-2 h-2 shrink-0 rounded-full", stageColors[stage.color || 'bg-slate-500'] || 'bg-slate-500')} />
                 <h3 className="font-bold text-slate-700 text-xs uppercase tracking-wider truncate flex-1">{stage.name}</h3>
-                <span className="bg-slate-200 text-slate-600 text-[10px] font-bold px-1.5 py-0.5 rounded-md shrink-0">{stageLeads.length}</span>
+                <span className="bg-slate-200 text-slate-600 text-[10px] font-bold px-1.5 py-0.5 rounded-md shrink-0">{stageTickets.length}</span>
                 <span className="text-[10px] font-bold text-slate-400 shrink-0">
                   R$ {stageTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                 </span>
@@ -1402,11 +1421,13 @@ export function LeadKanban() {
                   }
                 }}
               >
-                {visibleLeads.map((lead) => {
+                {visibleTickets.map((ticket) => {
+                  const lead = ticket.lead!;
+                  const isClosed = ticket.status === 'closed';
                   const isPerdido = stage.slug === 'perdido';
-                  const semMotivo = isPerdido && !lead.loss_reason;
+                  const semMotivo = isPerdido && !lead.loss_reason && !isClosed;
                   const lastContact = lead.last_message_at ?? lead.created_at;
-                  const frozen = !!lead.converted_patient_id || isPerdido;
+                  const frozen = isClosed || !!lead.converted_patient_id || isPerdido;
                   // Contagem persistente do banco + ciclo atual estourado
                   const currentCycleBreach = (() => {
                     if (frozen || !aiConfig?.sla_minutes || !aiConfig?.business_hours || !lead.last_message_at) return false;
@@ -1417,27 +1438,31 @@ export function LeadKanban() {
                     return mins > aiConfig.sla_minutes;
                   })();
                   const slaBreach = lead.sla_breach_count + (currentCycleBreach ? 1 : 0);
-                  const aguardando = !isPerdido && !!lead.last_outbound_at && (
+                  const aguardando = !frozen && !!lead.last_outbound_at && (
                     !lead.last_message_at || parseISO(lead.last_outbound_at) > parseISO(lead.last_message_at)
                   );
-                  const precisaResponder = !isPerdido && !!lead.last_message_at && (
+                  const precisaResponder = !frozen && !!lead.last_message_at && (
                     !lead.last_outbound_at || parseISO(lead.last_message_at) > parseISO(lead.last_outbound_at)
                   );
+                  const closeReasonLabel: Record<string, string> = { ganho: 'Ganho', perdido: 'Perdido', nps_enviado: 'NPS Enviado' };
                   return (
                   <motion.div
-                    key={lead.id}
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, lead)}
-                    whileHover={{ y: -1 }}
+                    key={ticket.id}
+                    draggable={!isClosed}
+                    onDragStart={!isClosed ? (e) => handleDragStart(e, ticket) : undefined}
+                    whileHover={{ y: isClosed ? 0 : -1 }}
                     className={cn(
-                      "px-3 py-2.5 rounded-lg border shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md transition-all group",
-                      draggedLead?.id === lead.id && "opacity-50",
+                      "px-3 py-2.5 rounded-lg border shadow-sm transition-all group",
+                      isClosed
+                        ? "opacity-60 cursor-default bg-slate-50 border-slate-200"
+                        : "cursor-grab active:cursor-grabbing hover:shadow-md",
+                      draggedLead?.id === ticket.id && "opacity-50",
                       semMotivo && "animate-pulse",
-                      isPerdido ? "bg-white border-rose-200"
+                      !isClosed && (isPerdido ? "bg-white border-rose-200"
                         : (!!lead.fb_campaign_name || lead.source === 'meta_ads') ? "bg-blue-50/60 border-blue-200/80"
                         : (!!lead.g_campaign_name || lead.source === 'google_ads') ? "bg-emerald-50/60 border-emerald-200/80"
                         : lead.source === 'sincronizacao' ? "bg-violet-50/60 border-violet-200/80"
-                        : "bg-white border-slate-200"
+                        : "bg-white border-slate-200")
                     )}
                   >
                     {/* Header: fonte + acoes */}
@@ -1495,13 +1520,25 @@ export function LeadKanban() {
                       </div>
                       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-2">
                         <button title="Agendar consulta" onClick={() => { setScheduleLead(lead); setScheduleForm({ doctor_id: doctors[0]?.id || '', date: '', time: '', notes: '' }); }} className="p-0.5 text-slate-400 hover:text-indigo-600 rounded transition-colors"><CalendarPlus className="w-3 h-3" /></button>
-                        <button title="Registrar venda" onClick={() => setConversionLead({ id: lead.id, name: lead.name, prevStageId: null })} className="p-0.5 text-slate-400 hover:text-emerald-600 rounded transition-colors"><ShoppingCart className="w-3 h-3" /></button>
-                        <button title="Editar" onClick={() => openEditModal(lead)} className="p-0.5 text-slate-400 hover:text-teal-600 rounded transition-colors"><Edit2 className="w-3 h-3" /></button>
-                        <button title="Excluir" onClick={() => openDeleteConfirm(lead)} className="p-0.5 text-slate-400 hover:text-rose-600 rounded transition-colors"><Trash2 className="w-3 h-3" /></button>
+                        <button title="Registrar venda" onClick={() => setConversionLead({ id: lead.id, name: lead.name, prevStageId: ticket.stage_id, ticketId: ticket.id })} className="p-0.5 text-slate-400 hover:text-emerald-600 rounded transition-colors"><ShoppingCart className="w-3 h-3" /></button>
+                        <button title="Editar" onClick={() => openEditModal(ticket)} className="p-0.5 text-slate-400 hover:text-teal-600 rounded transition-colors"><Edit2 className="w-3 h-3" /></button>
+                        <button title="Excluir" onClick={() => openDeleteConfirm(ticket)} className="p-0.5 text-slate-400 hover:text-rose-600 rounded transition-colors"><Trash2 className="w-3 h-3" /></button>
                       </div>
                     </div>
                       );
                     })()}
+
+                    {/* Badge ticket fechado */}
+                    {isClosed && ticket.close_reason && (
+                      <div className={cn(
+                        "mb-1.5 px-2 py-0.5 rounded text-[9px] font-bold inline-flex items-center gap-1",
+                        ticket.close_reason === 'ganho' ? "bg-emerald-50 border border-emerald-200 text-emerald-700"
+                        : ticket.close_reason === 'perdido' ? "bg-rose-50 border border-rose-100 text-rose-700"
+                        : "bg-slate-100 border border-slate-200 text-slate-500"
+                      )}>
+                        ● {closeReasonLabel[ticket.close_reason] ?? ticket.close_reason}
+                      </div>
+                    )}
 
                     {/* Nome + telefone */}
                     <div className="flex items-center gap-3 mt-1.5">
@@ -1591,7 +1628,7 @@ export function LeadKanban() {
                         {formatDistanceToNow(parseISO(lastContact), { addSuffix: true, locale: ptBR })}
                       </span>
                       <button
-                        onClick={() => setChatLead(lead)}
+                        onClick={() => setChatLead({ lead: ticket.lead, ticketId: ticket.id })}
                         className="p-1 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded transition-colors shrink-0"
                         title="Abrir chat"
                       >
@@ -1966,11 +2003,15 @@ export function LeadKanban() {
           lead={conversionLead}
           onClose={() => setConversionLead(null)}
           onCancel={() => {
-            const { id, prevStageId } = conversionLead;
+            const { ticketId, prevStageId } = conversionLead;
             setConversionLead(null);
-            if (prevStageId) update(id, { stage_id: prevStageId });
+            if (prevStageId) moveTicket(ticketId, prevStageId);
           }}
-          onCreate={createConversion}
+          onCreate={async (data) => {
+            const ok = await createConversion(data);
+            if (ok) await closeTicket(conversionLead.ticketId, 'ganho');
+            return ok;
+          }}
         />
       )}
 
@@ -1980,12 +2021,13 @@ export function LeadKanban() {
           lead={lossLead}
           onClose={() => setLossLead(null)}
           onCancel={() => {
-            const { id, prevStageId } = lossLead;
+            const { ticketId, prevStageId } = lossLead;
             setLossLead(null);
-            if (prevStageId) update(id, { stage_id: prevStageId });
+            if (prevStageId) moveTicket(ticketId, prevStageId);
           }}
           onConfirm={async (reason) => {
             await update(lossLead.id, { loss_reason: reason || null });
+            await closeTicket(lossLead.ticketId, 'perdido');
           }}
         />
       )}
@@ -1993,7 +2035,7 @@ export function LeadKanban() {
       {/* Lead Chat Drawer */}
       <AnimatePresence>
         {chatLead && (
-          <LeadChat lead={chatLead} onClose={() => setChatLead(null)} isDragging={!!draggedLead} />
+          <LeadChat lead={chatLead.lead} ticketId={chatLead.ticketId} onClose={() => setChatLead(null)} isDragging={draggedLead !== null} onCloseTicket={async () => { await closeTicket(chatLead.ticketId, 'nps_enviado'); setChatLead(null); }} />
         )}
       </AnimatePresence>
 

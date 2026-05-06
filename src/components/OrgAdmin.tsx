@@ -81,7 +81,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
   const [clinicMembers, setClinicMembers] = useState<ClinicMember[]>([]);
   const [orgUsers, setOrgUsers] = useState<OrgUser[]>([]);
   const [loadingClinics, setLoadingClinics] = useState(true);
-  const [activeSubTab, setActiveSubTab] = useState<"clinics" | "users" | "settings">("clinics");
+  const [activeSubTab, setActiveSubTab] = useState<"clinics" | "users" | "settings">(() => (localStorage.getItem('orgAdminTab') as any) || "clinics");
   const [orgSettings, setOrgSettings] = useState<{ google_ad_mcc_id: string; google_ad_mcc_token: string }>({ google_ad_mcc_id: '', google_ad_mcc_token: '' });
   const [orgSettingsSaving, setOrgSettingsSaving] = useState(false);
   const [orgSettingsSaved, setOrgSettingsSaved] = useState(false);
@@ -390,7 +390,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
           {visibleTabs.map((t) => (
             <button
               key={t.id}
-              onClick={() => setActiveSubTab(t.id as any)}
+              onClick={() => { setActiveSubTab(t.id as any); localStorage.setItem('orgAdminTab', t.id); }}
               className={cn(
                 "flex items-center gap-2 px-5 py-2 text-xs font-bold rounded-lg transition-all",
                 activeSubTab === t.id

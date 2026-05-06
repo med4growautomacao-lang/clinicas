@@ -90,7 +90,7 @@ export function Appointments() {
   const [lastCreatedPatient, setLastCreatedPatient] = useState<any>(null);
   const [filter, setFilter] = useState("Todos");
   const [dateFilter, setDateFilter] = useState<"all" | "today">("all");
-  const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
+  const [viewMode, setViewMode] = useState<"list" | "calendar">(() => (localStorage.getItem('appointmentsViewMode') as any) || "list");
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [searchTerm, setSearchTerm] = useState("");
   const [showModal, setShowModal] = useState(false);
@@ -524,8 +524,8 @@ export function Appointments() {
             </div>
 
             <div className="flex bg-white p-1 rounded-lg border border-slate-200 w-fit">
-              <button onClick={() => setViewMode("list")} className={cn("px-4 py-1.5 text-xs font-semibold rounded-md transition-all", viewMode === "list" ? "bg-teal-600 text-white" : "text-slate-500 hover:text-slate-900")}>Lista</button>
-              <button onClick={() => setViewMode("calendar")} className={cn("px-4 py-1.5 text-xs font-semibold rounded-md transition-all", viewMode === "calendar" ? "bg-teal-600 text-white" : "text-slate-500 hover:text-slate-900")}>Calendário</button>
+              <button onClick={() => { setViewMode("list"); localStorage.setItem('appointmentsViewMode', 'list'); }} className={cn("px-4 py-1.5 text-xs font-semibold rounded-md transition-all", viewMode === "list" ? "bg-teal-600 text-white" : "text-slate-500 hover:text-slate-900")}>Lista</button>
+              <button onClick={() => { setViewMode("calendar"); localStorage.setItem('appointmentsViewMode', 'calendar'); }} className={cn("px-4 py-1.5 text-xs font-semibold rounded-md transition-all", viewMode === "calendar" ? "bg-teal-600 text-white" : "text-slate-500 hover:text-slate-900")}>Calendário</button>
             </div>
           </div>
         </CardHeader>

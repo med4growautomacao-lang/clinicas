@@ -562,6 +562,77 @@ export function useLeads(options?: { pageSize?: number }) {
 }
 
 // ==========================================
+// TICKETS
+// ==========================================
+export interface Ticket {
+  id: string;
+  clinic_id: string;
+  lead_id: string;
+  stage_id: string | null;
+  opened_at: string;
+  closed_at: string | null;
+  status: 'open' | 'closed';
+  close_reason: 'ganho' | 'perdido' | 'nps_enviado' | null;
+  notes: string | null;
+  created_at: string;
+  lead?: Lead;
+}
+
+export function useTickets() {
+  const { activeClinicId } = useAuth();
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = useCallback(async (silent = false) => {
+    if (!activeClinicId) return;
+    if (!silent) setLoading(true);
+    const ninetyDaysAgo = new Date(Date.now() - 90 * 86400000).toISOString();
+    const { data } = await supabase
+      .from('tickets')
+      .select('*, lead:leads(*)')
+      .eq('clinic_id', activeClinicId)
+      .or(`status.eq.open,and(status.eq.closed,closed_at.gte.${ninetyDaysAgo})`)
+      .order('opened_at', { ascending: false });
+    setTickets(data || []);
+    if (!silent) setLoading(false);
+  }, [activeClinicId]);
+
+  useEffect(() => {
+    fetch();
+    if (!activeClinicId) return;
+    const channel = supabase
+      .channel(`tickets_realtime_${activeClinicId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets', filter: `clinic_id=eq.${activeClinicId}` }, () => { fetch(true); })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [fetch, activeClinicId]);
+
+  const moveTicket = async (ticketId: string, stageId: string) => {
+    setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, stage_id: stageId } : t));
+    const { data, error } = await supabase.from('tickets').update({ stage_id: stageId }).eq('id', ticketId).select('lead_id').single();
+    if (error) { fetch(true); return false; }
+    if (data?.lead_id) await supabase.from('leads').update({ stage_id: stageId }).eq('id', data.lead_id);
+    return true;
+  };
+
+  const openTicket = async (leadId: string, stageId: string) => {
+    const alreadyOpen = tickets.some(t => t.lead_id === leadId && t.status === 'open');
+    if (alreadyOpen) return null;
+    const { data, error } = await supabase.from('tickets').insert({ clinic_id: activeClinicId, lead_id: leadId, stage_id: stageId }).select('*, lead:leads(*)').single();
+    if (!error && data) setTickets(prev => [data as Ticket, ...prev]);
+    return error ? null : (data as Ticket);
+  };
+
+  const closeTicket = async (ticketId: string, reason: Ticket['close_reason']) => {
+    const closedAt = new Date().toISOString();
+    setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, status: 'closed', close_reason: reason, closed_at: closedAt } : t));
+    await supabase.from('tickets').update({ status: 'closed', close_reason: reason, closed_at: closedAt }).eq('id', ticketId);
+  };
+
+  return { tickets, loading, refetch: fetch, moveTicket, openTicket, closeTicket };
+}
+
+// ==========================================
 // DASHBOARD STATS (Realtime automatic refetch)
 // ==========================================
 export interface DashboardStats {

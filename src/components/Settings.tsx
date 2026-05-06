@@ -47,8 +47,8 @@ import WhatsappLogo from "../assets/logos/Logo Whatsapp.png";
 
 export function Settings() {
     const { clinic, aiConfig, whatsapp, loading, updateClinic, updateAI, updateWhatsapp, generateConnectToken } = useSettings();
-    const [activeTab, setActiveTab] = useState<"clinic" | "integrations" | "protocols">("clinic");
-    const [activeIntTab, setActiveIntTab] = useState<'whatsapp' | 'meta' | 'google'>('whatsapp');
+    const [activeTab, setActiveTab] = useState<"clinic" | "integrations" | "protocols">(() => (localStorage.getItem('settingsTab') as any) || "clinic");
+    const [activeIntTab, setActiveIntTab] = useState<'whatsapp' | 'meta' | 'google'>(() => (localStorage.getItem('settingsIntTab') as any) || 'whatsapp');
     
     // Local states for editing
     const [localClinic, setLocalClinic] = useState<Partial<Clinic>>({});
@@ -255,7 +255,7 @@ export function Settings() {
                         return (
                             <button
                                 key={tab.id}
-                                onClick={() => setActiveTab(tab.id as any)}
+                                onClick={() => { setActiveTab(tab.id as any); localStorage.setItem('settingsTab', tab.id); }}
                                 className={cn(
                                     "flex items-center gap-2 px-5 py-2 text-sm font-semibold rounded-md transition-all",
                                     isActive
@@ -274,7 +274,7 @@ export function Settings() {
             {activeTab === "integrations" && (
                 <div className="flex bg-slate-50 p-1 rounded-xl w-fit shadow-sm border border-slate-200/60">
                     <button
-                        onClick={() => setActiveIntTab('whatsapp')}
+                        onClick={() => { setActiveIntTab('whatsapp'); localStorage.setItem('settingsIntTab', 'whatsapp'); }}
                         className={cn(
                             "flex items-center gap-2.5 px-6 py-2 text-sm font-bold rounded-lg transition-all duration-200",
                             activeIntTab === 'whatsapp' 
@@ -286,7 +286,7 @@ export function Settings() {
                         WhatsApp
                     </button>
                     <button
-                        onClick={() => setActiveIntTab('meta')}
+                        onClick={() => { setActiveIntTab('meta'); localStorage.setItem('settingsIntTab', 'meta'); }}
                         className={cn(
                             "flex items-center gap-2.5 px-6 py-2 text-sm font-bold rounded-lg transition-all duration-200",
                             activeIntTab === 'meta' 
@@ -298,7 +298,7 @@ export function Settings() {
                         Meta Ads
                     </button>
                     <button
-                        onClick={() => setActiveIntTab('google')}
+                        onClick={() => { setActiveIntTab('google'); localStorage.setItem('settingsIntTab', 'google'); }}
                         className={cn(
                             "flex items-center gap-2.5 px-6 py-2 text-sm font-bold rounded-lg transition-all duration-200",
                             activeIntTab === 'google' 

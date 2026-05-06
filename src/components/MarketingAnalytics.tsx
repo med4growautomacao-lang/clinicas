@@ -104,7 +104,7 @@ const METRICS_CONFIG = [
 
 export function MarketingAnalytics() {
   const [period, setPeriod] = useState<Period>('dia');
-  const [viewMode, setViewMode] = useState<'dashboard' | 'table'>('dashboard');
+  const [viewMode, setViewMode] = useState<'dashboard' | 'table'>(() => (localStorage.getItem('marketingViewMode') as any) || 'dashboard');
   const [dateRange, setDateRange] = useState({
     start: subDays(new Date(), 7),
     end: subDays(new Date(), 1)
@@ -652,13 +652,13 @@ export function MarketingAnalytics() {
         <div className={cn("flex justify-end gap-2 transition-all", isEditing ? "opacity-0 pointer-events-none h-0" : "opacity-100 h-10")}>
           <div className="flex bg-white rounded-xl p-1 border border-slate-200 shadow-sm">
             <button
-              onClick={() => setViewMode('dashboard')}
+              onClick={() => { setViewMode('dashboard'); localStorage.setItem('marketingViewMode', 'dashboard'); }}
               className={cn("p-2 rounded-lg transition-all", viewMode === 'dashboard' ? "bg-teal-600 text-white shadow-md" : "text-slate-400 hover:text-slate-600")}
             >
               <LayoutDashboard className="w-4 h-4" />
             </button>
             <button
-              onClick={() => setViewMode('table')}
+              onClick={() => { setViewMode('table'); localStorage.setItem('marketingViewMode', 'table'); }}
               className={cn("p-2 rounded-lg transition-all", viewMode === 'table' ? "bg-teal-600 text-white shadow-md" : "text-slate-400 hover:text-slate-600")}
             >
               <TableIcon className="w-4 h-4" />

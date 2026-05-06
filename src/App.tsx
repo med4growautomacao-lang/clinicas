@@ -21,7 +21,7 @@ import { TermsOfUse } from './components/TermsOfUse';
 import { Loader2 } from 'lucide-react';
 
 function AppContent() {
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState(() => localStorage.getItem('activeTab') || 'dashboard');
   // Abas já visitadas — componentes ficam montados em memória após a primeira visita
   const [visitedTabs, setVisitedTabs] = useState<Set<string>>(new Set(['dashboard']));
   const { user, loading, userRole, activeClinicId } = useAuth();
@@ -32,6 +32,7 @@ function AppContent() {
     if (prevClinicRef.current && prevClinicRef.current !== activeClinicId) {
       setVisitedTabs(new Set(['dashboard']));
       setActiveTab('dashboard');
+      localStorage.setItem('activeTab', 'dashboard');
     }
     prevClinicRef.current = activeClinicId;
   }, [activeClinicId]);
@@ -39,6 +40,7 @@ function AppContent() {
   const handleSetActiveTab = useCallback((tab: string) => {
     setActiveTab(tab);
     setVisitedTabs(prev => new Set([...prev, tab]));
+    localStorage.setItem('activeTab', tab);
   }, []);
 
   // Redireciona usuários org sem clínica ativa para a aba Organização

@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { CustomDatePicker } from "./CustomDatePicker";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import {
@@ -374,8 +375,12 @@ export function Finance() {
                     </div>
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Data</label>
-                    <input type="date" value={formData.date} onChange={e => setFormData(p => ({ ...p, date: e.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 font-medium text-sm" />
+                    <CustomDatePicker
+                      label="Data"
+                      value={formData.date}
+                      onChange={v => setFormData(p => ({ ...p, date: v }))}
+                      align="left"
+                    />
                   </div>
                 </div>
 

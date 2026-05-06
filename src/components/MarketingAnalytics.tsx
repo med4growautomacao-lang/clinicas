@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { DateRangePicker } from "./DateRangePicker";
 import {
   Card,
   CardContent,
@@ -567,57 +568,27 @@ export function MarketingAnalytics() {
 
                       <div className="pt-4 mt-2 border-t border-slate-100">
                         <span className="text-[9px] font-black text-slate-400 uppercase tracking-[2px] block mb-3 pl-1">Período Principal</span>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="space-y-1">
-                            <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest pl-1">Início</label>
-                            <input
-                              type="date"
-                              value={format(dateRange.start, 'yyyy-MM-dd')}
-                              onChange={(e) => {
-                                setDateRange(v => ({ ...v, start: parseISO(e.target.value) }));
-                                setActiveRangeLabel("Personalizado");
-                              }}
-                              className="w-full bg-slate-50 border-slate-200 rounded-xl p-2.5 text-[10px] font-bold text-slate-600 outline-none border focus:ring-1 focus:ring-teal-500/20"
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest pl-1">Fim</label>
-                            <input
-                              type="date"
-                              value={format(dateRange.end, 'yyyy-MM-dd')}
-                              onChange={(e) => {
-                                setDateRange(v => ({ ...v, end: parseISO(e.target.value) }));
-                                setActiveRangeLabel("Personalizado");
-                              }}
-                              className="w-full bg-slate-50 border-slate-200 rounded-xl p-2.5 text-[10px] font-bold text-slate-600 outline-none border focus:ring-1 focus:ring-teal-500/20"
-                            />
-                          </div>
-                        </div>
+                        <DateRangePicker
+                          inline
+                          numberOfMonths={1}
+                          from={format(dateRange.start, 'yyyy-MM-dd')}
+                          to={format(dateRange.end, 'yyyy-MM-dd')}
+                          onFromChange={(v) => { if (v) { setDateRange(r => ({ ...r, start: parseISO(v) })); setActiveRangeLabel("Personalizado"); } }}
+                          onToChange={(v) => { if (v) { setDateRange(r => ({ ...r, end: parseISO(v) })); setActiveRangeLabel("Personalizado"); } }}
+                        />
                       </div>
 
                       {isComparing && (
                         <div className="pt-4 mt-2 border-t border-slate-100 bg-teal-50/20 -mx-4 px-4 pb-2">
                           <span className="text-[9px] font-black text-teal-600 uppercase tracking-[2px] block mb-3 pl-1">Período Comparativo</span>
-                          <div className="grid grid-cols-2 gap-3">
-                            <div className="space-y-1">
-                              <label className="text-[8px] font-bold text-teal-600/50 uppercase tracking-widest pl-1">Início</label>
-                              <input
-                                type="date"
-                                value={format(compareDateRange.start, 'yyyy-MM-dd')}
-                                onChange={(e) => setCompareDateRange(v => ({ ...v, start: parseISO(e.target.value) }))}
-                                className="w-full bg-white border-teal-100 rounded-xl p-2.5 text-[10px] font-bold text-slate-600 outline-none border focus:ring-1 focus:ring-teal-500/20"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <label className="text-[8px] font-bold text-teal-600/50 uppercase tracking-widest pl-1">Fim</label>
-                              <input
-                                type="date"
-                                value={format(compareDateRange.end, 'yyyy-MM-dd')}
-                                onChange={(e) => setCompareDateRange(v => ({ ...v, end: parseISO(e.target.value) }))}
-                                className="w-full bg-white border-teal-100 rounded-xl p-2.5 text-[10px] font-bold text-slate-600 outline-none border focus:ring-1 focus:ring-teal-500/20"
-                              />
-                            </div>
-                          </div>
+                          <DateRangePicker
+                            inline
+                            numberOfMonths={1}
+                            from={format(compareDateRange.start, 'yyyy-MM-dd')}
+                            to={format(compareDateRange.end, 'yyyy-MM-dd')}
+                            onFromChange={(v) => { if (v) setCompareDateRange(r => ({ ...r, start: parseISO(v) })); }}
+                            onToChange={(v) => { if (v) setCompareDateRange(r => ({ ...r, end: parseISO(v) })); }}
+                          />
                         </div>
                       )}
                     </motion.div>

@@ -36,6 +36,7 @@ import MetaLogo from "../assets/logos/Logo Metaads.png";
 import WhatsAppLogo from "../assets/logos/Logo Whatsapp.png";
 import SemOrigemLogo from "../assets/logos/Logo Sem origem.png";
 import { Share2, Globe, Layout, Smartphone } from "lucide-react";
+import { DateRangePicker } from "./DateRangePicker";
 
 const SOURCE_LABELS: Record<string, string> = {
   'meta_ads': 'Meta Ads',
@@ -208,13 +209,13 @@ function ExportModal({ onClose }: { onClose: () => void }) {
           {/* Período */}
           <div className="space-y-2">
             <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Período</label>
-            <div className="flex items-center gap-2">
-              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-                className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400" />
-              <span className="text-slate-400 text-sm font-medium">até</span>
-              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-                className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400" />
-            </div>
+            <DateRangePicker
+              from={dateFrom}
+              to={dateTo}
+              onFromChange={setDateFrom}
+              onToChange={setDateTo}
+              numberOfMonths={1}
+            />
           </div>
 
           {/* Lead — dropdown com busca integrada */}
@@ -761,6 +762,8 @@ export function LeadKanban() {
   const [showAutomationModal, setShowAutomationModal] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<'all' | 'meta' | 'google' | 'sem_origem'>('all');
+  const [columnPages, setColumnPages] = useState<Record<string, number>>({});
+  const COLUMN_PAGE_SIZE = 20;
   const [entryDateFrom, setEntryDateFrom] = useState('');
   const [entryDateTo, setEntryDateTo] = useState('');
   const [convDateFrom, setConvDateFrom] = useState('');
@@ -903,6 +906,8 @@ export function LeadKanban() {
   }, [leads, sourceFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo, conversionsByLead]);
 
   const hasActiveFilters = sourceFilter !== 'all' || entryDateFrom || entryDateTo || convDateFrom || convDateTo;
+
+  React.useEffect(() => { setColumnPages({}); }, [sourceFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo]);
 
   if (stagesLoading || leadsLoading) {
     return (
@@ -1332,21 +1337,22 @@ export function LeadKanban() {
           ))}
         </div>
 
-        {/* Filtro de entrada */}
-        <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-3 py-1.5 shadow-sm">
-          <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider shrink-0">Entrada</span>
-          <input type="date" value={entryDateFrom} onChange={e => setEntryDateFrom(e.target.value)} className="text-xs font-medium text-slate-700 outline-none border-none bg-transparent w-[120px]" />
-          <span className="text-slate-300 text-xs">—</span>
-          <input type="date" value={entryDateTo} onChange={e => setEntryDateTo(e.target.value)} className="text-xs font-medium text-slate-700 outline-none border-none bg-transparent w-[120px]" />
-        </div>
+        <DateRangePicker
+          label="Entrada"
+          from={entryDateFrom}
+          to={entryDateTo}
+          onFromChange={setEntryDateFrom}
+          onToChange={setEntryDateTo}
+        />
 
-        {/* Filtro de conversão */}
-        <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-3 py-1.5 shadow-sm">
-          <span className="text-[10px] font-black text-emerald-500 uppercase tracking-wider shrink-0">Conversão</span>
-          <input type="date" value={convDateFrom} onChange={e => setConvDateFrom(e.target.value)} className="text-xs font-medium text-slate-700 outline-none border-none bg-transparent w-[120px]" />
-          <span className="text-slate-300 text-xs">—</span>
-          <input type="date" value={convDateTo} onChange={e => setConvDateTo(e.target.value)} className="text-xs font-medium text-slate-700 outline-none border-none bg-transparent w-[120px]" />
-        </div>
+        <DateRangePicker
+          label="Conversão"
+          labelColor="text-emerald-500"
+          from={convDateFrom}
+          to={convDateTo}
+          onFromChange={setConvDateFrom}
+          onToChange={setConvDateTo}
+        />
 
         {/* Limpar filtros */}
         {hasActiveFilters && (
@@ -1364,6 +1370,9 @@ export function LeadKanban() {
         {stages.map((stage) => {
           const stageLeads = filteredLeads.filter(l => l.stage_id === stage.id);
           const stageTotal = stageLeads.reduce((sum, l) => sum + (Number(l.estimated_value) || 0), 0);
+          const visibleCount = (columnPages[stage.id] || 1) * COLUMN_PAGE_SIZE;
+          const visibleLeads = stageLeads.slice(0, visibleCount);
+          const hasMoreInColumn = visibleCount < stageLeads.length;
           return (
             <div key={stage.id} className="w-[300px] shrink-0 flex flex-col gap-2 h-full">
               <div className="flex items-center gap-2 px-2">
@@ -1386,8 +1395,14 @@ export function LeadKanban() {
                 onDragOver={(e) => handleDragOver(e, stage.id)}
                 onDragLeave={() => setDragOverStage(null)}
                 onDrop={(e) => handleDrop(e, stage.id)}
+                onScroll={(e) => {
+                  const el = e.currentTarget;
+                  if (hasMoreInColumn && el.scrollTop + el.clientHeight >= el.scrollHeight - 100) {
+                    setColumnPages(prev => ({ ...prev, [stage.id]: (prev[stage.id] || 1) + 1 }));
+                  }
+                }}
               >
-                {stageLeads.map((lead) => {
+                {visibleLeads.map((lead) => {
                   const isPerdido = stage.slug === 'perdido';
                   const semMotivo = isPerdido && !lead.loss_reason;
                   const lastContact = lead.last_message_at ?? lead.created_at;
@@ -1587,6 +1602,12 @@ export function LeadKanban() {
                   );
                 })}
 
+                {hasMoreInColumn && (
+                  <div className="flex items-center justify-center py-2 text-[10px] font-bold text-slate-400 gap-1.5">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    Role para ver mais
+                  </div>
+                )}
               </div>
               <button onClick={() => { setFormData(p => ({ ...p, stage_id: stage.id, avatar_url: '' })); setShowModal(true); }} className="w-full py-1.5 border border-dashed border-slate-300 rounded-lg text-slate-400 text-xs font-semibold hover:bg-white hover:border-slate-400 transition-all flex items-center justify-center gap-1.5 shrink-0">
                 <Plus className="w-3 h-3" />

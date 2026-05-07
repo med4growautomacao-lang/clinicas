@@ -358,58 +358,58 @@ const SCROLL_SPEED = 3.5;
 const MOMENTUM_DECAY = 0.92;
 
 function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
-  const mainRef = useRef<HTMLDivElement>(null);
+  const outerRef = useRef<HTMLDivElement>(null);   // clip container
+  const innerRef = useRef<HTMLDivElement>(null);   // flex row — recebe transform
   const topScrollRef = useRef<HTMLDivElement>(null);
-  const innerRef = useRef<HTMLDivElement>(null);
+  const scrollPhantomRef = useRef<HTMLDivElement>(null); // define largura da barra
+
   const isPanning = useRef(false);
+  const isPendingPan = useRef(false);
   const hasMoved = useRef(false);
   const isCardDragging = useRef(false);
-  const panTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mouseDownX = useRef(0);
   const lastX = useRef(0);
-  const syncingFrom = useRef<'main' | 'top' | null>(null);
   const velocity = useRef(0);
-  const pendingDx = useRef(0); // delta acumulado entre frames
+  const pendingDx = useRef(0);
+  const offset = useRef(0);   // posição atual do scroll
+  const maxOffset = useRef(0);
   const rafId = useRef<number | null>(null);
+  const fromScrollbar = useRef(false);
 
-  const onMainScroll = useCallback(() => {
-    if (syncingFrom.current === 'top') return;
-    syncingFrom.current = 'main';
-    if (topScrollRef.current && mainRef.current)
-      topScrollRef.current.scrollLeft = mainRef.current.scrollLeft;
-    syncingFrom.current = null;
+  // Aplica o offset via transform — sem reflow, direto no compositor
+  const applyOffset = useCallback((newOffset: number) => {
+    const clamped = Math.max(0, Math.min(newOffset, maxOffset.current));
+    offset.current = clamped;
+    if (innerRef.current) innerRef.current.style.transform = `translateX(${-clamped}px)`;
+    if (topScrollRef.current && !fromScrollbar.current)
+      topScrollRef.current.scrollLeft = clamped;
   }, []);
 
-  const onTopScroll = useCallback(() => {
-    if (syncingFrom.current === 'main') return;
-    syncingFrom.current = 'top';
-    if (mainRef.current && topScrollRef.current)
-      mainRef.current.scrollLeft = topScrollRef.current.scrollLeft;
-    syncingFrom.current = null;
-  }, []);
-
+  // Atualiza largura do phantom e maxOffset quando colunas mudam
   useEffect(() => {
     const update = () => {
-      if (mainRef.current && innerRef.current)
-        innerRef.current.style.width = mainRef.current.scrollWidth + 'px';
+      if (!outerRef.current || !innerRef.current) return;
+      const totalW = innerRef.current.scrollWidth;
+      const viewW  = outerRef.current.clientWidth;
+      maxOffset.current = Math.max(0, totalW - viewW);
+      if (scrollPhantomRef.current) scrollPhantomRef.current.style.width = totalW + 'px';
     };
     update();
     const obs = new ResizeObserver(update);
-    if (mainRef.current) obs.observe(mainRef.current);
+    if (innerRef.current)  obs.observe(innerRef.current);
+    if (outerRef.current)  obs.observe(outerRef.current);
     return () => obs.disconnect();
   }, []);
 
-  // Loop RAF unificado: aplica scroll a 60fps durante pan e momentum
   const rafLoop = useCallback(() => {
-    if (!mainRef.current) { rafId.current = null; return; }
-
     if (isPanning.current) {
       if (pendingDx.current !== 0) {
-        mainRef.current.scrollLeft += pendingDx.current;
+        applyOffset(offset.current + pendingDx.current);
         pendingDx.current = 0;
       }
       rafId.current = requestAnimationFrame(rafLoop);
     } else if (Math.abs(velocity.current) > 0.5) {
-      mainRef.current.scrollLeft += velocity.current;
+      applyOffset(offset.current + velocity.current);
       velocity.current *= MOMENTUM_DECAY;
       rafId.current = requestAnimationFrame(rafLoop);
     } else {
@@ -417,111 +417,115 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
       pendingDx.current = 0;
       rafId.current = null;
     }
-  }, []);
+  }, [applyOffset]);
 
   const stopPan = useCallback(() => {
+    isPendingPan.current = false;
     if (!isPanning.current) return;
     isPanning.current = false;
-    if (mainRef.current) {
-      mainRef.current.style.cursor = '';
-      mainRef.current.style.userSelect = '';
+    if (outerRef.current) {
+      outerRef.current.style.cursor = '';
+      outerRef.current.style.userSelect = '';
     }
-    // RAF loop detecta isPanning=false e continua no momentum automaticamente
   }, []);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
-      if (!isPanning.current) return;
-      hasMoved.current = true;
       const dx = lastX.current - e.pageX;
-      // EMA suaviza velocity para o momentum pós-pan
-      velocity.current = dx * SCROLL_SPEED * 0.35 + velocity.current * 0.65;
-      pendingDx.current += dx * SCROLL_SPEED; // acumula, RAF aplica
       lastX.current = e.pageX;
-    };
 
-    const handleMouseUp = () => {
-      if (panTimer.current) clearTimeout(panTimer.current);
-      stopPan();
+      if (isPanning.current) {
+        hasMoved.current = true;
+        velocity.current = dx * SCROLL_SPEED * 0.35 + velocity.current * 0.65;
+        pendingDx.current += dx * SCROLL_SPEED;
+      } else if (isPendingPan.current && !isCardDragging.current) {
+        if (Math.abs(mouseDownX.current - e.pageX) > 5) {
+          isPanning.current = true;
+          isPendingPan.current = false;
+          if (outerRef.current) {
+            outerRef.current.style.cursor = 'grabbing';
+            outerRef.current.style.userSelect = 'none';
+          }
+          if (rafId.current) cancelAnimationFrame(rafId.current);
+          rafId.current = requestAnimationFrame(rafLoop);
+          velocity.current = dx * SCROLL_SPEED;
+          pendingDx.current += dx * SCROLL_SPEED;
+        }
+      }
     };
-
+    const handleMouseUp = () => stopPan();
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [stopPan]);
+  }, [rafLoop, stopPan]);
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     if (target.closest('button') || target.closest('input') || target.closest('textarea') || target.closest('select')) return;
     if (isCardDragging.current) return;
-    // Para qualquer RAF em andamento
     if (rafId.current) { cancelAnimationFrame(rafId.current); rafId.current = null; }
     velocity.current = 0;
     pendingDx.current = 0;
-    const pageX = e.pageX;
-    panTimer.current = setTimeout(() => {
-      if (isCardDragging.current) return;
-      isPanning.current = true;
-      lastX.current = pageX;
-      if (mainRef.current) {
-        mainRef.current.style.cursor = 'grabbing';
-        mainRef.current.style.userSelect = 'none';
-      }
-      // Inicia o loop RAF
-      if (rafId.current) cancelAnimationFrame(rafId.current);
-      rafId.current = requestAnimationFrame(rafLoop);
-    }, 80);
-  }, [rafLoop]);
+    mouseDownX.current = e.pageX;
+    lastX.current = e.pageX;
+    isPendingPan.current = true;
+  }, []);
 
   const onContextMenu = useCallback((e: React.MouseEvent) => {
-    if (hasMoved.current) {
-      e.preventDefault();
-      hasMoved.current = false;
-    }
+    if (hasMoved.current) { e.preventDefault(); hasMoved.current = false; }
   }, []);
 
   const onDragStart = useCallback(() => {
-    if (panTimer.current) clearTimeout(panTimer.current);
     if (rafId.current) { cancelAnimationFrame(rafId.current); rafId.current = null; }
     isCardDragging.current = true;
     isPanning.current = false;
+    isPendingPan.current = false;
     velocity.current = 0;
     pendingDx.current = 0;
-    if (mainRef.current) mainRef.current.style.cursor = '';
+    if (outerRef.current) outerRef.current.style.cursor = '';
   }, []);
 
   const onDragEnd = useCallback(() => {
     isCardDragging.current = false;
-    if (mainRef.current) mainRef.current.style.cursor = '';
+    if (outerRef.current) outerRef.current.style.cursor = '';
   }, []);
 
   return (
     <div className="flex flex-col h-full">
-      {/* Barra de scroll superior */}
+      {/* Barra de scroll superior — nativa, sincroniza via applyOffset */}
       <div
         ref={topScrollRef}
         className="overflow-x-scroll custom-scrollbar mb-3"
         style={{ height: 16 }}
-        onScroll={onTopScroll}
+        onScroll={(e) => {
+          fromScrollbar.current = true;
+          applyOffset(e.currentTarget.scrollLeft);
+          fromScrollbar.current = false;
+        }}
       >
-        <div ref={innerRef} style={{ height: 1 }} />
+        <div ref={scrollPhantomRef} style={{ height: 1 }} />
       </div>
 
-      {/* Container principal */}
+      {/* Outer: clip horizontal */}
       <div
-        ref={mainRef}
-        className="flex gap-4 overflow-x-scroll pb-2 h-full scrollbar-hide"
-        style={{ willChange: 'scroll-position' }}
+        ref={outerRef}
+        className="overflow-hidden h-full"
+        onMouseDown={onMouseDown}
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
-        onScroll={onMainScroll}
-        onMouseDown={onMouseDown}
         onContextMenu={onContextMenu}
       >
-        {children}
+        {/* Inner: transform no compositor — sem reflow */}
+        <div
+          ref={innerRef}
+          className="flex gap-4 pb-2 h-full"
+          style={{ willChange: 'transform' }}
+        >
+          {children}
+        </div>
       </div>
     </div>
   );

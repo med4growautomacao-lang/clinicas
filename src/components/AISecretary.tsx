@@ -1314,11 +1314,9 @@ export function AISecretary() {
 }
 
 function ChatsView() {
-  const { data: leads, loading: leadsLoading } = useLeads();
+  const { data: leads, loading: leadsLoading, loadingMore, hasMore, loadMore } = useLeads({ pageSize: 20 });
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
-  const [visibleCount, setVisibleCount] = useState(20);
   const selectedLead = leads.find(l => l.id === selectedLeadId);
-  const visibleLeads = leads.slice(0, visibleCount);
   const { data: messages, loading: messagesLoading } = useChatMessages(selectedLeadId || undefined, selectedLead?.phone);
 
   const scrollRef = React.useRef<HTMLDivElement>(null);
@@ -1387,8 +1385,8 @@ function ChatsView() {
           className="flex-1 overflow-y-auto p-2 space-y-1 mt-2 custom-scrollbar"
           onScroll={(e) => {
             const el = e.currentTarget;
-            if (el.scrollTop + el.clientHeight >= el.scrollHeight - 80 && visibleCount < leads.length) {
-              setVisibleCount(v => v + 20);
+            if (el.scrollTop + el.clientHeight >= el.scrollHeight - 80 && hasMore && !loadingMore) {
+              loadMore();
             }
           }}
         >
@@ -1397,7 +1395,7 @@ function ChatsView() {
               <p className="text-sm font-medium">Nenhum atendimento ativo no momento.</p>
             </div>
           ) : (
-            visibleLeads.map((lead) => {
+            leads.map((lead) => {
               const isMeta = !!lead.fb_campaign_name || lead.source === 'meta_ads';
               const isGoogle = !!lead.g_campaign_name || lead.source === 'google_ads';
               return (
@@ -1477,6 +1475,11 @@ function ChatsView() {
               </motion.div>
               );
             })
+          )}
+          {loadingMore && (
+            <div className="flex justify-center py-3">
+              <Loader2 className="w-4 h-4 text-teal-500 animate-spin" />
+            </div>
           )}
         </CardContent>
       </Card>

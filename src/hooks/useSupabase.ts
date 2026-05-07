@@ -449,7 +449,11 @@ export function useLeads(options?: { pageSize?: number }) {
     if (!activeClinicId) return;
     if (!silent) setLoading(true);
     let query = baseQuery();
-    if (PAGE_SIZE) query = query.range(0, PAGE_SIZE - 1);
+    if (PAGE_SIZE) {
+      // Refetch silencioso mantém todos os itens já carregados
+      const limit = silent ? Math.max(loadedCountRef.current, PAGE_SIZE) : PAGE_SIZE;
+      query = query.range(0, limit - 1);
+    }
     const { data, error } = await query;
     if (error) { setError(error.message); if (!silent) setLoading(false); return; }
     const result = data || [];

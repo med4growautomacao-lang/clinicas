@@ -368,7 +368,8 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
   const lastX = useRef(0);
   const syncingFrom = useRef<'main' | 'top' | null>(null);
   const velocity = useRef(0);
-  const momentumRaf = useRef<number | null>(null);
+  const pendingDx = useRef(0); // delta acumulado entre frames
+  const rafId = useRef<number | null>(null);
 
   const onMainScroll = useCallback(() => {
     if (syncingFrom.current === 'top') return;
@@ -397,15 +398,25 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
     return () => obs.disconnect();
   }, []);
 
-  const applyMomentum = useCallback(() => {
-    if (!mainRef.current || Math.abs(velocity.current) < 0.5) {
+  // Loop RAF unificado: aplica scroll a 60fps durante pan e momentum
+  const rafLoop = useCallback(() => {
+    if (!mainRef.current) { rafId.current = null; return; }
+
+    if (isPanning.current) {
+      if (pendingDx.current !== 0) {
+        mainRef.current.scrollLeft += pendingDx.current;
+        pendingDx.current = 0;
+      }
+      rafId.current = requestAnimationFrame(rafLoop);
+    } else if (Math.abs(velocity.current) > 0.5) {
+      mainRef.current.scrollLeft += velocity.current;
+      velocity.current *= MOMENTUM_DECAY;
+      rafId.current = requestAnimationFrame(rafLoop);
+    } else {
       velocity.current = 0;
-      momentumRaf.current = null;
-      return;
+      pendingDx.current = 0;
+      rafId.current = null;
     }
-    mainRef.current.scrollLeft += velocity.current;
-    velocity.current *= MOMENTUM_DECAY;
-    momentumRaf.current = requestAnimationFrame(applyMomentum);
   }, []);
 
   const stopPan = useCallback(() => {
@@ -415,23 +426,18 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
       mainRef.current.style.cursor = '';
       mainRef.current.style.userSelect = '';
     }
-    if (Math.abs(velocity.current) > 1) {
-      momentumRaf.current = requestAnimationFrame(applyMomentum);
-    } else {
-      velocity.current = 0;
-      hasMoved.current = false;
-    }
-  }, [applyMomentum]);
+    // RAF loop detecta isPanning=false e continua no momentum automaticamente
+  }, []);
 
-  // Handlers globais: pan nunca quebra ao sair do container
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isPanning.current) return;
       hasMoved.current = true;
       const dx = lastX.current - e.pageX;
-      velocity.current = dx * SCROLL_SPEED * 0.4 + velocity.current * 0.6;
+      // EMA suaviza velocity para o momentum pós-pan
+      velocity.current = dx * SCROLL_SPEED * 0.35 + velocity.current * 0.65;
+      pendingDx.current += dx * SCROLL_SPEED; // acumula, RAF aplica
       lastX.current = e.pageX;
-      if (mainRef.current) mainRef.current.scrollLeft += dx * SCROLL_SPEED;
     };
 
     const handleMouseUp = () => {
@@ -451,7 +457,10 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
     const target = e.target as HTMLElement;
     if (target.closest('button') || target.closest('input') || target.closest('textarea') || target.closest('select')) return;
     if (isCardDragging.current) return;
-    if (momentumRaf.current) { cancelAnimationFrame(momentumRaf.current); momentumRaf.current = null; velocity.current = 0; }
+    // Para qualquer RAF em andamento
+    if (rafId.current) { cancelAnimationFrame(rafId.current); rafId.current = null; }
+    velocity.current = 0;
+    pendingDx.current = 0;
     const pageX = e.pageX;
     panTimer.current = setTimeout(() => {
       if (isCardDragging.current) return;
@@ -461,8 +470,11 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
         mainRef.current.style.cursor = 'grabbing';
         mainRef.current.style.userSelect = 'none';
       }
+      // Inicia o loop RAF
+      if (rafId.current) cancelAnimationFrame(rafId.current);
+      rafId.current = requestAnimationFrame(rafLoop);
     }, 80);
-  }, []);
+  }, [rafLoop]);
 
   const onContextMenu = useCallback((e: React.MouseEvent) => {
     if (hasMoved.current) {
@@ -473,10 +485,11 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
 
   const onDragStart = useCallback(() => {
     if (panTimer.current) clearTimeout(panTimer.current);
-    if (momentumRaf.current) { cancelAnimationFrame(momentumRaf.current); momentumRaf.current = null; }
+    if (rafId.current) { cancelAnimationFrame(rafId.current); rafId.current = null; }
     isCardDragging.current = true;
     isPanning.current = false;
     velocity.current = 0;
+    pendingDx.current = 0;
     if (mainRef.current) mainRef.current.style.cursor = '';
   }, []);
 
@@ -501,6 +514,7 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
       <div
         ref={mainRef}
         className="flex gap-4 overflow-x-scroll pb-2 h-full scrollbar-hide"
+        style={{ willChange: 'scroll-position' }}
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
         onScroll={onMainScroll}

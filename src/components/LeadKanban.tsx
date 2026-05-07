@@ -1363,32 +1363,8 @@ export function LeadKanban() {
 
   return (
     <div className="flex flex-col h-full gap-4">
-      <div className="flex items-center justify-between shrink-0">
-        <div>
-          <h2 className="text-3xl font-bold tracking-tight text-slate-900">
-            Funil de <span className="text-teal-600">Oportunidades</span>
-          </h2>
-          <p className="text-slate-500 font-medium text-base">Gerencie a jornada dos seus leads.</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <Button variant="outline" size="icon" className="h-10 w-10 text-slate-400 hover:text-teal-600" onClick={() => setExportOpen(true)}>
-            <Download className="w-5 h-5" />
-          </Button>
-          <Button variant="outline" size="icon" className="h-10 w-10 text-slate-400 hover:text-teal-600" onClick={() => { setShowAutomationModal(true); }}>
-            <Zap className="w-5 h-5" />
-          </Button>
-          <Button variant="outline" size="icon" className="h-10 w-10 text-slate-400 hover:text-teal-600" onClick={() => { setLocalStages([...stages]); setShowSettingsModal(true); }}>
-            <Settings className="w-5 h-5" />
-          </Button>
-          <Button className="py-5 px-6 group" onClick={() => { setSelectedLead(null); setFormData({ name: '', phone: '', source: 'sincronizacao', capture_channel: 'whatsapp', stage_id: stages[0]?.id || '', estimated_value: String(aiConfig?.default_ticket_value ?? ''), loss_reason: '', avatar_url: '' }); setShowModal(true); }}>
-            <Plus className="w-5 h-5 mr-2 group-hover:rotate-90 transition-transform" />
-            Novo Lead
-          </Button>
-        </div>
-      </div>
-
-      {/* ── Barra de Filtros ── */}
-      <div className="flex items-stretch gap-3 shrink-0 flex-wrap">
+      {/* ── Cabeçalho + Filtros ── */}
+      <div className="flex items-center gap-3 shrink-0 flex-wrap">
         {/* Filtro de origem */}
         <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-xl p-1 shadow-sm">
           {([
@@ -1430,7 +1406,6 @@ export function LeadKanban() {
           onToChange={setConvDateTo}
         />
 
-        {/* Limpar filtros */}
         {hasActiveFilters && (
           <button
             onClick={() => { setSourceFilter('all'); setEntryDateFrom(''); setEntryDateTo(''); setConvDateFrom(''); setConvDateTo(''); }}
@@ -1439,6 +1414,22 @@ export function LeadKanban() {
             <X className="w-3 h-3" /> Limpar
           </button>
         )}
+
+        <div className="flex items-center gap-2 ml-auto">
+          <Button variant="outline" size="icon" className="h-9 w-9 text-slate-400 hover:text-teal-600" onClick={() => setExportOpen(true)}>
+            <Download className="w-4 h-4" />
+          </Button>
+          <Button variant="outline" size="icon" className="h-9 w-9 text-slate-400 hover:text-teal-600" onClick={() => { setShowAutomationModal(true); }}>
+            <Zap className="w-4 h-4" />
+          </Button>
+          <Button variant="outline" size="icon" className="h-9 w-9 text-slate-400 hover:text-teal-600" onClick={() => { setLocalStages([...stages]); setShowSettingsModal(true); }}>
+            <Settings className="w-4 h-4" />
+          </Button>
+          <Button className="py-5 px-6 group" onClick={() => { setSelectedLead(null); setFormData({ name: '', phone: '', source: 'sincronizacao', capture_channel: 'whatsapp', stage_id: stages[0]?.id || '', estimated_value: String(aiConfig?.default_ticket_value ?? ''), loss_reason: '', avatar_url: '' }); setShowModal(true); }}>
+            <Plus className="w-5 h-5 mr-2 group-hover:rotate-90 transition-transform" />
+            Novo Lead
+          </Button>
+        </div>
       </div>
 
       <div className="flex-1 min-h-0">

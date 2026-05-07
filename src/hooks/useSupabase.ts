@@ -1364,11 +1364,13 @@ export function useChatMessages(leadId?: string, leadPhone?: string | null) {
       query = query.eq('phone', leadPhone);
     }
 
-    const { data, error } = await query.order('created_at', { ascending: true });
-    
+    const { data, error } = await query
+      .order('created_at', { ascending: false })
+      .limit(200);
+
     if (error) { setError(error.message); setLoading(false); return; }
-    
-    const formattedData = (data || []).map(m => ({
+
+    const formattedData = (data || []).reverse().map(m => ({
       ...m,
       message: parseMessage(m.message)
     }));
@@ -1376,19 +1378,25 @@ export function useChatMessages(leadId?: string, leadPhone?: string | null) {
     setData(formattedData);
     setError(null);
     setLoading(false);
-  }, [activeClinicId, leadId]);
+  }, [activeClinicId, leadId, leadPhone]);
 
-  useEffect(() => { 
-    fetch(); 
+  useEffect(() => {
+    fetch();
     if (!activeClinicId) return;
+    if (!leadId && !leadPhone) return;
+
+    const channelName = leadId ? `chat_lead_${leadId}` : `chat_phone_${leadPhone}`;
+    const filter = leadId
+      ? `lead_id=eq.${leadId}`
+      : `phone=eq.${leadPhone}`;
 
     const channel = supabase
-      .channel(`chat_${leadId || 'all'}`)
-      .on('postgres_changes', { 
-        event: 'INSERT', 
-        schema: 'public', 
+      .channel(channelName)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
         table: 'chat_messages',
-        filter: leadId ? `lead_id=eq.${leadId}` : `clinic_id=eq.${activeClinicId}`
+        filter
       }, (payload) => {
         const newMsg = payload.new as ChatMessage;
         if (!leadId || newMsg.lead_id === leadId) {
@@ -1405,7 +1413,7 @@ export function useChatMessages(leadId?: string, leadPhone?: string | null) {
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [fetch, activeClinicId, leadId]);
+  }, [fetch, activeClinicId, leadId, leadPhone]);
 
   const send = async (msg: Partial<ChatMessage>) => {
     if (!activeClinicId) return null;

@@ -481,18 +481,27 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
       }
     };
     const handleMouseUp = () => stopPan();
+    // Garante reset mesmo quando dragend não borbulha até o container
+    const handleDragEnd = () => {
+      isCardDragging.current = false;
+      dragEdgeDir.current = 0;
+      if (dragEdgeRaf.current) { cancelAnimationFrame(dragEdgeRaf.current); dragEdgeRaf.current = null; }
+    };
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener('dragend', handleDragEnd);
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      document.removeEventListener('dragend', handleDragEnd);
     };
   }, [rafLoop, stopPan]);
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     if (target.closest('button') || target.closest('input') || target.closest('textarea') || target.closest('select')) return;
-    if (isCardDragging.current) return;
+    isCardDragging.current = false; // limpa qualquer estado de drag residual
+    if (isPanning.current) return;
     if (rafId.current) { cancelAnimationFrame(rafId.current); rafId.current = null; }
     velocity.current = 0;
     pendingDx.current = 0;

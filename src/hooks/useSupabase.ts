@@ -542,7 +542,9 @@ export interface Ticket {
   opened_at: string;
   closed_at: string | null;
   status: 'open' | 'closed';
-  close_reason: 'ganho' | 'perdido' | 'nps_enviado' | null;
+  outcome: 'ganho' | 'perdido' | null;
+  outcome_at: string | null;
+  loss_reason: string | null;
   notes: string | null;
   created_at: string;
   lead?: Lead;
@@ -593,13 +595,21 @@ export function useTickets() {
     return error ? null : (data as Ticket);
   };
 
-  const closeTicket = async (ticketId: string, reason: Ticket['close_reason']) => {
-    const closedAt = new Date().toISOString();
-    setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, status: 'closed', close_reason: reason, closed_at: closedAt } : t));
-    await supabase.from('tickets').update({ status: 'closed', close_reason: reason, closed_at: closedAt }).eq('id', ticketId);
+  const closeTicket = async (ticketId: string, outcome: 'ganho' | 'perdido', lossReason?: string) => {
+    const now = new Date().toISOString();
+    const updates: Record<string, any> = { outcome, outcome_at: now };
+    if (lossReason) updates.loss_reason = lossReason;
+    setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, ...updates } : t));
+    await supabase.from('tickets').update(updates).eq('id', ticketId);
   };
 
-  return { tickets, loading, refetch: fetch, moveTicket, openTicket, closeTicket };
+  const finalizeTicket = async (ticketId: string) => {
+    const closedAt = new Date().toISOString();
+    setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, status: 'closed', closed_at: closedAt } : t));
+    await supabase.from('tickets').update({ status: 'closed', closed_at: closedAt }).eq('id', ticketId);
+  };
+
+  return { tickets, loading, refetch: fetch, moveTicket, openTicket, closeTicket, finalizeTicket };
 }
 
 // ==========================================
@@ -1219,6 +1229,7 @@ export interface ChatMessage {
   };
   phone: string | null;
   session_id: string | null;
+  ticket_id: string | null;
   metadata: any;
   created_at: string;
 }

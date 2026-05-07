@@ -25,6 +25,8 @@ import {
   CalendarPlus,
   ThumbsUp,
   ThumbsDown,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -836,7 +838,7 @@ function GanhoModal({ lead, onClose, onCancel, onCreate }: {
 export function LeadKanban() {
   const { data: stages, loading: stagesLoading, reorder: reorderStages, update: updateStage, create: createStage, remove: removeStage } = useFunnelStages();
   const { data: leads, create, update, remove } = useLeads({ pageSize: 150 });
-  const { tickets, loading: ticketsLoading, moveTicket, openTicket, closeTicket } = useTickets();
+  const { tickets, loading: ticketsLoading, moveTicket, openTicket, closeTicket, finalizeTicket } = useTickets();
   const { byLead: conversionsByLead, create: createConversion } = useConversions();
   const { aiConfig, updateAI } = useSettings();
   const [ganhoLead, setGanhoLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
@@ -863,6 +865,7 @@ export function LeadKanban() {
   const [showAutomationModal, setShowAutomationModal] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<'all' | 'meta' | 'google' | 'sem_origem'>('all');
+  const [showResolved, setShowResolved] = useState(false);
   const [columnPages, setColumnPages] = useState<Record<string, number>>({});
   const COLUMN_PAGE_SIZE = 20;
   const [entryDateFrom, setEntryDateFrom] = useState('');
@@ -915,49 +918,53 @@ export function LeadKanban() {
     if (!formData.name.trim()) return;
     setSubmitting(true);
 
-    const targetStageId = formData.stage_id || (stages[0]?.id ?? '');
-    const isPerdido = stages.find(s => s.id === targetStageId)?.slug === 'perdido';
+    try {
+      const targetStageId = formData.stage_id || (stages[0]?.id ?? '');
+      const isPerdido = stages.find(s => s.id === targetStageId)?.slug === 'perdido';
+      const isConversao = stages.find(s => s.id === targetStageId)?.slug === 'ganho';
 
-    const payload = {
-      name: formData.name,
-      phone: formData.phone || null,
-      source: formData.source || null,
-      capture_channel: formData.capture_channel || 'whatsapp',
-      stage_id: targetStageId || null,
-      estimated_value: formData.estimated_value ? Number(formData.estimated_value) : 0,
-      loss_reason: isPerdido ? (formData.loss_reason || null) : null,
-      avatar_url: formData.avatar_url || null,
-    };
+      const payload = {
+        name: formData.name,
+        phone: formData.phone || null,
+        source: formData.source || null,
+        capture_channel: formData.capture_channel || 'whatsapp',
+        stage_id: targetStageId || null,
+        estimated_value: formData.estimated_value ? Number(formData.estimated_value) : 0,
+        loss_reason: isPerdido ? (formData.loss_reason || null) : null,
+        avatar_url: formData.avatar_url || null,
+      };
 
-    const isConversao = stages.find(s => s.id === targetStageId)?.slug === 'ganho';
-
-    if (selectedLead) {
-      await update(selectedLead.id, payload);
-      // Move ticket if stage changed
-      if (targetStageId && selectedLead._ticketId) {
-        const openT = tickets.find(t => t.id === selectedLead._ticketId);
-        if (openT && targetStageId !== openT.stage_id) {
-          if (isPerdido) {
-            await closeTicket(openT.id, 'perdido');
-          } else {
-            await moveTicket(openT.id, targetStageId);
-            if (isConversao) {
-              setGanhoLead({ id: selectedLead.id, name: selectedLead.name, prevStageId: openT.stage_id, ticketId: openT.id });
+      if (selectedLead) {
+        const ok = await update(selectedLead.id, payload);
+        if (!ok) return;
+        if (targetStageId && selectedLead._ticketId) {
+          const openT = tickets.find(t => t.id === selectedLead._ticketId);
+          if (openT && targetStageId !== openT.stage_id) {
+            if (isPerdido) {
+              await closeTicket(openT.id, 'perdido');
+            } else {
+              await moveTicket(openT.id, targetStageId);
+              if (isConversao) {
+                setGanhoLead({ id: selectedLead.id, name: selectedLead.name, prevStageId: openT.stage_id, ticketId: openT.id });
+              }
             }
           }
         }
+      } else {
+        const newLead = await create(payload);
+        if (newLead && targetStageId && !isPerdido) {
+          await openTicket(newLead.id, targetStageId);
+        }
       }
-    } else {
-      const newLead = await create(payload);
-      if (newLead && targetStageId && !isPerdido) {
-        await openTicket(newLead.id, targetStageId);
-      }
-    }
 
-    setFormData({ name: '', phone: '', source: 'sincronizacao', capture_channel: 'whatsapp', stage_id: '', estimated_value: '', loss_reason: '', avatar_url: '' });
-    setSelectedLead(null);
-    setShowModal(false);
-    setSubmitting(false);
+      setFormData({ name: '', phone: '', source: 'sincronizacao', capture_channel: 'whatsapp', stage_id: '', estimated_value: '', loss_reason: '', avatar_url: '' });
+      setSelectedLead(null);
+      setShowModal(false);
+    } catch (err) {
+      console.error('Erro ao salvar lead:', err);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleDelete = async () => {
@@ -1008,9 +1015,10 @@ export function LeadKanban() {
     const hasSourceFilter = sourceFilter !== 'all';
     const hasEntryFilter = entryDateFrom || entryDateTo;
     const hasConvFilter = convDateFrom || convDateTo;
-    if (!hasSourceFilter && !hasEntryFilter && !hasConvFilter) return tickets;
+    const base = showResolved ? tickets : tickets.filter(t => t.status !== 'closed');
+    if (!hasSourceFilter && !hasEntryFilter && !hasConvFilter) return base;
 
-    return tickets.filter(ticket => {
+    return base.filter(ticket => {
       const lead = ticket.lead;
       if (!lead) return true;
       if (hasSourceFilter) {
@@ -1037,7 +1045,7 @@ export function LeadKanban() {
       }
       return true;
     });
-  }, [tickets, sourceFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo, conversionsByLead]);
+  }, [tickets, sourceFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo, conversionsByLead, showResolved]);
 
   const hasActiveFilters = sourceFilter !== 'all' || entryDateFrom || entryDateTo || convDateFrom || convDateTo;
 
@@ -1474,6 +1482,9 @@ export function LeadKanban() {
         )}
 
         <div className="flex items-center gap-2 ml-auto">
+          <Button variant="outline" size="icon" title={showResolved ? 'Ocultar resolvidos' : 'Mostrar resolvidos'} className={cn("h-9 w-9", showResolved ? "text-teal-600 border-teal-300 bg-teal-50 hover:bg-teal-100" : "text-slate-400 hover:text-teal-600")} onClick={() => setShowResolved(v => !v)}>
+            {showResolved ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+          </Button>
           <Button variant="outline" size="icon" className="h-9 w-9 text-slate-400 hover:text-teal-600" onClick={() => setExportOpen(true)}>
             <Download className="w-4 h-4" />
           </Button>
@@ -1551,25 +1562,27 @@ export function LeadKanban() {
                   const precisaResponder = !frozen && !!lead.last_message_at && (
                     !lead.last_outbound_at || parseISO(lead.last_message_at) > parseISO(lead.last_outbound_at)
                   );
-                  const closeReasonLabel: Record<string, string> = { ganho: 'Ganho', perdido: 'Perdido', nps_enviado: 'NPS Enviado' };
+                  const outcomeLabel: Record<string, string> = { ganho: 'Ganho', perdido: 'Perdido' };
                   return (
                   <motion.div
                     key={ticket.id}
-                    draggable={!isClosed}
-                    onDragStart={!isClosed ? (e) => handleDragStart(e, ticket) : undefined}
+                    draggable={!isClosed && !lead.converted_patient_id}
+                    onDragStart={!isClosed && !lead.converted_patient_id ? (e) => handleDragStart(e, ticket) : undefined}
                     whileHover={{ y: isClosed ? 0 : -1 }}
                     className={cn(
                       "px-3 py-2.5 rounded-lg border shadow-sm transition-all group",
-                      isClosed
-                        ? "opacity-60 cursor-default bg-slate-50 border-slate-200"
-                        : "cursor-grab active:cursor-grabbing hover:shadow-md",
+                      !frozen && !isClosed ? "cursor-grab active:cursor-grabbing hover:shadow-md" : "cursor-default",
+                      isClosed && ticket.outcome !== 'perdido' && "opacity-60",
                       draggedLead?.id === ticket.id && "opacity-50",
                       semMotivo && "animate-pulse",
-                      !isClosed && (isPerdido ? "bg-white border-rose-200"
+                      isClosed && ticket.outcome !== 'perdido' ? "bg-slate-50 border-slate-200"
+                        : ticket.outcome === 'ganho' ? "bg-emerald-50 border-emerald-200"
+                        : ticket.outcome === 'perdido' ? "bg-rose-50 border-rose-200"
+                        : isPerdido ? "bg-white border-rose-200"
                         : (!!lead.fb_campaign_name || lead.source === 'meta_ads') ? "bg-blue-50/60 border-blue-200/80"
                         : (!!lead.g_campaign_name || lead.source === 'google_ads') ? "bg-emerald-50/60 border-emerald-200/80"
                         : lead.source === 'sincronizacao' ? "bg-violet-50/60 border-violet-200/80"
-                        : "bg-white border-slate-200")
+                        : "bg-white border-slate-200"
                     )}
                   >
                     {/* Header: fonte + acoes */}
@@ -1659,15 +1672,30 @@ export function LeadKanban() {
                       );
                     })()}
 
-                    {/* Badge ticket fechado */}
-                    {isClosed && ticket.close_reason && (
-                      <div className={cn(
-                        "mb-1.5 px-2 py-0.5 rounded text-[9px] font-bold inline-flex items-center gap-1",
-                        ticket.close_reason === 'ganho' ? "bg-emerald-50 border border-emerald-200 text-emerald-700"
-                        : ticket.close_reason === 'perdido' ? "bg-rose-50 border border-rose-100 text-rose-700"
-                        : "bg-slate-100 border border-slate-200 text-slate-500"
-                      )}>
-                        ● {closeReasonLabel[ticket.close_reason] ?? ticket.close_reason}
+                    {/* Badge + botão resolvido */}
+                    {ticket.outcome && (
+                      <div className="mb-2 flex flex-col gap-1.5">
+                        <div className={cn(
+                          "px-2 py-0.5 rounded text-[9px] font-bold inline-flex items-center gap-1 self-start",
+                          ticket.outcome === 'ganho' ? "bg-emerald-50 border border-emerald-200 text-emerald-700"
+                          : "bg-rose-50 border border-rose-100 text-rose-700"
+                        )}>
+                          ● {outcomeLabel[ticket.outcome] ?? ticket.outcome}
+                        </div>
+                        {!isClosed && (
+                          <button
+                            onClick={e => { e.stopPropagation(); finalizeTicket(ticket.id); }}
+                            className={cn(
+                              "w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-[10px] font-semibold transition-colors shadow-sm",
+                              ticket.outcome === 'ganho'
+                                ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                                : "bg-rose-600 text-white hover:bg-rose-700"
+                            )}
+                          >
+                            <Check className="w-3 h-3" />
+                            Marcar como Resolvido
+                          </button>
+                        )}
                       </div>
                     )}
 
@@ -2123,7 +2151,7 @@ export function LeadKanban() {
           }}
           onConfirm={async (reason) => {
             await update(lossLead.id, { loss_reason: reason || null });
-            await closeTicket(lossLead.ticketId, 'perdido');
+            await closeTicket(lossLead.ticketId, 'perdido', reason || undefined);
           }}
         />
       )}

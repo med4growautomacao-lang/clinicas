@@ -874,12 +874,16 @@ export function LeadKanban() {
   const [convDateTo, setConvDateTo] = useState('');
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [statusDropdownTicketId, setStatusDropdownTicketId] = useState<string | null>(null);
+  const [confirmingResolveId, setConfirmingResolveId] = useState<string | null>(null);
   useEffect(() => {
-    if (!statusDropdownTicketId) return;
-    const close = () => setStatusDropdownTicketId(null);
+    if (!statusDropdownTicketId && !confirmingResolveId) return;
+    const close = () => {
+      setStatusDropdownTicketId(null);
+      setConfirmingResolveId(null);
+    };
     document.addEventListener('click', close);
     return () => document.removeEventListener('click', close);
-  }, [statusDropdownTicketId]);
+  }, [statusDropdownTicketId, confirmingResolveId]);
   const [isAddingRule, setIsAddingRule] = useState(false);
   const [newRule, setNewRule] = useState({ keywords: '', target_stage_id: '', context: '', lead_response: '', message_to_send: '' });
 
@@ -1572,10 +1576,10 @@ export function LeadKanban() {
                     className={cn(
                       "px-3 py-2.5 rounded-lg border shadow-sm transition-all group",
                       !frozen && !isClosed ? "cursor-grab active:cursor-grabbing hover:shadow-md" : "cursor-default",
-                      isClosed && ticket.outcome !== 'perdido' && "opacity-60",
+                      isClosed && "opacity-50 grayscale-[0.5] hover:opacity-75",
                       draggedLead?.id === ticket.id && "opacity-50",
                       semMotivo && "animate-pulse",
-                      isClosed && ticket.outcome !== 'perdido' ? "bg-slate-50 border-slate-200"
+                      isClosed ? "bg-slate-50/80 border-slate-200"
                         : ticket.outcome === 'ganho' ? "bg-emerald-50 border-emerald-200"
                         : ticket.outcome === 'perdido' ? "bg-rose-50 border-rose-200"
                         : isPerdido ? "bg-white border-rose-200"
@@ -1592,14 +1596,16 @@ export function LeadKanban() {
                       const isSync = !isMeta && !isGoogle && lead.source === 'sincronizacao';
                       const campaignName = lead.fb_campaign_name || lead.g_campaign_name;
                       
-                      const hasUtms = isMeta 
-                        ? (lead.fb_campaign_name || lead.fb_adset_name || lead.fb_ad_name)
-                        : (lead.g_campaign_name || lead.g_term_name || lead.g_source_name);
+                      const hasUtms = !!(
+                        lead.fb_campaign_name || lead.fb_adset_name || lead.fb_ad_name || lead.fb_clid ||
+                        lead.g_campaign_name || lead.g_adset_name || lead.g_ad_name || lead.g_term_name || lead.g_source_name ||
+                        lead.ctwa_clid || lead.rast_id || lead.source
+                      );
 
                       return (
                     <div className="flex justify-between items-start mb-2">
                       <div className="flex flex-col gap-1.5 flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5">
+                        <div className="relative group/utm inline-flex items-center gap-1.5 cursor-help w-max">
                           {isMeta && (
                             <img src={MetaLogo} alt="Meta" className="w-3.5 h-3.5 rounded shrink-0" />
                           )}
@@ -1615,89 +1621,129 @@ export function LeadKanban() {
                           )}>
                             {isMeta ? 'Meta Ads' : isGoogle ? 'Google Ads' : isSync ? 'Sincronização' : 'Sem Origem'}
                           </span>
+
+                          {hasUtms && (
+                            <div className="absolute left-0 top-full mt-2 z-50 hidden group-hover/utm:flex flex-col bg-slate-900 text-slate-100 text-[10px] p-2.5 rounded-xl shadow-xl w-max max-w-[250px] border border-slate-700 pointer-events-none">
+                              <div className="font-black text-slate-400 mb-1.5 uppercase tracking-wider text-[8px]">Dados da Origem</div>
+                              
+                              {lead.source && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">utm_source:</span> <span className="font-bold truncate">{lead.source}</span></p>}
+                              
+                              {/* Meta */}
+                              {lead.fb_campaign_name && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">utm_campaign:</span> <span className="font-bold truncate" title={lead.fb_campaign_name}>{lead.fb_campaign_name}</span></p>}
+                              {lead.fb_adset_name && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">utm_adset:</span> <span className="font-bold truncate" title={lead.fb_adset_name}>{lead.fb_adset_name}</span></p>}
+                              {lead.fb_ad_name && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">utm_ad:</span> <span className="font-bold truncate" title={lead.fb_ad_name}>{lead.fb_ad_name}</span></p>}
+                              {lead.fb_clid && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">fbclid:</span> <span className="font-bold truncate" title={lead.fb_clid}>{lead.fb_clid}</span></p>}
+                              
+                              {/* Google */}
+                              {lead.g_campaign_name && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">utm_campaign:</span> <span className="font-bold truncate" title={lead.g_campaign_name}>{lead.g_campaign_name}</span></p>}
+                              {lead.g_adset_name && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">utm_adgroup:</span> <span className="font-bold truncate" title={lead.g_adset_name}>{lead.g_adset_name}</span></p>}
+                              {lead.g_ad_name && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">utm_ad:</span> <span className="font-bold truncate" title={lead.g_ad_name}>{lead.g_ad_name}</span></p>}
+                              {lead.g_term_name && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">utm_term:</span> <span className="font-bold truncate" title={lead.g_term_name}>{lead.g_term_name}</span></p>}
+                              {lead.g_source_name && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">g_source:</span> <span className="font-bold truncate" title={lead.g_source_name}>{lead.g_source_name}</span></p>}
+                              
+                              {/* Outros IDs de Rastreio */}
+                              {lead.ctwa_clid && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">ctwa_clid:</span> <span className="font-bold truncate" title={lead.ctwa_clid}>{lead.ctwa_clid}</span></p>}
+                              {lead.rast_id && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">rast_id:</span> <span className="font-bold truncate" title={lead.rast_id}>{lead.rast_id}</span></p>}
+                            </div>
+                          )}
                         </div>
-                        
-                        {hasUtms && (
-                          <div className="mt-1 space-y-0.5">
-                            {campaignName && (
-                              <p className={cn(
-                                "text-[9px] leading-tight truncate max-w-full font-medium",
-                                isMeta ? "text-blue-600/80" : isGoogle ? "text-emerald-600/80" : "text-slate-500"
-                              )}>
-                                <span className="font-bold opacity-70">Campanha:</span> {campaignName}
-                              </p>
+
+                        {/* UTMs expostas */}
+                        {(lead.fb_campaign_name || lead.g_campaign_name || lead.fb_adset_name || lead.g_adset_name || lead.g_term_name) && (
+                          <div className="mt-0.5 flex flex-col gap-0.5">
+                            {(lead.fb_campaign_name || lead.g_campaign_name) && (
+                              <div className="text-[9px] text-slate-500 truncate flex gap-1">
+                                <span className="font-semibold text-slate-400">Campanha:</span> 
+                                <span className={isMeta ? "text-blue-600/80" : "text-emerald-600/80"}>{lead.fb_campaign_name || lead.g_campaign_name}</span>
+                              </div>
                             )}
-                            {(lead.g_term_name || lead.fb_adset_name) && (
-                              <p className={cn(
-                                "text-[9px] leading-tight truncate max-w-full font-medium",
-                                isMeta ? "text-blue-500/70" : isGoogle ? "text-emerald-500/70" : "text-slate-400"
-                              )}>
-                                <span className="font-bold opacity-70">Termo:</span> {lead.g_term_name || lead.fb_adset_name}
-                              </p>
+                            {(lead.fb_adset_name || lead.g_adset_name) && (
+                              <div className="text-[9px] text-slate-500 truncate flex gap-1">
+                                <span className="font-semibold text-slate-400">AdGroup:</span> 
+                                <span className={isMeta ? "text-blue-500/70" : "text-emerald-500/70"}>{lead.fb_adset_name || lead.g_adset_name}</span>
+                              </div>
+                            )}
+                            {lead.g_term_name && (
+                              <div className="text-[9px] text-slate-500 truncate flex gap-1">
+                                <span className="font-semibold text-slate-400">Termo:</span> 
+                                <span className="text-emerald-500/70">{lead.g_term_name}</span>
+                              </div>
                             )}
                           </div>
                         )}
                       </div>
-                      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-2">
-                        <button title="Agendar consulta" onClick={() => { setScheduleLead(lead); setScheduleForm({ doctor_id: doctors[0]?.id || '', date: '', time: '', notes: '' }); }} className="p-0.5 text-slate-400 hover:text-indigo-600 rounded transition-colors"><CalendarPlus className="w-3 h-3" /></button>
-                        <div className="relative">
-                          <button
-                            title="Status"
-                            onClick={e => { e.stopPropagation(); setStatusDropdownTicketId(statusDropdownTicketId === ticket.id ? null : ticket.id); }}
-                            className="p-0.5 text-slate-400 hover:text-violet-600 rounded transition-colors"
-                          >
-                            <Check className="w-3 h-3" />
-                          </button>
-                          {statusDropdownTicketId === ticket.id && (
-                            <div className="absolute right-0 top-5 z-50 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden w-28" onClick={e => e.stopPropagation()}>
+                      <div className="flex flex-col items-end gap-1.5 shrink-0 ml-2">
+                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button title="Agendar consulta" onClick={() => { setScheduleLead(lead); setScheduleForm({ doctor_id: doctors[0]?.id || '', date: '', time: '', notes: '' }); }} className="p-0.5 text-slate-400 hover:text-indigo-600 rounded transition-colors"><CalendarPlus className="w-3 h-3" /></button>
+                          {!ticket.outcome && !isClosed && (
+                            <div className="relative">
                               <button
-                                onClick={() => { setStatusDropdownTicketId(null); setGanhoLead({ id: lead.id, name: lead.name, prevStageId: ticket.stage_id, ticketId: ticket.id }); }}
-                                className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50 transition-colors"
+                                title="Status"
+                                onClick={e => { e.stopPropagation(); setStatusDropdownTicketId(statusDropdownTicketId === ticket.id ? null : ticket.id); }}
+                                className="p-0.5 text-slate-400 hover:text-violet-600 rounded transition-colors"
                               >
-                                <ThumbsUp className="w-3 h-3" /> Ganho
+                                <Check className="w-3 h-3" />
                               </button>
-                              <button
-                                onClick={() => { setStatusDropdownTicketId(null); setLossLead({ id: lead.id, name: lead.name, prevStageId: ticket.stage_id, ticketId: ticket.id }); }}
-                                className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-50 transition-colors"
-                              >
-                                <ThumbsDown className="w-3 h-3" /> Perdido
-                              </button>
+                              {statusDropdownTicketId === ticket.id && (
+                                <div className="absolute right-0 top-5 z-50 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden w-28" onClick={e => e.stopPropagation()}>
+                                  <button
+                                    onClick={() => { setStatusDropdownTicketId(null); setGanhoLead({ id: lead.id, name: lead.name, prevStageId: ticket.stage_id, ticketId: ticket.id }); }}
+                                    className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50 transition-colors"
+                                  >
+                                    <ThumbsUp className="w-3 h-3" /> Ganho
+                                  </button>
+                                  <button
+                                    onClick={() => { setStatusDropdownTicketId(null); setLossLead({ id: lead.id, name: lead.name, prevStageId: ticket.stage_id, ticketId: ticket.id }); }}
+                                    className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-50 transition-colors"
+                                  >
+                                    <ThumbsDown className="w-3 h-3" /> Perdido
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           )}
+                          <button title="Editar" onClick={() => openEditModal(ticket)} className="p-0.5 text-slate-400 hover:text-teal-600 rounded transition-colors"><Edit2 className="w-3 h-3" /></button>
+                          <button title="Excluir" onClick={() => openDeleteConfirm(ticket)} className="p-0.5 text-slate-400 hover:text-rose-600 rounded transition-colors"><Trash2 className="w-3 h-3" /></button>
                         </div>
-                        <button title="Editar" onClick={() => openEditModal(ticket)} className="p-0.5 text-slate-400 hover:text-teal-600 rounded transition-colors"><Edit2 className="w-3 h-3" /></button>
-                        <button title="Excluir" onClick={() => openDeleteConfirm(ticket)} className="p-0.5 text-slate-400 hover:text-rose-600 rounded transition-colors"><Trash2 className="w-3 h-3" /></button>
+
+                        {ticket.outcome && !isClosed && (
+                          <div className="mt-auto">
+                            {confirmingResolveId === ticket.id ? (
+                              <div className="flex gap-1 animate-in fade-in zoom-in duration-200">
+                                <button
+                                  onClick={e => { e.stopPropagation(); finalizeTicket(ticket.id); setConfirmingResolveId(null); }}
+                                  className="flex items-center justify-center px-1.5 py-1 bg-amber-500 text-white rounded text-[9px] font-black hover:bg-amber-600 transition-all shadow-sm"
+                                >
+                                  Confirmar
+                                </button>
+                                <button
+                                  onClick={e => { e.stopPropagation(); setConfirmingResolveId(null); }}
+                                  className="px-1 flex items-center justify-center bg-white text-slate-600 py-1 rounded hover:bg-slate-100 border border-slate-200 transition-all shadow-sm shrink-0"
+                                  title="Cancelar"
+                                >
+                                  <X className="w-2.5 h-2.5" />
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={e => { e.stopPropagation(); setConfirmingResolveId(ticket.id); }}
+                                className={cn(
+                                  "flex items-center justify-center gap-1 px-2.5 py-1 rounded text-[9px] font-bold transition-all shadow-sm truncate",
+                                  ticket.outcome === 'ganho'
+                                    ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                                    : "bg-rose-600 text-white hover:bg-rose-700"
+                                )}
+                              >
+                                <Check className="w-2.5 h-2.5 shrink-0" />
+                                Resolver
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                       );
                     })()}
-
-                    {/* Badge + botão resolvido */}
-                    {ticket.outcome && (
-                      <div className="mb-2 flex flex-col gap-1.5">
-                        <div className={cn(
-                          "px-2 py-0.5 rounded text-[9px] font-bold inline-flex items-center gap-1 self-start",
-                          ticket.outcome === 'ganho' ? "bg-emerald-50 border border-emerald-200 text-emerald-700"
-                          : "bg-rose-50 border border-rose-100 text-rose-700"
-                        )}>
-                          ● {outcomeLabel[ticket.outcome] ?? ticket.outcome}
-                        </div>
-                        {!isClosed && (
-                          <button
-                            onClick={e => { e.stopPropagation(); finalizeTicket(ticket.id); }}
-                            className={cn(
-                              "w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-[10px] font-semibold transition-colors shadow-sm",
-                              ticket.outcome === 'ganho'
-                                ? "bg-emerald-600 text-white hover:bg-emerald-700"
-                                : "bg-rose-600 text-white hover:bg-rose-700"
-                            )}
-                          >
-                            <Check className="w-3 h-3" />
-                            Marcar como Resolvido
-                          </button>
-                        )}
-                      </div>
-                    )}
 
                     {/* Nome + telefone */}
                     <div className="flex items-center gap-3 mt-1.5">

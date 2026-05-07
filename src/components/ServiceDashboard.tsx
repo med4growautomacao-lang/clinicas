@@ -251,7 +251,7 @@ export function ServiceDashboard() {
     const clinicId = activeClinicId || profile?.clinic_id;
     fetchData();
     if (!clinicId) return;
-    const channel = supabase.channel('service_dashboard_rt').on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages', filter: `clinic_id=eq.${clinicId}` }, () => fetchData()).on('postgres_changes', { event: '*', schema: 'public', table: 'leads', filter: `clinic_id=eq.${clinicId}` }, () => fetchData()).on('postgres_changes', { event: '*', schema: 'public', table: 'automation_logs', filter: `clinic_id=eq.${clinicId}` }, () => fetchData()).on('postgres_changes', { event: '*', schema: 'public', table: 'appointments', filter: `clinic_id=eq.${clinicId}` }, () => fetchData()).subscribe();
+    const channel = supabase.channel('service_dashboard_rt').on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages', filter: `clinic_id=eq.${clinicId}` }, () => fetchData()).on('postgres_changes', { event: '*', schema: 'public', table: 'leads', filter: `clinic_id=eq.${clinicId}` }, () => fetchData()).on('postgres_changes', { event: '*', schema: 'public', table: 'appointments', filter: `clinic_id=eq.${clinicId}` }, () => fetchData()).subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [fetchData, activeClinicId, profile?.clinic_id]);
 

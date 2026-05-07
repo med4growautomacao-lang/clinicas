@@ -62,20 +62,12 @@ export function useDoctors() {
     fetch();
     if (!activeClinicId) return;
 
-    const channel = supabase
-      .channel('doctors_realtime')
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'doctors',
-        filter: `clinic_id=eq.${activeClinicId}`
-      }, () => {
-        invalidateCache(`doctors:${activeClinicId}`);
-        fetch(true);
-      })
-      .subscribe();
+    const interval = setInterval(() => {
+      invalidateCache(`doctors:${activeClinicId}`);
+      fetch(true);
+    }, 120_000);
 
-    return () => { supabase.removeChannel(channel); };
+    return () => clearInterval(interval);
   }, [fetch, activeClinicId]);
 
   const create = async (doc: Partial<Doctor>) => {
@@ -172,23 +164,12 @@ export function usePatients() {
     if (!silent) setLoading(false);
   }, [activeClinicId]);
 
-  useEffect(() => { 
-    fetch(); 
+  useEffect(() => {
+    fetch();
     if (!activeClinicId) return;
 
-    const channel = supabase
-      .channel('patients_realtime')
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'patients',
-        filter: `clinic_id=eq.${activeClinicId}`
-      }, () => {
-        fetch(true);
-      })
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
+    const interval = setInterval(() => fetch(true), 60_000);
+    return () => clearInterval(interval);
   }, [fetch, activeClinicId]);
 
   const create = async (p: Partial<Patient>) => {
@@ -392,22 +373,6 @@ export function useFunnelStages() {
 
   useEffect(() => {
     fetch();
-    if (!activeClinicId) return;
-
-    const channel = supabase
-      .channel('funnel_stages_realtime')
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'funnel_stages',
-        filter: `clinic_id=eq.${activeClinicId}`
-      }, () => {
-        invalidateCache(`funnel_stages:${activeClinicId}`);
-        fetch(true);
-      })
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
   }, [fetch, activeClinicId]);
 
   const update = async (id: string, updates: Partial<FunnelStage>) => {
@@ -868,23 +833,12 @@ export function useFinancial() {
     if (!silent) setLoading(false);
   }, [activeClinicId]);
 
-  useEffect(() => { 
-    fetch(); 
+  useEffect(() => {
+    fetch();
     if (!activeClinicId) return;
 
-    const channel = supabase
-      .channel('financial_realtime')
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'financial_transactions',
-        filter: `clinic_id=eq.${activeClinicId}`
-      }, () => {
-        fetch(true);
-      })
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
+    const interval = setInterval(() => fetch(true), 30_000);
+    return () => clearInterval(interval);
   }, [fetch, activeClinicId]);
 
   const create = async (tx: Partial<FinancialTransaction>) => {
@@ -957,23 +911,8 @@ export function useMedicalRecords(patientId: string | null) {
     if (!silent) setLoading(false);
   }, [patientId]);
 
-  useEffect(() => { 
-    fetch(); 
-    if (!patientId) return;
-
-    const channel = supabase
-      .channel(`records_${patientId}`)
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'medical_records',
-        filter: `patient_id=eq.${patientId}`
-      }, () => {
-        fetch(true);
-      })
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
+  useEffect(() => {
+    fetch();
   }, [fetch, patientId]);
 
   const create = async (record: Partial<MedicalRecord>) => {

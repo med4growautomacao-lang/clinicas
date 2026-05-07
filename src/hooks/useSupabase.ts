@@ -1119,7 +1119,8 @@ export function useSettings() {
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
-        table: 'whatsapp_instances'
+        table: 'whatsapp_instances',
+        filter: `clinic_id=eq.${activeClinicId}`
       }, (payload) => {
         if (payload.new && (payload.new as any).clinic_id === activeClinicId) {
           fetch(true);
@@ -1128,7 +1129,8 @@ export function useSettings() {
       .on('postgres_changes', {
         event: 'UPDATE',
         schema: 'public',
-        table: 'ai_config'
+        table: 'ai_config',
+        filter: `clinic_id=eq.${activeClinicId}`
       }, (payload) => {
         if ((payload.new as any)?.clinic_id === activeClinicId) {
           fetch(true);

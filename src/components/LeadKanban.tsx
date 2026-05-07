@@ -375,6 +375,8 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
   const maxOffset = useRef(0);
   const rafId = useRef<number | null>(null);
   const fromScrollbar = useRef(false);
+  const dragEdgeDir = useRef(0);   // velocidade do edge-scroll durante drag
+  const dragEdgeRaf = useRef<number | null>(null);
 
   // Aplica o offset via transform — sem reflow, direto no compositor
   const applyOffset = useCallback((newOffset: number) => {
@@ -418,6 +420,31 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
       rafId.current = null;
     }
   }, [applyOffset]);
+
+  // Loop de edge-scroll durante drag de card
+  const dragEdgeLoop = useCallback(() => {
+    if (dragEdgeDir.current === 0) { dragEdgeRaf.current = null; return; }
+    applyOffset(offset.current + dragEdgeDir.current);
+    dragEdgeRaf.current = requestAnimationFrame(dragEdgeLoop);
+  }, [applyOffset]);
+
+  const onDragOverEdge = useCallback((e: React.DragEvent) => {
+    if (!outerRef.current) return;
+    const rect = outerRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const EDGE = 300;
+    const MAX_SPEED = 28;
+    if (x < EDGE) {
+      dragEdgeDir.current = -MAX_SPEED * (1 - x / EDGE);
+    } else if (x > rect.width - EDGE) {
+      dragEdgeDir.current = MAX_SPEED * (1 - (rect.width - x) / EDGE);
+    } else {
+      dragEdgeDir.current = 0;
+    }
+    if (dragEdgeDir.current !== 0 && !dragEdgeRaf.current) {
+      dragEdgeRaf.current = requestAnimationFrame(dragEdgeLoop);
+    }
+  }, [dragEdgeLoop]);
 
   const stopPan = useCallback(() => {
     isPendingPan.current = false;
@@ -490,6 +517,8 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
 
   const onDragEnd = useCallback(() => {
     isCardDragging.current = false;
+    dragEdgeDir.current = 0;
+    if (dragEdgeRaf.current) { cancelAnimationFrame(dragEdgeRaf.current); dragEdgeRaf.current = null; }
     if (outerRef.current) outerRef.current.style.cursor = '';
   }, []);
 
@@ -516,6 +545,8 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
         onMouseDown={onMouseDown}
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
+        onDragOver={onDragOverEdge}
+        onDragLeave={() => { dragEdgeDir.current = 0; }}
         onContextMenu={onContextMenu}
       >
         {/* Inner: transform no compositor — sem reflow */}

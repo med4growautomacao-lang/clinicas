@@ -355,13 +355,14 @@ import { ptBR } from "date-fns/locale";
 import { LeadChat } from "./LeadChat";
 
 const SCROLL_SPEED = 3.5;
-const MOMENTUM_DECAY = 0.88;
+const MOMENTUM_DECAY = 0.92;
 
 function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
   const mainRef = useRef<HTMLDivElement>(null);
   const topScrollRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
   const isPanning = useRef(false);
+  const hasMoved = useRef(false);
   const isCardDragging = useRef(false);
   const panTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastX = useRef(0);
@@ -418,6 +419,7 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
       momentumRaf.current = requestAnimationFrame(applyMomentum);
     } else {
       velocity.current = 0;
+      hasMoved.current = false;
     }
   }, [applyMomentum]);
 
@@ -425,8 +427,9 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isPanning.current) return;
+      hasMoved.current = true;
       const dx = lastX.current - e.pageX;
-      velocity.current = dx * SCROLL_SPEED * 0.6 + velocity.current * 0.4;
+      velocity.current = dx * SCROLL_SPEED * 0.4 + velocity.current * 0.6;
       lastX.current = e.pageX;
       if (mainRef.current) mainRef.current.scrollLeft += dx * SCROLL_SPEED;
     };
@@ -459,6 +462,13 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
         mainRef.current.style.userSelect = 'none';
       }
     }, 80);
+  }, []);
+
+  const onContextMenu = useCallback((e: React.MouseEvent) => {
+    if (hasMoved.current) {
+      e.preventDefault();
+      hasMoved.current = false;
+    }
   }, []);
 
   const onDragStart = useCallback(() => {
@@ -495,6 +505,7 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
         onDragEnd={onDragEnd}
         onScroll={onMainScroll}
         onMouseDown={onMouseDown}
+        onContextMenu={onContextMenu}
       >
         {children}
       </div>

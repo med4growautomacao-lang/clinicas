@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
-import { X, Send, Bot, User, Loader2, MessageSquare, Phone, ThumbsUp, ThumbsDown } from "lucide-react";
+import { X, Send, Bot, User, Loader2, MessageSquare, Phone, ThumbsUp, ThumbsDown, TrendingUp } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "./ui/button";
-import { useChatMessages, ChatMessage, Lead, useLeads, useFunnelStages } from "../hooks/useSupabase";
+import { useChatMessages, ChatMessage, Lead, useLeads, useFunnelStages, useConversions } from "../hooks/useSupabase";
 import { format, isToday, isYesterday } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/src/lib/utils";
@@ -84,6 +84,8 @@ export function extractMessageText(message: any): string {
 export function LeadChat({ lead, onClose, isDragging = false, ticketId, onGanho, onPerdido, onStageChange }: LeadChatProps) {
   const { data: messages, loading, send } = useChatMessages(lead.id, lead.phone);
   const { update: updateLead } = useLeads();
+  const { byLead: conversionsByLead } = useConversions();
+  const [showConversions, setShowConversions] = useState(false);
   const { data: stages } = useFunnelStages();
   const [content, setContent] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -143,6 +145,7 @@ export function LeadChat({ lead, onClose, isDragging = false, ticketId, onGanho,
   };
 
   return (
+    <>
     <motion.div
       initial={{ opacity: 0, x: 300 }}
       animate={{ opacity: 1, x: 0 }}
@@ -223,6 +226,14 @@ export function LeadChat({ lead, onClose, isDragging = false, ticketId, onGanho,
                   </div>
                 </>
               )}
+              <span className="text-slate-200">•</span>
+              <button
+                onClick={() => setShowConversions(true)}
+                className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold text-teal-700 bg-teal-50 hover:bg-teal-100 border border-teal-200 rounded-lg transition-all"
+              >
+                <TrendingUp className="w-3 h-3" />
+                Conversões {(conversionsByLead[lead.id]?.length ?? 0) > 0 && `(${conversionsByLead[lead.id].length})`}
+              </button>
             </div>
           </div>
         </div>
@@ -389,5 +400,73 @@ export function LeadChat({ lead, onClose, isDragging = false, ticketId, onGanho,
         </p>
       </div>
     </motion.div>
+
+    {/* Modal de Conversões */}
+    <AnimatePresence>
+      {showConversions && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4"
+          onClick={() => setShowConversions(false)}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 16 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 16 }}
+            className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+              <div>
+                <p className="font-bold text-slate-900 text-base">{lead.name}</p>
+                {lead.phone && (
+                  <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
+                    <Phone className="w-3 h-3" /> {lead.phone}
+                  </p>
+                )}
+              </div>
+              <button onClick={() => setShowConversions(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Lista */}
+            <div className="p-5">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Histórico de Conversões</p>
+              {(conversionsByLead[lead.id]?.length ?? 0) === 0 ? (
+                <p className="text-sm text-slate-400 text-center py-6">Nenhuma conversão registrada.</p>
+              ) : (
+                <>
+                  <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar">
+                    {[...conversionsByLead[lead.id]]
+                      .sort((a, b) => new Date(b.converted_at).getTime() - new Date(a.converted_at).getTime())
+                      .map(conv => (
+                        <div key={conv.id} className="flex items-center justify-between px-3 py-2 bg-teal-50 border border-teal-100 rounded-lg">
+                          <span className="text-xs text-slate-500">
+                            {new Date(conv.converted_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                          </span>
+                          <span className="text-sm font-semibold text-teal-700">
+                            R$ {Number(conv.value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                  <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100 text-xs">
+                    <span className="text-slate-400">{conversionsByLead[lead.id].length} ganho{conversionsByLead[lead.id].length !== 1 ? 's' : ''}</span>
+                    <span className="font-bold text-teal-600">
+                      Total: R$ {conversionsByLead[lead.id].reduce((s, c) => s + Number(c.value || 0), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+    </>
   );
 }

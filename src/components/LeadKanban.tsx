@@ -1737,18 +1737,6 @@ export function LeadKanban() {
                       </div>
                     )}
 
-                    {/* Badge de conversões */}
-                    {conversionsByLead[lead.id]?.length > 0 && (() => {
-                      const convs = conversionsByLead[lead.id];
-                      const total = convs.reduce((s, c) => s + Number(c.value), 0);
-                      return (
-                        <div className="flex items-center gap-1 mt-1.5">
-                          <span className="text-[9px] font-black px-1.5 py-0.5 rounded border bg-emerald-50 border-emerald-200 text-emerald-700">
-                            ✓ {convs.length}x · R$ {total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                          </span>
-                        </div>
-                      );
-                    })()}
 
                     {/* Footer: valor | tempo + chat */}
                     <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-100 gap-2">
@@ -1879,29 +1867,6 @@ export function LeadKanban() {
                 )}
               </div>
 
-              {selectedLead && conversionsByLead[selectedLead.id]?.length > 0 && (
-                <div className="px-6 pb-4">
-                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Histórico de Conversões</label>
-                  <div className="space-y-1.5 max-h-40 overflow-y-auto custom-scrollbar">
-                    {[...conversionsByLead[selectedLead.id]].sort((a, b) => new Date(b.converted_at).getTime() - new Date(a.converted_at).getTime()).map(conv => (
-                      <div key={conv.id} className="flex items-center justify-between px-3 py-2 bg-teal-50 border border-teal-100 rounded-lg">
-                        <span className="text-xs text-slate-500">
-                          {new Date(conv.converted_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })}
-                        </span>
-                        <span className="text-sm font-semibold text-teal-700">
-                          R$ {Number(conv.value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="mt-2 flex items-center justify-between text-xs">
-                    <span className="text-slate-400">{conversionsByLead[selectedLead.id].length} ganho{conversionsByLead[selectedLead.id].length !== 1 ? 's' : ''}</span>
-                    <span className="font-semibold text-teal-600">
-                      Total: R$ {conversionsByLead[selectedLead.id].reduce((sum, c) => sum + Number(c.value || 0), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                </div>
-              )}
 
               <div className="flex gap-3 p-6 border-t border-slate-100 bg-slate-50">
                 <Button variant="outline" className="flex-1" onClick={() => setShowModal(false)}>Cancelar</Button>

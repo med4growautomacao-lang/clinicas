@@ -261,10 +261,10 @@ export function useAppointments(options?: { daysBack?: number; daysForward?: num
     if (!activeClinicId) return;
 
     const channel = supabase
-      .channel('appointments_realtime')
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
+      .channel(`appointments_realtime_${activeClinicId}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
         table: 'appointments',
         filter: `clinic_id=eq.${activeClinicId}`
       }, () => {
@@ -287,8 +287,9 @@ export function useAppointments(options?: { daysBack?: number; daysForward?: num
   };
 
   const update = async (id: string, updates: Partial<Appointment>) => {
+    setData(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
     const { error } = await supabase.from('appointments').update(updates).eq('id', id);
-    if (error) { setError(error.message); return false; }
+    if (error) { setError(error.message); fetch(true); return false; }
     return true;
   };
 

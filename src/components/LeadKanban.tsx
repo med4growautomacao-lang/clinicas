@@ -21,9 +21,10 @@ import {
   FileText,
   Search,
   Users,
-  ShoppingCart,
   Check,
   CalendarPlus,
+  ThumbsUp,
+  ThumbsDown,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -353,17 +354,20 @@ function calcBusinessMinutes(since: Date, bh: { start: string; end: string; days
 import { ptBR } from "date-fns/locale";
 import { LeadChat } from "./LeadChat";
 
+const SCROLL_SPEED = 3.5;
+const MOMENTUM_DECAY = 0.88;
+
 function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
   const mainRef = useRef<HTMLDivElement>(null);
   const topScrollRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
   const isPanning = useRef(false);
-  const pendingPan = useRef(false);
   const isCardDragging = useRef(false);
   const panTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const startX = useRef(0);
-  const scrollLeft = useRef(0);
+  const lastX = useRef(0);
   const syncingFrom = useRef<'main' | 'top' | null>(null);
+  const velocity = useRef(0);
+  const momentumRaf = useRef<number | null>(null);
 
   const onMainScroll = useCallback(() => {
     if (syncingFrom.current === 'top') return;
@@ -392,52 +396,82 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
     return () => obs.disconnect();
   }, []);
 
-  const onMouseDown = useCallback((e: React.MouseEvent) => {
-    const target = e.target as HTMLElement;
-    if (target.closest('button') || target.closest('input') || target.closest('textarea')) return;
-    const pageX = e.pageX;
-    const curScroll = mainRef.current?.scrollLeft ?? 0;
-    // Aguarda 100ms: drag de card dispara em ~50ms, pan é gesto mais lento
-    panTimer.current = setTimeout(() => {
-      if (isCardDragging.current) return;
-      pendingPan.current = true;
-      startX.current = pageX;
-      scrollLeft.current = curScroll;
-      if (mainRef.current) mainRef.current.style.cursor = 'grab';
-    }, 100);
-  }, []);
-
-  const onMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!pendingPan.current && !isPanning.current) return;
-    if (!isPanning.current) {
-      isPanning.current = true;
-      startX.current = e.pageX;
-      scrollLeft.current = mainRef.current?.scrollLeft ?? 0;
-      if (mainRef.current) mainRef.current.style.cursor = 'grabbing';
+  const applyMomentum = useCallback(() => {
+    if (!mainRef.current || Math.abs(velocity.current) < 0.5) {
+      velocity.current = 0;
+      momentumRaf.current = null;
       return;
     }
-    if (!mainRef.current) return;
-    mainRef.current.scrollLeft = scrollLeft.current - (e.pageX - startX.current);
+    mainRef.current.scrollLeft += velocity.current;
+    velocity.current *= MOMENTUM_DECAY;
+    momentumRaf.current = requestAnimationFrame(applyMomentum);
   }, []);
 
   const stopPan = useCallback(() => {
-    if (panTimer.current) clearTimeout(panTimer.current);
-    pendingPan.current = false;
+    if (!isPanning.current) return;
     isPanning.current = false;
-    if (mainRef.current) mainRef.current.style.cursor = '';
+    if (mainRef.current) {
+      mainRef.current.style.cursor = '';
+      mainRef.current.style.userSelect = '';
+    }
+    if (Math.abs(velocity.current) > 1) {
+      momentumRaf.current = requestAnimationFrame(applyMomentum);
+    } else {
+      velocity.current = 0;
+    }
+  }, [applyMomentum]);
+
+  // Handlers globais: pan nunca quebra ao sair do container
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isPanning.current) return;
+      const dx = lastX.current - e.pageX;
+      velocity.current = dx * SCROLL_SPEED * 0.6 + velocity.current * 0.4;
+      lastX.current = e.pageX;
+      if (mainRef.current) mainRef.current.scrollLeft += dx * SCROLL_SPEED;
+    };
+
+    const handleMouseUp = () => {
+      if (panTimer.current) clearTimeout(panTimer.current);
+      stopPan();
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [stopPan]);
+
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('button') || target.closest('input') || target.closest('textarea') || target.closest('select')) return;
+    if (isCardDragging.current) return;
+    if (momentumRaf.current) { cancelAnimationFrame(momentumRaf.current); momentumRaf.current = null; velocity.current = 0; }
+    const pageX = e.pageX;
+    panTimer.current = setTimeout(() => {
+      if (isCardDragging.current) return;
+      isPanning.current = true;
+      lastX.current = pageX;
+      if (mainRef.current) {
+        mainRef.current.style.cursor = 'grabbing';
+        mainRef.current.style.userSelect = 'none';
+      }
+    }, 80);
   }, []);
 
   const onDragStart = useCallback(() => {
     if (panTimer.current) clearTimeout(panTimer.current);
+    if (momentumRaf.current) { cancelAnimationFrame(momentumRaf.current); momentumRaf.current = null; }
     isCardDragging.current = true;
-    pendingPan.current = false;
     isPanning.current = false;
+    velocity.current = 0;
     if (mainRef.current) mainRef.current.style.cursor = '';
   }, []);
 
   const onDragEnd = useCallback(() => {
     isCardDragging.current = false;
-    isPanning.current = false;
     if (mainRef.current) mainRef.current.style.cursor = '';
   }, []);
 
@@ -461,9 +495,6 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
         onDragEnd={onDragEnd}
         onScroll={onMainScroll}
         onMouseDown={onMouseDown}
-        onMouseMove={onMouseMove}
-        onMouseUp={stopPan}
-        onMouseLeave={stopPan}
       >
         {children}
       </div>
@@ -561,7 +592,7 @@ function LossModal({ lead, onClose, onCancel, onConfirm }: {
   );
 }
 
-function ConversionModal({ lead, onClose, onCancel, onCreate }: {
+function GanhoModal({ lead, onClose, onCancel, onCreate }: {
   lead: { id: string; name: string };
   onClose: () => void;
   onCancel: () => void;
@@ -618,7 +649,7 @@ function ConversionModal({ lead, onClose, onCancel, onCreate }: {
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onCancel}>
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onCancel}>
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
@@ -725,7 +756,7 @@ function ConversionModal({ lead, onClose, onCancel, onCreate }: {
           >
             {done ? <><Check className="w-4 h-4" /> Registrado!</> :
              saving ? <Loader2 className="w-4 h-4 animate-spin" /> :
-             <><ShoppingCart className="w-4 h-4" /> Registrar Venda</>}
+             <><ThumbsUp className="w-4 h-4" /> Registrar Ganho</>}
           </button>
         </div>
       </motion.div>
@@ -739,7 +770,7 @@ export function LeadKanban() {
   const { tickets, loading: ticketsLoading, moveTicket, openTicket, closeTicket } = useTickets();
   const { byLead: conversionsByLead, create: createConversion } = useConversions();
   const { aiConfig, updateAI } = useSettings();
-  const [conversionLead, setConversionLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
+  const [ganhoLead, setGanhoLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
   const [lossLead, setLossLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
   const { data: transitionRules, create: createRule, remove: removeRule, update: updateRule, reorder: reorderRules } = useTransitionRules();
   const [showModal, setShowModal] = useState(false);
@@ -770,6 +801,13 @@ export function LeadKanban() {
   const [convDateFrom, setConvDateFrom] = useState('');
   const [convDateTo, setConvDateTo] = useState('');
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
+  const [statusDropdownTicketId, setStatusDropdownTicketId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!statusDropdownTicketId) return;
+    const close = () => setStatusDropdownTicketId(null);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [statusDropdownTicketId]);
   const [isAddingRule, setIsAddingRule] = useState(false);
   const [newRule, setNewRule] = useState({ keywords: '', target_stage_id: '', context: '', lead_response: '', message_to_send: '' });
 
@@ -795,8 +833,8 @@ export function LeadKanban() {
       const targetStage = stages.find(s => s.id === targetStageId);
       await moveTicket(draggedLead.id, targetStageId);
 
-      if (targetStage?.slug === 'conversao') {
-        setConversionLead({ id: draggedLead.lead_id, name: draggedLead.lead?.name ?? '', prevStageId: draggedLead.stage_id, ticketId: draggedLead.id });
+      if (targetStage?.slug === 'ganho') {
+        setGanhoLead({ id: draggedLead.lead_id, name: draggedLead.lead?.name ?? '', prevStageId: draggedLead.stage_id, ticketId: draggedLead.id });
       } else if (targetStage?.slug === 'perdido') {
         setLossLead({ id: draggedLead.lead_id, name: draggedLead.lead?.name ?? '', prevStageId: draggedLead.stage_id, ticketId: draggedLead.id });
       }
@@ -822,6 +860,8 @@ export function LeadKanban() {
       avatar_url: formData.avatar_url || null,
     };
 
+    const isConversao = stages.find(s => s.id === targetStageId)?.slug === 'ganho';
+
     if (selectedLead) {
       await update(selectedLead.id, payload);
       // Move ticket if stage changed
@@ -832,6 +872,9 @@ export function LeadKanban() {
             await closeTicket(openT.id, 'perdido');
           } else {
             await moveTicket(openT.id, targetStageId);
+            if (isConversao) {
+              setGanhoLead({ id: selectedLead.id, name: selectedLead.name, prevStageId: openT.stage_id, ticketId: openT.id });
+            }
           }
         }
       }
@@ -887,6 +930,9 @@ export function LeadKanban() {
     'bg-purple-500': 'bg-purple-500',
     'bg-indigo-500': 'bg-indigo-500',
     'bg-slate-500': 'bg-slate-500',
+    'bg-green-600': 'bg-green-600',
+    'bg-red-600': 'bg-red-600',
+    'bg-orange-500': 'bg-orange-500',
   };
 
   const filteredTickets = React.useMemo(() => {
@@ -1365,7 +1411,7 @@ export function LeadKanban() {
         />
 
         <DateRangePicker
-          label="Data de conversão do lead"
+          label="Data de ganho do lead"
           labelColor="text-emerald-500"
           from={convDateFrom}
           to={convDateTo}
@@ -1394,7 +1440,7 @@ export function LeadKanban() {
           const hasMoreInColumn = visibleCount < stageTickets.length;
           return (
             <div key={stage.id} className="w-[300px] shrink-0 flex flex-col gap-2 h-full">
-              <div className="flex items-center gap-2 px-2">
+              <div className="flex items-center gap-2 px-2" draggable={false} onDragStart={e => e.preventDefault()}>
                 <div className={cn("w-2 h-2 shrink-0 rounded-full", stageColors[stage.color || 'bg-slate-500'] || 'bg-slate-500')} />
                 <h3 className="font-bold text-slate-700 text-xs uppercase tracking-wider truncate flex-1">{stage.name}</h3>
                 <span className="bg-slate-200 text-slate-600 text-[10px] font-bold px-1.5 py-0.5 rounded-md shrink-0">{stageTickets.length}</span>
@@ -1414,6 +1460,7 @@ export function LeadKanban() {
                 onDragOver={(e) => handleDragOver(e, stage.id)}
                 onDragLeave={() => setDragOverStage(null)}
                 onDrop={(e) => handleDrop(e, stage.id)}
+                onDragStart={e => { if (!(e.target as HTMLElement).closest('[draggable="true"]')) e.preventDefault(); }}
                 onScroll={(e) => {
                   const el = e.currentTarget;
                   if (hasMoreInColumn && el.scrollTop + el.clientHeight >= el.scrollHeight - 100) {
@@ -1520,7 +1567,31 @@ export function LeadKanban() {
                       </div>
                       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-2">
                         <button title="Agendar consulta" onClick={() => { setScheduleLead(lead); setScheduleForm({ doctor_id: doctors[0]?.id || '', date: '', time: '', notes: '' }); }} className="p-0.5 text-slate-400 hover:text-indigo-600 rounded transition-colors"><CalendarPlus className="w-3 h-3" /></button>
-                        <button title="Registrar venda" onClick={() => setConversionLead({ id: lead.id, name: lead.name, prevStageId: ticket.stage_id, ticketId: ticket.id })} className="p-0.5 text-slate-400 hover:text-emerald-600 rounded transition-colors"><ShoppingCart className="w-3 h-3" /></button>
+                        <div className="relative">
+                          <button
+                            title="Status"
+                            onClick={e => { e.stopPropagation(); setStatusDropdownTicketId(statusDropdownTicketId === ticket.id ? null : ticket.id); }}
+                            className="p-0.5 text-slate-400 hover:text-violet-600 rounded transition-colors"
+                          >
+                            <Check className="w-3 h-3" />
+                          </button>
+                          {statusDropdownTicketId === ticket.id && (
+                            <div className="absolute right-0 top-5 z-50 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden w-28" onClick={e => e.stopPropagation()}>
+                              <button
+                                onClick={() => { setStatusDropdownTicketId(null); setGanhoLead({ id: lead.id, name: lead.name, prevStageId: ticket.stage_id, ticketId: ticket.id }); }}
+                                className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50 transition-colors"
+                              >
+                                <ThumbsUp className="w-3 h-3" /> Ganho
+                              </button>
+                              <button
+                                onClick={() => { setStatusDropdownTicketId(null); setLossLead({ id: lead.id, name: lead.name, prevStageId: ticket.stage_id, ticketId: ticket.id }); }}
+                                className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-50 transition-colors"
+                              >
+                                <ThumbsDown className="w-3 h-3" /> Perdido
+                              </button>
+                            </div>
+                          )}
+                        </div>
                         <button title="Editar" onClick={() => openEditModal(ticket)} className="p-0.5 text-slate-400 hover:text-teal-600 rounded transition-colors"><Edit2 className="w-3 h-3" /></button>
                         <button title="Excluir" onClick={() => openDeleteConfirm(ticket)} className="p-0.5 text-slate-400 hover:text-rose-600 rounded transition-colors"><Trash2 className="w-3 h-3" /></button>
                       </div>
@@ -1764,7 +1835,7 @@ export function LeadKanban() {
                     ))}
                   </div>
                   <div className="mt-2 flex items-center justify-between text-xs">
-                    <span className="text-slate-400">{conversionsByLead[selectedLead.id].length} conversão{conversionsByLead[selectedLead.id].length !== 1 ? 'ões' : ''}</span>
+                    <span className="text-slate-400">{conversionsByLead[selectedLead.id].length} ganho{conversionsByLead[selectedLead.id].length !== 1 ? 's' : ''}</span>
                     <span className="font-semibold text-teal-600">
                       Total: R$ {conversionsByLead[selectedLead.id].reduce((sum, c) => sum + Number(c.value || 0), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                     </span>
@@ -1897,7 +1968,7 @@ export function LeadKanban() {
                         >
                           <ChevronDown className="w-4 h-4" />
                         </button>
-                        {!stage.slug && (
+                        {!stage.is_system && (
                           <>
                             <button
                               onClick={() => { setEditingStageId(stage.id); setEditingStageName(stage.name); }}
@@ -1997,19 +2068,19 @@ export function LeadKanban() {
       {/* Export Modal */}
       {exportOpen && <ExportModal onClose={() => setExportOpen(false)} />}
 
-      {/* Conversion Modal */}
-      {conversionLead && (
-        <ConversionModal
-          lead={conversionLead}
-          onClose={() => setConversionLead(null)}
+      {/* Ganho Modal */}
+      {ganhoLead && (
+        <GanhoModal
+          lead={ganhoLead}
+          onClose={() => setGanhoLead(null)}
           onCancel={() => {
-            const { ticketId, prevStageId } = conversionLead;
-            setConversionLead(null);
+            const { ticketId, prevStageId } = ganhoLead;
+            setGanhoLead(null);
             if (prevStageId) moveTicket(ticketId, prevStageId);
           }}
           onCreate={async (data) => {
             const ok = await createConversion(data);
-            if (ok) await closeTicket(conversionLead.ticketId, 'ganho');
+            if (ok) await closeTicket(ganhoLead.ticketId, 'ganho');
             return ok;
           }}
         />
@@ -2035,7 +2106,28 @@ export function LeadKanban() {
       {/* Lead Chat Drawer */}
       <AnimatePresence>
         {chatLead && (
-          <LeadChat lead={chatLead.lead} ticketId={chatLead.ticketId} onClose={() => setChatLead(null)} isDragging={draggedLead !== null} onCloseTicket={async () => { await closeTicket(chatLead.ticketId, 'nps_enviado'); setChatLead(null); }} />
+          <LeadChat
+            lead={chatLead.lead}
+            ticketId={chatLead.ticketId}
+            onClose={() => setChatLead(null)}
+            isDragging={draggedLead !== null}
+            onGanho={() => setGanhoLead({ id: chatLead.lead.id, name: chatLead.lead.name, prevStageId: null, ticketId: chatLead.ticketId })}
+            onPerdido={() => setLossLead({ id: chatLead.lead.id, name: chatLead.lead.name, prevStageId: null, ticketId: chatLead.ticketId })}
+            onStageChange={async (stageId) => {
+              const targetStage = stages.find(s => s.id === stageId);
+              const ticket = tickets.find(t => t.id === chatLead.ticketId);
+              if (ticket && stageId !== ticket.stage_id) {
+                if (targetStage?.slug === 'perdido') {
+                  await closeTicket(ticket.id, 'perdido');
+                } else {
+                  await moveTicket(ticket.id, stageId);
+                  if (targetStage?.slug === 'ganho') {
+                    setGanhoLead({ id: chatLead.lead.id, name: chatLead.lead.name, prevStageId: ticket.stage_id, ticketId: ticket.id });
+                  }
+                }
+              }
+            }}
+          />
         )}
       </AnimatePresence>
 

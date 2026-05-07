@@ -253,15 +253,15 @@ export function Appointments() {
         converted_at: `${date}T${time?.substring(0, 5)}:00`,
       });
 
-      const { data: conversaoStage } = await supabase
+      const { data: ganhoStage } = await supabase
         .from('funnel_stages')
         .select('id')
         .eq('clinic_id', activeClinicId)
-        .eq('slug', 'conversao')
+        .eq('slug', 'ganho')
         .maybeSingle();
 
-      if (conversaoStage && leadData.stage_id !== conversaoStage.id) {
-        await supabase.from('leads').update({ stage_id: conversaoStage.id }).eq('id', leadData.id);
+      if (ganhoStage && leadData.stage_id !== ganhoStage.id) {
+        await supabase.from('leads').update({ stage_id: ganhoStage.id }).eq('id', leadData.id);
       }
     }
   };

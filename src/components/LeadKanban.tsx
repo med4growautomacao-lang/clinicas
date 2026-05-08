@@ -2096,7 +2096,7 @@ export function LeadKanban() {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Valor do orçamento/conversão</label>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Valor do orçamento</label>
                     <CurrencyInput
                       value={formData.estimated_value}
                       onChange={val => setFormData(p => ({ ...p, estimated_value: val }))}
@@ -2165,7 +2165,7 @@ export function LeadKanban() {
                   <div className="mt-4 p-3 bg-slate-50 rounded-lg text-sm text-left border border-slate-100">
                     <p className="font-semibold text-slate-700">{selectedLead.name}</p>
                     <p className="text-slate-500 text-xs">
-                      Valor do orçamento/conversão: {
+                      Valor do orçamento: {
                         formatBRL(
                           conversionsByLead[selectedLead.id]?.[conversionsByLead[selectedLead.id].length - 1]?.value ?? 
                           selectedLead.estimated_value ?? 

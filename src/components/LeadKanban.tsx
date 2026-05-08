@@ -866,6 +866,7 @@ export function LeadKanban() {
   const [exportOpen, setExportOpen] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<'all' | 'meta' | 'google' | 'sem_origem'>('all');
   const [showResolved, setShowResolved] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [columnPages, setColumnPages] = useState<Record<string, number>>({});
   const COLUMN_PAGE_SIZE = 20;
   const [entryDateFrom, setEntryDateFrom] = useState('');
@@ -1019,12 +1020,20 @@ export function LeadKanban() {
     const hasSourceFilter = sourceFilter !== 'all';
     const hasEntryFilter = entryDateFrom || entryDateTo;
     const hasConvFilter = convDateFrom || convDateTo;
+    const hasSearch = searchQuery.trim().length > 0;
     const base = showResolved ? tickets : tickets.filter(t => t.status !== 'closed');
-    if (!hasSourceFilter && !hasEntryFilter && !hasConvFilter) return base;
+    if (!hasSourceFilter && !hasEntryFilter && !hasConvFilter && !hasSearch) return base;
+
+    const lowerSearch = searchQuery.toLowerCase();
 
     return base.filter(ticket => {
       const lead = ticket.lead;
       if (!lead) return true;
+      if (hasSearch) {
+        const nameMatch = lead.name?.toLowerCase().includes(lowerSearch);
+        const phoneMatch = lead.phone?.toLowerCase().includes(lowerSearch);
+        if (!nameMatch && !phoneMatch) return false;
+      }
       if (hasSourceFilter) {
         const isMeta = !!lead.fb_campaign_name || lead.source === 'meta_ads';
         const isGoogle = !!lead.g_campaign_name || lead.source === 'google_ads';
@@ -1049,11 +1058,11 @@ export function LeadKanban() {
       }
       return true;
     });
-  }, [tickets, sourceFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo, conversionsByLead, showResolved]);
+  }, [tickets, sourceFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo, conversionsByLead, showResolved, searchQuery]);
 
-  const hasActiveFilters = sourceFilter !== 'all' || entryDateFrom || entryDateTo || convDateFrom || convDateTo;
+  const hasActiveFilters = sourceFilter !== 'all' || entryDateFrom || entryDateTo || convDateFrom || convDateTo || searchQuery.trim().length > 0;
 
-  React.useEffect(() => { setColumnPages({}); }, [sourceFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo]);
+  React.useEffect(() => { setColumnPages({}); }, [sourceFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo, searchQuery]);
 
   if (stagesLoading || ticketsLoading) {
     return (
@@ -1476,9 +1485,20 @@ export function LeadKanban() {
           onToChange={setConvDateTo}
         />
 
+        <div className="relative flex-1 min-w-[200px] max-w-xs">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Buscar lead (nome ou fone)..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 transition-all bg-white font-medium"
+          />
+        </div>
+
         {hasActiveFilters && (
           <button
-            onClick={() => { setSourceFilter('all'); setEntryDateFrom(''); setEntryDateTo(''); setConvDateFrom(''); setConvDateTo(''); }}
+            onClick={() => { setSourceFilter('all'); setEntryDateFrom(''); setEntryDateTo(''); setConvDateFrom(''); setConvDateTo(''); setSearchQuery(''); }}
             className="text-[10px] font-bold text-rose-500 hover:text-rose-700 uppercase tracking-wider flex items-center gap-1"
           >
             <X className="w-3 h-3" /> Limpar
@@ -1509,7 +1529,13 @@ export function LeadKanban() {
       <KanbanScrollContainer>
         {stages.map((stage) => {
           const stageTickets = filteredTickets.filter(t => t.stage_id === stage.id);
-          const stageTotal = stageTickets.reduce((sum, t) => sum + (Number(t.lead?.estimated_value) || 0), 0);
+          const stageTotal = stageTickets.reduce((sum, t) => {
+            const conversions = t.lead ? conversionsByLead[t.lead.id] : undefined;
+            const lastConversion = conversions?.[conversions.length - 1];
+            const realValue = lastConversion ? Number(lastConversion.value || 0) : 0;
+            const valueToAdd = realValue > 0 ? realValue : Number(t.lead?.estimated_value || 0);
+            return sum + valueToAdd;
+          }, 0);
           const visibleCount = (columnPages[stage.id] || 1) * COLUMN_PAGE_SIZE;
           const visibleTickets = stageTickets.slice(0, visibleCount);
           const hasMoreInColumn = visibleCount < stageTickets.length;

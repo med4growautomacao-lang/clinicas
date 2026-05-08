@@ -1131,13 +1131,17 @@ export function LeadKanban() {
   const openEditModal = (ticket: Ticket) => {
     const lead = ticket.lead!;
     setSelectedLead({ ...lead, _ticketId: ticket.id });
+    const conversions = conversionsByLead[lead.id];
+    const lastConversion = conversions?.[conversions.length - 1];
+    const realValue = lastConversion ? lastConversion.value : (lead.estimated_value || '');
+
     setFormData({
       name: lead.name,
       phone: lead.phone || '',
       source: lead.source || '',
       capture_channel: lead.capture_channel || 'whatsapp',
       stage_id: ticket.stage_id || '',
-      estimated_value: lead.estimated_value?.toString() || '',
+      estimated_value: realValue.toString(),
       loss_reason: lead.loss_reason || '',
       avatar_url: lead.avatar_url || ''
     });
@@ -1669,7 +1673,7 @@ export function LeadKanban() {
           <Button
             size="icon"
             className="h-8 w-8 bg-teal-600 hover:bg-teal-700 text-white shadow-sm transition-all rounded-lg"
-            onClick={() => { setSelectedLead(null); setFormData({ name: '', phone: '', source: 'sincronizacao', capture_channel: 'whatsapp', stage_id: stages[0]?.id || '', estimated_value: String(aiConfig?.default_ticket_value ?? ''), loss_reason: '', avatar_url: '' }); setShowModal(true); }}
+            onClick={() => { setSelectedLead(null); setFormData({ name: '', phone: '', source: 'sincronizacao', capture_channel: 'whatsapp', stage_id: stages[0]?.id || '', estimated_value: '', loss_reason: '', avatar_url: '' }); setShowModal(true); }}
             title="Novo Lead"
           >
             <Plus className="w-5 h-5" />
@@ -1700,7 +1704,7 @@ export function LeadKanban() {
                   <span className="text-[10px] font-bold text-slate-400 shrink-0">
                     {formatBRL(stageTotal)}
                   </span>
-                  <button className="text-slate-400 hover:text-slate-600 shrink-0" onClick={() => { setSelectedLead(null); setFormData({ name: '', phone: '', source: 'sincronizacao', capture_channel: 'whatsapp', stage_id: stage.id, estimated_value: String(aiConfig?.default_ticket_value ?? ''), loss_reason: '', avatar_url: '' }); setShowModal(true); }}>
+                  <button className="text-slate-400 hover:text-slate-600 shrink-0" onClick={() => { setSelectedLead(null); setFormData({ name: '', phone: '', source: 'sincronizacao', capture_channel: 'whatsapp', stage_id: stage.id, estimated_value: '', loss_reason: '', avatar_url: '' }); setShowModal(true); }}>
                     <Plus className="w-4 h-4" />
                   </button>
                 </div>
@@ -2092,7 +2096,7 @@ export function LeadKanban() {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Valor estimado</label>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Valor do orçamento/conversão</label>
                     <CurrencyInput
                       value={formData.estimated_value}
                       onChange={val => setFormData(p => ({ ...p, estimated_value: val }))}
@@ -2160,7 +2164,15 @@ export function LeadKanban() {
                 {selectedLead && (
                   <div className="mt-4 p-3 bg-slate-50 rounded-lg text-sm text-left border border-slate-100">
                     <p className="font-semibold text-slate-700">{selectedLead.name}</p>
-                    <p className="text-slate-500 text-xs">Valor estimado: {formatBRL(selectedLead.estimated_value || 0)}</p>
+                    <p className="text-slate-500 text-xs">
+                      Valor do orçamento/conversão: {
+                        formatBRL(
+                          conversionsByLead[selectedLead.id]?.[conversionsByLead[selectedLead.id].length - 1]?.value ?? 
+                          selectedLead.estimated_value ?? 
+                          0
+                        )
+                      }
+                    </p>
                   </div>
                 )}
               </div>

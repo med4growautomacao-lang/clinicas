@@ -851,7 +851,7 @@ export function LeadKanban() {
   const [formData, setFormData] = useState({ name: '', phone: '', source: 'sincronizacao', capture_channel: 'whatsapp', stage_id: '', estimated_value: '', loss_reason: '', avatar_url: '' });
   const [submitting, setSubmitting] = useState(false);
   const [chatLead, setChatLead] = useState<{ lead: any; ticketId: string } | null>(null);
-  const [scheduleLead, setScheduleLead] = useState<Lead | null>(null);
+  const [scheduleLead, setScheduleLead] = useState<{ lead: Lead; ticketId: string } | null>(null);
   const [scheduleForm, setScheduleForm] = useState({ doctor_id: '', date: '', time: '', notes: '' });
   const [scheduleSubmitting, setScheduleSubmitting] = useState(false);
   const { create: createAppointment } = useAppointments();
@@ -1547,7 +1547,7 @@ export function LeadKanban() {
                   const lead = ticket.lead!;
                   const isClosed = ticket.status === 'closed';
                   const isPerdido = stage.slug === 'perdido';
-                  const semMotivo = isPerdido && !lead.loss_reason && !isClosed;
+                  const semMotivo = isPerdido && !lead.loss_reason && !ticket.loss_reason && !isClosed;
                   const lastContact = lead.last_message_at ?? lead.created_at;
                   const frozen = isClosed || !!lead.converted_patient_id || isPerdido;
                   // Contagem persistente do banco + ciclo atual estourado
@@ -1674,7 +1674,7 @@ export function LeadKanban() {
                       </div>
                       <div className="flex flex-col items-end gap-1.5 shrink-0 ml-2">
                         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button title="Agendar consulta" onClick={() => { setScheduleLead(lead); setScheduleForm({ doctor_id: doctors[0]?.id || '', date: '', time: '', notes: '' }); }} className="p-0.5 text-slate-400 hover:text-indigo-600 rounded transition-colors"><CalendarPlus className="w-3 h-3" /></button>
+                          <button title="Agendar consulta" onClick={() => { setScheduleLead({ lead, ticketId: ticket.id }); setScheduleForm({ doctor_id: doctors[0]?.id || '', date: '', time: '', notes: '' }); }} className="p-0.5 text-slate-400 hover:text-indigo-600 rounded transition-colors"><CalendarPlus className="w-3 h-3" /></button>
                           {!ticket.outcome && !isClosed && (
                             <div className="relative">
                               <button
@@ -1781,7 +1781,7 @@ export function LeadKanban() {
                           : "bg-rose-50 border border-rose-100 text-rose-700"
                       )}>
                         <AlertCircle className="w-2.5 h-2.5 shrink-0" />
-                        {semMotivo ? "Motivo da perda nao preenchido" : lead.loss_reason}
+                        {semMotivo ? "Motivo da perda não preenchido" : (ticket.loss_reason || lead.loss_reason)}
                       </div>
                     )}
 
@@ -1813,9 +1813,19 @@ export function LeadKanban() {
 
 
                     {/* Footer: valor | tempo + chat */}
+                    {(() => {
+                      const conversions = conversionsByLead[lead.id];
+                      const lastConversion = conversions?.[conversions.length - 1];
+                      const realValue = lastConversion ? Number(lastConversion.value || 0) : 0;
+                      const displayValue = realValue > 0 ? realValue : Number(lead.estimated_value || 0);
+                      const isReal = realValue > 0;
+                      return (
                     <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-100 gap-2">
-                      <div className="bg-teal-50 text-teal-700 text-[9px] font-bold px-1.5 py-0.5 rounded border border-teal-100 shrink-0">
-                        R$ {Number(lead.estimated_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      <div className={cn(
+                        "text-[9px] font-bold px-1.5 py-0.5 rounded border shrink-0",
+                        isReal ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-teal-50 text-teal-700 border-teal-100"
+                      )}>
+                        R$ {displayValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                       </div>
                       <span className="text-[9px] font-medium text-slate-400 truncate text-right flex-1">
                         {formatDistanceToNow(parseISO(lastContact), { addSuffix: true, locale: ptBR })}
@@ -1828,6 +1838,8 @@ export function LeadKanban() {
                         <MessageSquare className="w-3 h-3" />
                       </button>
                     </div>
+                      );
+                    })()}
                   </motion.div>
                   );
                 })}
@@ -2179,7 +2191,11 @@ export function LeadKanban() {
           }}
           onCreate={async (data) => {
             const ok = await createConversion(data);
-            if (ok) await closeTicket(ganhoLead.ticketId, 'ganho');
+            if (ok) {
+              const ganhoStage = stages.find(s => s.slug === 'ganho');
+              if (ganhoStage) await moveTicket(ganhoLead.ticketId, ganhoStage.id);
+              await closeTicket(ganhoLead.ticketId, 'ganho');
+            }
             return ok;
           }}
         />
@@ -2197,6 +2213,8 @@ export function LeadKanban() {
           }}
           onConfirm={async (reason) => {
             await update(lossLead.id, { loss_reason: reason || null });
+            const perdidoStage = stages.find(s => s.slug === 'perdido');
+            if (perdidoStage) await moveTicket(lossLead.ticketId, perdidoStage.id);
             await closeTicket(lossLead.ticketId, 'perdido', reason || undefined);
           }}
         />
@@ -2244,7 +2262,7 @@ export function LeadKanban() {
               <div className="flex items-center justify-between p-5 border-b border-slate-100">
                 <div>
                   <h3 className="text-base font-bold text-slate-900">Agendar Consulta</h3>
-                  <p className="text-xs text-slate-400 mt-0.5">{scheduleLead.name}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">{scheduleLead.lead.name}</p>
                 </div>
                 <button onClick={() => setScheduleLead(null)} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-full"><X className="w-4 h-4" /></button>
               </div>
@@ -2278,23 +2296,24 @@ export function LeadKanban() {
                   disabled={!scheduleForm.doctor_id || !scheduleForm.date || !scheduleForm.time || scheduleSubmitting}
                   onClick={async () => {
                     setScheduleSubmitting(true);
+                    const sl = scheduleLead.lead;
                     // Garante que o lead tem um paciente vinculado
-                    let patientId = scheduleLead.converted_patient_id;
+                    let patientId = sl.converted_patient_id;
                     if (!patientId) {
-                      const existing = patients.find(p => p.phone === scheduleLead.phone);
+                      const existing = patients.find(p => p.phone === sl.phone);
                       if (existing) {
                         patientId = existing.id;
-                        supabase.from('leads').update({ converted_patient_id: existing.id }).eq('id', scheduleLead.id);
+                        supabase.from('leads').update({ converted_patient_id: existing.id }).eq('id', sl.id);
                       } else {
-                        const newPatient = await createPatient({ name: scheduleLead.name, phone: scheduleLead.phone || null, email: scheduleLead.email || null });
+                        const newPatient = await createPatient({ name: sl.name, phone: sl.phone || null, email: sl.email || null });
                         if (newPatient) {
                           patientId = newPatient.id;
-                          supabase.from('leads').update({ converted_patient_id: newPatient.id }).eq('id', scheduleLead.id);
+                          supabase.from('leads').update({ converted_patient_id: newPatient.id }).eq('id', sl.id);
                         }
                       }
                     }
                     if (patientId) {
-                      await createAppointment({ patient_id: patientId, doctor_id: scheduleForm.doctor_id, date: scheduleForm.date, time: scheduleForm.time, notes: scheduleForm.notes || null, status: 'pendente', source: 'manual' });
+                      await createAppointment({ patient_id: patientId, doctor_id: scheduleForm.doctor_id, date: scheduleForm.date, time: scheduleForm.time, notes: scheduleForm.notes || null, status: 'pendente', source: 'manual', ticket_id: scheduleLead.ticketId } as any);
                     }
                     setScheduleLead(null);
                     setScheduleSubmitting(false);

@@ -551,7 +551,7 @@ export interface Ticket {
 }
 
 export function useTickets() {
-  const { activeClinicId } = useAuth();
+  const { activeClinicId, profile, activeClinicName, clinicName } = useAuth();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -595,18 +595,89 @@ export function useTickets() {
     return error ? null : (data as Ticket);
   };
 
+  const triggerTicketWebhook = async (ticketId: string, eventOutcome: string | null) => {
+    try {
+      const ticketToTrigger = tickets.find(t => t.id === ticketId);
+      if (!ticketToTrigger || !activeClinicId) return;
+
+      const { data: config } = await supabase
+        .from('ai_config')
+        .select('id, finish_service_enabled, finish_service_message, finish_ganho_enabled, finish_ganho_message, finish_perdido_enabled, finish_perdido_message')
+        .eq('clinic_id', activeClinicId)
+        .single();
+
+      const { data: whatsapp } = await supabase
+        .from('whatsapp_instances')
+        .select('api_token')
+        .eq('clinic_id', activeClinicId)
+        .maybeSingle();
+
+      if (config?.finish_service_enabled || config?.finish_ganho_enabled || config?.finish_perdido_enabled) {
+        const eventName = eventOutcome === 'ganho' ? 'ticket_ganho' 
+                        : eventOutcome === 'perdido' ? 'ticket_perdido' 
+                        : 'ticket_closed';
+
+        const payload = {
+          event: eventName,
+          ticket_id: ticketId,
+          token: whatsapp?.api_token,
+          lead: ticketToTrigger.lead,
+          agent: profile,
+          outcome: eventOutcome || ticketToTrigger.outcome,
+          clinic: {
+            id: activeClinicId,
+            name: activeClinicName || clinicName || ''
+          },
+          followup_config: {
+            finish_service_enabled: config.finish_service_enabled,
+            finish_service_message: config.finish_service_message,
+            finish_ganho_enabled: config.finish_ganho_enabled,
+            finish_ganho_message: config.finish_ganho_message,
+            finish_perdido_enabled: config.finish_perdido_enabled,
+            finish_perdido_message: config.finish_perdido_message
+          }
+        };
+
+        console.log(`[Webhook Encerramento] Disparando payload via proxy para ${eventName}:`, payload);
+
+        supabase.functions.invoke('webhook-proxy', {
+          body: {
+            target_url: 'https://webhook.med4growautomacao.com.br/webhook/meddesk/followup/encerramentocomum',
+            payload
+          }
+        }).then(({ data, error }) => {
+          if (error) console.error('Webhook proxy error:', error);
+          else console.log(`[Webhook Encerramento] Resposta ${eventName}:`, data);
+        });
+      }
+    } catch (e) {
+      console.error('Error firing webhook:', e);
+    }
+  };
+
   const closeTicket = async (ticketId: string, outcome: 'ganho' | 'perdido', lossReason?: string) => {
     const now = new Date().toISOString();
     const updates: Record<string, any> = { outcome, outcome_at: now };
     if (lossReason) updates.loss_reason = lossReason;
+    
     setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, ...updates } : t));
     await supabase.from('tickets').update(updates).eq('id', ticketId);
+
+    // Dispara o webhook imediatamente ao marcar como Ganho ou Perdido
+    await triggerTicketWebhook(ticketId, outcome);
   };
 
   const finalizeTicket = async (ticketId: string) => {
     const closedAt = new Date().toISOString();
+    const ticketToClose = tickets.find(t => t.id === ticketId);
+    
     setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, status: 'closed', closed_at: closedAt } : t));
     await supabase.from('tickets').update({ status: 'closed', closed_at: closedAt }).eq('id', ticketId);
+
+    // Dispara o webhook de encerramento (ticket_closed) sempre que o ticket for arquivado
+    if (ticketToClose) {
+      await triggerTicketWebhook(ticketId, null);
+    }
   };
 
   return { tickets, loading, refetch: fetch, moveTicket, openTicket, closeTicket, finalizeTicket };

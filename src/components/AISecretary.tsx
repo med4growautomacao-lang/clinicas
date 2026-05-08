@@ -961,6 +961,7 @@ function FinishServiceView() {
   const [saving, setSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [localConfig, setLocalConfig] = useState<any>(null);
+  const [outcomeTab, setOutcomeTab] = useState<"fechado" | "ganho" | "perdido">("fechado");
 
   const setConfig = (updates: any) => { setLocalConfig((p: any) => ({ ...p, ...updates })); setIsDirty(true); };
 
@@ -971,7 +972,11 @@ function FinishServiceView() {
     } else if (!loading) {
       setLocalConfig({
         finish_service_enabled: false,
-        finish_service_message: "Atendimento finalizado com sucesso. Agradecemos o contato!"
+        finish_service_message: "Atendimento finalizado com sucesso. Agradecemos o contato!",
+        finish_ganho_enabled: false,
+        finish_ganho_message: "Parabéns por escolher a nossa clínica! Em breve entraremos em contato com mais detalhes.",
+        finish_perdido_enabled: false,
+        finish_perdido_message: "Sentimos muito que não fechamos dessa vez. Ficamos à disposição no futuro!"
       });
     }
   }, [aiConfig, loading]);
@@ -1006,37 +1011,70 @@ function FinishServiceView() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            <div className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-100">
-              <div>
-                <p className="text-sm font-bold text-slate-900">Ativar Mensagem de Encerramento</p>
-                <p className="text-[10px] font-semibold text-slate-500 uppercase pt-0.5">Disparo automático ao finalizar</p>
-              </div>
-              <button
-                onClick={() => { const v = !localConfig.finish_service_enabled; setLocalConfig({ ...localConfig, finish_service_enabled: v }); updateAI({ ...localConfig, finish_service_enabled: v }); }}
-                className={cn(
-                  "w-12 h-6 rounded-full relative transition-all",
-                  localConfig.finish_service_enabled ? "bg-teal-600" : "bg-slate-300"
-                )}
-              >
-                <div className={cn(
-                  "w-4 h-4 bg-white rounded-full absolute top-1 transition-all shadow-sm",
-                  localConfig.finish_service_enabled ? "right-1" : "left-1"
-                )}></div>
-              </button>
+            <div className="flex bg-slate-100 p-1 rounded-lg gap-1 w-full">
+              {[
+                { id: "fechado", label: "Padrão / Fechado" },
+                { id: "ganho", label: "Ticket Ganho" },
+                { id: "perdido", label: "Ticket Perdido" },
+              ].map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setOutcomeTab(t.id as any)}
+                  className={cn(
+                    "flex-1 py-1.5 text-xs font-bold rounded-md transition-all text-center",
+                    outcomeTab === t.id
+                      ? "bg-white text-teal-700 shadow-sm"
+                      : "text-slate-500 hover:text-slate-800"
+                  )}
+                >
+                  {t.label}
+                </button>
+              ))}
             </div>
 
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1 font-sans">
-                Mensagem de Despedida
-              </label>
-              <textarea
-                rows={5}
-                value={localConfig.finish_service_message || ""}
-                onChange={(e) => setConfig({ finish_service_message: e.target.value })}
-                className="w-full p-4 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all resize-none text-sm leading-relaxed"
-                placeholder="Obrigado pelo contato! Se precisar de algo mais, estamos à disposição."
-              />
-            </div>
+            {(() => {
+              const keys = {
+                fechado: { enabled: 'finish_service_enabled', message: 'finish_service_message' },
+                ganho: { enabled: 'finish_ganho_enabled', message: 'finish_ganho_message' },
+                perdido: { enabled: 'finish_perdido_enabled', message: 'finish_perdido_message' }
+              }[outcomeTab];
+
+              return (
+                <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                  <div className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-100">
+                    <div>
+                      <p className="text-sm font-bold text-slate-900">Ativar Mensagem ({outcomeTab})</p>
+                      <p className="text-[10px] font-semibold text-slate-500 uppercase pt-0.5">Disparo automático ao finalizar</p>
+                    </div>
+                    <button
+                      onClick={() => { const v = !localConfig[keys.enabled]; setLocalConfig({ ...localConfig, [keys.enabled]: v }); updateAI({ ...localConfig, [keys.enabled]: v }); }}
+                      className={cn(
+                        "w-12 h-6 rounded-full relative transition-all",
+                        localConfig[keys.enabled] ? "bg-teal-600" : "bg-slate-300"
+                      )}
+                    >
+                      <div className={cn(
+                        "w-4 h-4 bg-white rounded-full absolute top-1 transition-all shadow-sm",
+                        localConfig[keys.enabled] ? "right-1" : "left-1"
+                      )}></div>
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1 font-sans">
+                      Mensagem de Despedida
+                    </label>
+                    <textarea
+                      rows={5}
+                      value={localConfig[keys.message] || ""}
+                      onChange={(e) => setConfig({ [keys.message]: e.target.value })}
+                      className="w-full p-4 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all resize-none text-sm leading-relaxed"
+                      placeholder="Sua mensagem de despedida..."
+                    />
+                  </div>
+                </div>
+              );
+            })()}
 
             <Button
               onClick={handleSave}
@@ -1072,7 +1110,9 @@ function FinishServiceView() {
             <CardContent className="pt-2">
               <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 max-w-[85%] relative">
                  <p className="text-sm text-slate-700 leading-relaxed font-medium">
-                   {localConfig.finish_service_message || "Agradecemos o contato!"}
+                   {localConfig[
+                     { fechado: 'finish_service_message', ganho: 'finish_ganho_message', perdido: 'finish_perdido_message' }[outcomeTab] as any
+                   ] || "Agradecemos o contato!"}
                  </p>
                  <span className="text-[9px] text-slate-400 font-bold uppercase mt-2 block">10:45</span>
                  <div className="absolute -left-2 top-4 w-4 h-4 bg-white border-l border-b border-slate-100 rotate-45" />

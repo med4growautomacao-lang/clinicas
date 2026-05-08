@@ -190,7 +190,8 @@ export function Appointments() {
     paymentMethod: string | null,
     txStatus: 'pago' | 'pendente' = 'pago',
     description: string = '',
-    protocolIds: string[] = []
+    protocolIds: string[] = [],
+    ticketId?: string | null
   ) => {
     const finMethod = (['pix', 'cartao', 'dinheiro', 'plano'] as const).includes(paymentMethod as any)
       ? (paymentMethod as 'pix' | 'cartao' | 'dinheiro' | 'plano')
@@ -209,18 +210,17 @@ export function Appointments() {
       protocol_ids: protocolIds,
     });
 
-    // 1. Busca lead vinculado diretamente ao paciente
-    let leadData: { id: string; stage_id: string } | null = null;
+    // Busca lead vinculado ao paciente
+    let leadId: string | null = null;
     const { data: byPatient } = await supabase
       .from('leads')
-      .select('id, stage_id')
+      .select('id')
       .eq('converted_patient_id', patientId)
       .maybeSingle();
 
     if (byPatient) {
-      leadData = byPatient;
+      leadId = byPatient.id;
     } else {
-      // 2. Fallback: busca pelo telefone do paciente
       const { data: patient } = await supabase
         .from('patients')
         .select('phone')
@@ -229,39 +229,45 @@ export function Appointments() {
       if (patient?.phone) {
         const { data: byPhone } = await supabase
           .from('leads')
-          .select('id, stage_id')
+          .select('id')
           .eq('clinic_id', activeClinicId)
           .eq('phone', patient.phone)
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
         if (byPhone) {
-          leadData = byPhone;
-          // Vincula o lead ao paciente para futuras buscas
+          leadId = byPhone.id;
           await supabase.from('leads').update({ converted_patient_id: patientId }).eq('id', byPhone.id);
         }
       }
     }
 
-    if (leadData?.id) {
+    if (leadId) {
       await createConversion({
-        lead_id: leadData.id,
+        lead_id: leadId,
         value,
         description: description || 'Consulta realizada',
         payment_method: paymentMethod,
         protocol_ids: protocolIds,
         converted_at: `${date}T${time?.substring(0, 5)}:00`,
       });
+    }
 
+    // Move ticket para ganho
+    const resolveTicketId = ticketId || null;
+    if (resolveTicketId) {
       const { data: ganhoStage } = await supabase
         .from('funnel_stages')
         .select('id')
         .eq('clinic_id', activeClinicId)
         .eq('slug', 'ganho')
         .maybeSingle();
-
-      if (ganhoStage && leadData.stage_id !== ganhoStage.id) {
-        await supabase.from('leads').update({ stage_id: ganhoStage.id }).eq('id', leadData.id);
+      if (ganhoStage) {
+        await supabase.from('tickets').update({
+          stage_id: ganhoStage.id,
+          outcome: 'ganho',
+          outcome_at: new Date().toISOString()
+        }).eq('id', resolveTicketId);
       }
     }
   };
@@ -344,7 +350,16 @@ export function Appointments() {
         }
 
         if (leadId) {
-          await supabase.from('leads').update({ stage_id: compareceuStage.id }).eq('id', leadId);
+          // Move ticket aberto do lead
+          const { data: openTicket } = await supabase
+            .from('tickets')
+            .select('id')
+            .eq('lead_id', leadId)
+            .eq('status', 'open')
+            .maybeSingle();
+          if (openTicket) {
+            await supabase.from('tickets').update({ stage_id: compareceuStage.id }).eq('id', openTicket.id);
+          }
         }
       }
     }
@@ -361,7 +376,8 @@ export function Appointments() {
       paymentMethod || null,
       status,
       description,
-      protocolIds
+      protocolIds,
+      apt.ticket_id
     );
   };
 
@@ -374,7 +390,7 @@ export function Appointments() {
       await update(selectedAppointment.id, formData);
 
       if (becomingRealizado) {
-        await onAppointmentRealizado(formData.patient_id, selectedAppointment.id, formData.date, formData.time, 0, null);
+        await onAppointmentRealizado(formData.patient_id, selectedAppointment.id, formData.date, formData.time, 0, null, 'pago', '', [], selectedAppointment.ticket_id);
       }
     } else {
       await create({

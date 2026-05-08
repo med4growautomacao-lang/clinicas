@@ -1181,8 +1181,17 @@ export function LeadKanban() {
       const lead = ticket.lead;
       if (!lead) return true;
       if (hasSearch) {
-        const nameMatch = lead.name?.toLowerCase().includes(lowerSearch);
-        const phoneMatch = lead.phone?.toLowerCase().includes(lowerSearch);
+        // Normalização para busca por nome (ignora acentos)
+        const normalize = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+        const normalizedName = normalize(lead.name || "");
+        const normalizedSearch = normalize(lowerSearch);
+        const nameMatch = normalizedName.includes(normalizedSearch);
+        
+        // Normalização para busca por telefone (apenas números)
+        const cleanPhone = (lead.phone || "").replace(/\D/g, "");
+        const cleanSearch = lowerSearch.replace(/\D/g, "");
+        const phoneMatch = cleanSearch.length > 0 && cleanPhone.includes(cleanSearch);
+
         if (!nameMatch && !phoneMatch) return false;
       }
       if (hasSourceFilter) {

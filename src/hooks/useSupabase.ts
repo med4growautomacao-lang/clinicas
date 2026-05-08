@@ -559,14 +559,20 @@ export function useTickets() {
     if (!activeClinicId) return;
     if (!silent) setLoading(true);
     const ninetyDaysAgo = new Date(Date.now() - 90 * 86400000).toISOString();
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('tickets')
       .select('*, lead:leads(*)')
       .eq('clinic_id', activeClinicId)
-      .or(`status.eq.open,and(status.eq.closed,closed_at.gte.${ninetyDaysAgo})`)
+      .or(`status.eq.open,closed_at.gte.${ninetyDaysAgo}`)
       .order('opened_at', { ascending: false })
       .limit(5000);
-    setTickets(data || []);
+
+    if (error) {
+      console.error('Erro ao buscar tickets:', error);
+      setTickets([]);
+    } else {
+      setTickets(data || []);
+    }
     if (!silent) setLoading(false);
   }, [activeClinicId]);
 

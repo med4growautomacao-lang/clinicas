@@ -1443,9 +1443,9 @@ export function LeadKanban() {
   return (
     <div className="flex flex-col h-full gap-4">
       {/* ── Cabeçalho + Filtros ── */}
-      <div className="flex items-center gap-3 shrink-0 flex-wrap">
+      <div className="flex items-center gap-2 shrink-0">
         {/* Filtro de origem */}
-        <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-xl p-1 shadow-sm">
+        <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-xl p-0.5 shadow-sm">
           {([
             { id: 'all',       label: 'Todos',      logo: null },
             { id: 'meta',      label: 'Meta',        logo: MetaLogo },
@@ -1456,20 +1456,20 @@ export function LeadKanban() {
               key={opt.id}
               onClick={() => setSourceFilter(opt.id)}
               className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                "flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold transition-all",
                 sourceFilter === opt.id
                   ? "bg-slate-900 text-white shadow-sm"
                   : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
               )}
             >
-              {opt.logo && <img src={opt.logo} className={cn("w-3.5 h-3.5 rounded", opt.id === 'sem_origem' && "opacity-60")} />}
+              {opt.logo && <img src={opt.logo} className={cn("w-3 h-3 rounded", opt.id === 'sem_origem' && "opacity-60")} />}
               {opt.label}
             </button>
           ))}
         </div>
 
         <DateRangePicker
-          label="Data de entrada do lead"
+          label="Entrada"
           from={entryDateFrom}
           to={entryDateTo}
           onFromChange={setEntryDateFrom}
@@ -1477,7 +1477,7 @@ export function LeadKanban() {
         />
 
         <DateRangePicker
-          label="Data de ganho do lead"
+          label="Ganho"
           labelColor="text-emerald-500"
           from={convDateFrom}
           to={convDateTo}
@@ -1485,42 +1485,47 @@ export function LeadKanban() {
           onToChange={setConvDateTo}
         />
 
-        <div className="relative flex-1 min-w-[200px] max-w-xs">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+        <div className="relative w-48">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
           <input
             type="text"
-            placeholder="Buscar lead (nome ou fone)..."
+            placeholder="Buscar lead..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 transition-all bg-white font-medium"
+            className="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 transition-all bg-white font-medium shadow-sm"
           />
         </div>
 
         {hasActiveFilters && (
           <button
             onClick={() => { setSourceFilter('all'); setEntryDateFrom(''); setEntryDateTo(''); setConvDateFrom(''); setConvDateTo(''); setSearchQuery(''); }}
-            className="text-[10px] font-bold text-rose-500 hover:text-rose-700 uppercase tracking-wider flex items-center gap-1"
+            className="text-[10px] font-bold text-rose-500 hover:text-rose-700 uppercase tracking-wider flex items-center gap-1 shrink-0"
+            title="Limpar Filtros"
           >
-            <X className="w-3 h-3" /> Limpar
+            <X className="w-3 h-3" />
           </button>
         )}
 
-        <div className="flex items-center gap-2 ml-auto">
-          <Button variant="outline" size="icon" title={showResolved ? 'Ocultar resolvidos' : 'Mostrar resolvidos'} className={cn("h-9 w-9", showResolved ? "text-teal-600 border-teal-300 bg-teal-50 hover:bg-teal-100" : "text-slate-400 hover:text-teal-600")} onClick={() => setShowResolved(v => !v)}>
-            {showResolved ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+        <div className="flex items-center gap-1.5 ml-auto">
+          <Button variant="outline" size="icon" title={showResolved ? 'Ocultar resolvidos' : 'Mostrar resolvidos'} className={cn("h-8 w-8", showResolved ? "text-teal-600 border-teal-300 bg-teal-50 hover:bg-teal-100" : "text-slate-400 hover:text-teal-600")} onClick={() => setShowResolved(v => !v)}>
+            {showResolved ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
           </Button>
-          <Button variant="outline" size="icon" className="h-9 w-9 text-slate-400 hover:text-teal-600" onClick={() => setExportOpen(true)}>
-            <Download className="w-4 h-4" />
+          <Button variant="outline" size="icon" className="h-8 w-8 text-slate-400 hover:text-teal-600" onClick={() => setExportOpen(true)} title="Exportar">
+            <Download className="w-3.5 h-3.5" />
           </Button>
-          <Button variant="outline" size="icon" className="h-9 w-9 text-slate-400 hover:text-teal-600" onClick={() => { setShowAutomationModal(true); }}>
-            <Zap className="w-4 h-4" />
+          <Button variant="outline" size="icon" className="h-8 w-8 text-slate-400 hover:text-teal-600" onClick={() => { setShowAutomationModal(true); }} title="Automações">
+            <Zap className="w-3.5 h-3.5" />
           </Button>
-          <Button variant="outline" size="icon" className="h-9 w-9 text-slate-400 hover:text-teal-600" onClick={() => { setLocalStages([...stages]); setShowSettingsModal(true); }}>
-            <Settings className="w-4 h-4" />
+          <Button variant="outline" size="icon" className="h-8 w-8 text-slate-400 hover:text-teal-600" onClick={() => { setLocalStages([...stages]); setShowSettingsModal(true); }} title="Configurar Funil">
+            <Settings className="w-3.5 h-3.5" />
           </Button>
-          <Button className="py-5 px-6 group" onClick={() => { setSelectedLead(null); setFormData({ name: '', phone: '', source: 'sincronizacao', capture_channel: 'whatsapp', stage_id: stages[0]?.id || '', estimated_value: String(aiConfig?.default_ticket_value ?? ''), loss_reason: '', avatar_url: '' }); setShowModal(true); }}>
-            <Plus className="w-5 h-5 mr-2 group-hover:rotate-90 transition-transform" />
-            Novo Lead
+          <Button 
+            size="icon" 
+            className="h-8 w-8 bg-teal-600 hover:bg-teal-700 text-white shadow-sm transition-all rounded-lg" 
+            onClick={() => { setSelectedLead(null); setFormData({ name: '', phone: '', source: 'sincronizacao', capture_channel: 'whatsapp', stage_id: stages[0]?.id || '', estimated_value: String(aiConfig?.default_ticket_value ?? ''), loss_reason: '', avatar_url: '' }); setShowModal(true); }}
+            title="Novo Lead"
+          >
+            <Plus className="w-5 h-5" />
           </Button>
         </div>
       </div>

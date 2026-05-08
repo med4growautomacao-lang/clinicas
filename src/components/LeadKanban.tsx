@@ -394,14 +394,14 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
     const update = () => {
       if (!outerRef.current || !innerRef.current) return;
       const totalW = innerRef.current.scrollWidth;
-      const viewW  = outerRef.current.clientWidth;
+      const viewW = outerRef.current.clientWidth;
       maxOffset.current = Math.max(0, totalW - viewW);
       if (scrollPhantomRef.current) scrollPhantomRef.current.style.width = totalW + 'px';
     };
     update();
     const obs = new ResizeObserver(update);
-    if (innerRef.current)  obs.observe(innerRef.current);
-    if (outerRef.current)  obs.observe(outerRef.current);
+    if (innerRef.current) obs.observe(innerRef.current);
+    if (outerRef.current) obs.observe(outerRef.current);
     return () => obs.disconnect();
   }, []);
 
@@ -663,36 +663,53 @@ function LossModal({ lead, onClose, onCancel, onConfirm }: {
   );
 }
 
+const formatBRL = (val: number | string) => {
+  const n = typeof val === 'string' ? Number(val) : val;
+  return new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(n || 0);
+};
+
 function CurrencyInput({ value, onChange, className, placeholder, autoFocus }: {
-  value: string;
+  value: string | number;
   onChange: (val: string) => void;
   className?: string;
   placeholder?: string;
   autoFocus?: boolean;
 }) {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const digits = e.target.value.replace(/\D/g, '');
-    const numeric = Number(digits) / 100;
-    onChange(numeric > 0 ? String(numeric) : '');
+    const rawValue = e.target.value.replace(/\D/g, '');
+    if (rawValue === '') {
+      onChange('');
+      return;
+    }
+    const numericValue = parseInt(rawValue, 10) / 100;
+    onChange(numericValue.toFixed(2));
   };
 
-  // Garante que o valor seja tratado como número para o toLocaleString
-  const numericValue = typeof value === 'string' ? Number(value) : value;
-  const displayValue = numericValue && !isNaN(numericValue) ? numericValue.toLocaleString('pt-BR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }) : '';
+  const displayValue = value && !isNaN(Number(value))
+    ? new Intl.NumberFormat('pt-BR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(Number(value))
+    : '';
 
   return (
-    <div className="relative w-full">
-      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm pointer-events-none z-10">R$</span>
+    <div className={cn(
+      "flex items-center w-full px-4 py-3 border border-slate-200 rounded-xl bg-white shadow-sm focus-within:ring-2 focus-within:ring-teal-500/20 focus-within:border-teal-500 transition-all",
+      className
+    )}>
+      <span className="text-slate-400 font-black text-sm mr-2 select-none shrink-0">R$</span>
       <input
         type="text"
         autoFocus={autoFocus}
         value={displayValue}
         onChange={handleChange}
         placeholder={placeholder || "0,00"}
-        className={cn("pl-11 w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-bold focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 transition-all bg-white shadow-sm", className)}
+        className="w-full bg-transparent border-none outline-none text-sm font-bold p-0 placeholder:text-slate-300 focus:ring-0"
       />
     </div>
   );
@@ -854,14 +871,14 @@ function GanhoModal({ lead, onClose, onCancel, onCreate }: {
             className={cn(
               "w-full py-3 rounded-xl text-sm font-black transition-all flex items-center justify-center gap-2",
               done ? "bg-emerald-500 text-white" :
-              saving ? "bg-slate-100 text-slate-400" :
-              !value || Number(value) <= 0 ? "bg-slate-100 text-slate-400 cursor-not-allowed" :
-              "bg-emerald-600 hover:bg-emerald-700 text-white"
+                saving ? "bg-slate-100 text-slate-400" :
+                  !value || Number(value) <= 0 ? "bg-slate-100 text-slate-400 cursor-not-allowed" :
+                    "bg-emerald-600 hover:bg-emerald-700 text-white"
             )}
           >
             {done ? <><Check className="w-4 h-4" /> Registrado!</> :
-             saving ? <Loader2 className="w-4 h-4 animate-spin" /> :
-             <><ThumbsUp className="w-4 h-4" /> Registrar Ganho</>}
+              saving ? <Loader2 className="w-4 h-4 animate-spin" /> :
+                <><ThumbsUp className="w-4 h-4" /> Registrar Ganho</>}
           </button>
         </div>
       </motion.div>
@@ -944,13 +961,13 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
               className={cn(
                 "flex-1 py-2.5 rounded-xl text-sm font-black transition-all flex items-center justify-center gap-2",
                 done ? "bg-emerald-500 text-white" :
-                saving ? "bg-slate-100 text-slate-400" :
-                "bg-blue-600 hover:bg-blue-700 text-white"
+                  saving ? "bg-slate-100 text-slate-400" :
+                    "bg-blue-600 hover:bg-blue-700 text-white"
               )}
             >
               {done ? <><Check className="w-4 h-4" /> Registrado!</> :
-               saving ? <Loader2 className="w-4 h-4 animate-spin" /> :
-               'Confirmar Orçamento'}
+                saving ? <Loader2 className="w-4 h-4 animate-spin" /> :
+                  'Confirmar Orçamento'}
             </button>
           </div>
         </div>
@@ -1208,7 +1225,7 @@ export function LeadKanban() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <button 
+            <button
               onClick={() => { setShowAutomationModal(false); setEditingRuleId(null); setIsAddingRule(false); setNewRule({ keywords: '', target_stage_id: '', context: '', lead_response: '', message_to_send: '' }); }}
               className="w-10 h-10 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors"
             >
@@ -1243,7 +1260,7 @@ export function LeadKanban() {
               </div>
               <p className="text-lg font-bold text-slate-500">Nenhuma automacao configurada</p>
               <p className="text-sm text-slate-400 mt-2 max-w-md mx-auto">Crie regras para mover leads automaticamente entre etapas com base no contexto da conversa.</p>
-              <Button 
+              <Button
                 onClick={() => setIsAddingRule(true)}
                 className="mt-6 bg-teal-600 hover:bg-teal-700 text-white gap-2 shadow-lg shadow-teal-100 py-5 px-6"
               >
@@ -1268,9 +1285,9 @@ export function LeadKanban() {
                             <MessageSquare className="w-3 h-3 text-blue-500" />
                             Contexto
                           </label>
-                          <textarea 
+                          <textarea
                             rows={3}
-                            value={newRule.context} 
+                            value={newRule.context}
                             onChange={e => setNewRule(p => ({ ...p, context: e.target.value }))}
                             placeholder="Ex: Para qualificar o Lead apos explicar como funciona a consulta..."
                             className="w-full px-3 py-2.5 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 font-medium resize-none transition-all"
@@ -1281,9 +1298,9 @@ export function LeadKanban() {
                             <Send className="w-3 h-3 text-emerald-500" />
                             Mensagem a Enviar
                           </label>
-                          <textarea 
+                          <textarea
                             rows={3}
-                            value={newRule.message_to_send} 
+                            value={newRule.message_to_send}
                             onChange={e => setNewRule(p => ({ ...p, message_to_send: e.target.value }))}
                             placeholder="Ex: Parabens pela decisao! Para continuarmos..."
                             className="w-full px-3 py-2.5 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 font-medium resize-none transition-all"
@@ -1296,9 +1313,9 @@ export function LeadKanban() {
                             <MessageSquare className="w-3 h-3 text-amber-500" />
                             Resposta Esperada do Lead
                           </label>
-                          <input 
-                            type="text" 
-                            value={newRule.lead_response} 
+                          <input
+                            type="text"
+                            value={newRule.lead_response}
                             onChange={e => setNewRule(p => ({ ...p, lead_response: e.target.value }))}
                             placeholder="Ex: Se a resposta for sim ou positiva"
                             className="w-full px-3 py-2.5 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 font-medium transition-all"
@@ -1309,9 +1326,9 @@ export function LeadKanban() {
                             <Zap className="w-3 h-3 text-violet-500" />
                             Gatilho
                           </label>
-                          <input 
-                            type="text" 
-                            value={newRule.keywords} 
+                          <input
+                            type="text"
+                            value={newRule.keywords}
                             onChange={e => setNewRule(p => ({ ...p, keywords: e.target.value }))}
                             placeholder="[QUALIFICADO]"
                             className="w-full px-3 py-2.5 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 font-mono font-medium transition-all"
@@ -1319,7 +1336,7 @@ export function LeadKanban() {
                         </div>
                         <div className="space-y-2">
                           <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Etapa Destino</label>
-                          <select 
+                          <select
                             value={newRule.target_stage_id}
                             onChange={e => setNewRule(p => ({ ...p, target_stage_id: e.target.value }))}
                             className="w-full px-3 py-2.5 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 font-medium transition-all"
@@ -1332,7 +1349,7 @@ export function LeadKanban() {
                         </div>
                       </div>
                       <div className="flex gap-3 pt-2">
-                        <Button 
+                        <Button
                           className="bg-teal-600 hover:bg-teal-700 shadow-lg shadow-teal-100 px-6"
                           disabled={!newRule.keywords.trim() || !newRule.target_stage_id || submitting}
                           onClick={async () => {
@@ -1352,8 +1369,8 @@ export function LeadKanban() {
                   </motion.div>
                 ) : (
                   /* Read-only Rule Card */
-                  <motion.div 
-                    key={rule.id} 
+                  <motion.div
+                    key={rule.id}
                     initial={{ opacity: 0, y: -5 }}
                     animate={{ opacity: 1, y: 0 }}
                     className="rounded-2xl border border-slate-200 overflow-hidden bg-white hover:shadow-lg transition-shadow group"
@@ -1396,7 +1413,7 @@ export function LeadKanban() {
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button 
+                        <button
                           onClick={() => {
                             setEditingRuleId(rule.id);
                             setNewRule({
@@ -1411,7 +1428,7 @@ export function LeadKanban() {
                         >
                           <Pencil className="w-4 h-4" />
                         </button>
-                        <button 
+                        <button
                           onClick={() => removeRule(rule.id)}
                           className="p-2 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-all"
                         >
@@ -1480,9 +1497,9 @@ export function LeadKanban() {
                           <MessageSquare className="w-3 h-3 text-blue-500" />
                           Contexto
                         </label>
-                        <textarea 
+                        <textarea
                           rows={3}
-                          value={newRule.context} 
+                          value={newRule.context}
                           onChange={e => setNewRule(p => ({ ...p, context: e.target.value }))}
                           placeholder="Ex: Para qualificar o Lead apos explicar como funciona a consulta..."
                           className="w-full px-3 py-2.5 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 font-medium resize-none transition-all"
@@ -1493,9 +1510,9 @@ export function LeadKanban() {
                           <Send className="w-3 h-3 text-emerald-500" />
                           Mensagem a Enviar
                         </label>
-                        <textarea 
+                        <textarea
                           rows={3}
-                          value={newRule.message_to_send} 
+                          value={newRule.message_to_send}
                           onChange={e => setNewRule(p => ({ ...p, message_to_send: e.target.value }))}
                           placeholder="Ex: Parabens pela decisao! Para continuarmos..."
                           className="w-full px-3 py-2.5 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 font-medium resize-none transition-all"
@@ -1508,9 +1525,9 @@ export function LeadKanban() {
                           <MessageSquare className="w-3 h-3 text-amber-500" />
                           Resposta Esperada do Lead
                         </label>
-                        <input 
-                          type="text" 
-                          value={newRule.lead_response} 
+                        <input
+                          type="text"
+                          value={newRule.lead_response}
                           onChange={e => setNewRule(p => ({ ...p, lead_response: e.target.value }))}
                           placeholder="Ex: Se a resposta for sim ou positiva"
                           className="w-full px-3 py-2.5 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 font-medium transition-all"
@@ -1521,9 +1538,9 @@ export function LeadKanban() {
                           <Zap className="w-3 h-3 text-violet-500" />
                           Gatilho
                         </label>
-                        <input 
-                          type="text" 
-                          value={newRule.keywords} 
+                        <input
+                          type="text"
+                          value={newRule.keywords}
                           onChange={e => setNewRule(p => ({ ...p, keywords: e.target.value }))}
                           placeholder="[QUALIFICADO]"
                           className="w-full px-3 py-2.5 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 font-mono font-medium transition-all"
@@ -1531,7 +1548,7 @@ export function LeadKanban() {
                       </div>
                       <div className="space-y-2">
                         <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Etapa Destino</label>
-                        <select 
+                        <select
                           value={newRule.target_stage_id}
                           onChange={e => setNewRule(p => ({ ...p, target_stage_id: e.target.value }))}
                           className="w-full px-3 py-2.5 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 font-medium transition-all"
@@ -1544,7 +1561,7 @@ export function LeadKanban() {
                       </div>
                     </div>
                     <div className="flex gap-3 pt-2">
-                      <Button 
+                      <Button
                         className="bg-teal-600 hover:bg-teal-700 shadow-lg shadow-teal-100 px-6"
                         disabled={!newRule.keywords.trim() || !newRule.target_stage_id || submitting}
                         onClick={async () => {
@@ -1577,10 +1594,10 @@ export function LeadKanban() {
         {/* Filtro de origem */}
         <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-xl p-0.5 shadow-sm">
           {([
-            { id: 'all',       label: 'Todos',      logo: null },
-            { id: 'meta',      label: 'Meta',        logo: MetaLogo },
-            { id: 'google',    label: 'Google',      logo: GoogleLogo },
-            { id: 'sem_origem',label: 'Sem Origem',  logo: SemOrigemLogo },
+            { id: 'all', label: 'Todos', logo: null },
+            { id: 'meta', label: 'Meta', logo: MetaLogo },
+            { id: 'google', label: 'Google', logo: GoogleLogo },
+            { id: 'sem_origem', label: 'Sem Origem', logo: SemOrigemLogo },
           ] as const).map(opt => (
             <button
               key={opt.id}
@@ -1649,9 +1666,9 @@ export function LeadKanban() {
           <Button variant="outline" size="icon" className="h-8 w-8 text-slate-400 hover:text-teal-600" onClick={() => { setLocalStages([...stages]); setShowSettingsModal(true); }} title="Configurar Funil">
             <Settings className="w-3.5 h-3.5" />
           </Button>
-          <Button 
-            size="icon" 
-            className="h-8 w-8 bg-teal-600 hover:bg-teal-700 text-white shadow-sm transition-all rounded-lg" 
+          <Button
+            size="icon"
+            className="h-8 w-8 bg-teal-600 hover:bg-teal-700 text-white shadow-sm transition-all rounded-lg"
             onClick={() => { setSelectedLead(null); setFormData({ name: '', phone: '', source: 'sincronizacao', capture_channel: 'whatsapp', stage_id: stages[0]?.id || '', estimated_value: String(aiConfig?.default_ticket_value ?? ''), loss_reason: '', avatar_url: '' }); setShowModal(true); }}
             title="Novo Lead"
           >
@@ -1661,365 +1678,365 @@ export function LeadKanban() {
       </div>
 
       <div className="flex-1 min-h-0">
-      <KanbanScrollContainer>
-        {stages.map((stage) => {
-          const stageTickets = filteredTickets.filter(t => t.stage_id === stage.id);
-          const stageTotal = stageTickets.reduce((sum, t) => {
-            const conversions = t.lead ? conversionsByLead[t.lead.id] : undefined;
-            const lastConversion = conversions?.[conversions.length - 1];
-            const realValue = lastConversion ? Number(lastConversion.value || 0) : 0;
-            const valueToAdd = realValue > 0 ? realValue : Number(t.lead?.estimated_value || 0);
-            return sum + valueToAdd;
-          }, 0);
-          const visibleCount = (columnPages[stage.id] || 1) * COLUMN_PAGE_SIZE;
-          const visibleTickets = stageTickets.slice(0, visibleCount);
-          const hasMoreInColumn = visibleCount < stageTickets.length;
-          return (
-            <div key={stage.id} className="w-[300px] shrink-0 flex flex-col gap-2 h-full">
-              <div className="flex items-center gap-2 px-2" draggable={false} onDragStart={e => e.preventDefault()}>
-                <div className={cn("w-2 h-2 shrink-0 rounded-full", stageColors[stage.color || 'bg-slate-500'] || 'bg-slate-500')} />
-                <h3 className="font-bold text-slate-700 text-xs uppercase tracking-wider truncate flex-1">{stage.name}</h3>
-                <span className="bg-slate-200 text-slate-600 text-[10px] font-bold px-1.5 py-0.5 rounded-md shrink-0">{stageTickets.length}</span>
-                <span className="text-[10px] font-bold text-slate-400 shrink-0">
-                  R$ {stageTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                </span>
-                <button className="text-slate-400 hover:text-slate-600 shrink-0" onClick={() => { setSelectedLead(null); setFormData({ name: '', phone: '', source: 'sincronizacao', capture_channel: 'whatsapp', stage_id: stage.id, estimated_value: String(aiConfig?.default_ticket_value ?? ''), loss_reason: '', avatar_url: '' }); setShowModal(true); }}>
-                  <Plus className="w-4 h-4" />
+        <KanbanScrollContainer>
+          {stages.map((stage) => {
+            const stageTickets = filteredTickets.filter(t => t.stage_id === stage.id);
+            const stageTotal = stageTickets.reduce((sum, t) => {
+              const conversions = t.lead ? conversionsByLead[t.lead.id] : undefined;
+              const lastConversion = conversions?.[conversions.length - 1];
+              const realValue = lastConversion ? Number(lastConversion.value || 0) : 0;
+              const valueToAdd = realValue > 0 ? realValue : Number(t.lead?.estimated_value || 0);
+              return sum + valueToAdd;
+            }, 0);
+            const visibleCount = (columnPages[stage.id] || 1) * COLUMN_PAGE_SIZE;
+            const visibleTickets = stageTickets.slice(0, visibleCount);
+            const hasMoreInColumn = visibleCount < stageTickets.length;
+            return (
+              <div key={stage.id} className="w-[300px] shrink-0 flex flex-col gap-2 h-full">
+                <div className="flex items-center gap-2 px-2" draggable={false} onDragStart={e => e.preventDefault()}>
+                  <div className={cn("w-2 h-2 shrink-0 rounded-full", stageColors[stage.color || 'bg-slate-500'] || 'bg-slate-500')} />
+                  <h3 className="font-bold text-slate-700 text-xs uppercase tracking-wider truncate flex-1">{stage.name}</h3>
+                  <span className="bg-slate-200 text-slate-600 text-[10px] font-bold px-1.5 py-0.5 rounded-md shrink-0">{stageTickets.length}</span>
+                  <span className="text-[10px] font-bold text-slate-400 shrink-0">
+                    {formatBRL(stageTotal)}
+                  </span>
+                  <button className="text-slate-400 hover:text-slate-600 shrink-0" onClick={() => { setSelectedLead(null); setFormData({ name: '', phone: '', source: 'sincronizacao', capture_channel: 'whatsapp', stage_id: stage.id, estimated_value: String(aiConfig?.default_ticket_value ?? ''), loss_reason: '', avatar_url: '' }); setShowModal(true); }}>
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div
+                  className={cn(
+                    "flex-1 min-h-0 bg-slate-100/50 rounded-xl p-3 flex flex-col gap-3 overflow-y-auto overflow-x-hidden custom-scrollbar transition-colors border-2 border-transparent",
+                    dragOverStage === stage.id && "bg-teal-50 border-teal-200"
+                  )}
+                  onDragOver={(e) => handleDragOver(e, stage.id)}
+                  onDragLeave={() => setDragOverStage(null)}
+                  onDrop={(e) => handleDrop(e, stage.id)}
+                  onDragStart={e => { if (!(e.target as HTMLElement).closest('[draggable="true"]')) e.preventDefault(); }}
+                  onScroll={(e) => {
+                    const el = e.currentTarget;
+                    if (hasMoreInColumn && el.scrollTop + el.clientHeight >= el.scrollHeight - 100) {
+                      setColumnPages(prev => ({ ...prev, [stage.id]: (prev[stage.id] || 1) + 1 }));
+                    }
+                  }}
+                >
+                  {visibleTickets.map((ticket) => {
+                    const lead = ticket.lead!;
+                    const isClosed = ticket.status === 'closed';
+                    const isPerdido = stage.slug === 'perdido';
+                    const semMotivo = isPerdido && !lead.loss_reason && !ticket.loss_reason && !isClosed;
+                    const lastContact = lead.last_message_at ?? lead.created_at;
+                    const frozen = isClosed || !!lead.converted_patient_id || isPerdido;
+                    // Contagem persistente do banco + ciclo atual estourado
+                    const currentCycleBreach = (() => {
+                      if (frozen || !aiConfig?.sla_minutes || !aiConfig?.business_hours || !lead.last_message_at) return false;
+                      // So conta se o lead mandou msg depois da ultima resposta (ciclo aberto)
+                      if (lead.last_outbound_at && parseISO(lead.last_outbound_at) > parseISO(lead.last_message_at)) return false;
+                      const endDate = frozen && lead.updated_at ? parseISO(lead.updated_at) : undefined;
+                      const mins = calcBusinessMinutes(parseISO(lead.last_message_at), aiConfig.business_hours, endDate);
+                      return mins > aiConfig.sla_minutes;
+                    })();
+                    const slaBreach = lead.sla_breach_count + (currentCycleBreach ? 1 : 0);
+                    const aguardando = !frozen && !!lead.last_outbound_at && (
+                      !lead.last_message_at || parseISO(lead.last_outbound_at) > parseISO(lead.last_message_at)
+                    );
+                    const precisaResponder = !frozen && !!lead.last_message_at && (
+                      !lead.last_outbound_at || parseISO(lead.last_message_at) > parseISO(lead.last_outbound_at)
+                    );
+                    const outcomeLabel: Record<string, string> = { ganho: 'Ganho', perdido: 'Perdido' };
+                    return (
+                      <motion.div
+                        key={ticket.id}
+                        draggable={!isClosed && !lead.converted_patient_id}
+                        onDragStart={!isClosed && !lead.converted_patient_id ? (e) => handleDragStart(e, ticket) : undefined}
+                        whileHover={{ y: isClosed ? 0 : -1 }}
+                        className={cn(
+                          "px-3 py-2.5 rounded-lg border shadow-sm transition-all group",
+                          !frozen && !isClosed ? "cursor-pointer active:cursor-move hover:shadow-md" : "cursor-default",
+                          isClosed && "opacity-50 grayscale-[0.5] hover:opacity-75",
+                          draggedLead?.id === ticket.id && "opacity-50",
+                          semMotivo && "animate-pulse",
+                          isClosed ? "bg-slate-50/80 border-slate-200"
+                            : ticket.outcome === 'ganho' ? "bg-emerald-50 border-emerald-200"
+                              : ticket.outcome === 'perdido' ? "bg-rose-50 border-rose-200"
+                                : isPerdido ? "bg-white border-rose-200"
+                                  : (!!lead.fb_campaign_name || lead.source === 'meta_ads') ? "bg-blue-50/60 border-blue-200/80"
+                                    : (!!lead.g_campaign_name || lead.source === 'google_ads') ? "bg-emerald-50/60 border-emerald-200/80"
+                                      : lead.source === 'sincronizacao' ? "bg-violet-50/60 border-violet-200/80"
+                                        : "bg-white border-slate-200"
+                        )}
+                      >
+                        {/* Header: fonte + acoes */}
+                        {(() => {
+                          const isMeta = !!lead.fb_campaign_name || lead.source === 'meta_ads';
+                          const isGoogle = !!lead.g_campaign_name || lead.source === 'google_ads';
+                          const isSync = !isMeta && !isGoogle && lead.source === 'sincronizacao';
+                          const campaignName = lead.fb_campaign_name || lead.g_campaign_name;
+
+                          const hasUtms = !!(
+                            lead.fb_campaign_name || lead.fb_adset_name || lead.fb_ad_name || lead.fb_clid ||
+                            lead.g_campaign_name || lead.g_adset_name || lead.g_ad_name || lead.g_term_name || lead.g_source_name ||
+                            lead.ctwa_clid || lead.rast_id || lead.source
+                          );
+
+                          return (
+                            <div className="flex justify-between items-start mb-2">
+                              <div className="flex flex-col gap-1.5 flex-1 min-w-0">
+                                <div className="relative group/utm inline-flex items-center gap-1.5 cursor-help w-max">
+                                  {isMeta && (
+                                    <img src={MetaLogo} alt="Meta" className="w-3.5 h-3.5 rounded shrink-0" />
+                                  )}
+                                  {isGoogle && !isMeta && (
+                                    <img src={GoogleLogo} alt="Google" className="w-3.5 h-3.5 rounded shrink-0" />
+                                  )}
+                                  {!isMeta && !isGoogle && (
+                                    <img src={SemOrigemLogo} alt="Sem Origem" className="w-3.5 h-3.5 rounded shrink-0 opacity-40" />
+                                  )}
+                                  <span className={cn(
+                                    "text-[9px] font-black uppercase tracking-[0.1em] truncate",
+                                    isMeta ? "text-blue-500" : isGoogle ? "text-emerald-500" : isSync ? "text-violet-500" : "text-slate-400"
+                                  )}>
+                                    {isMeta ? 'Meta Ads' : isGoogle ? 'Google Ads' : isSync ? 'Sincronização' : 'Sem Origem'}
+                                  </span>
+
+                                  {hasUtms && (
+                                    <div className="absolute left-0 top-full mt-2 z-50 hidden group-hover/utm:flex flex-col bg-slate-900 text-slate-100 text-[10px] p-2.5 rounded-xl shadow-xl w-max max-w-[250px] border border-slate-700 pointer-events-none">
+                                      <div className="font-black text-slate-400 mb-1.5 uppercase tracking-wider text-[8px]">Dados da Origem</div>
+
+                                      {lead.source && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">utm_source:</span> <span className="font-bold truncate">{lead.source}</span></p>}
+
+                                      {/* Meta */}
+                                      {lead.fb_campaign_name && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">utm_campaign:</span> <span className="font-bold truncate" title={lead.fb_campaign_name}>{lead.fb_campaign_name}</span></p>}
+                                      {lead.fb_adset_name && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">utm_adset:</span> <span className="font-bold truncate" title={lead.fb_adset_name}>{lead.fb_adset_name}</span></p>}
+                                      {lead.fb_ad_name && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">utm_ad:</span> <span className="font-bold truncate" title={lead.fb_ad_name}>{lead.fb_ad_name}</span></p>}
+                                      {lead.fb_clid && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">fbclid:</span> <span className="font-bold truncate" title={lead.fb_clid}>{lead.fb_clid}</span></p>}
+
+                                      {/* Google */}
+                                      {lead.g_campaign_name && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">utm_campaign:</span> <span className="font-bold truncate" title={lead.g_campaign_name}>{lead.g_campaign_name}</span></p>}
+                                      {lead.g_adset_name && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">utm_adgroup:</span> <span className="font-bold truncate" title={lead.g_adset_name}>{lead.g_adset_name}</span></p>}
+                                      {lead.g_ad_name && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">utm_ad:</span> <span className="font-bold truncate" title={lead.g_ad_name}>{lead.g_ad_name}</span></p>}
+                                      {lead.g_term_name && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">utm_term:</span> <span className="font-bold truncate" title={lead.g_term_name}>{lead.g_term_name}</span></p>}
+                                      {lead.g_source_name && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">g_source:</span> <span className="font-bold truncate" title={lead.g_source_name}>{lead.g_source_name}</span></p>}
+
+                                      {/* Outros IDs de Rastreio */}
+                                      {lead.ctwa_clid && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">ctwa_clid:</span> <span className="font-bold truncate" title={lead.ctwa_clid}>{lead.ctwa_clid}</span></p>}
+                                      {lead.rast_id && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">rast_id:</span> <span className="font-bold truncate" title={lead.rast_id}>{lead.rast_id}</span></p>}
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* UTMs expostas */}
+                                {(lead.fb_campaign_name || lead.g_campaign_name || lead.fb_adset_name || lead.g_adset_name || lead.g_term_name) && (
+                                  <div className="mt-0.5 flex flex-col gap-0.5">
+                                    {(lead.fb_campaign_name || lead.g_campaign_name) && (
+                                      <div className="text-[9px] text-slate-500 truncate flex gap-1">
+                                        <span className="font-semibold text-slate-400">Campanha:</span>
+                                        <span className={isMeta ? "text-blue-600/80" : "text-emerald-600/80"}>{lead.fb_campaign_name || lead.g_campaign_name}</span>
+                                      </div>
+                                    )}
+                                    {(lead.fb_adset_name || lead.g_adset_name) && (
+                                      <div className="text-[9px] text-slate-500 truncate flex gap-1">
+                                        <span className="font-semibold text-slate-400">AdGroup:</span>
+                                        <span className={isMeta ? "text-blue-500/70" : "text-emerald-500/70"}>{lead.fb_adset_name || lead.g_adset_name}</span>
+                                      </div>
+                                    )}
+                                    {lead.g_term_name && (
+                                      <div className="text-[9px] text-slate-500 truncate flex gap-1">
+                                        <span className="font-semibold text-slate-400">Termo:</span>
+                                        <span className="text-emerald-500/70">{lead.g_term_name}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex flex-col items-end gap-1.5 shrink-0 ml-2">
+                                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <button title="Agendar consulta" onClick={() => { setScheduleLead({ lead, ticketId: ticket.id }); setScheduleForm({ doctor_id: doctors[0]?.id || '', date: '', time: '', notes: '' }); }} className="p-0.5 text-slate-400 hover:text-indigo-600 rounded transition-colors"><CalendarPlus className="w-3 h-3" /></button>
+                                  {!ticket.outcome && !isClosed && (
+                                    <div className="relative">
+                                      <button
+                                        title="Status"
+                                        onClick={e => { e.stopPropagation(); setStatusDropdownTicketId(statusDropdownTicketId === ticket.id ? null : ticket.id); }}
+                                        className="p-0.5 text-slate-400 hover:text-violet-600 rounded transition-colors"
+                                      >
+                                        <Check className="w-3 h-3" />
+                                      </button>
+                                      {statusDropdownTicketId === ticket.id && (
+                                        <div className="absolute right-0 top-5 z-50 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden w-28" onClick={e => e.stopPropagation()}>
+                                          <button
+                                            onClick={() => { setStatusDropdownTicketId(null); setGanhoLead({ id: lead.id, name: lead.name, prevStageId: ticket.stage_id, ticketId: ticket.id }); }}
+                                            className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50 transition-colors"
+                                          >
+                                            <ThumbsUp className="w-3 h-3" /> Ganho
+                                          </button>
+                                          <button
+                                            onClick={() => { setStatusDropdownTicketId(null); setLossLead({ id: lead.id, name: lead.name, prevStageId: ticket.stage_id, ticketId: ticket.id }); }}
+                                            className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-50 transition-colors"
+                                          >
+                                            <ThumbsDown className="w-3 h-3" /> Perdido
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                  <button title="Editar" onClick={() => openEditModal(ticket)} className="p-0.5 text-slate-400 hover:text-teal-600 rounded transition-colors"><Edit2 className="w-3 h-3" /></button>
+                                  <button title="Excluir" onClick={() => openDeleteConfirm(ticket)} className="p-0.5 text-slate-400 hover:text-rose-600 rounded transition-colors"><Trash2 className="w-3 h-3" /></button>
+                                </div>
+
+                                {ticket.outcome && !isClosed && (
+                                  <div className="mt-auto">
+                                    {confirmingResolveId === ticket.id ? (
+                                      <div className="flex gap-1 animate-in fade-in zoom-in duration-200">
+                                        <button
+                                          onClick={e => { e.stopPropagation(); finalizeTicket(ticket.id); setConfirmingResolveId(null); }}
+                                          className="flex items-center justify-center px-1.5 py-1 bg-amber-500 text-white rounded text-[9px] font-black hover:bg-amber-600 transition-all shadow-sm"
+                                        >
+                                          Confirmar
+                                        </button>
+                                        <button
+                                          onClick={e => { e.stopPropagation(); setConfirmingResolveId(null); }}
+                                          className="px-1 flex items-center justify-center bg-white text-slate-600 py-1 rounded hover:bg-slate-100 border border-slate-200 transition-all shadow-sm shrink-0"
+                                          title="Cancelar"
+                                        >
+                                          <X className="w-2.5 h-2.5" />
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <button
+                                        onClick={e => { e.stopPropagation(); setConfirmingResolveId(ticket.id); }}
+                                        className={cn(
+                                          "flex items-center justify-center gap-1 px-2.5 py-1 rounded text-[9px] font-bold transition-all shadow-sm truncate",
+                                          ticket.outcome === 'ganho'
+                                            ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                                            : "bg-rose-600 text-white hover:bg-rose-700"
+                                        )}
+                                      >
+                                        <Check className="w-2.5 h-2.5 shrink-0" />
+                                        Resolver
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {/* Nome + telefone */}
+                        <div className="flex items-center gap-3 mt-1.5">
+                          {lead.avatar_url ? (
+                            <div className="relative w-8 h-8 shrink-0">
+                              <img
+                                src={lead.avatar_url}
+                                alt={lead.name}
+                                className="w-8 h-8 rounded-full object-cover border border-slate-100"
+                                onError={e => { e.currentTarget.style.display = 'none'; (e.currentTarget.nextElementSibling as HTMLElement).style.display = 'flex'; }}
+                              />
+                              <div style={{ display: 'none' }} className="absolute inset-0 w-8 h-8 rounded-full bg-teal-100 items-center justify-center border border-teal-100 text-teal-700 text-[10px] font-black">
+                                {lead.name.charAt(0).toUpperCase()}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center border border-slate-100 text-slate-500 text-[10px] font-black shrink-0">
+                              {lead.name.charAt(0).toUpperCase()}
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <h4 className="font-bold text-slate-900 text-sm leading-tight truncate">{lead.name}</h4>
+                            {lead.phone && (
+                              <p className="text-[10px] font-medium text-slate-400 mt-0.5">{lead.phone}</p>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Motivo da perda */}
+                        {isPerdido && (
+                          <div className={cn(
+                            "mt-2 px-2 py-1 rounded text-[9px] font-bold flex items-center gap-1.5",
+                            semMotivo
+                              ? "bg-amber-50 border border-amber-200 text-amber-700"
+                              : "bg-rose-50 border border-rose-100 text-rose-700"
+                          )}>
+                            <AlertCircle className="w-2.5 h-2.5 shrink-0" />
+                            {semMotivo ? "Motivo da perda não preenchido" : (ticket.loss_reason || lead.loss_reason)}
+                          </div>
+                        )}
+
+                        {/* Badges de status */}
+                        {(aguardando || precisaResponder || slaBreach > 0) && (
+                          <div className="flex items-center gap-1.5 mt-2">
+                            {aguardando && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border bg-blue-50 border-blue-200 text-blue-600">
+                                Aguardando Lead
+                              </span>
+                            )}
+                            {precisaResponder && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border bg-amber-50 border-amber-200 text-amber-600">
+                                Responder Lead
+                              </span>
+                            )}
+                            {slaBreach > 0 && (
+                              <span className={cn(
+                                "text-[9px] font-bold px-1.5 py-0.5 rounded border",
+                                slaBreach === 1
+                                  ? "bg-amber-50 border-amber-200 text-amber-700"
+                                  : "bg-rose-50 border-rose-100 text-rose-700"
+                              )}>
+                                {slaBreach}x SLA
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+
+                        {/* Footer: valor | tempo + chat */}
+                        {(() => {
+                          const conversions = conversionsByLead[lead.id];
+                          const lastConversion = conversions?.[conversions.length - 1];
+                          const realValue = lastConversion ? Number(lastConversion.value || 0) : 0;
+                          const displayValue = realValue > 0 ? realValue : Number(lead.estimated_value || 0);
+                          const isReal = realValue > 0;
+                          return (
+                            <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-100 gap-2">
+                              <div className={cn(
+                                "text-[9px] font-bold px-1.5 py-0.5 rounded border shrink-0",
+                                isReal ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-teal-50 text-teal-700 border-teal-100"
+                              )}>
+                                {formatBRL(displayValue)}
+                              </div>
+                              <span className="text-[9px] font-medium text-slate-400 truncate text-right flex-1">
+                                {formatDistanceToNow(parseISO(lastContact), { addSuffix: true, locale: ptBR })}
+                              </span>
+                              <button
+                                onClick={() => setChatLead({ lead: ticket.lead, ticketId: ticket.id })}
+                                className="p-1 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded transition-colors shrink-0"
+                                title="Abrir chat"
+                              >
+                                <MessageSquare className="w-3 h-3" />
+                              </button>
+                            </div>
+                          );
+                        })()}
+                      </motion.div>
+                    );
+                  })}
+
+                  {hasMoreInColumn && (
+                    <div className="flex items-center justify-center py-2 text-[10px] font-bold text-slate-400 gap-1.5">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      Role para ver mais
+                    </div>
+                  )}
+                </div>
+                <button onClick={() => { setFormData(p => ({ ...p, stage_id: stage.id, avatar_url: '' })); setShowModal(true); }} className="w-full py-1.5 border border-dashed border-slate-300 rounded-lg text-slate-400 text-xs font-semibold hover:bg-white hover:border-slate-400 transition-all flex items-center justify-center gap-1.5 shrink-0">
+                  <Plus className="w-3 h-3" />
+                  Adicionar Lead
                 </button>
               </div>
-
-              <div
-                className={cn(
-                  "flex-1 min-h-0 bg-slate-100/50 rounded-xl p-3 flex flex-col gap-3 overflow-y-auto overflow-x-hidden custom-scrollbar transition-colors border-2 border-transparent",
-                  dragOverStage === stage.id && "bg-teal-50 border-teal-200"
-                )}
-                onDragOver={(e) => handleDragOver(e, stage.id)}
-                onDragLeave={() => setDragOverStage(null)}
-                onDrop={(e) => handleDrop(e, stage.id)}
-                onDragStart={e => { if (!(e.target as HTMLElement).closest('[draggable="true"]')) e.preventDefault(); }}
-                onScroll={(e) => {
-                  const el = e.currentTarget;
-                  if (hasMoreInColumn && el.scrollTop + el.clientHeight >= el.scrollHeight - 100) {
-                    setColumnPages(prev => ({ ...prev, [stage.id]: (prev[stage.id] || 1) + 1 }));
-                  }
-                }}
-              >
-                {visibleTickets.map((ticket) => {
-                  const lead = ticket.lead!;
-                  const isClosed = ticket.status === 'closed';
-                  const isPerdido = stage.slug === 'perdido';
-                  const semMotivo = isPerdido && !lead.loss_reason && !ticket.loss_reason && !isClosed;
-                  const lastContact = lead.last_message_at ?? lead.created_at;
-                  const frozen = isClosed || !!lead.converted_patient_id || isPerdido;
-                  // Contagem persistente do banco + ciclo atual estourado
-                  const currentCycleBreach = (() => {
-                    if (frozen || !aiConfig?.sla_minutes || !aiConfig?.business_hours || !lead.last_message_at) return false;
-                    // So conta se o lead mandou msg depois da ultima resposta (ciclo aberto)
-                    if (lead.last_outbound_at && parseISO(lead.last_outbound_at) > parseISO(lead.last_message_at)) return false;
-                    const endDate = frozen && lead.updated_at ? parseISO(lead.updated_at) : undefined;
-                    const mins = calcBusinessMinutes(parseISO(lead.last_message_at), aiConfig.business_hours, endDate);
-                    return mins > aiConfig.sla_minutes;
-                  })();
-                  const slaBreach = lead.sla_breach_count + (currentCycleBreach ? 1 : 0);
-                  const aguardando = !frozen && !!lead.last_outbound_at && (
-                    !lead.last_message_at || parseISO(lead.last_outbound_at) > parseISO(lead.last_message_at)
-                  );
-                  const precisaResponder = !frozen && !!lead.last_message_at && (
-                    !lead.last_outbound_at || parseISO(lead.last_message_at) > parseISO(lead.last_outbound_at)
-                  );
-                  const outcomeLabel: Record<string, string> = { ganho: 'Ganho', perdido: 'Perdido' };
-                  return (
-                  <motion.div
-                    key={ticket.id}
-                    draggable={!isClosed && !lead.converted_patient_id}
-                    onDragStart={!isClosed && !lead.converted_patient_id ? (e) => handleDragStart(e, ticket) : undefined}
-                    whileHover={{ y: isClosed ? 0 : -1 }}
-                    className={cn(
-                      "px-3 py-2.5 rounded-lg border shadow-sm transition-all group",
-                      !frozen && !isClosed ? "cursor-pointer active:cursor-move hover:shadow-md" : "cursor-default",
-                      isClosed && "opacity-50 grayscale-[0.5] hover:opacity-75",
-                      draggedLead?.id === ticket.id && "opacity-50",
-                      semMotivo && "animate-pulse",
-                      isClosed ? "bg-slate-50/80 border-slate-200"
-                        : ticket.outcome === 'ganho' ? "bg-emerald-50 border-emerald-200"
-                        : ticket.outcome === 'perdido' ? "bg-rose-50 border-rose-200"
-                        : isPerdido ? "bg-white border-rose-200"
-                        : (!!lead.fb_campaign_name || lead.source === 'meta_ads') ? "bg-blue-50/60 border-blue-200/80"
-                        : (!!lead.g_campaign_name || lead.source === 'google_ads') ? "bg-emerald-50/60 border-emerald-200/80"
-                        : lead.source === 'sincronizacao' ? "bg-violet-50/60 border-violet-200/80"
-                        : "bg-white border-slate-200"
-                    )}
-                  >
-                    {/* Header: fonte + acoes */}
-                    {(() => {
-                      const isMeta = !!lead.fb_campaign_name || lead.source === 'meta_ads';
-                      const isGoogle = !!lead.g_campaign_name || lead.source === 'google_ads';
-                      const isSync = !isMeta && !isGoogle && lead.source === 'sincronizacao';
-                      const campaignName = lead.fb_campaign_name || lead.g_campaign_name;
-                      
-                      const hasUtms = !!(
-                        lead.fb_campaign_name || lead.fb_adset_name || lead.fb_ad_name || lead.fb_clid ||
-                        lead.g_campaign_name || lead.g_adset_name || lead.g_ad_name || lead.g_term_name || lead.g_source_name ||
-                        lead.ctwa_clid || lead.rast_id || lead.source
-                      );
-
-                      return (
-                    <div className="flex justify-between items-start mb-2">
-                      <div className="flex flex-col gap-1.5 flex-1 min-w-0">
-                        <div className="relative group/utm inline-flex items-center gap-1.5 cursor-help w-max">
-                          {isMeta && (
-                            <img src={MetaLogo} alt="Meta" className="w-3.5 h-3.5 rounded shrink-0" />
-                          )}
-                          {isGoogle && !isMeta && (
-                            <img src={GoogleLogo} alt="Google" className="w-3.5 h-3.5 rounded shrink-0" />
-                          )}
-                          {!isMeta && !isGoogle && (
-                            <img src={SemOrigemLogo} alt="Sem Origem" className="w-3.5 h-3.5 rounded shrink-0 opacity-40" />
-                          )}
-                          <span className={cn(
-                            "text-[9px] font-black uppercase tracking-[0.1em] truncate",
-                            isMeta ? "text-blue-500" : isGoogle ? "text-emerald-500" : isSync ? "text-violet-500" : "text-slate-400"
-                          )}>
-                            {isMeta ? 'Meta Ads' : isGoogle ? 'Google Ads' : isSync ? 'Sincronização' : 'Sem Origem'}
-                          </span>
-
-                          {hasUtms && (
-                            <div className="absolute left-0 top-full mt-2 z-50 hidden group-hover/utm:flex flex-col bg-slate-900 text-slate-100 text-[10px] p-2.5 rounded-xl shadow-xl w-max max-w-[250px] border border-slate-700 pointer-events-none">
-                              <div className="font-black text-slate-400 mb-1.5 uppercase tracking-wider text-[8px]">Dados da Origem</div>
-                              
-                              {lead.source && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">utm_source:</span> <span className="font-bold truncate">{lead.source}</span></p>}
-                              
-                              {/* Meta */}
-                              {lead.fb_campaign_name && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">utm_campaign:</span> <span className="font-bold truncate" title={lead.fb_campaign_name}>{lead.fb_campaign_name}</span></p>}
-                              {lead.fb_adset_name && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">utm_adset:</span> <span className="font-bold truncate" title={lead.fb_adset_name}>{lead.fb_adset_name}</span></p>}
-                              {lead.fb_ad_name && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">utm_ad:</span> <span className="font-bold truncate" title={lead.fb_ad_name}>{lead.fb_ad_name}</span></p>}
-                              {lead.fb_clid && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">fbclid:</span> <span className="font-bold truncate" title={lead.fb_clid}>{lead.fb_clid}</span></p>}
-                              
-                              {/* Google */}
-                              {lead.g_campaign_name && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">utm_campaign:</span> <span className="font-bold truncate" title={lead.g_campaign_name}>{lead.g_campaign_name}</span></p>}
-                              {lead.g_adset_name && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">utm_adgroup:</span> <span className="font-bold truncate" title={lead.g_adset_name}>{lead.g_adset_name}</span></p>}
-                              {lead.g_ad_name && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">utm_ad:</span> <span className="font-bold truncate" title={lead.g_ad_name}>{lead.g_ad_name}</span></p>}
-                              {lead.g_term_name && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">utm_term:</span> <span className="font-bold truncate" title={lead.g_term_name}>{lead.g_term_name}</span></p>}
-                              {lead.g_source_name && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">g_source:</span> <span className="font-bold truncate" title={lead.g_source_name}>{lead.g_source_name}</span></p>}
-                              
-                              {/* Outros IDs de Rastreio */}
-                              {lead.ctwa_clid && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">ctwa_clid:</span> <span className="font-bold truncate" title={lead.ctwa_clid}>{lead.ctwa_clid}</span></p>}
-                              {lead.rast_id && <p className="mb-0.5 flex gap-1"><span className="text-slate-500 font-medium shrink-0">rast_id:</span> <span className="font-bold truncate" title={lead.rast_id}>{lead.rast_id}</span></p>}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* UTMs expostas */}
-                        {(lead.fb_campaign_name || lead.g_campaign_name || lead.fb_adset_name || lead.g_adset_name || lead.g_term_name) && (
-                          <div className="mt-0.5 flex flex-col gap-0.5">
-                            {(lead.fb_campaign_name || lead.g_campaign_name) && (
-                              <div className="text-[9px] text-slate-500 truncate flex gap-1">
-                                <span className="font-semibold text-slate-400">Campanha:</span> 
-                                <span className={isMeta ? "text-blue-600/80" : "text-emerald-600/80"}>{lead.fb_campaign_name || lead.g_campaign_name}</span>
-                              </div>
-                            )}
-                            {(lead.fb_adset_name || lead.g_adset_name) && (
-                              <div className="text-[9px] text-slate-500 truncate flex gap-1">
-                                <span className="font-semibold text-slate-400">AdGroup:</span> 
-                                <span className={isMeta ? "text-blue-500/70" : "text-emerald-500/70"}>{lead.fb_adset_name || lead.g_adset_name}</span>
-                              </div>
-                            )}
-                            {lead.g_term_name && (
-                              <div className="text-[9px] text-slate-500 truncate flex gap-1">
-                                <span className="font-semibold text-slate-400">Termo:</span> 
-                                <span className="text-emerald-500/70">{lead.g_term_name}</span>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex flex-col items-end gap-1.5 shrink-0 ml-2">
-                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button title="Agendar consulta" onClick={() => { setScheduleLead({ lead, ticketId: ticket.id }); setScheduleForm({ doctor_id: doctors[0]?.id || '', date: '', time: '', notes: '' }); }} className="p-0.5 text-slate-400 hover:text-indigo-600 rounded transition-colors"><CalendarPlus className="w-3 h-3" /></button>
-                          {!ticket.outcome && !isClosed && (
-                            <div className="relative">
-                              <button
-                                title="Status"
-                                onClick={e => { e.stopPropagation(); setStatusDropdownTicketId(statusDropdownTicketId === ticket.id ? null : ticket.id); }}
-                                className="p-0.5 text-slate-400 hover:text-violet-600 rounded transition-colors"
-                              >
-                                <Check className="w-3 h-3" />
-                              </button>
-                              {statusDropdownTicketId === ticket.id && (
-                                <div className="absolute right-0 top-5 z-50 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden w-28" onClick={e => e.stopPropagation()}>
-                                  <button
-                                    onClick={() => { setStatusDropdownTicketId(null); setGanhoLead({ id: lead.id, name: lead.name, prevStageId: ticket.stage_id, ticketId: ticket.id }); }}
-                                    className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50 transition-colors"
-                                  >
-                                    <ThumbsUp className="w-3 h-3" /> Ganho
-                                  </button>
-                                  <button
-                                    onClick={() => { setStatusDropdownTicketId(null); setLossLead({ id: lead.id, name: lead.name, prevStageId: ticket.stage_id, ticketId: ticket.id }); }}
-                                    className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-50 transition-colors"
-                                  >
-                                    <ThumbsDown className="w-3 h-3" /> Perdido
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                          <button title="Editar" onClick={() => openEditModal(ticket)} className="p-0.5 text-slate-400 hover:text-teal-600 rounded transition-colors"><Edit2 className="w-3 h-3" /></button>
-                          <button title="Excluir" onClick={() => openDeleteConfirm(ticket)} className="p-0.5 text-slate-400 hover:text-rose-600 rounded transition-colors"><Trash2 className="w-3 h-3" /></button>
-                        </div>
-
-                        {ticket.outcome && !isClosed && (
-                          <div className="mt-auto">
-                            {confirmingResolveId === ticket.id ? (
-                              <div className="flex gap-1 animate-in fade-in zoom-in duration-200">
-                                <button
-                                  onClick={e => { e.stopPropagation(); finalizeTicket(ticket.id); setConfirmingResolveId(null); }}
-                                  className="flex items-center justify-center px-1.5 py-1 bg-amber-500 text-white rounded text-[9px] font-black hover:bg-amber-600 transition-all shadow-sm"
-                                >
-                                  Confirmar
-                                </button>
-                                <button
-                                  onClick={e => { e.stopPropagation(); setConfirmingResolveId(null); }}
-                                  className="px-1 flex items-center justify-center bg-white text-slate-600 py-1 rounded hover:bg-slate-100 border border-slate-200 transition-all shadow-sm shrink-0"
-                                  title="Cancelar"
-                                >
-                                  <X className="w-2.5 h-2.5" />
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                onClick={e => { e.stopPropagation(); setConfirmingResolveId(ticket.id); }}
-                                className={cn(
-                                  "flex items-center justify-center gap-1 px-2.5 py-1 rounded text-[9px] font-bold transition-all shadow-sm truncate",
-                                  ticket.outcome === 'ganho'
-                                    ? "bg-emerald-600 text-white hover:bg-emerald-700"
-                                    : "bg-rose-600 text-white hover:bg-rose-700"
-                                )}
-                              >
-                                <Check className="w-2.5 h-2.5 shrink-0" />
-                                Resolver
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                      );
-                    })()}
-
-                    {/* Nome + telefone */}
-                    <div className="flex items-center gap-3 mt-1.5">
-                      {lead.avatar_url ? (
-                        <div className="relative w-8 h-8 shrink-0">
-                          <img
-                            src={lead.avatar_url}
-                            alt={lead.name}
-                            className="w-8 h-8 rounded-full object-cover border border-slate-100"
-                            onError={e => { e.currentTarget.style.display = 'none'; (e.currentTarget.nextElementSibling as HTMLElement).style.display = 'flex'; }}
-                          />
-                          <div style={{ display: 'none' }} className="absolute inset-0 w-8 h-8 rounded-full bg-teal-100 items-center justify-center border border-teal-100 text-teal-700 text-[10px] font-black">
-                            {lead.name.charAt(0).toUpperCase()}
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center border border-slate-100 text-slate-500 text-[10px] font-black shrink-0">
-                          {lead.name.charAt(0).toUpperCase()}
-                        </div>
-                      )}
-                      <div className="min-w-0">
-                        <h4 className="font-bold text-slate-900 text-sm leading-tight truncate">{lead.name}</h4>
-                        {lead.phone && (
-                          <p className="text-[10px] font-medium text-slate-400 mt-0.5">{lead.phone}</p>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Motivo da perda */}
-                    {isPerdido && (
-                      <div className={cn(
-                        "mt-2 px-2 py-1 rounded text-[9px] font-bold flex items-center gap-1.5",
-                        semMotivo
-                          ? "bg-amber-50 border border-amber-200 text-amber-700"
-                          : "bg-rose-50 border border-rose-100 text-rose-700"
-                      )}>
-                        <AlertCircle className="w-2.5 h-2.5 shrink-0" />
-                        {semMotivo ? "Motivo da perda não preenchido" : (ticket.loss_reason || lead.loss_reason)}
-                      </div>
-                    )}
-
-                    {/* Badges de status */}
-                    {(aguardando || precisaResponder || slaBreach > 0) && (
-                      <div className="flex items-center gap-1.5 mt-2">
-                        {aguardando && (
-                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border bg-blue-50 border-blue-200 text-blue-600">
-                            Aguardando Lead
-                          </span>
-                        )}
-                        {precisaResponder && (
-                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border bg-amber-50 border-amber-200 text-amber-600">
-                            Responder Lead
-                          </span>
-                        )}
-                        {slaBreach > 0 && (
-                          <span className={cn(
-                            "text-[9px] font-bold px-1.5 py-0.5 rounded border",
-                            slaBreach === 1
-                              ? "bg-amber-50 border-amber-200 text-amber-700"
-                              : "bg-rose-50 border-rose-100 text-rose-700"
-                          )}>
-                            {slaBreach}x SLA
-                          </span>
-                        )}
-                      </div>
-                    )}
-
-
-                    {/* Footer: valor | tempo + chat */}
-                    {(() => {
-                      const conversions = conversionsByLead[lead.id];
-                      const lastConversion = conversions?.[conversions.length - 1];
-                      const realValue = lastConversion ? Number(lastConversion.value || 0) : 0;
-                      const displayValue = realValue > 0 ? realValue : Number(lead.estimated_value || 0);
-                      const isReal = realValue > 0;
-                      return (
-                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-100 gap-2">
-                      <div className={cn(
-                        "text-[9px] font-bold px-1.5 py-0.5 rounded border shrink-0",
-                        isReal ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-teal-50 text-teal-700 border-teal-100"
-                      )}>
-                        R$ {displayValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </div>
-                      <span className="text-[9px] font-medium text-slate-400 truncate text-right flex-1">
-                        {formatDistanceToNow(parseISO(lastContact), { addSuffix: true, locale: ptBR })}
-                      </span>
-                      <button
-                        onClick={() => setChatLead({ lead: ticket.lead, ticketId: ticket.id })}
-                        className="p-1 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded transition-colors shrink-0"
-                        title="Abrir chat"
-                      >
-                        <MessageSquare className="w-3 h-3" />
-                      </button>
-                    </div>
-                      );
-                    })()}
-                  </motion.div>
-                  );
-                })}
-
-                {hasMoreInColumn && (
-                  <div className="flex items-center justify-center py-2 text-[10px] font-bold text-slate-400 gap-1.5">
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    Role para ver mais
-                  </div>
-                )}
-              </div>
-              <button onClick={() => { setFormData(p => ({ ...p, stage_id: stage.id, avatar_url: '' })); setShowModal(true); }} className="w-full py-1.5 border border-dashed border-slate-300 rounded-lg text-slate-400 text-xs font-semibold hover:bg-white hover:border-slate-400 transition-all flex items-center justify-center gap-1.5 shrink-0">
-                <Plus className="w-3 h-3" />
-                Adicionar Lead
-              </button>
-            </div>
-          );
-        })}
-      </KanbanScrollContainer>
+            );
+          })}
+        </KanbanScrollContainer>
       </div>
 
 
@@ -2027,7 +2044,7 @@ export function LeadKanban() {
       <AnimatePresence>
         {showModal && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
-             <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between p-6 border-b border-slate-100">
                 <h3 className="text-lg font-bold text-slate-900">{selectedLead ? 'Editar Lead' : 'Novo Lead'}</h3>
                 <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
@@ -2039,9 +2056,9 @@ export function LeadKanban() {
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Telefone</label>
-                  <input 
-                    type="text" 
-                    value={formData.phone} 
+                  <input
+                    type="text"
+                    value={formData.phone}
                     onChange={e => {
                       const val = e.target.value.replace(/\D/g, "");
                       let formatted = val;
@@ -2050,9 +2067,9 @@ export function LeadKanban() {
                         if (val.length > 7) formatted = `(${val.slice(0, 2)}) ${val.slice(2, 7)}-${val.slice(7, 11)}`;
                       }
                       setFormData(p => ({ ...p, phone: formatted }));
-                    }} 
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 font-medium text-sm" 
-                    placeholder="(11) 99999-9999" 
+                    }}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 font-medium text-sm"
+                    placeholder="(11) 99999-9999"
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
@@ -2143,7 +2160,7 @@ export function LeadKanban() {
                 {selectedLead && (
                   <div className="mt-4 p-3 bg-slate-50 rounded-lg text-sm text-left border border-slate-100">
                     <p className="font-semibold text-slate-700">{selectedLead.name}</p>
-                    <p className="text-slate-500 text-xs">Valor estimado: R$ {Number(selectedLead.estimated_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                    <p className="text-slate-500 text-xs">Valor estimado: {formatBRL(selectedLead.estimated_value || 0)}</p>
                   </div>
                 )}
               </div>
@@ -2226,7 +2243,7 @@ export function LeadKanban() {
                           disabled={idx === 0}
                           onClick={() => {
                             const newStages = [...localStages];
-                            [newStages[idx], newStages[idx-1]] = [newStages[idx-1], newStages[idx]];
+                            [newStages[idx], newStages[idx - 1]] = [newStages[idx - 1], newStages[idx]];
                             setLocalStages(newStages);
                           }}
                           className="p-1.5 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded-md disabled:opacity-30"
@@ -2237,7 +2254,7 @@ export function LeadKanban() {
                           disabled={idx === localStages.length - 1}
                           onClick={() => {
                             const newStages = [...localStages];
-                            [newStages[idx], newStages[idx+1]] = [newStages[idx+1], newStages[idx]];
+                            [newStages[idx], newStages[idx + 1]] = [newStages[idx + 1], newStages[idx]];
                             setLocalStages(newStages);
                           }}
                           className="p-1.5 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded-md disabled:opacity-30"
@@ -2272,20 +2289,20 @@ export function LeadKanban() {
 
                 {isAddingStage ? (
                   <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="p-4 bg-teal-50/50 rounded-xl border border-teal-100 flex gap-2">
-                    <input 
+                    <input
                       autoFocus
-                      type="text" 
-                      value={newStageName} 
+                      type="text"
+                      value={newStageName}
                       onChange={e => setNewStageName(e.target.value)}
                       placeholder="Nome da etapa"
                       className="flex-1 px-3 py-1.5 text-sm bg-white border border-teal-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200"
                       onKeyDown={async (e) => {
                         if (e.key === 'Enter' && newStageName.trim()) {
-                          const newStage = await createStage({ 
-                            name: newStageName, 
-                            color: 'bg-teal-500', 
+                          const newStage = await createStage({
+                            name: newStageName,
+                            color: 'bg-teal-500',
                             is_fixed: false,
-                            is_system: false 
+                            is_system: false
                           });
                           if (newStage) {
                             setLocalStages(p => [...p, newStage]);
@@ -2297,11 +2314,11 @@ export function LeadKanban() {
                     />
                     <Button size="sm" onClick={async () => {
                       if (!newStageName.trim()) return;
-                      const newStage = await createStage({ 
-                        name: newStageName, 
-                        color: 'bg-teal-500', 
+                      const newStage = await createStage({
+                        name: newStageName,
+                        color: 'bg-teal-500',
                         is_fixed: false,
-                        is_system: false 
+                        is_system: false
                       });
                       if (newStage) {
                         setLocalStages(p => [...p, newStage]);
@@ -2312,7 +2329,7 @@ export function LeadKanban() {
                     <Button size="sm" variant="ghost" onClick={() => setIsAddingStage(false)}>X</Button>
                   </motion.div>
                 ) : (
-                  <button 
+                  <button
                     onClick={() => setIsAddingStage(true)}
                     className="w-full py-3 border border-dashed border-slate-300 rounded-xl text-slate-400 text-sm font-bold hover:bg-slate-50 hover:border-slate-400 transition-all flex items-center justify-center gap-2"
                   >

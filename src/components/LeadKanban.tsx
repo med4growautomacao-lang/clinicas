@@ -676,21 +676,23 @@ function CurrencyInput({ value, onChange, className, placeholder, autoFocus }: {
     onChange(numeric > 0 ? String(numeric) : '');
   };
 
-  const displayValue = value ? Number(value).toLocaleString('pt-BR', {
+  // Garante que o valor seja tratado como número para o toLocaleString
+  const numericValue = typeof value === 'string' ? Number(value) : value;
+  const displayValue = numericValue && !isNaN(numericValue) ? numericValue.toLocaleString('pt-BR', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }) : '';
 
   return (
-    <div className="relative">
-      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm pointer-events-none">R$</span>
+    <div className="relative w-full">
+      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm pointer-events-none z-10">R$</span>
       <input
         type="text"
         autoFocus={autoFocus}
         value={displayValue}
         onChange={handleChange}
         placeholder={placeholder || "0,00"}
-        className={cn("pl-9 w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-bold focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 transition-all bg-white shadow-sm", className)}
+        className={cn("pl-11 w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-bold focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 transition-all bg-white shadow-sm", className)}
       />
     </div>
   );
@@ -1734,7 +1736,7 @@ export function LeadKanban() {
                     whileHover={{ y: isClosed ? 0 : -1 }}
                     className={cn(
                       "px-3 py-2.5 rounded-lg border shadow-sm transition-all group",
-                      !frozen && !isClosed ? "cursor-grab active:cursor-grabbing hover:shadow-md" : "cursor-default",
+                      !frozen && !isClosed ? "cursor-pointer active:cursor-move hover:shadow-md" : "cursor-default",
                       isClosed && "opacity-50 grayscale-[0.5] hover:opacity-75",
                       draggedLead?.id === ticket.id && "opacity-50",
                       semMotivo && "animate-pulse",

@@ -564,7 +564,8 @@ export function useTickets() {
       .select('*, lead:leads(*)')
       .eq('clinic_id', activeClinicId)
       .or(`status.eq.open,and(status.eq.closed,closed_at.gte.${ninetyDaysAgo})`)
-      .order('opened_at', { ascending: false });
+      .order('opened_at', { ascending: false })
+      .limit(5000);
     setTickets(data || []);
     if (!silent) setLoading(false);
   }, [activeClinicId]);

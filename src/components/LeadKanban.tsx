@@ -663,6 +663,39 @@ function LossModal({ lead, onClose, onCancel, onConfirm }: {
   );
 }
 
+function CurrencyInput({ value, onChange, className, placeholder, autoFocus }: {
+  value: string;
+  onChange: (val: string) => void;
+  className?: string;
+  placeholder?: string;
+  autoFocus?: boolean;
+}) {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const digits = e.target.value.replace(/\D/g, '');
+    const numeric = Number(digits) / 100;
+    onChange(numeric > 0 ? String(numeric) : '');
+  };
+
+  const displayValue = value ? Number(value).toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }) : '';
+
+  return (
+    <div className="relative">
+      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm pointer-events-none">R$</span>
+      <input
+        type="text"
+        autoFocus={autoFocus}
+        value={displayValue}
+        onChange={handleChange}
+        placeholder={placeholder || "0,00"}
+        className={cn("pl-9 w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-bold focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 transition-all bg-white shadow-sm", className)}
+      />
+    </div>
+  );
+}
+
 function GanhoModal({ lead, onClose, onCancel, onCreate }: {
   lead: { id: string; name: string };
   onClose: () => void;
@@ -737,14 +770,13 @@ function GanhoModal({ lead, onClose, onCancel, onCreate }: {
             <button onClick={onCancel} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4 text-slate-400" /></button>
           </div>
 
-          {/* Valor */}
           <div className="space-y-1.5">
             <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Valor (R$)</label>
-            <input
-              autoFocus type="number" min="0" step="0.01"
-              value={value} onChange={e => setValue(e.target.value)}
-              placeholder="0,00"
-              className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+            <CurrencyInput
+              autoFocus
+              value={value}
+              onChange={setValue}
+              className="focus:ring-emerald-500/20 focus:border-emerald-500"
             />
           </div>
 
@@ -835,6 +867,97 @@ function GanhoModal({ lead, onClose, onCancel, onCreate }: {
   );
 }
 
+function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
+  lead: { id: string; name: string };
+  onClose: () => void;
+  onCancel: () => void;
+  onConfirm: (data: Omit<Conversion, 'id' | 'clinic_id' | 'created_at'>) => Promise<boolean>;
+}) {
+  const [value, setValue] = useState('');
+  const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [saving, setSaving] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const handleSave = async () => {
+    if (!value || Number(value) <= 0) return;
+    setSaving(true);
+    const ok = await onConfirm({
+      lead_id: lead.id,
+      value: Number(value),
+      description: 'Orçamento Enviado',
+      payment_method: 'outros',
+      protocol_ids: [],
+      converted_at: new Date(date + 'T12:00:00').toISOString(),
+    });
+    if (ok) {
+      setDone(true);
+      setTimeout(onClose, 1000);
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onCancel}>
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="h-1.5 bg-blue-500" />
+        <div className="p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-black text-slate-900">Registrar Orçamento</h3>
+              <p className="text-xs text-slate-500 font-medium mt-0.5">{lead.name}</p>
+            </div>
+            <button onClick={onCancel} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4 text-slate-400" /></button>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Valor do Orçamento (R$)</label>
+            <CurrencyInput
+              autoFocus
+              value={value}
+              onChange={setValue}
+              className="focus:ring-blue-500/20 focus:border-blue-500"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Data do Envio</label>
+            <input
+              type="date" value={date} onChange={e => setDate(e.target.value)}
+              className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+            />
+          </div>
+
+          <div className="flex gap-2 pt-1">
+            <button onClick={onCancel} className="flex-1 py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-500 hover:bg-slate-50 transition-all">
+              Cancelar
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving || !value || Number(value) <= 0}
+              className={cn(
+                "flex-1 py-2.5 rounded-xl text-sm font-black transition-all flex items-center justify-center gap-2",
+                done ? "bg-emerald-500 text-white" :
+                saving ? "bg-slate-100 text-slate-400" :
+                "bg-blue-600 hover:bg-blue-700 text-white"
+              )}
+            >
+              {done ? <><Check className="w-4 h-4" /> Registrado!</> :
+               saving ? <Loader2 className="w-4 h-4 animate-spin" /> :
+               'Confirmar Orçamento'}
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+
 export function LeadKanban() {
   const { data: stages, loading: stagesLoading, reorder: reorderStages, update: updateStage, create: createStage, remove: removeStage } = useFunnelStages();
   const { data: leads, create, update, remove } = useLeads({ pageSize: 150 });
@@ -842,6 +965,7 @@ export function LeadKanban() {
   const { byLead: conversionsByLead, create: createConversion } = useConversions();
   const { aiConfig, updateAI } = useSettings();
   const [ganhoLead, setGanhoLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
+  const [orcamentoLead, setOrcamentoLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
   const [lossLead, setLossLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
   const { data: transitionRules, create: createRule, remove: removeRule, update: updateRule, reorder: reorderRules } = useTransitionRules();
   const [showModal, setShowModal] = useState(false);
@@ -914,6 +1038,8 @@ export function LeadKanban() {
         setGanhoLead({ id: draggedLead.lead_id, name: draggedLead.lead?.name ?? '', prevStageId: draggedLead.stage_id, ticketId: draggedLead.id });
       } else if (targetStage?.slug === 'perdido') {
         setLossLead({ id: draggedLead.lead_id, name: draggedLead.lead?.name ?? '', prevStageId: draggedLead.stage_id, ticketId: draggedLead.id });
+      } else if (targetStage?.slug === 'orcamento') {
+        setOrcamentoLead({ id: draggedLead.lead_id, name: draggedLead.lead?.name ?? '', prevStageId: draggedLead.stage_id, ticketId: draggedLead.id });
       }
     }
     setDraggedLead(null);
@@ -927,6 +1053,7 @@ export function LeadKanban() {
       const targetStageId = formData.stage_id || (stages[0]?.id ?? '');
       const isPerdido = stages.find(s => s.id === targetStageId)?.slug === 'perdido';
       const isConversao = stages.find(s => s.id === targetStageId)?.slug === 'ganho';
+      const isOrcamento = stages.find(s => s.id === targetStageId)?.slug === 'orcamento';
 
       const payload = {
         name: formData.name,
@@ -947,11 +1074,12 @@ export function LeadKanban() {
           if (openT && targetStageId !== openT.stage_id) {
             if (isPerdido) {
               await closeTicket(openT.id, 'perdido');
+            } else if (isConversao) {
+              setGanhoLead({ id: selectedLead.id, name: selectedLead.name, prevStageId: openT.stage_id, ticketId: openT.id });
+            } else if (isOrcamento) {
+              setOrcamentoLead({ id: selectedLead.id, name: selectedLead.name, prevStageId: openT.stage_id, ticketId: openT.id });
             } else {
               await moveTicket(openT.id, targetStageId);
-              if (isConversao) {
-                setGanhoLead({ id: selectedLead.id, name: selectedLead.name, prevStageId: openT.stage_id, ticketId: openT.id });
-              }
             }
           }
         }
@@ -1946,7 +2074,11 @@ export function LeadKanban() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Valor estimado</label>
-                    <input type="number" value={formData.estimated_value} onChange={e => setFormData(p => ({ ...p, estimated_value: e.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 font-medium text-sm" placeholder="0.00" />
+                    <CurrencyInput
+                      value={formData.estimated_value}
+                      onChange={val => setFormData(p => ({ ...p, estimated_value: val }))}
+                      className="bg-slate-50 focus:ring-teal-200 border-slate-200"
+                    />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">URL da Foto</label>
@@ -2251,6 +2383,30 @@ export function LeadKanban() {
         />
       )}
 
+      {/* Orçamento Modal */}
+      {orcamentoLead && (
+        <OrcamentoModal
+          lead={orcamentoLead}
+          onClose={() => setOrcamentoLead(null)}
+          onCancel={() => {
+            const { ticketId, prevStageId } = orcamentoLead;
+            setOrcamentoLead(null);
+            if (prevStageId) moveTicket(ticketId, prevStageId);
+          }}
+          onConfirm={async (data) => {
+            const ok = await createConversion({
+              ...data,
+              description: 'Orçamento Enviado',
+            });
+            if (ok) {
+              const orcStage = stages.find(s => s.slug === 'orcamento');
+              if (orcStage) await moveTicket(orcamentoLead.ticketId, orcStage.id);
+            }
+            return ok;
+          }}
+        />
+      )}
+
       {/* Lead Chat Drawer */}
       <AnimatePresence>
         {chatLead && (
@@ -2267,11 +2423,12 @@ export function LeadKanban() {
               if (ticket && stageId !== ticket.stage_id) {
                 if (targetStage?.slug === 'perdido') {
                   await closeTicket(ticket.id, 'perdido');
+                } else if (targetStage?.slug === 'ganho') {
+                  setGanhoLead({ id: chatLead.lead.id, name: chatLead.lead.name, prevStageId: ticket.stage_id, ticketId: ticket.id });
+                } else if (targetStage?.slug === 'orcamento') {
+                  setOrcamentoLead({ id: chatLead.lead.id, name: chatLead.lead.name, prevStageId: ticket.stage_id, ticketId: ticket.id });
                 } else {
                   await moveTicket(ticket.id, stageId);
-                  if (targetStage?.slug === 'ganho') {
-                    setGanhoLead({ id: chatLead.lead.id, name: chatLead.lead.name, prevStageId: ticket.stage_id, ticketId: ticket.id });
-                  }
                 }
               }
             }}

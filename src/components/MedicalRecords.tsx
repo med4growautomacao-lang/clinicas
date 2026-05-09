@@ -18,6 +18,7 @@ import {
 } from "../hooks/useSupabase";
 import { PatientModal } from "./PatientModal";
 import { ProntuarioPasswordModal } from "./ProntuarioPasswordModal";
+import { exportKey, importKey, encryptField, decryptField, encryptJSON, decryptJSON } from "../lib/prontuarioCrypto";
 
 // ─── Print: Receituário ───────────────────────────────────────────────────────
 function printPrescription(p: Prescription, patient: Patient, doctor: Doctor | undefined, clinicName: string) {
@@ -156,31 +157,9 @@ function RecordPrescriptions({ recordId, prescriptions, examRequests, doctors, p
     );
 }
 
-// ─── Componente principal ─────────────────────────────────────────────────────
-const SESSION_HOURS = 1;
-
-export function MedicalRecords() {
-    const { clinicName, profile, activeClinicId } = useAuth();
-
-    const sessionKey = `prontuario_auth_${activeClinicId}_${profile?.id}`;
-    const [authorized, setAuthorized] = useState(() => {
-        try {
-            const stored = localStorage.getItem(`prontuario_auth_${activeClinicId}_${profile?.id}`);
-            if (!stored) return false;
-            const { expiresAt } = JSON.parse(stored);
-            return new Date(expiresAt) > new Date();
-        } catch { return false; }
-    });
-
-    const handleAuthorized = (email: string) => {
-        const expiresAt = new Date(Date.now() + SESSION_HOURS * 3600 * 1000).toISOString();
-        localStorage.setItem(sessionKey, JSON.stringify({ email, expiresAt }));
-        setAuthorized(true);
-    };
-
-    if (!authorized) {
-        return <ProntuarioPasswordModal onAuthorized={handleAuthorized} />;
-    }
+// ─── Conteúdo (só monta após autenticação) ───────────────────────────────────
+function MedicalRecordsContent({ encKey }: { encKey: CryptoKey }) {
+    const { clinicName } = useAuth();
     const { data: patients, loading: patientsLoading, create: createPatient, update: updatePatient, remove: removePatient, refetch: refetchPatients } = usePatients();
     const { data: doctors } = useDoctors();
     const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
@@ -189,6 +168,44 @@ export function MedicalRecords() {
     const { data: records, loading: recordsLoading, create: createRecord, update: updateRecord, remove: removeRecord } = useMedicalRecords(selectedPatient?.id || null);
     const { data: prescriptions, loading: prescLoading, create: createPrescription, remove: removePrescription } = usePrescriptions(selectedPatient?.id || null);
     const { data: examRequests, loading: examLoading, create: createExamRequest, remove: removeExamRequest } = useExamRequests(selectedPatient?.id || null);
+
+    // Versões descriptografadas para exibição
+    const [decRecords, setDecRecords] = useState<MedicalRecord[]>([]);
+    const [decPrescriptions, setDecPrescriptions] = useState<Prescription[]>([]);
+    const [decExamRequests, setDecExamRequests] = useState<ExamRequest[]>([]);
+
+    useEffect(() => {
+        if (!encKey) return;
+        Promise.all((records || []).map(async r => ({
+            ...r,
+            description: await decryptField(r.description, encKey),
+            diagnosis: await decryptField(r.diagnosis, encKey),
+            prescription: await decryptField(r.prescription, encKey),
+            weight: await decryptField(r.weight, encKey),
+            height: await decryptField(r.height, encKey),
+            blood_pressure: await decryptField(r.blood_pressure, encKey),
+            temperature: await decryptField(r.temperature, encKey),
+        }))).then(setDecRecords);
+    }, [records, encKey]);
+
+    useEffect(() => {
+        if (!encKey) return;
+        Promise.all((prescriptions || []).map(async p => ({
+            ...p,
+            medications: (await decryptJSON<PrescriptionMed[]>(p.medications, encKey)) ?? (Array.isArray(p.medications) ? p.medications : []),
+            notes: await decryptField(p.notes, encKey),
+        }))).then(setDecPrescriptions);
+    }, [prescriptions, encKey]);
+
+    useEffect(() => {
+        if (!encKey) return;
+        Promise.all((examRequests || []).map(async e => ({
+            ...e,
+            exams: (await decryptJSON<ExamItem[]>(e.exams, encKey)) ?? (Array.isArray(e.exams) ? e.exams : []),
+            clinical_indication: await decryptField(e.clinical_indication, encKey),
+            notes: await decryptField(e.notes, encKey),
+        }))).then(setDecExamRequests);
+    }, [examRequests, encKey]);
 
     // Patient Modal
     const [showPatientModal, setShowPatientModal] = useState(false);
@@ -259,10 +276,21 @@ export function MedicalRecords() {
         setShowRecordModal(true);
     };
     const handleRecordSubmit = async () => {
-        if (!selectedPatient || !recordFormData.doctor_id) return;
+        if (!selectedPatient || !recordFormData.doctor_id || !encKey) return;
         setSubmitting(true);
-        if (selectedRecord) await updateRecord(selectedRecord.id, { ...recordFormData, patient_id: selectedPatient.id });
-        else await createRecord({ ...recordFormData, patient_id: selectedPatient.id });
+        const enc = {
+            ...recordFormData,
+            patient_id: selectedPatient.id,
+            description: await encryptField(recordFormData.description || null, encKey),
+            diagnosis: await encryptField(recordFormData.diagnosis || null, encKey),
+            prescription: await encryptField(recordFormData.prescription || null, encKey),
+            weight: await encryptField(recordFormData.weight || null, encKey),
+            height: await encryptField(recordFormData.height || null, encKey),
+            blood_pressure: await encryptField(recordFormData.blood_pressure || null, encKey),
+            temperature: await encryptField(recordFormData.temperature || null, encKey),
+        };
+        if (selectedRecord) await updateRecord(selectedRecord.id, enc);
+        else await createRecord(enc);
         setShowRecordModal(false);
         setSubmitting(false);
     };
@@ -271,11 +299,17 @@ export function MedicalRecords() {
     // Prescription actions
     const openNewPresc = (recordId: string) => { setPrescRecordId(recordId); setPrescDoctorId(doctors[0]?.id || ''); setPrescMeds([emptyMed()]); setPrescNotes(''); setShowPrescModal(true); };
     const handlePrescSubmit = async () => {
-        if (!selectedPatient) return;
+        if (!selectedPatient || !encKey) return;
         const valid = prescMeds.filter(m => m.name.trim());
         if (!valid.length) return;
         setSubmitting(true);
-        await createPrescription({ patient_id: selectedPatient.id, doctor_id: prescDoctorId || null, medications: valid, notes: prescNotes.trim() || null, record_id: prescRecordId });
+        await createPrescription({
+            patient_id: selectedPatient.id,
+            doctor_id: prescDoctorId || null,
+            medications: await encryptJSON(valid, encKey) as any,
+            notes: await encryptField(prescNotes.trim() || null, encKey),
+            record_id: prescRecordId,
+        });
         setShowPrescModal(false);
         setSubmitting(false);
     };
@@ -284,11 +318,18 @@ export function MedicalRecords() {
     // Exam actions
     const openNewExam = (recordId: string) => { setExamRecordId(recordId); setExamDoctorId(doctors[0]?.id || ''); setExamItems([emptyExam()]); setExamIndication(''); setExamNotes(''); setShowExamModal(true); };
     const handleExamSubmit = async () => {
-        if (!selectedPatient) return;
+        if (!selectedPatient || !encKey) return;
         const valid = examItems.filter(e => e.name.trim());
         if (!valid.length) return;
         setSubmitting(true);
-        await createExamRequest({ patient_id: selectedPatient.id, doctor_id: examDoctorId || null, exams: valid, clinical_indication: examIndication.trim() || null, notes: examNotes.trim() || null, record_id: examRecordId });
+        await createExamRequest({
+            patient_id: selectedPatient.id,
+            doctor_id: examDoctorId || null,
+            exams: await encryptJSON(valid, encKey) as any,
+            clinical_indication: await encryptField(examIndication.trim() || null, encKey),
+            notes: await encryptField(examNotes.trim() || null, encKey),
+            record_id: examRecordId,
+        });
         setShowExamModal(false);
         setSubmitting(false);
     };
@@ -399,7 +440,7 @@ export function MedicalRecords() {
 
                     {isLoading ? (
                         <div className="flex items-center justify-center py-12"><Loader2 className="w-6 h-6 text-teal-600 animate-spin" /></div>
-                    ) : records.length === 0 ? (
+                    ) : decRecords.length === 0 ? (
                         <div className="text-center py-16 text-slate-400 bg-white rounded-xl border border-slate-200 border-dashed">
                             <FileText className="w-12 h-12 mx-auto mb-4 text-slate-300" />
                             <p className="font-bold text-lg text-slate-600">Nenhum registro</p>
@@ -407,7 +448,7 @@ export function MedicalRecords() {
                         </div>
                     ) : (
                         <div className="relative pl-6 space-y-4 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200 before:rounded-full">
-                            {records.map((item) => {
+                            {decRecords.map((item) => {
                                 const cfg = typeConfig[item.type] || typeConfig.consulta;
                                 const doc = doctors.find(d => d.id === item.doctor_id);
                                 return (
@@ -450,8 +491,8 @@ export function MedicalRecords() {
                                                 {/* Nested docs */}
                                                 <RecordPrescriptions
                                                     recordId={item.id}
-                                                    prescriptions={prescriptions}
-                                                    examRequests={examRequests}
+                                                    prescriptions={decPrescriptions}
+                                                    examRequests={decExamRequests}
                                                     doctors={doctors}
                                                     patient={selectedPatient}
                                                     clinicName={clinicName}
@@ -723,4 +764,35 @@ export function MedicalRecords() {
             </AnimatePresence>
         </div>
     );
+}
+
+// ─── Gate de autenticação ─────────────────────────────────────────────────────
+export function MedicalRecords() {
+    const { profile, activeClinicId } = useAuth();
+
+    const [authorized, setAuthorized] = useState(false);
+    const [encKey, setEncKey] = useState<CryptoKey | null>(null);
+
+    useEffect(() => {
+        if (!activeClinicId || !profile?.id) return;
+        const stored = sessionStorage.getItem(`prontuario_enc_${activeClinicId}_${profile.id}`);
+        if (stored) {
+            importKey(stored)
+                .then(key => { setEncKey(key); setAuthorized(true); })
+                .catch(() => {});
+        }
+    }, [activeClinicId, profile?.id]);
+
+    const handleAuthorized = async (email: string, key: CryptoKey) => {
+        const b64 = await exportKey(key);
+        sessionStorage.setItem(`prontuario_enc_${activeClinicId}_${profile?.id}`, b64);
+        setEncKey(key);
+        setAuthorized(true);
+    };
+
+    if (authorized && encKey) {
+        return <MedicalRecordsContent encKey={encKey} />;
+    }
+
+    return <ProntuarioPasswordModal onAuthorized={handleAuthorized} />;
 }

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Lock, Eye, EyeOff, ShieldCheck, Copy, Check } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
+import { deriveKey } from "../lib/prontuarioCrypto";
 
 async function sha256(text: string): Promise<string> {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
@@ -13,7 +14,7 @@ function generatePin(): string {
 }
 
 interface Props {
-  onAuthorized: (email: string) => void;
+  onAuthorized: (email: string, key: CryptoKey) => void;
 }
 
 export function ProntuarioPasswordModal({ onAuthorized }: Props) {
@@ -44,10 +45,8 @@ export function ProntuarioPasswordModal({ onAuthorized }: Props) {
         setSavedEmail(data.email);
         setStep("enter-pin");
       } else {
-        // First access: generate PIN and show it
         const generated = generatePin();
         const hash = await sha256(generated);
-        const userEmail = profile.id; // fallback; real email below
 
         const { data: { user } } = await supabase.auth.getUser();
         const email = user?.email ?? profile.id;
@@ -71,13 +70,15 @@ export function ProntuarioPasswordModal({ onAuthorized }: Props) {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleConfirmPin = () => {
-    onAuthorized(savedEmail);
+  const handleConfirmPin = async () => {
+    if (!profile?.id || !activeClinicId) return;
+    const key = await deriveKey(newPin, profile.id, activeClinicId);
+    onAuthorized(savedEmail, key);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!pin.trim()) return;
+    if (!pin.trim() || !profile?.id || !activeClinicId) return;
     setLoading(true);
     setError("");
 
@@ -87,8 +88,8 @@ export function ProntuarioPasswordModal({ onAuthorized }: Props) {
       const { data, error: dbError } = await supabase
         .from("prontuario_passwords")
         .select("email, password_hash")
-        .eq("user_id", profile!.id)
-        .eq("clinic_id", activeClinicId!)
+        .eq("user_id", profile.id)
+        .eq("clinic_id", activeClinicId)
         .maybeSingle();
 
       if (dbError) throw dbError;
@@ -101,7 +102,8 @@ export function ProntuarioPasswordModal({ onAuthorized }: Props) {
         return;
       }
 
-      onAuthorized(data.email);
+      const key = await deriveKey(pin.trim(), profile.id, activeClinicId);
+      onAuthorized(data.email, key);
     } catch (err: any) {
       setError("Erro ao verificar: " + err.message);
     } finally {

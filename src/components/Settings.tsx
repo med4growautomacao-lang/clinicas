@@ -41,11 +41,13 @@ import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSettings, useProtocols, Protocol, Clinic, AIConfig, WhatsappInstance } from "../hooks/useSupabase";
 import { supabase } from "../lib/supabase";
+import { useAuth } from "../contexts/AuthContext";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import WhatsappLogo from "../assets/logos/Logo Whatsapp.png";
 
 export function Settings() {
+    const { userRole } = useAuth();
     const { clinic, aiConfig, whatsapp, loading, updateClinic, updateAI, updateWhatsapp, generateConnectToken } = useSettings();
     const [activeTab, setActiveTab] = useState<"clinic" | "integrations" | "protocols">(() => (localStorage.getItem('settingsTab') as any) || "clinic");
     const [activeIntTab, setActiveIntTab] = useState<'whatsapp' | 'meta' | 'google'>(() => (localStorage.getItem('settingsIntTab') as any) || 'whatsapp');
@@ -205,10 +207,11 @@ export function Settings() {
         );
     }
 
+    const isSecretaria = userRole === 'secretaria';
+
     const tabs = [
         { id: "clinic", label: "Dados da Clínica", icon: Building2, color: "text-emerald-600" },
         { id: "integrations", label: "Integrações", icon: Plug, color: "text-violet-600" },
-        { id: "protocols", label: "Protocolos", icon: ClipboardList, color: "text-teal-600" },
     ];
 
     const handleSaveProtocol = async () => {
@@ -277,38 +280,42 @@ export function Settings() {
                         onClick={() => { setActiveIntTab('whatsapp'); localStorage.setItem('settingsIntTab', 'whatsapp'); }}
                         className={cn(
                             "flex items-center gap-2.5 px-6 py-2 text-sm font-bold rounded-lg transition-all duration-200",
-                            activeIntTab === 'whatsapp' 
-                                ? "bg-teal-600 text-white shadow-md shadow-teal-100" 
+                            activeIntTab === 'whatsapp'
+                                ? "bg-teal-600 text-white shadow-md shadow-teal-100"
                                 : "text-slate-500 hover:text-slate-900 hover:bg-white"
                         )}
                     >
-                        <MessageCircle className={cn("w-4 h-4", activeIntTab === 'whatsapp' ? "text-white" : "text-emerald-500")} /> 
+                        <MessageCircle className={cn("w-4 h-4", activeIntTab === 'whatsapp' ? "text-white" : "text-emerald-500")} />
                         WhatsApp
                     </button>
-                    <button
-                        onClick={() => { setActiveIntTab('meta'); localStorage.setItem('settingsIntTab', 'meta'); }}
-                        className={cn(
-                            "flex items-center gap-2.5 px-6 py-2 text-sm font-bold rounded-lg transition-all duration-200",
-                            activeIntTab === 'meta' 
-                                ? "bg-teal-600 text-white shadow-md shadow-teal-100" 
-                                : "text-slate-500 hover:text-slate-900 hover:bg-white"
-                        )}
-                    >
-                        <img src={MetaLogo} alt="Meta" className={cn("w-4 h-4 object-contain filter transition-all", activeIntTab === 'meta' ? 'brightness-0 invert' : 'brightness-100 opacity-60')} /> 
-                        Meta Ads
-                    </button>
-                    <button
-                        onClick={() => { setActiveIntTab('google'); localStorage.setItem('settingsIntTab', 'google'); }}
-                        className={cn(
-                            "flex items-center gap-2.5 px-6 py-2 text-sm font-bold rounded-lg transition-all duration-200",
-                            activeIntTab === 'google' 
-                                ? "bg-teal-600 text-white shadow-md shadow-teal-100" 
-                                : "text-slate-500 hover:text-slate-900 hover:bg-white"
-                        )}
-                    >
-                        <img src={GoogleLogo} alt="Google" className={cn("w-4 h-4 object-contain filter transition-all", activeIntTab === 'google' ? 'brightness-0 invert' : 'brightness-100 opacity-60')} /> 
-                        Google Ads
-                    </button>
+                    {!isSecretaria && (
+                        <button
+                            onClick={() => { setActiveIntTab('meta'); localStorage.setItem('settingsIntTab', 'meta'); }}
+                            className={cn(
+                                "flex items-center gap-2.5 px-6 py-2 text-sm font-bold rounded-lg transition-all duration-200",
+                                activeIntTab === 'meta'
+                                    ? "bg-teal-600 text-white shadow-md shadow-teal-100"
+                                    : "text-slate-500 hover:text-slate-900 hover:bg-white"
+                            )}
+                        >
+                            <img src={MetaLogo} alt="Meta" className={cn("w-4 h-4 object-contain filter transition-all", activeIntTab === 'meta' ? 'brightness-0 invert' : 'brightness-100 opacity-60')} />
+                            Meta Ads
+                        </button>
+                    )}
+                    {!isSecretaria && (
+                        <button
+                            onClick={() => { setActiveIntTab('google'); localStorage.setItem('settingsIntTab', 'google'); }}
+                            className={cn(
+                                "flex items-center gap-2.5 px-6 py-2 text-sm font-bold rounded-lg transition-all duration-200",
+                                activeIntTab === 'google'
+                                    ? "bg-teal-600 text-white shadow-md shadow-teal-100"
+                                    : "text-slate-500 hover:text-slate-900 hover:bg-white"
+                            )}
+                        >
+                            <img src={GoogleLogo} alt="Google" className={cn("w-4 h-4 object-contain filter transition-all", activeIntTab === 'google' ? 'brightness-0 invert' : 'brightness-100 opacity-60')} />
+                            Google Ads
+                        </button>
+                    )}
                 </div>
             )}
 
@@ -423,26 +430,7 @@ export function Settings() {
                                     </CardContent>
                                 </Card>
                             </div>
-                            </>
-                        )}
-                        {activeTab === "integrations" && (
-                            <IntegrationSettings
-                                data={localWA}
-                                onChange={(updates) => setLocalWA(prev => ({ ...prev, ...updates }))}
-                                clinicData={localClinic}
-                                onClinicChange={(updates) => setLocalClinic(prev => ({ ...prev, ...updates }))}
-                                onSaveClinic={updateClinic}
-                                onConnect={handleWhatsappConnect}
-                                onCancel={handleWhatsappCancel}
-                                connecting={connecting}
-                                onCopyLink={handleShowLink}
-                                linkCopied={linkCopied}
-                                activeIntTab={activeIntTab}
-                            />
-                        )}
-
-                        {activeTab === "protocols" && (
-                            <Card className="border border-slate-200 shadow-sm max-w-3xl mx-auto">
+                            {!isSecretaria && <Card className="border border-slate-200 shadow-sm max-w-4xl mx-auto">
                                 <CardHeader className="flex flex-row items-center justify-between">
                                     <CardTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
                                         <ClipboardList className="w-5 h-5 text-teal-600" />
@@ -490,8 +478,25 @@ export function Settings() {
                                         </div>
                                     )}
                                 </CardContent>
-                            </Card>
+                            </Card>}
+                            </>
                         )}
+                        {activeTab === "integrations" && (
+                            <IntegrationSettings
+                                data={localWA}
+                                onChange={(updates) => setLocalWA(prev => ({ ...prev, ...updates }))}
+                                clinicData={localClinic}
+                                onClinicChange={(updates) => setLocalClinic(prev => ({ ...prev, ...updates }))}
+                                onSaveClinic={updateClinic}
+                                onConnect={handleWhatsappConnect}
+                                onCancel={handleWhatsappCancel}
+                                connecting={connecting}
+                                onCopyLink={handleShowLink}
+                                linkCopied={linkCopied}
+                                activeIntTab={activeIntTab}
+                            />
+                        )}
+
                     </motion.div>
                 </AnimatePresence>
             </div>

@@ -1638,7 +1638,6 @@ export function LeadKanban() {
 
         <DateRangePicker
           label="Ganho"
-          labelColor="text-emerald-500"
           from={convDateFrom}
           to={convDateTo}
           onFromChange={setConvDateFrom}

@@ -66,9 +66,11 @@ import {
   subMonths,
   subWeeks,
   addDays,
+  addMonths,
   differenceInDays
 } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { DayPicker } from "react-day-picker";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import SemOrigemLogo from "../assets/logos/Logo Sem origem.png";
@@ -192,6 +194,8 @@ export function MarketingAnalytics() {
 
   const [isPeriodOpen, setIsPeriodOpen] = useState(false);
   const [activeRangeLabel, setActiveRangeLabel] = useState("ÚLTIMOS 7 DIAS");
+  const [calMonth1, setCalMonth1] = useState<Date>(() => subDays(new Date(), 7));
+  const [calMonth2, setCalMonth2] = useState<Date>(() => addMonths(subDays(new Date(), 7), 1));
 
   const setRangeById = (id: string) => {
     const today = new Date();
@@ -216,6 +220,11 @@ export function MarketingAnalytics() {
         start = subDays(today, 7);
         end = subDays(today, 1);
         label = "ÚLTIMOS 7 DIAS";
+        break;
+      case '14days':
+        start = subDays(today, 14);
+        end = subDays(today, 1);
+        label = "ÚLTIMOS 14 DIAS";
         break;
       case '28days':
         start = subDays(today, 28);
@@ -247,6 +256,8 @@ export function MarketingAnalytics() {
 
     setDateRange({ start, end });
     setActiveRangeLabel(label);
+    setCalMonth1(start);
+    setCalMonth2(addMonths(start, 1));
     setIsPeriodOpen(false);
   };
 
@@ -554,43 +565,84 @@ export function MarketingAnalytics() {
                       initial={{ opacity: 0, y: 10, scale: 0.95 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                      className="absolute top-full right-0 mt-3 w-72 bg-white rounded-2xl border border-slate-200 shadow-2xl z-[110] p-4 flex flex-col gap-1 overflow-hidden"
+                      className="absolute top-full right-0 mt-3 bg-white rounded-2xl border border-slate-200 shadow-2xl z-[110] overflow-hidden rdp-custom flex"
                     >
-                      <PeriodOption label="HOJE" onClick={() => setRangeById('today')} active={activeRangeLabel === 'HOJE'} />
-                      <PeriodOption label="ONTEM" onClick={() => setRangeById('yesterday')} active={activeRangeLabel === 'ONTEM'} />
-                      <PeriodOption label="ESTA SEMANA" onClick={() => setRangeById('week')} active={activeRangeLabel === 'ESTA SEMANA'} />
-                      <PeriodOption label="SEMANA PASSADA" onClick={() => setRangeById('last_week')} active={activeRangeLabel === 'SEMANA PASSADA'} />
-                      <PeriodOption label="ÚLTIMOS 7 DIAS" onClick={() => setRangeById('7days')} active={activeRangeLabel === 'ÚLTIMOS 7 DIAS'} />
-                      <PeriodOption label="ÚLTIMOS 28 DIAS" onClick={() => setRangeById('28days')} active={activeRangeLabel === 'ÚLTIMOS 28 DIAS'} />
-                      <PeriodOption label="ÚLTIMOS 30 DIAS" onClick={() => setRangeById('30days')} active={activeRangeLabel === 'ÚLTIMOS 30 DIAS'} />
-                      <PeriodOption label="ESTE MÊS" onClick={() => setRangeById('month')} active={activeRangeLabel === 'ESTE MÊS'} />
-                      <PeriodOption label="MÊS PASSADO" onClick={() => setRangeById('last_month')} active={activeRangeLabel === 'MÊS PASSADO'} />
-
-                      <div className="pt-4 mt-2 border-t border-slate-100">
-                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-[2px] block mb-3 pl-1">Período Principal</span>
-                        <DateRangePicker
-                          inline
-                          numberOfMonths={1}
-                          from={format(dateRange.start, 'yyyy-MM-dd')}
-                          to={format(dateRange.end, 'yyyy-MM-dd')}
-                          onFromChange={(v) => { if (v) { setDateRange(r => ({ ...r, start: parseISO(v) })); setActiveRangeLabel("Personalizado"); } }}
-                          onToChange={(v) => { if (v) { setDateRange(r => ({ ...r, end: parseISO(v) })); setActiveRangeLabel("Personalizado"); } }}
-                        />
+                      {/* Quick options column */}
+                      <div className="w-44 border-r border-slate-100 p-2 flex flex-col gap-0.5 shrink-0">
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-[2px] px-3 pt-1 pb-1.5">Período</span>
+                        {[
+                          { id: 'today',      label: 'Hoje' },
+                          { id: 'yesterday',  label: 'Ontem' },
+                          { id: 'week',       label: 'Esta Semana' },
+                          { id: 'last_week',  label: 'Semana Passada' },
+                          { id: '7days',      label: 'Últimos 7 dias' },
+                          { id: '14days',     label: 'Últimos 14 dias' },
+                          { id: '28days',     label: 'Últimos 28 dias' },
+                          { id: '30days',     label: 'Últimos 30 dias' },
+                          { id: 'month',      label: 'Este Mês' },
+                          { id: 'last_month', label: 'Mês Passado' },
+                        ].map(opt => (
+                          <button
+                            key={opt.id}
+                            onClick={() => setRangeById(opt.id)}
+                            className={cn(
+                              "text-left px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors",
+                              activeRangeLabel === opt.label.toUpperCase()
+                                ? "bg-teal-50 text-teal-700"
+                                : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                            )}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
                       </div>
 
-                      {isComparing && (
-                        <div className="pt-4 mt-2 border-t border-slate-100 bg-teal-50/20 -mx-4 px-4 pb-2">
-                          <span className="text-[9px] font-black text-teal-600 uppercase tracking-[2px] block mb-3 pl-1">Período Comparativo</span>
-                          <DateRangePicker
-                            inline
+                      {/* Two stacked calendars */}
+                      <div className="flex flex-col divide-y divide-slate-100">
+                        <div className="p-3">
+                          <DayPicker
+                            mode="range"
+                            selected={{ from: dateRange.start, to: dateRange.end }}
+                            onSelect={(r) => {
+                              if (r?.from) { setDateRange(d => ({ ...d, start: r.from! })); setActiveRangeLabel("PERSONALIZADO"); }
+                              if (r?.to)   { setDateRange(d => ({ ...d, end: r.to! })); }
+                            }}
+                            month={calMonth1}
+                            onMonthChange={setCalMonth1}
                             numberOfMonths={1}
-                            from={format(compareDateRange.start, 'yyyy-MM-dd')}
-                            to={format(compareDateRange.end, 'yyyy-MM-dd')}
-                            onFromChange={(v) => { if (v) setCompareDateRange(r => ({ ...r, start: parseISO(v) })); }}
-                            onToChange={(v) => { if (v) setCompareDateRange(r => ({ ...r, end: parseISO(v) })); }}
+                            locale={ptBR}
+                            weekStartsOn={0}
                           />
                         </div>
-                      )}
+                        <div className="p-3">
+                          <DayPicker
+                            mode="range"
+                            selected={{ from: dateRange.start, to: dateRange.end }}
+                            onSelect={(r) => {
+                              if (r?.from) { setDateRange(d => ({ ...d, start: r.from! })); setActiveRangeLabel("PERSONALIZADO"); }
+                              if (r?.to)   { setDateRange(d => ({ ...d, end: r.to! })); }
+                            }}
+                            month={calMonth2}
+                            onMonthChange={setCalMonth2}
+                            numberOfMonths={1}
+                            locale={ptBR}
+                            weekStartsOn={0}
+                          />
+                        </div>
+                        {isComparing && (
+                          <div className="p-3 bg-teal-50/30">
+                            <span className="text-[9px] font-black text-teal-600 uppercase tracking-[2px] block mb-2">Período Comparativo</span>
+                            <DateRangePicker
+                              inline
+                              numberOfMonths={1}
+                              from={format(compareDateRange.start, 'yyyy-MM-dd')}
+                              to={format(compareDateRange.end, 'yyyy-MM-dd')}
+                              onFromChange={(v) => { if (v) setCompareDateRange(r => ({ ...r, start: parseISO(v) })); }}
+                              onToChange={(v) => { if (v) setCompareDateRange(r => ({ ...r, end: parseISO(v) })); }}
+                            />
+                          </div>
+                        )}
+                      </div>
                     </motion.div>
                   </>
                 )}
@@ -1279,13 +1331,6 @@ function StatCard({ title, value, prevValue, type, icon: Icon, color }: any) {
   );
 }
 
-function PeriodOption({ label, onClick, active }: { label: string, onClick: () => void, active: boolean }) {
-  return (
-    <button onClick={onClick} className={cn("w-full text-left px-3 py-2.5 rounded-xl text-[10px] font-black tracking-[1px] transition-all uppercase", active ? "bg-teal-50 text-teal-700 border border-teal-100/50 shadow-sm" : "text-slate-400 hover:bg-slate-50 hover:text-slate-600")}>
-      {label}
-    </button>
-  );
-}
 
 function PlatformRows({ platform, periods, metricsByPeriod, comparisonMetricsByPeriod, isComparing, isEditing, editValues, setEditValues, period, visibleMetrics, metricsOrder }: any) {
   return (

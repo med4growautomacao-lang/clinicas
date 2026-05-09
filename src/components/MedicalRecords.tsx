@@ -17,6 +17,7 @@ import {
     Patient, MedicalRecord, Prescription, PrescriptionMed, ExamRequest, ExamItem, Doctor,
 } from "../hooks/useSupabase";
 import { PatientModal } from "./PatientModal";
+import { ProntuarioPasswordModal } from "./ProntuarioPasswordModal";
 
 // ─── Print: Receituário ───────────────────────────────────────────────────────
 function printPrescription(p: Prescription, patient: Patient, doctor: Doctor | undefined, clinicName: string) {
@@ -156,8 +157,30 @@ function RecordPrescriptions({ recordId, prescriptions, examRequests, doctors, p
 }
 
 // ─── Componente principal ─────────────────────────────────────────────────────
+const SESSION_HOURS = 8;
+
 export function MedicalRecords() {
-    const { clinicName } = useAuth();
+    const { clinicName, profile, activeClinicId } = useAuth();
+
+    const sessionKey = `prontuario_auth_${activeClinicId}_${profile?.id}`;
+    const [authorized, setAuthorized] = useState(() => {
+        try {
+            const stored = localStorage.getItem(`prontuario_auth_${activeClinicId}_${profile?.id}`);
+            if (!stored) return false;
+            const { expiresAt } = JSON.parse(stored);
+            return new Date(expiresAt) > new Date();
+        } catch { return false; }
+    });
+
+    const handleAuthorized = (email: string) => {
+        const expiresAt = new Date(Date.now() + SESSION_HOURS * 3600 * 1000).toISOString();
+        localStorage.setItem(sessionKey, JSON.stringify({ email, expiresAt }));
+        setAuthorized(true);
+    };
+
+    if (!authorized) {
+        return <ProntuarioPasswordModal onAuthorized={handleAuthorized} />;
+    }
     const { data: patients, loading: patientsLoading, create: createPatient, update: updatePatient, remove: removePatient, refetch: refetchPatients } = usePatients();
     const { data: doctors } = useDoctors();
     const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);

@@ -80,14 +80,14 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
   const isOutro = activeClinicCategory === 'outro';
 
   const allNavItems = [
-    { id: "dashboard", label: "Visão Geral", icon: LayoutDashboard, color: "text-emerald-600", roles: ['gestor', 'medico', 'secretaria'] },
-    { id: "marketing", label: "Marketing", icon: BarChart3, color: "text-cyan-600", roles: ['gestor'] },
-    { id: "ai-secretary", label: "Comercial", icon: Bot, color: "text-teal-600", roles: ['gestor', 'secretaria'] },
-    { id: "appointments", label: "Agendamentos", icon: CalendarDays, color: "text-teal-700", roles: ['gestor', 'medico', 'secretaria'], clinicOnly: true },
-    { id: "medical-records", label: "Prontuários", icon: ClipboardList, color: "text-slate-700", roles: ['gestor', 'medico', 'secretaria'], clinicOnly: true },
-    { id: "doctors", label: "Corpo Clínico", icon: Users, color: "text-emerald-800", roles: ['gestor'], clinicOnly: true },
-    { id: "finance", label: "Financeiro", icon: CircleDollarSign, color: "text-emerald-700", roles: ['gestor'] },
-    { id: "settings", label: "Configurações", icon: Settings, color: "text-slate-500", roles: ['gestor'] },
+    { id: "dashboard", label: "Visão Geral", icon: LayoutDashboard, color: "text-emerald-600", roles: ['gestor', 'medico', 'medico_gestor', 'secretaria'] },
+    { id: "marketing", label: "Marketing", icon: BarChart3, color: "text-cyan-600", roles: ['gestor', 'medico_gestor'] },
+    { id: "ai-secretary", label: "Comercial", icon: Bot, color: "text-teal-600", roles: ['gestor', 'medico_gestor', 'secretaria'] },
+    { id: "appointments", label: "Agendamentos", icon: CalendarDays, color: "text-teal-700", roles: ['gestor', 'medico', 'medico_gestor', 'secretaria'], clinicOnly: true },
+    { id: "medical-records", label: "Prontuários", icon: ClipboardList, color: "text-slate-700", roles: ['medico', 'medico_gestor'], clinicOnly: true },
+    { id: "doctors", label: "Corpo Clínico", icon: Users, color: "text-emerald-800", roles: ['gestor', 'medico_gestor'], clinicOnly: true },
+    { id: "finance", label: "Financeiro", icon: CircleDollarSign, color: "text-emerald-700", roles: ['gestor', 'medico_gestor'] },
+    { id: "settings", label: "Configurações", icon: Settings, color: "text-slate-500", roles: ['gestor', 'medico_gestor'] },
     { id: "super-admin", label: "Super Admin", icon: ShieldCheck, color: "text-orange-600", roles: ['super-admin'] },
     { id: "org-admin", label: "Organização", icon: Activity, color: "text-violet-600", roles: ['org_owner', 'org_admin', 'org_team'] },
   ];

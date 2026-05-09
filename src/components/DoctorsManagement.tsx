@@ -11,13 +11,17 @@ import {
     X,
     Loader2,
     AlertCircle,
+    KeyRound,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { useDoctors, Doctor } from "../hooks/useSupabase";
 import { DoctorScheduleSettings } from "./DoctorScheduleSettings";
+import { supabase } from "../lib/supabase";
+import { useAuth } from "../contexts/AuthContext";
 
 export function DoctorsManagement() {
+    const { activeClinicId } = useAuth();
     const { data: doctors, loading, error, refetch, createWithAuth, update, remove } = useDoctors();
     const [showModal, setShowModal] = useState(false);
     const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
@@ -31,6 +35,8 @@ export function DoctorsManagement() {
     });
     const [submitting, setSubmitting] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
+    const [showResetPinConfirm, setShowResetPinConfirm] = useState<string | null>(null);
+    const [resetPinDone, setResetPinDone] = useState<string | null>(null);
     const [showScheduleSettings, setShowScheduleSettings] = useState(false);
     const [doctorToConfigure, setDoctorToConfigure] = useState<Doctor | null>(null);
 
@@ -50,20 +56,24 @@ export function DoctorsManagement() {
 
     const handleSubmit = async () => {
         if (!formData.name.trim()) return;
+        if (!formData.crm.trim()) {
+            alert("O CRM/CRO é obrigatório para cadastrar um profissional.");
+            return;
+        }
         if (modalMode === 'create' && !formData.email.trim()) {
             alert("O e-mail é obrigatório para cadastrar um profissional.");
             return;
         }
         setSubmitting(true);
-        
+
         try {
             if (modalMode === 'create') {
-                await createWithAuth({ 
-                    name: formData.name, 
+                await createWithAuth({
+                    name: formData.name,
                     email: formData.email,
                     password: formData.password,
-                    specialty: formData.specialty || null, 
-                    crm: formData.crm || null
+                    specialty: formData.specialty || null,
+                    crm: formData.crm
                 });
             } else if (selectedDoctorId) {
                 await update(selectedDoctorId, { 
@@ -87,6 +97,18 @@ export function DoctorsManagement() {
         await remove(id);
         setShowDeleteConfirm(null);
         setSubmitting(false);
+    };
+
+    const handleResetPin = async (doc: Doctor) => {
+        if (!doc.user_id || !activeClinicId) return;
+        await supabase
+            .from('prontuario_passwords')
+            .delete()
+            .eq('user_id', doc.user_id)
+            .eq('clinic_id', activeClinicId);
+        setShowResetPinConfirm(null);
+        setResetPinDone(doc.id);
+        setTimeout(() => setResetPinDone(null), 3000);
     };
 
     const toggleStatus = async (doc: Doctor) => {
@@ -210,15 +232,61 @@ export function DoctorsManagement() {
                                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                                     {doc.is_active ? 'Status: Ativo' : 'Status: Inativo'}
                                 </span>
-                                <button 
+                                <div className="flex items-center gap-3">
+                                {resetPinDone === doc.id ? (
+                                    <span className="text-[10px] font-bold text-teal-600 uppercase">PIN resetado</span>
+                                ) : (
+                                    <button
+                                        onClick={() => setShowResetPinConfirm(doc.id)}
+                                        className="flex items-center gap-1 text-[10px] font-bold text-slate-400 hover:text-amber-600 transition-colors uppercase"
+                                    >
+                                        <KeyRound className="w-3 h-3" />
+                                        Reset PIN
+                                    </button>
+                                )}
+                                <button
                                     onClick={() => setShowDeleteConfirm(doc.id)}
                                     className="text-xs font-bold text-rose-400 hover:text-rose-600 transition-colors uppercase"
                                 >
                                     Excluir
                                 </button>
+                                </div>
                             </div>
 
-                            {/* Delete Confirmation Overly */}
+                            {/* Reset PIN Confirmation Overlay */}
+                            <AnimatePresence>
+                                {showResetPinConfirm === doc.id && (
+                                    <motion.div
+                                        initial={{ opacity: 0 }}
+                                        animate={{ opacity: 1 }}
+                                        exit={{ opacity: 0 }}
+                                        className="absolute inset-0 bg-white/95 z-10 flex flex-col items-center justify-center p-6 text-center"
+                                    >
+                                        <KeyRound className="w-10 h-10 text-amber-500 mb-2" />
+                                        <h4 className="text-sm font-bold text-slate-900 mb-1">Resetar PIN do prontuário?</h4>
+                                        <p className="text-xs text-slate-500 mb-4">
+                                            O médico precisará criar um novo PIN no próximo acesso.
+                                        </p>
+                                        <div className="flex gap-2 w-full">
+                                            <Button
+                                                variant="outline"
+                                                className="flex-1 h-8 text-[10px] font-bold"
+                                                onClick={() => setShowResetPinConfirm(null)}
+                                            >
+                                                Cancelar
+                                            </Button>
+                                            <Button
+                                                className="flex-1 h-8 text-[10px] font-bold bg-amber-500 hover:bg-amber-600"
+                                                onClick={() => handleResetPin(doc)}
+                                            >
+                                                Resetar
+                                            </Button>
+                                        </div>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+
+                            {/* Delete Confirmation Overlay */}
                             <AnimatePresence>
                                 {showDeleteConfirm === doc.id && (
                                     <motion.div 
@@ -323,13 +391,14 @@ export function DoctorsManagement() {
                                 </div>
 
                                 <div>
-                                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 font-bold">CRM / CRO</label>
+                                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 font-bold">CRM / CRO *</label>
                                     <input
                                         type="text"
                                         value={formData.crm}
                                         onChange={e => setFormData(p => ({ ...p, crm: e.target.value }))}
                                         className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-300 font-medium text-sm transition-all"
                                         placeholder="CRM 12345-SP"
+                                        required
                                     />
                                 </div>
 

@@ -49,7 +49,7 @@ const ORG_ROLES = [
   { value: 'org_admin', label: 'Admin' },
   { value: 'org_team', label: 'Team' },
 ];
-const CLINIC_ROLES = ['gestor', 'medico', 'secretaria'];
+const CLINIC_ROLES = ['gestor', 'medico_gestor', 'medico', 'secretaria'];
 const PLANS = ['free', 'pro', 'enterprise'];
 const CLINIC_CATEGORIES = [
   { value: 'clinica', label: 'Clínica' },
@@ -293,23 +293,44 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
     fetchOrgUsers();
   };
 
+  const isMedicoRole = (role: string) => role === 'medico' || role === 'medico_gestor';
+
   const handleAddClinicUser = async () => {
     if (!clinicUserTarget) return;
-    if (!clinicUserForm.name.trim() || !clinicUserForm.email.trim() || !clinicUserForm.password.trim()) {
-      setClinicUserError('Preencha todos os campos.');
+    if (!clinicUserForm.name.trim() || !clinicUserForm.email.trim()) {
+      setClinicUserError('Preencha nome e e-mail.');
+      return;
+    }
+    if (!isMedicoRole(clinicUserForm.role) && !clinicUserForm.password.trim()) {
+      setClinicUserError('Preencha a senha.');
       return;
     }
     setClinicUserSaving(true);
     setClinicUserError('');
-    const { error } = await supabase.rpc('add_user_to_clinic', {
-      p_clinic_id: clinicUserTarget.id,
-      p_full_name: clinicUserForm.name.trim(),
-      p_email: clinicUserForm.email.trim(),
-      p_password: clinicUserForm.password,
-      p_role: clinicUserForm.role,
-    });
-    setClinicUserSaving(false);
-    if (error) { setClinicUserError(error.message); return; }
+
+    if (isMedicoRole(clinicUserForm.role)) {
+      // Médico: pré-cadastra sem criar conta auth — o próprio médico cria a senha no login
+      const { error } = await supabase.from('pending_clinic_users').upsert({
+        clinic_id: clinicUserTarget.id,
+        email: clinicUserForm.email.trim().toLowerCase(),
+        full_name: clinicUserForm.name.trim(),
+        role: clinicUserForm.role,
+      }, { onConflict: 'email,clinic_id' });
+      setClinicUserSaving(false);
+      if (error) { setClinicUserError(error.message); return; }
+    } else {
+      // Gestor / Secretária: cria conta auth imediatamente
+      const { error } = await supabase.rpc('add_user_to_clinic', {
+        p_clinic_id: clinicUserTarget.id,
+        p_full_name: clinicUserForm.name.trim(),
+        p_email: clinicUserForm.email.trim(),
+        p_password: clinicUserForm.password,
+        p_role: clinicUserForm.role,
+      });
+      setClinicUserSaving(false);
+      if (error) { setClinicUserError(error.message); return; }
+    }
+
     setClinicUserTarget(null);
     setClinicUserForm({ name: '', email: '', password: '', role: 'gestor' });
     if (clinicUsersView?.id === clinicUserTarget?.id) fetchClinicUsers(clinicUserTarget.id);
@@ -326,8 +347,8 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
     setClinicUsersLoading(false);
   };
 
-  const handleChangeClinicUserRole = async (userId: string, newRole: string) => {
-    await supabase.from('clinic_users').update({ role: newRole }).eq('id', userId);
+  const handleChangeClinicUserRole = async (user: ClinicUser, newRole: string) => {
+    await supabase.from('clinic_users').update({ role: newRole }).eq('id', user.id);
     if (clinicUsersView) fetchClinicUsers(clinicUsersView.id);
   };
 
@@ -1021,14 +1042,21 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                   className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500" placeholder="Nome completo" />
                 <input value={clinicUserForm.email} onChange={e => setClinicUserForm(f => ({ ...f, email: e.target.value }))}
                   className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500" placeholder="Email" type="email" />
-                <div className="relative">
-                  <input value={clinicUserForm.password} onChange={e => setClinicUserForm(f => ({ ...f, password: e.target.value }))}
-                    type={showClinicUserPassword ? 'text' : 'password'}
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500 pr-10" placeholder="Senha" />
-                  <button type="button" onClick={() => setShowClinicUserPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
-                    {showClinicUserPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
+                {!isMedicoRole(clinicUserForm.role) && (
+                  <div className="relative">
+                    <input value={clinicUserForm.password} onChange={e => setClinicUserForm(f => ({ ...f, password: e.target.value }))}
+                      type={showClinicUserPassword ? 'text' : 'password'}
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500 pr-10" placeholder="Senha" />
+                    <button type="button" onClick={() => setShowClinicUserPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                      {showClinicUserPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                )}
+                {isMedicoRole(clinicUserForm.role) && (
+                  <p className="text-[11px] text-slate-400 bg-slate-50 rounded-lg px-3 py-2 leading-relaxed">
+                    O médico receberá um e-mail de confirmação e criará a própria senha ao acessar o app pela primeira vez.
+                  </p>
+                )}
                 <div>
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Papel</label>
                   <div className="flex gap-2">
@@ -1036,7 +1064,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                       <button key={r} onClick={() => setClinicUserForm(f => ({ ...f, role: r }))}
                         className={cn("flex-1 py-2 rounded-xl text-xs font-bold capitalize transition-all border",
                           clinicUserForm.role === r ? "bg-teal-600 text-white border-teal-600" : "bg-slate-50 text-slate-600 border-slate-200 hover:border-teal-300")}>
-                        {r === 'medico' ? 'Médico' : r === 'secretaria' ? 'Secretária' : 'Gestor'}
+                        {r === 'medico' ? 'Médico' : r === 'medico_gestor' ? 'Médico Gestor' : r === 'secretaria' ? 'Secretária' : 'Gestor'}
                       </button>
                     ))}
                   </div>
@@ -1108,12 +1136,12 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                         {canAddClinicUsers ? (
                           <select
                             value={u.role}
-                            onChange={e => handleChangeClinicUserRole(u.id, e.target.value)}
+                            onChange={e => handleChangeClinicUserRole(u, e.target.value)}
                             className="text-[10px] font-bold border border-slate-200 rounded-lg px-1.5 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-teal-300 shrink-0"
                           >
                             {CLINIC_ROLES.map(r => (
                               <option key={r} value={r}>
-                                {r === 'medico' ? 'Médico' : r === 'secretaria' ? 'Secretária' : 'Gestor'}
+                                {r === 'medico' ? 'Médico' : r === 'medico_gestor' ? 'Médico Gestor' : r === 'secretaria' ? 'Secretária' : 'Gestor'}
                               </option>
                             ))}
                           </select>

@@ -278,21 +278,27 @@ function MedicalRecordsContent({ encKey }: { encKey: CryptoKey }) {
     const handleRecordSubmit = async () => {
         if (!selectedPatient || !recordFormData.doctor_id || !encKey) return;
         setSubmitting(true);
-        const enc = {
-            ...recordFormData,
-            patient_id: selectedPatient.id,
-            description: await encryptField(recordFormData.description || null, encKey),
-            diagnosis: await encryptField(recordFormData.diagnosis || null, encKey),
-            prescription: await encryptField(recordFormData.prescription || null, encKey),
-            weight: await encryptField(recordFormData.weight || null, encKey),
-            height: await encryptField(recordFormData.height || null, encKey),
-            blood_pressure: await encryptField(recordFormData.blood_pressure || null, encKey),
-            temperature: await encryptField(recordFormData.temperature || null, encKey),
-        };
-        if (selectedRecord) await updateRecord(selectedRecord.id, enc);
-        else await createRecord(enc);
-        setShowRecordModal(false);
-        setSubmitting(false);
+        try {
+            const enc = {
+                ...recordFormData,
+                patient_id: selectedPatient.id,
+                description: await encryptField(recordFormData.description || null, encKey),
+                diagnosis: await encryptField(recordFormData.diagnosis || null, encKey),
+                prescription: await encryptField(recordFormData.prescription || null, encKey),
+                weight: await encryptField(recordFormData.weight || null, encKey),
+                height: await encryptField(recordFormData.height || null, encKey),
+                blood_pressure: await encryptField(recordFormData.blood_pressure || null, encKey),
+                temperature: await encryptField(recordFormData.temperature || null, encKey),
+            };
+            if (selectedRecord) await updateRecord(selectedRecord.id, enc);
+            else await createRecord(enc);
+            setShowRecordModal(false);
+        } catch (err) {
+            console.error('[Prontuário] Erro na criptografia:', err);
+            alert('Erro ao criptografar os dados. Verifique o console.');
+        } finally {
+            setSubmitting(false);
+        }
     };
     const handleDeleteRecord = async () => { if (!selectedRecord) return; setSubmitting(true); await removeRecord(selectedRecord.id); setShowDeleteRecordConfirm(false); setSelectedRecord(null); setSubmitting(false); };
 

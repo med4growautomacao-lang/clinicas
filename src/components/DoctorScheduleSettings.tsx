@@ -25,7 +25,7 @@ const WEEKDAYS = [
 ];
 
 export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorScheduleSettingsProps) {
-  const [activeTab, setActiveTab] = useState<'hours' | 'days_off'>('hours');
+  const [activeTab, setActiveTab] = useState<'hours' | 'days' | 'blocked_times'>('hours');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -133,7 +133,7 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 20 }}
-        className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
+        className="bg-white rounded-xl shadow-xl w-full max-w-2xl h-[90vh] overflow-hidden flex flex-col"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
@@ -159,13 +159,22 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
             <Clock className="w-4 h-4" /> Horários e Turnos
           </button>
           <button
-            onClick={() => setActiveTab('days_off')}
+            onClick={() => setActiveTab('days')}
             className={cn(
               "pb-4 font-semibold text-sm border-b-2 transition-colors flex items-center gap-2",
-              activeTab === 'days_off' ? "border-teal-600 text-teal-800" : "border-transparent text-slate-500 hover:text-slate-700"
+              activeTab === 'days' ? "border-teal-600 text-teal-800" : "border-transparent text-slate-500 hover:text-slate-700"
             )}
           >
-            <CalendarDays className="w-4 h-4" /> Dias de Folga/Exceções
+            <CalendarDays className="w-4 h-4" /> Bloquear Dias
+          </button>
+          <button
+            onClick={() => setActiveTab('blocked_times')}
+            className={cn(
+              "pb-4 font-semibold text-sm border-b-2 transition-colors flex items-center gap-2",
+              activeTab === 'blocked_times' ? "border-teal-600 text-teal-800" : "border-transparent text-slate-500 hover:text-slate-700"
+            )}
+          >
+            <Clock className="w-4 h-4" /> Bloquear Horários
           </button>
         </div>
 
@@ -268,133 +277,130 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
             </motion.div>
           )}
 
-          {/* ── Dias de Folga / Exceções ── */}
-          {activeTab === 'days_off' && (
-            <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
-
-              {/* Bloquear dia inteiro */}
-              <div>
-                <div className="p-5 bg-white rounded-xl border border-slate-200 shadow-sm mb-4">
-                  <h4 className="font-bold text-slate-800 text-sm mb-4">Bloquear dia inteiro</h4>
-                  <div className="flex items-end gap-4">
-                    <div className="flex-1">
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Data da Ausência</label>
-                      <input
-                        type="date"
-                        value={newDayOff}
-                        onChange={e => setNewDayOff(e.target.value)}
-                        className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-teal-200 focus:outline-none"
-                      />
-                    </div>
-                    <Button onClick={handleAddDayOff} disabled={!newDayOff} className="flex shrink-0 h-[42px]">
-                      <Plus className="w-4 h-4 mr-2" /> Bloquear Dia
-                    </Button>
+          {/* ── Bloquear Dias ── */}
+          {activeTab === 'days' && (
+            <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-4">
+              <div className="p-5 bg-white rounded-xl border border-slate-200 shadow-sm">
+                <h4 className="font-bold text-slate-800 text-sm mb-4">Bloquear dia inteiro</h4>
+                <div className="flex items-end gap-4">
+                  <div className="flex-1">
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Data da Ausência</label>
+                    <input
+                      type="date"
+                      value={newDayOff}
+                      onChange={e => setNewDayOff(e.target.value)}
+                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-teal-200 focus:outline-none"
+                    />
                   </div>
+                  <Button onClick={handleAddDayOff} disabled={!newDayOff} className="flex shrink-0 h-[42px]">
+                    <Plus className="w-4 h-4 mr-2" /> Bloquear Dia
+                  </Button>
                 </div>
-
-                <h5 className="font-bold text-slate-700 text-xs mb-3 uppercase tracking-wider pl-1">Dias Bloqueados na Agenda</h5>
-                {daysOff.length === 0 ? (
-                  <div className="text-center py-8 bg-white border border-dashed border-slate-200 rounded-xl">
-                    <CalendarDays className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                    <p className="text-sm font-semibold text-slate-400">Nenhum dia bloqueado.</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                    {daysOff.map(date => (
-                      <div key={date} className="flex items-center justify-between p-3 bg-white border border-rose-100 rounded-lg shadow-sm">
-                        <div className="flex items-center gap-2">
-                          <span className="w-2 h-2 rounded-full bg-rose-400 shrink-0" />
-                          <span className="font-bold text-sm text-slate-700">{formatDate(date)}</span>
-                        </div>
-                        <button onClick={() => setDaysOff(prev => prev.filter(d => d !== date))} className="text-slate-300 hover:text-rose-500 transition-colors">
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
 
-              {/* Bloquear horário específico */}
-              <div>
-                <div className="p-5 bg-white rounded-xl border border-slate-200 shadow-sm mb-4">
-                  <h4 className="font-bold text-slate-800 text-sm mb-4">Bloquear horário específico</h4>
-                  <div className="grid grid-cols-[1fr_auto_auto] gap-3 items-end mb-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Data</label>
-                      <input
-                        type="date"
-                        value={newBlockedTime.date}
-                        onChange={e => setNewBlockedTime(p => ({ ...p, date: e.target.value }))}
-                        className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-teal-200 focus:outline-none"
-                      />
+              <h5 className="font-bold text-slate-700 text-xs mb-3 uppercase tracking-wider pl-1">Dias Bloqueados na Agenda</h5>
+              {daysOff.length === 0 ? (
+                <div className="text-center py-8 bg-white border border-dashed border-slate-200 rounded-xl">
+                  <CalendarDays className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                  <p className="text-sm font-semibold text-slate-400">Nenhum dia bloqueado.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {daysOff.map(date => (
+                    <div key={date} className="flex items-center justify-between p-3 bg-white border border-rose-100 rounded-lg shadow-sm">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-rose-400 shrink-0" />
+                        <span className="font-bold text-sm text-slate-700">{formatDate(date)}</span>
+                      </div>
+                      <button onClick={() => setDaysOff(prev => prev.filter(d => d !== date))} className="text-slate-300 hover:text-rose-500 transition-colors">
+                        <X className="w-4 h-4" />
+                      </button>
                     </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Das</label>
-                      <input
-                        type="time"
-                        value={newBlockedTime.start}
-                        onChange={e => setNewBlockedTime(p => ({ ...p, start: e.target.value }))}
-                        className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-teal-200 focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Às</label>
-                      <input
-                        type="time"
-                        value={newBlockedTime.end}
-                        onChange={e => setNewBlockedTime(p => ({ ...p, end: e.target.value }))}
-                        className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-teal-200 focus:outline-none"
-                      />
-                    </div>
+                  ))}
+                </div>
+              )}
+            </motion.div>
+          )}
+
+          {/* ── Bloquear Horários ── */}
+          {activeTab === 'blocked_times' && (
+            <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-4">
+              <div className="p-5 bg-white rounded-xl border border-slate-200 shadow-sm">
+                <h4 className="font-bold text-slate-800 text-sm mb-4">Bloquear horário específico</h4>
+                <div className="grid grid-cols-[1fr_auto_auto] gap-3 items-end mb-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Data</label>
+                    <input
+                      type="date"
+                      value={newBlockedTime.date}
+                      onChange={e => setNewBlockedTime(p => ({ ...p, date: e.target.value }))}
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-teal-200 focus:outline-none"
+                    />
                   </div>
-                  <div className="flex gap-3 items-end">
-                    <div className="flex-1">
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Nome / Motivo *</label>
-                      <input
-                        type="text"
-                        placeholder="Ex: Almoço, Reunião, Procedimento..."
-                        value={newBlockedTime.name || ''}
-                        onChange={e => setNewBlockedTime(p => ({ ...p, name: e.target.value }))}
-                        className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-teal-200 focus:outline-none"
-                      />
-                    </div>
-                    <Button
-                      onClick={handleAddBlockedTime}
-                      disabled={!newBlockedTime.date || !newBlockedTime.start || !newBlockedTime.end || !newBlockedTime.name}
-                      className="h-[42px] shrink-0"
-                    >
-                      <Plus className="w-4 h-4 mr-2" /> Bloquear
-                    </Button>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Das</label>
+                    <input
+                      type="time"
+                      value={newBlockedTime.start}
+                      onChange={e => setNewBlockedTime(p => ({ ...p, start: e.target.value }))}
+                      className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-teal-200 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Às</label>
+                    <input
+                      type="time"
+                      value={newBlockedTime.end}
+                      onChange={e => setNewBlockedTime(p => ({ ...p, end: e.target.value }))}
+                      className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-teal-200 focus:outline-none"
+                    />
                   </div>
                 </div>
-
-                <h5 className="font-bold text-slate-700 text-xs mb-3 uppercase tracking-wider pl-1">Horários Bloqueados</h5>
-                {blockedTimes.length === 0 ? (
-                  <div className="text-center py-8 bg-white border border-dashed border-slate-200 rounded-xl">
-                    <Clock className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                    <p className="text-sm font-semibold text-slate-400">Nenhum horário bloqueado.</p>
+                <div className="flex gap-3 items-end">
+                  <div className="flex-1">
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Nome / Motivo *</label>
+                    <input
+                      type="text"
+                      placeholder="Ex: Almoço, Reunião, Procedimento..."
+                      value={newBlockedTime.name || ''}
+                      onChange={e => setNewBlockedTime(p => ({ ...p, name: e.target.value }))}
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-teal-200 focus:outline-none"
+                    />
                   </div>
-                ) : (
-                  <div className="space-y-2">
-                    {blockedTimes.map((bt, i) => (
-                      <div key={i} className="flex items-center justify-between px-4 py-3 bg-white border border-amber-100 rounded-lg shadow-sm">
-                        <div className="flex items-center gap-3">
-                          <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
-                          <span className="font-bold text-sm text-slate-700">{formatDate(bt.date)}</span>
-                          <span className="text-xs text-slate-400">—</span>
-                          <span className="text-sm font-semibold text-slate-600">{bt.start} às {bt.end}</span>
-                          {bt.name && <span className="text-xs text-amber-600 font-semibold bg-amber-50 px-2 py-0.5 rounded-full">{bt.name}</span>}
-                        </div>
-                        <button onClick={() => handleRemoveBlockedTime(i)} className="text-slate-300 hover:text-rose-500 transition-colors">
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                  <Button
+                    onClick={handleAddBlockedTime}
+                    disabled={!newBlockedTime.date || !newBlockedTime.start || !newBlockedTime.end || !newBlockedTime.name}
+                    className="h-[42px] shrink-0"
+                  >
+                    <Plus className="w-4 h-4 mr-2" /> Bloquear
+                  </Button>
+                </div>
               </div>
 
+              <h5 className="font-bold text-slate-700 text-xs mb-3 uppercase tracking-wider pl-1">Horários Bloqueados</h5>
+              {blockedTimes.length === 0 ? (
+                <div className="text-center py-8 bg-white border border-dashed border-slate-200 rounded-xl">
+                  <Clock className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                  <p className="text-sm font-semibold text-slate-400">Nenhum horário bloqueado.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {blockedTimes.map((bt, i) => (
+                    <div key={i} className="flex items-center justify-between px-4 py-3 bg-white border border-amber-100 rounded-lg shadow-sm">
+                      <div className="flex items-center gap-3">
+                        <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
+                        <span className="font-bold text-sm text-slate-700">{formatDate(bt.date)}</span>
+                        <span className="text-xs text-slate-400">—</span>
+                        <span className="text-sm font-semibold text-slate-600">{bt.start} às {bt.end}</span>
+                        {bt.name && <span className="text-xs text-amber-600 font-semibold bg-amber-50 px-2 py-0.5 rounded-full">{bt.name}</span>}
+                      </div>
+                      <button onClick={() => handleRemoveBlockedTime(i)} className="text-slate-300 hover:text-rose-500 transition-colors">
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </motion.div>
           )}
         </div>

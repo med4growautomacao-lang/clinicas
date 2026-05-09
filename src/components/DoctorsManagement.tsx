@@ -4,7 +4,6 @@ import { Button } from "./ui/button";
 import {
     Users,
     Plus,
-    Clock,
     Settings,
     Stethoscope,
     ChevronRight,
@@ -16,7 +15,6 @@ import {
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { useDoctors, Doctor } from "../hooks/useSupabase";
-import { DoctorScheduleSettings } from "./DoctorScheduleSettings";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -37,9 +35,6 @@ export function DoctorsManagement() {
     const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
     const [showResetPinConfirm, setShowResetPinConfirm] = useState<string | null>(null);
     const [resetPinDone, setResetPinDone] = useState<string | null>(null);
-    const [showScheduleSettings, setShowScheduleSettings] = useState(false);
-    const [doctorToConfigure, setDoctorToConfigure] = useState<Doctor | null>(null);
-
     const openCreateModal = () => {
         setModalMode('create');
         setFormData({ name: '', specialty: '', crm: '', email: '', password: '' });
@@ -205,27 +200,14 @@ export function DoctorsManagement() {
                                     )}
                                 </div>
 
-                                <div className="grid grid-cols-2 gap-2">
-                                    <Button 
-                                        variant="outline" 
-                                        className="w-full h-9 flex gap-2 text-xs font-bold"
-                                        onClick={() => {
-                                            setDoctorToConfigure(doc);
-                                            setShowScheduleSettings(true);
-                                        }}
-                                    >
-                                        <Clock className="w-3.5 h-3.5" />
-                                        Agenda
-                                    </Button>
-                                    <Button 
-                                        variant="secondary" 
-                                        className="w-full h-9 flex gap-2 text-xs font-bold"
-                                        onClick={() => openEditModal(doc)}
-                                    >
-                                        <Settings className="w-3.5 h-3.5" />
-                                        Editar
-                                    </Button>
-                                </div>
+                                <Button
+                                    variant="secondary"
+                                    className="w-full h-9 flex gap-2 text-xs font-bold"
+                                    onClick={() => openEditModal(doc)}
+                                >
+                                    <Settings className="w-3.5 h-3.5" />
+                                    Editar
+                                </Button>
                             </CardContent>
 
                             <div className="px-6 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between group-hover:bg-teal-50/30 transition-colors">
@@ -446,18 +428,6 @@ export function DoctorsManagement() {
                 )}
             </AnimatePresence>
 
-            <AnimatePresence>
-                {showScheduleSettings && doctorToConfigure && (
-                    <DoctorScheduleSettings
-                        doctor={doctorToConfigure}
-                        onSaved={() => refetch(true, true)}
-                        onClose={() => {
-                            setShowScheduleSettings(false);
-                            setDoctorToConfigure(null);
-                        }}
-                    />
-                )}
-            </AnimatePresence>
         </div>
     );
 }

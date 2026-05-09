@@ -1,4 +1,6 @@
 import React, { useState, useMemo } from "react";
+import { DayPicker } from "react-day-picker";
+import "react-day-picker/dist/style.css";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { 
   Users, 
@@ -29,7 +31,8 @@ import {
 } from "recharts";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { useDashboardStats } from "../hooks/useSupabase";
+import { useDashboardStats, useAppointments, useDoctors } from "../hooks/useSupabase";
+import { CalendarView } from "./CalendarView";
 import {
   format,
   subDays,
@@ -39,8 +42,10 @@ import {
   endOfMonth,
   subMonths,
   subWeeks,
+  addMonths,
   parseISO
 } from "date-fns";
+import { ptBR } from "date-fns/locale";
 
 type Period = 'dia' | 'sem' | 'mês';
 
@@ -59,6 +64,11 @@ export function Dashboard() {
   }), [dateRange]);
 
   const { data: stats, loading } = useDashboardStats(statsDateRange);
+  const { data: appointments } = useAppointments();
+  const { data: doctors } = useDoctors();
+  const [calendarMonth, setCalendarMonth] = useState(new Date());
+  const [calMonth1, setCalMonth1] = useState<Date>(() => subDays(new Date(), 7));
+  const [calMonth2, setCalMonth2] = useState<Date>(() => addMonths(subDays(new Date(), 7), 1));
 
   const setRangeById = (id: string) => {
     const today = new Date();
@@ -83,6 +93,11 @@ export function Dashboard() {
         start = subDays(today, 7);
         end = subDays(today, 1);
         label = "ÚLTIMOS 7 DIAS";
+        break;
+      case '14days':
+        start = subDays(today, 14);
+        end = subDays(today, 1);
+        label = "ÚLTIMOS 14 DIAS";
         break;
       case '28days':
         start = subDays(today, 28);
@@ -255,47 +270,69 @@ export function Dashboard() {
                       initial={{ opacity: 0, y: 10, scale: 0.95 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                      className="absolute top-full right-0 mt-3 w-72 bg-white rounded-2xl border border-slate-200 shadow-2xl z-[110] p-4 flex flex-col gap-1 overflow-hidden"
+                      className="absolute top-full right-0 mt-3 bg-white rounded-2xl border border-slate-200 shadow-2xl z-[110] overflow-hidden rdp-custom flex"
                     >
-                      <PeriodOption label="HOJE" onClick={() => setRangeById('today')} active={activeRangeLabel === 'HOJE'} />
-                      <PeriodOption label="ONTEM" onClick={() => setRangeById('yesterday')} active={activeRangeLabel === 'ONTEM'} />
-                      <PeriodOption label="ESTA SEMANA" onClick={() => setRangeById('week')} active={activeRangeLabel === 'ESTA SEMANA'} />
-                      <PeriodOption label="SEMANA PASSADA" onClick={() => setRangeById('last_week')} active={activeRangeLabel === 'SEMANA PASSADA'} />
-                      <PeriodOption label="ÚLTIMOS 7 DIAS" onClick={() => setRangeById('7days')} active={activeRangeLabel === 'ÚLTIMOS 7 DIAS'} />
-                      <PeriodOption label="ÚLTIMOS 28 DIAS" onClick={() => setRangeById('28days')} active={activeRangeLabel === 'ÚLTIMOS 28 DIAS'} />
-                      <PeriodOption label="ÚLTIMOS 30 DIAS" onClick={() => setRangeById('30days')} active={activeRangeLabel === 'ÚLTIMOS 30 DIAS'} />
-                      <PeriodOption label="ESTE MÊS" onClick={() => setRangeById('month')} active={activeRangeLabel === 'ESTE MÊS'} />
-                      <PeriodOption label="MÊS PASSADO" onClick={() => setRangeById('last_month')} active={activeRangeLabel === 'MÊS PASSADO'} />
+                      {/* Quick options */}
+                      <div className="w-44 border-r border-slate-100 p-2 flex flex-col gap-0.5 shrink-0">
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-[2px] px-3 pt-1 pb-1.5">Período</span>
+                        {[
+                          { id: 'today',      label: 'Hoje' },
+                          { id: 'yesterday',  label: 'Ontem' },
+                          { id: 'week',       label: 'Esta Semana' },
+                          { id: 'last_week',  label: 'Semana Passada' },
+                          { id: '7days',      label: 'Últimos 7 dias' },
+                          { id: '14days',     label: 'Últimos 14 dias' },
+                          { id: '28days',     label: 'Últimos 28 dias' },
+                          { id: '30days',     label: 'Últimos 30 dias' },
+                          { id: 'month',      label: 'Este Mês' },
+                          { id: 'last_month', label: 'Mês Passado' },
+                        ].map(opt => (
+                          <button
+                            key={opt.id}
+                            onClick={() => setRangeById(opt.id)}
+                            className={cn(
+                              "text-left px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors",
+                              activeRangeLabel === opt.label.toUpperCase()
+                                ? "bg-teal-50 text-teal-700"
+                                : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                            )}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
 
-                      <div className="pt-4 mt-2 border-t border-slate-100">
-                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-[2px] block mb-3 pl-1">Período Principal</span>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="space-y-1">
-                            <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest pl-1">Início</label>
-                            <input
-                              type="date"
-                              value={format(dateRange.start, 'yyyy-MM-dd')}
-                              onChange={(e) => {
-                                const [year, month, day] = e.target.value.split('-').map(Number);
-                                setDateRange(v => ({ ...v, start: new Date(year, month - 1, day) }));
-                                setActiveRangeLabel("Personalizado");
-                              }}
-                              className="w-full bg-slate-50 border-slate-200 rounded-xl p-2.5 text-[10px] font-bold text-slate-600 outline-none border focus:ring-1 focus:ring-teal-500/20"
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest pl-1">Fim</label>
-                            <input
-                              type="date"
-                              value={format(dateRange.end, 'yyyy-MM-dd')}
-                              onChange={(e) => {
-                                const [year, month, day] = e.target.value.split('-').map(Number);
-                                setDateRange(v => ({ ...v, end: new Date(year, month - 1, day) }));
-                                setActiveRangeLabel("Personalizado");
-                              }}
-                              className="w-full bg-slate-50 border-slate-200 rounded-xl p-2.5 text-[10px] font-bold text-slate-600 outline-none border focus:ring-1 focus:ring-teal-500/20"
-                            />
-                          </div>
+                      {/* Two stacked DayPickers */}
+                      <div className="flex flex-col divide-y divide-slate-100">
+                        <div className="p-3">
+                          <DayPicker
+                            mode="range"
+                            selected={{ from: dateRange.start, to: dateRange.end }}
+                            onSelect={(r) => {
+                              if (r?.from) { setDateRange(d => ({ ...d, start: r.from! })); setActiveRangeLabel("PERSONALIZADO"); }
+                              if (r?.to)   { setDateRange(d => ({ ...d, end: r.to! })); }
+                            }}
+                            month={calMonth1}
+                            onMonthChange={setCalMonth1}
+                            numberOfMonths={1}
+                            locale={ptBR}
+                            weekStartsOn={0}
+                          />
+                        </div>
+                        <div className="p-3">
+                          <DayPicker
+                            mode="range"
+                            selected={{ from: dateRange.start, to: dateRange.end }}
+                            onSelect={(r) => {
+                              if (r?.from) { setDateRange(d => ({ ...d, start: r.from! })); setActiveRangeLabel("PERSONALIZADO"); }
+                              if (r?.to)   { setDateRange(d => ({ ...d, end: r.to! })); }
+                            }}
+                            month={calMonth2}
+                            onMonthChange={setCalMonth2}
+                            numberOfMonths={1}
+                            locale={ptBR}
+                            weekStartsOn={0}
+                          />
                         </div>
                       </div>
                     </motion.div>
@@ -493,6 +530,23 @@ export function Dashboard() {
               </div>
             );
           })()}
+        </CardContent>
+      </Card>
+
+      {/* Calendário de Agendamentos */}
+      <Card className="border border-slate-100 shadow-sm overflow-hidden">
+        <CardHeader className="flex flex-row items-center gap-2 pb-4">
+          <Calendar className="w-5 h-5 text-teal-600" />
+          <CardTitle className="text-lg font-bold text-slate-900">Calendário de Agendamentos</CardTitle>
+        </CardHeader>
+        <CardContent className="px-6 pb-6">
+          <CalendarView
+            currentMonth={calendarMonth}
+            setCurrentMonth={setCalendarMonth}
+            appointments={appointments}
+            onDayClick={() => {}}
+            doctors={doctors}
+          />
         </CardContent>
       </Card>
     </div>

@@ -103,6 +103,7 @@ export function Appointments() {
   const [submitting, setSubmitting] = useState(false);
   const [showScheduleSettings, setShowScheduleSettings] = useState(false);
   const [doctorToConfigure, setDoctorToConfigure] = useState<any>(null);
+  const [showDoctorSchedulePicker, setShowDoctorSchedulePicker] = useState(false);
 
   const [showPatientModal, setShowPatientModal] = useState(false);
   const [showDayModal, setShowDayModal] = useState(false);
@@ -535,6 +536,35 @@ export function Appointments() {
              <Button variant="outline" className="py-5 px-6 font-bold" onClick={() => { setDoctorToConfigure(currentDoctor); setShowScheduleSettings(true); }}>
                <Settings className="w-5 h-5 mr-2 text-slate-500" /> Configurar Agenda
              </Button>
+          )}
+          {(userRole === 'gestor' || userRole === 'secretaria' || userRole === 'medico_gestor') && doctors.length > 0 && (
+            <div className="relative">
+              <Button variant="outline" className="py-5 px-6 font-bold" onClick={() => setShowDoctorSchedulePicker(v => !v)}>
+                <Settings className="w-5 h-5 mr-2 text-slate-500" /> Configurar Agenda
+              </Button>
+              <AnimatePresence>
+                {showDoctorSchedulePicker && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.12 }}
+                    className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg z-50 min-w-[200px]"
+                  >
+                    <p className="px-3 pt-2.5 pb-1 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Selecionar médico</p>
+                    {doctors.map(doc => (
+                      <button
+                        key={doc.id}
+                        onClick={() => { setDoctorToConfigure(doc); setShowScheduleSettings(true); setShowDoctorSchedulePicker(false); }}
+                        className="w-full text-left px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors truncate"
+                      >
+                        {doc.name}
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           )}
           <Button className="py-5 px-6 group" onClick={() => { setSelectedAppointment(null); setFormData({ patient_id: '', doctor_id: '', date: '', time: '', notes: '', status: 'pendente' }); setShowModal(true); }}>
             <Plus className="w-5 h-5 mr-2 group-hover:rotate-90 transition-transform" />

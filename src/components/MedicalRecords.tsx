@@ -157,7 +157,7 @@ function RecordPrescriptions({ recordId, prescriptions, examRequests, doctors, p
 }
 
 // ─── Componente principal ─────────────────────────────────────────────────────
-const SESSION_HOURS = 8;
+const SESSION_HOURS = 1;
 
 export function MedicalRecords() {
     const { clinicName, profile, activeClinicId } = useAuth();

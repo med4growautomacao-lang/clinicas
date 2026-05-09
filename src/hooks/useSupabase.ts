@@ -31,6 +31,7 @@ export interface Doctor {
   working_hours?: any;
   consultation_duration?: number;
   days_off?: string[];
+  blocked_times?: { date: string; start: string; end: string }[];
 }
 
 export function useDoctors() {
@@ -39,9 +40,10 @@ export function useDoctors() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetch = useCallback(async (silent = false) => {
+  const fetch = useCallback(async (silent = false, force = false) => {
     if (!activeClinicId) return;
     const cacheKey = `doctors:${activeClinicId}`;
+    if (force) invalidateCache(cacheKey);
     const cached = getCached<Doctor[]>(cacheKey);
     if (cached) { setData(cached); setLoading(false); return; }
     if (!silent) setLoading(true);
@@ -67,7 +69,18 @@ export function useDoctors() {
       fetch(true);
     }, 120_000);
 
-    return () => clearInterval(interval);
+    const channel = supabase
+      .channel(`doctors_realtime:${activeClinicId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'doctors', filter: `clinic_id=eq.${activeClinicId}` }, () => {
+        invalidateCache(`doctors:${activeClinicId}`);
+        fetch(true);
+      })
+      .subscribe();
+
+    return () => {
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
   }, [fetch, activeClinicId]);
 
   const create = async (doc: Partial<Doctor>) => {

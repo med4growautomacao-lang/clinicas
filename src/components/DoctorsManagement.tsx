@@ -381,7 +381,7 @@ export function DoctorsManagement() {
                 {showScheduleSettings && doctorToConfigure && (
                     <DoctorScheduleSettings
                         doctor={doctorToConfigure}
-                        onSaved={() => refetch(true)}
+                        onSaved={() => refetch(true, true)}
                         onClose={() => {
                             setShowScheduleSettings(false);
                             setDoctorToConfigure(null);

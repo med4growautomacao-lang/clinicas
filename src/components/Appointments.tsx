@@ -21,7 +21,9 @@ import {
   Settings,
   FileText,
   Check,
-  Info
+  Info,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -91,6 +93,7 @@ export function Appointments() {
   const [filter, setFilter] = useState("Todos");
   const [dateFilter, setDateFilter] = useState<"all" | "today">("all");
   const [viewMode, setViewMode] = useState<"list" | "calendar">(() => (localStorage.getItem('appointmentsViewMode') as any) || "list");
+  const [showBlocked, setShowBlocked] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [searchTerm, setSearchTerm] = useState("");
   const [showModal, setShowModal] = useState(false);
@@ -175,6 +178,37 @@ export function Appointments() {
     if (!selectedDay) return [];
     return appointments.filter(apt => apt.date === selectedDay);
   }, [appointments, selectedDay]);
+
+  const blockedListItems = useMemo(() => {
+    const relevantDoctors = filter === "Todos" ? doctors : doctors.filter(d => d.name.includes(filter));
+    const today = format(new Date(), 'yyyy-MM-dd');
+    const items: { date: string; start?: string; end?: string; name?: string; doctorId: string; doctorName: string; type: 'day' | 'time' }[] = [];
+    relevantDoctors.forEach(d => {
+      (d.days_off || []).forEach((date: string) => {
+        if (dateFilter === 'today' && date !== today) return;
+        items.push({ date, doctorId: d.id, doctorName: d.name, type: 'day' });
+      });
+      (d.blocked_times || []).forEach((bt: any) => {
+        if (dateFilter === 'today' && bt.date !== today) return;
+        items.push({ date: bt.date, start: bt.start, end: bt.end, name: bt.name, doctorId: d.id, doctorName: d.name, type: 'time' });
+      });
+    });
+    return items.sort((a, b) => a.date.localeCompare(b.date) || (a.start || '').localeCompare(b.start || ''));
+  }, [doctors, filter, dateFilter]);
+
+  const selectedDayBlockedDoctors = useMemo(() => {
+    if (!selectedDay) return [];
+    return doctors.filter(d => d.days_off?.includes(selectedDay));
+  }, [doctors, selectedDay]);
+
+  const selectedDayBlockedTimes = useMemo(() => {
+    if (!selectedDay) return [];
+    return doctors.flatMap(d =>
+      (d.blocked_times || [])
+        .filter((bt: any) => bt.date === selectedDay)
+        .map((bt: any) => ({ ...bt, doctorName: d.name }))
+    ).sort((a: any, b: any) => a.start.localeCompare(b.start));
+  }, [doctors, selectedDay]);
 
   const handleDayClick = (date: string) => {
     setSelectedDay(date);
@@ -539,9 +573,19 @@ export function Appointments() {
               )}
             </div>
 
-            <div className="flex bg-white p-1 rounded-lg border border-slate-200 w-fit">
-              <button onClick={() => { setViewMode("list"); localStorage.setItem('appointmentsViewMode', 'list'); }} className={cn("px-4 py-1.5 text-xs font-semibold rounded-md transition-all", viewMode === "list" ? "bg-teal-600 text-white" : "text-slate-500 hover:text-slate-900")}>Lista</button>
-              <button onClick={() => { setViewMode("calendar"); localStorage.setItem('appointmentsViewMode', 'calendar'); }} className={cn("px-4 py-1.5 text-xs font-semibold rounded-md transition-all", viewMode === "calendar" ? "bg-teal-600 text-white" : "text-slate-500 hover:text-slate-900")}>Calendário</button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setShowBlocked(v => !v)}
+                className={cn("h-8 gap-1.5 text-xs font-semibold", showBlocked ? "text-rose-600 border-rose-300 bg-rose-50 hover:bg-rose-100" : "text-slate-500 hover:text-rose-500")}
+              >
+                {showBlocked ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                {showBlocked ? 'Esconder bloqueados' : 'Mostrar bloqueados'}
+              </Button>
+              <div className="flex bg-white p-1 rounded-lg border border-slate-200 w-fit">
+                <button onClick={() => { setViewMode("list"); localStorage.setItem('appointmentsViewMode', 'list'); }} className={cn("px-4 py-1.5 text-xs font-semibold rounded-md transition-all", viewMode === "list" ? "bg-teal-600 text-white" : "text-slate-500 hover:text-slate-900")}>Lista</button>
+                <button onClick={() => { setViewMode("calendar"); localStorage.setItem('appointmentsViewMode', 'calendar'); }} className={cn("px-4 py-1.5 text-xs font-semibold rounded-md transition-all", viewMode === "calendar" ? "bg-teal-600 text-white" : "text-slate-500 hover:text-slate-900")}>Calendário</button>
+              </div>
             </div>
           </div>
         </CardHeader>
@@ -569,6 +613,45 @@ export function Appointments() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
+                      {showBlocked && blockedListItems.map((bl, i) => (
+                        <motion.tr key={`bl-${i}`} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }} className="bg-rose-50/60">
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-lg bg-rose-100 flex items-center justify-center text-rose-400 text-lg">⊘</div>
+                              <div>
+                                <span className="font-semibold text-rose-700 text-sm">{bl.type === 'day' ? 'Dia Bloqueado' : bl.name}</span>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className={cn("inline-flex items-center gap-2 px-2.5 py-1 rounded-lg border text-xs font-bold", getDoctorColor(bl.doctorId).bg, getDoctorColor(bl.doctorId).text, getDoctorColor(bl.doctorId).border)}>
+                              <Stethoscope className="w-3.5 h-3.5" />
+                              {bl.doctorName}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex flex-col">
+                              <span className="flex items-center text-slate-700 font-semibold text-sm">
+                                <CalendarIcon className="w-3.5 h-3.5 mr-2 text-rose-400" />
+                                {format(parseISO(bl.date), 'dd/MM/yyyy')}
+                              </span>
+                              {bl.type === 'time' && (
+                                <span className="flex items-center text-slate-400 font-medium text-xs mt-0.5"><Clock className="w-3 h-3 mr-1.5" />{bl.start} – {bl.end}</span>
+                              )}
+                              {bl.type === 'day' && (
+                                <span className="flex items-center text-rose-300 font-medium text-xs mt-0.5">Dia todo</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4" />
+                          <td className="px-6 py-4">
+                            <span className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold border bg-rose-100 text-rose-600 border-rose-200">
+                              Bloqueado
+                            </span>
+                          </td>
+                          <td className="px-6 py-4" />
+                        </motion.tr>
+                      ))}
                       {filteredAppointments.map((apt, i) => (
                         <motion.tr key={apt.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }} className="hover:bg-slate-50 group transition-all">
                           <td className="px-6 py-4">
@@ -645,11 +728,12 @@ export function Appointments() {
               </motion.div>
             ) : (
               <motion.div key="calendar" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="p-6">
-                <CalendarView 
-                  currentMonth={currentMonth} 
-                  setCurrentMonth={setCurrentMonth} 
+                <CalendarView
+                  currentMonth={currentMonth}
+                  setCurrentMonth={setCurrentMonth}
                   appointments={filteredAppointments}
                   onDayClick={handleDayClick}
+                  doctors={filter === "Todos" ? doctors : doctors.filter(d => d.name.includes(filter))}
                 />
               </motion.div>
             )}
@@ -800,7 +884,7 @@ export function Appointments() {
         {showScheduleSettings && doctorToConfigure && (
           <DoctorScheduleSettings
             doctor={doctorToConfigure}
-            onSaved={() => refetchDoctors(true)}
+            onSaved={() => refetchDoctors(true, true)}
             onClose={() => {
               setShowScheduleSettings(false);
               setDoctorToConfigure(null);
@@ -830,12 +914,38 @@ export function Appointments() {
               </div>
 
               <div className="flex-1 overflow-y-auto p-6 space-y-3 custom-scrollbar">
-                {selectedDayAppointments.length === 0 ? (
+                {/* Bloqueios do dia */}
+                {(selectedDayBlockedDoctors.length > 0 || selectedDayBlockedTimes.length > 0) && (
+                  <div className="space-y-2 pb-1">
+                    {selectedDayBlockedDoctors.map(d => (
+                      <div key={d.id} className="flex items-center gap-3 px-4 py-3 bg-rose-50 border border-rose-200 rounded-xl">
+                        <div className="w-8 h-8 flex items-center justify-center rounded-full bg-rose-100 text-rose-500 font-black text-sm shrink-0">⊘</div>
+                        <div>
+                          <p className="text-sm font-bold text-rose-700">Dia todo — {d.name}</p>
+                        </div>
+                      </div>
+                    ))}
+                    {selectedDayBlockedTimes.map((bt: any, i: number) => (
+                      <div key={i} className="flex items-center gap-3 px-4 py-3 bg-rose-50 border border-rose-200 rounded-xl">
+                        <div className="w-8 h-8 flex items-center justify-center rounded-full bg-rose-100 text-rose-500 font-black text-sm shrink-0">⊘</div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-bold text-rose-700">{bt.name}</p>
+                          <p className="text-xs text-rose-400 font-medium">{bt.start} – {bt.end}</p>
+                        </div>
+                      </div>
+                    ))}
+                    {selectedDayAppointments.length > 0 && (
+                      <div className="border-t border-slate-100 pt-1" />
+                    )}
+                  </div>
+                )}
+
+                {selectedDayAppointments.length === 0 && selectedDayBlockedDoctors.length === 0 && selectedDayBlockedTimes.length === 0 ? (
                   <div className="text-center py-10 opacity-50">
                     <CalendarIcon className="w-12 h-12 mx-auto mb-3 text-slate-300" />
                     <p className="font-semibold">Nenhuma consulta agendada.</p>
                   </div>
-                ) : (
+                ) : selectedDayAppointments.length === 0 && (selectedDayBlockedDoctors.length > 0 || selectedDayBlockedTimes.length > 0) ? null : (
                   selectedDayAppointments.map((apt) => {
                     const docColor = getDoctorColor(apt.doctor_id);
                     return (
@@ -1016,8 +1126,12 @@ export function Appointments() {
   );
 }
 
-function CalendarView({ currentMonth, setCurrentMonth, appointments, onDayClick }: {
-  currentMonth: Date, setCurrentMonth: (d: Date) => void, appointments: any[], onDayClick: (date: string) => void
+function CalendarView({ currentMonth, setCurrentMonth, appointments, onDayClick, doctors = [] }: {
+  currentMonth: Date;
+  setCurrentMonth: (d: Date) => void;
+  appointments: any[];
+  onDayClick: (date: string) => void;
+  doctors?: any[];
 }) {
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(monthStart);
@@ -1036,45 +1150,94 @@ function CalendarView({ currentMonth, setCurrentMonth, appointments, onDayClick 
         {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map(day => (
           <div key={day} className="text-center py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">{day}</div>
         ))}
-        {calendarDays.map((date, i) => {
+        {calendarDays.map((date) => {
           const formattedDate = format(date, 'yyyy-MM-dd');
           const dayApts = appointments.filter(apt => apt.date === formattedDate);
           const isCurrentMonth = isSameMonth(date, monthStart);
           const isTodayDate = isToday(date);
+
+          // Médicos com dia inteiro bloqueado
+          const blockedDayDoctors = doctors.filter(d => d.days_off?.includes(formattedDate));
+          const isFullyBlocked = blockedDayDoctors.length > 0 && blockedDayDoctors.length === doctors.length;
+
+          // Horários bloqueados de qualquer médico nesse dia
+          const blockedTimesForDay = doctors.flatMap(d =>
+            (d.blocked_times || [])
+              .filter((bt: any) => bt.date === formattedDate)
+              .map((bt: any) => ({ ...bt, doctorId: d.id, doctorName: d.name }))
+          ).sort((a: any, b: any) => a.start.localeCompare(b.start));
+
           return (
-            <div 
-              key={date.toString()} 
+            <div
+              key={date.toString()}
               onClick={() => isCurrentMonth && onDayClick(formattedDate)}
               className={cn(
-                "min-h-[90px] p-2 rounded-lg border transition-all cursor-pointer", 
-                isCurrentMonth ? "bg-white border-slate-100 hover:border-teal-300 hover:shadow-md" : "bg-slate-50/50 border-transparent opacity-40 cursor-default", 
+                "min-h-[90px] p-2 rounded-lg border transition-all cursor-pointer",
+                !isCurrentMonth && "bg-slate-50/50 border-transparent opacity-40 cursor-default",
+                isCurrentMonth && !isFullyBlocked && "bg-white border-slate-100 hover:border-teal-300 hover:shadow-md",
+                isCurrentMonth && isFullyBlocked && "bg-rose-50 border-slate-100 hover:border-slate-200",
                 isTodayDate && "ring-2 ring-teal-500/30 border-teal-500 shadow-sm"
               )}
             >
-              <div className="flex justify-between items-start mb-1">
-                <span className={cn("w-7 h-7 flex items-center justify-center rounded-md text-sm font-bold", isTodayDate ? "bg-teal-600 text-white" : "text-slate-400")}>{format(date, 'd')}</span>
-                <div className="flex gap-0.5">
-                  {Array.from(new Set(dayApts.map(a => a.doctor_id))).map(docId => (
-                    <span key={docId} className={cn("w-2 h-2 rounded-full", getDoctorColor(docId).dot)} />
-                  ))}
+              {isFullyBlocked ? (
+                <div className="relative w-full h-full min-h-[74px]">
+                  <span className={cn("w-7 h-7 flex items-center justify-center rounded-md text-sm font-bold absolute top-0 left-0", isTodayDate ? "bg-teal-600 text-white" : "text-rose-300")}>
+                    {format(date, 'd')}
+                  </span>
+                  <span className="absolute inset-0 flex items-center justify-center text-rose-300 text-2xl leading-none">⊘</span>
                 </div>
-              </div>
-              <div className="space-y-1 mt-1">
-                {dayApts.slice(0, 3).map(apt => {
-                  const docColor = getDoctorColor(apt.doctor_id);
-                  return (
-                    <div key={apt.id} className={cn(
-                      "text-[10px] font-bold px-1.5 py-0.5 rounded truncate border", 
-                      docColor.bg,
-                      docColor.text,
-                      docColor.border
+              ) : (
+                <>
+                  <div className="flex justify-between items-start mb-1">
+                    <span className={cn(
+                      "w-7 h-7 flex items-center justify-center rounded-md text-sm font-bold",
+                      isTodayDate ? "bg-teal-600 text-white" : "text-slate-400"
                     )}>
-                      {apt.time?.substring(0, 5)} - {apt.patient?.name?.split(' ')[0] || '?'}
+                      {format(date, 'd')}
+                    </span>
+                    <div className="flex gap-0.5 flex-wrap justify-end">
+                      {Array.from(new Set(dayApts.map((a: any) => a.doctor_id))).map(docId => (
+                        <span key={String(docId)} className={cn("w-2 h-2 rounded-full", getDoctorColor(String(docId)).dot)} />
+                      ))}
                     </div>
-                  );
-                })}
-                {dayApts.length > 3 && <div className="text-[10px] font-bold text-slate-400">+{dayApts.length - 3} mais</div>}
-              </div>
+                  </div>
+
+                  <div className="space-y-1 mt-1">
+                    {/* Dia parcialmente bloqueado (só alguns médicos) */}
+                    {blockedDayDoctors.length > 0 && (
+                      <div className="text-[10px] font-bold px-1.5 py-0.5 rounded truncate border bg-rose-50 text-rose-500 border-rose-100 flex items-center gap-1">
+                        <span className="shrink-0">⊘</span>
+                        <span className="truncate">{blockedDayDoctors.map((d: any) => d.name.split(' ')[0]).join(', ')}</span>
+                      </div>
+                    )}
+
+                    {/* Horários bloqueados */}
+                    {blockedTimesForDay.slice(0, 2).map((bt: any, i: number) => (
+                      <div key={i} className="px-1.5 py-0.5 rounded border bg-rose-50 text-rose-600 border-rose-200 flex flex-col leading-tight">
+                        {bt.name && <span className="text-[10px] font-black truncate">{bt.name}</span>}
+                        <span className="text-[9px] font-semibold opacity-70 truncate">⊘ {bt.start}–{bt.end}</span>
+                      </div>
+                    ))}
+                    {blockedTimesForDay.length > 2 && (
+                      <div className="text-[10px] font-bold text-rose-400">+{blockedTimesForDay.length - 2} bloq.</div>
+                    )}
+
+                    {/* Agendamentos */}
+                    {dayApts.slice(0, Math.max(0, 3 - Math.min(2, blockedTimesForDay.length))).map((apt: any) => {
+                      const docColor = getDoctorColor(apt.doctor_id);
+                      return (
+                        <div key={apt.id} className={cn(
+                          "text-[10px] font-bold px-1.5 py-0.5 rounded truncate border",
+                          docColor.bg, docColor.text, docColor.border
+                        )}>
+                          {apt.time?.substring(0, 5)} - {apt.patient?.name?.split(' ')[0] || '?'}
+                        </div>
+                      );
+                    })}
+                    {dayApts.length > 3 && <div className="text-[10px] font-bold text-slate-400">+{dayApts.length - 3} mais</div>}
+                  </div>
+                </>
+              )}
             </div>
           );
         })}

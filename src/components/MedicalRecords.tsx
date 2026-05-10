@@ -5,7 +5,7 @@ import {
     Search, FileText, History, Plus, User, Calendar, Scale, Ruler,
     AlertCircle, Stethoscope, Loader2, Trash2, Edit2, X,
     ClipboardList, Printer, Pill, FlaskConical, Microscope, ChevronDown, ChevronUp,
-    Heart, Thermometer,
+    Heart, Thermometer, Lock,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -158,7 +158,7 @@ function RecordPrescriptions({ recordId, prescriptions, examRequests, doctors, p
 }
 
 // ─── Conteúdo (só monta após autenticação) ───────────────────────────────────
-function MedicalRecordsContent({ encKey }: { encKey: CryptoKey }) {
+function MedicalRecordsContent({ encKey, onLock }: { encKey: CryptoKey; onLock: () => void }) {
     const { clinicName } = useAuth();
     const { data: patients, loading: patientsLoading, create: createPatient, update: updatePatient, remove: removePatient, refetch: refetchPatients } = usePatients();
     const { data: doctors } = useDoctors();
@@ -440,9 +440,14 @@ function MedicalRecordsContent({ encKey }: { encKey: CryptoKey }) {
                     {/* Timeline */}
                     <div className="flex items-center justify-between">
                         <h3 className="text-base font-bold text-slate-700 flex items-center gap-2"><History className="w-4 h-4 text-teal-600" /> Linha do Tempo</h3>
-                        <Button onClick={handleOpenCreateRecord} size="sm" className="h-8 font-bold text-[10px] uppercase gap-1.5 bg-teal-600 hover:bg-teal-700">
-                            <Plus className="w-3.5 h-3.5" /> Nova Consulta
-                        </Button>
+                        <div className="flex items-center gap-2">
+                            <button onClick={onLock} title="Bloquear prontuário" className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all">
+                                <Lock className="w-4 h-4" />
+                            </button>
+                            <Button onClick={handleOpenCreateRecord} size="sm" className="h-8 font-bold text-[10px] uppercase gap-1.5 bg-teal-600 hover:bg-teal-700">
+                                <Plus className="w-3.5 h-3.5" /> Nova Consulta
+                            </Button>
+                        </div>
                     </div>
 
                     {isLoading ? (
@@ -774,6 +779,29 @@ function MedicalRecordsContent({ encKey }: { encKey: CryptoKey }) {
 }
 
 // ─── Gate de autenticação ─────────────────────────────────────────────────────
+const SESSION_HOURS = 8;
+
+function storageKey(clinicId: string, userId: string) {
+    return `prontuario_enc_${clinicId}_${userId}`;
+}
+
+function readCachedKey(clinicId: string, userId: string): Promise<CryptoKey> | null {
+    try {
+        const raw = sessionStorage.getItem(storageKey(clinicId, userId));
+        if (!raw) return null;
+        const { key, expiresAt } = JSON.parse(raw);
+        if (!key || !expiresAt || new Date(expiresAt) <= new Date()) return null;
+        return importKey(key);
+    } catch {
+        return null;
+    }
+}
+
+function writeCachedKey(clinicId: string, userId: string, b64: string) {
+    const expiresAt = new Date(Date.now() + SESSION_HOURS * 3600 * 1000).toISOString();
+    sessionStorage.setItem(storageKey(clinicId, userId), JSON.stringify({ key: b64, expiresAt }));
+}
+
 export function MedicalRecords() {
     const { profile, activeClinicId } = useAuth();
 
@@ -782,9 +810,9 @@ export function MedicalRecords() {
 
     useEffect(() => {
         if (!activeClinicId || !profile?.id) return;
-        const stored = sessionStorage.getItem(`prontuario_enc_${activeClinicId}_${profile.id}`);
-        if (stored) {
-            importKey(stored)
+        const promise = readCachedKey(activeClinicId, profile.id);
+        if (promise) {
+            promise
                 .then(key => { setEncKey(key); setAuthorized(true); })
                 .catch(() => {});
         }
@@ -792,13 +820,20 @@ export function MedicalRecords() {
 
     const handleAuthorized = async (email: string, key: CryptoKey) => {
         const b64 = await exportKey(key);
-        sessionStorage.setItem(`prontuario_enc_${activeClinicId}_${profile?.id}`, b64);
+        writeCachedKey(activeClinicId!, profile!.id, b64);
         setEncKey(key);
         setAuthorized(true);
     };
 
+    const handleLock = () => {
+        if (activeClinicId && profile?.id)
+            sessionStorage.removeItem(storageKey(activeClinicId, profile.id));
+        setEncKey(null);
+        setAuthorized(false);
+    };
+
     if (authorized && encKey) {
-        return <MedicalRecordsContent encKey={encKey} />;
+        return <MedicalRecordsContent encKey={encKey} onLock={handleLock} />;
     }
 
     return <ProntuarioPasswordModal onAuthorized={handleAuthorized} />;

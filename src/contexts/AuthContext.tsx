@@ -218,11 +218,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     try {
-      sessionStorage.removeItem('activeClinicId');
-      sessionStorage.removeItem('activeClinicName');
-      Object.keys(sessionStorage)
-        .filter(k => k.startsWith('prontuario_enc_'))
-        .forEach(k => sessionStorage.removeItem(k));
+      sessionStorage.clear();
       const { error } = await supabase.auth.signOut();
       if (error) console.error('AuthContext: Sign out error:', error);
     } catch (error) {

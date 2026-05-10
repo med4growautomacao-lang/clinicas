@@ -170,7 +170,7 @@ export function ProntuarioPasswordModal({ onAuthorized }: Props) {
                 placeholder="PIN de 4 dígitos"
                 maxLength={4}
                 inputMode="numeric"
-                className="w-full pl-9 pr-10 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-300 font-mono font-bold text-xl text-center tracking-[8px] transition-all"
+                className="w-full pl-9 pr-10 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-300 font-mono font-bold text-xl text-center tracking-[8px] transition-all placeholder:tracking-normal placeholder:font-sans placeholder:font-normal placeholder:text-sm placeholder:text-slate-400"
                 autoFocus
               />
               <button

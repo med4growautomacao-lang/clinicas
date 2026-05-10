@@ -165,7 +165,7 @@ function MedicalRecordsContent({ encKey }: { encKey: CryptoKey }) {
     const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
 
-    const { data: records, loading: recordsLoading, create: createRecord, update: updateRecord, remove: removeRecord } = useMedicalRecords(selectedPatient?.id || null);
+    const { data: records, loading: recordsLoading, create: createRecord, update: updateRecord, remove: removeRecord, refetch: refetchRecords } = useMedicalRecords(selectedPatient?.id || null);
     const { data: prescriptions, loading: prescLoading, create: createPrescription, remove: removePrescription } = usePrescriptions(selectedPatient?.id || null);
     const { data: examRequests, loading: examLoading, create: createExamRequest, remove: removeExamRequest } = useExamRequests(selectedPatient?.id || null);
 
@@ -292,6 +292,7 @@ function MedicalRecordsContent({ encKey }: { encKey: CryptoKey }) {
             };
             if (selectedRecord) await updateRecord(selectedRecord.id, enc);
             else await createRecord(enc);
+            await refetchRecords(true);
             setShowRecordModal(false);
         } catch (err) {
             console.error('[Prontuário] Erro na criptografia:', err);
@@ -300,7 +301,7 @@ function MedicalRecordsContent({ encKey }: { encKey: CryptoKey }) {
             setSubmitting(false);
         }
     };
-    const handleDeleteRecord = async () => { if (!selectedRecord) return; setSubmitting(true); await removeRecord(selectedRecord.id); setShowDeleteRecordConfirm(false); setSelectedRecord(null); setSubmitting(false); };
+    const handleDeleteRecord = async () => { if (!selectedRecord) return; setSubmitting(true); await removeRecord(selectedRecord.id); await refetchRecords(true); setShowDeleteRecordConfirm(false); setSelectedRecord(null); setSubmitting(false); };
 
     // Prescription actions
     const openNewPresc = (recordId: string) => { setPrescRecordId(recordId); setPrescDoctorId(doctors[0]?.id || ''); setPrescMeds([emptyMed()]); setPrescNotes(''); setShowPrescModal(true); };

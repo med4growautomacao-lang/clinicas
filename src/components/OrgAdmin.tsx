@@ -97,6 +97,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
   const [tokenFocused, setTokenFocused] = useState(false);
   const [clinicSearch, setClinicSearch] = useState('');
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [menuDropUp, setMenuDropUp] = useState(false);
 
   // Permissions
   const canManageClinics = userRole === 'org_owner' || userRole === 'org_admin';
@@ -592,10 +593,11 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
               <p className="text-slate-500 font-medium text-sm">Nenhuma clínica vinculada a esta organização.</p>
             </div>
           ) : (
-            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm mb-8">
+              <div className="max-h-[calc(100vh-280px)] overflow-y-auto custom-scrollbar rounded-2xl">
               <table className="w-full">
-                <thead>
-                  <tr className="text-left text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-100 bg-slate-50/50">
+                <thead className="sticky top-0 z-10 bg-slate-50">
+                  <tr className="text-left text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-100">
                     <th className="px-6 py-3">Cliente</th>
                     <th className="px-6 py-3">Responsáveis</th>
                     <th className="px-6 py-3">Funções</th>
@@ -732,13 +734,26 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                             </button>
                             <div className="relative">
                               <button
-                                onClick={e => { e.stopPropagation(); setOpenMenuId(openMenuId === clinic.id ? null : clinic.id); }}
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  if (openMenuId === clinic.id) {
+                                    setOpenMenuId(null);
+                                  } else {
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    const spaceBelow = window.innerHeight - rect.bottom;
+                                    setMenuDropUp(spaceBelow < 220);
+                                    setOpenMenuId(clinic.id);
+                                  }
+                                }}
                                 className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 transition-colors"
                               >
                                 <MoreVertical className="w-3.5 h-3.5 text-slate-400" />
                               </button>
                               {openMenuId === clinic.id && (
-                                <div className="absolute right-0 top-7 z-50 bg-white border border-slate-200 rounded-xl shadow-lg py-1 min-w-[180px]">
+                                <div className={cn(
+                                  "absolute right-0 z-50 bg-white border border-slate-200 rounded-xl shadow-lg py-1 min-w-[180px]",
+                                  menuDropUp ? "bottom-9" : "top-9"
+                                )}>
                                   {canAddClinicUsers && (
                                     <button
                                       onClick={e => { e.stopPropagation(); setClinicUsersView({ id: clinic.id, name: clinic.name }); fetchClinicUsers(clinic.id); setOpenMenuId(null); }}
@@ -802,6 +817,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                   })}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
         </div>

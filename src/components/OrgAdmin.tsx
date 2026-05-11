@@ -1,9 +1,14 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
-import { Building2, Users, ArrowRight, LogIn, Loader2, X, Eye, EyeOff, Search, MoreVertical, UserPlus, Wifi, WifiOff, Settings, UserCheck, TrendingUp, UserCog, ChevronDown, Check, Trash2 } from "lucide-react";
+import { Building2, Users, ArrowRight, LogIn, Loader2, X, Eye, EyeOff, Search, MoreVertical, UserPlus, Wifi, WifiOff, Settings, UserCheck, TrendingUp, UserCog, ChevronDown, Check, Trash2, MessageCircle, Globe, FileText, BarChart3, Search as SearchIcon, LayoutGrid, List as ListIcon, Stethoscope, Briefcase, AlertCircle, Plus, Building, Activity } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
+import GoogleLogo from "../assets/logos/Logo Googleads.png";
+import MetaLogo from "../assets/logos/Logo Metaads.png";
+import WhatsappLogo from "../assets/logos/Logo Whatsapp.png";
+
+type ChannelStatus = 'none' | 'inactive' | 'active';
 
 interface Clinic {
   id: string;
@@ -14,6 +19,10 @@ interface Clinic {
   whatsapp_status?: string | null;
   category?: string | null;
   features?: { feature_followup?: boolean; feature_ia?: boolean } | null;
+  meta_status?: ChannelStatus;
+  google_status?: ChannelStatus;
+  site_status?: ChannelStatus;
+  forms_status?: ChannelStatus;
 }
 
 interface ClinicUser {
@@ -98,9 +107,10 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
 
   // Modal: nova clínica
   const [showClinicModal, setShowClinicModal] = useState(false);
-  const [clinicForm, setClinicForm] = useState<{ name: string; plan: string; category: string; ownerName: string; ownerEmail: string; ownerPassword: string; feature_followup: boolean; feature_ia: boolean }>({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '', feature_followup: true, feature_ia: true });
+  const [clinicForm, setClinicForm] = useState<{ name: string; plan: string; category: string; ownerName: string; ownerEmail: string; ownerPassword: string; feature_followup: boolean; feature_ia: boolean; meta_status: ChannelStatus; google_status: ChannelStatus; site_status: ChannelStatus; forms_status: ChannelStatus }>({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '', feature_followup: true, feature_ia: true, meta_status: 'none', google_status: 'none', site_status: 'none', forms_status: 'none' });
   const [categoryFilter, setCategoryFilter] = useState('');
   const [memberFilters, setMemberFilters] = useState<Record<string, string>>({});
+  const [inactiveFilter, setInactiveFilter] = useState<string>(''); // '' | 'any' | 'meta' | 'google' | 'site' | 'forms' | 'whatsapp'
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [clinicSaving, setClinicSaving] = useState(false);
   const [clinicError, setClinicError] = useState('');
@@ -149,7 +159,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
     if (canSeeAll) {
       const { data } = await supabase
         .from("clinics")
-        .select("id, name, plan, logo_url, organization_id, category, features")
+        .select("id, name, plan, logo_url, organization_id, category, features, meta_status, google_status, site_status, forms_status")
         .eq("organization_id", profile.organization_id)
         .order("name");
       clinicsData = data || [];
@@ -163,7 +173,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
       if (assignedIds.length > 0) {
         const { data } = await supabase
           .from("clinics")
-          .select("id, name, plan, logo_url, organization_id, category, features")
+          .select("id, name, plan, logo_url, organization_id, category, features, meta_status, google_status, site_status, forms_status")
           .in("id", assignedIds)
           .order("name");
         clinicsData = data || [];
@@ -248,7 +258,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
     setClinicSaving(false);
     if (error) { setClinicError(error.message); return; }
     setShowClinicModal(false);
-    setClinicForm({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '', feature_followup: true, feature_ia: true });
+    setClinicForm({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '', feature_followup: true, feature_ia: true, meta_status: 'none', google_status: 'none', site_status: 'none', forms_status: 'none' });
     fetchClinics();
   };
 
@@ -262,13 +272,17 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
         plan: clinicForm.plan,
         category: clinicForm.category || 'clinica',
         features: { feature_followup: clinicForm.feature_followup, feature_ia: clinicForm.feature_ia },
+        meta_status: clinicForm.meta_status,
+        google_status: clinicForm.google_status,
+        site_status: clinicForm.site_status,
+        forms_status: clinicForm.forms_status,
       })
       .eq('id', editClinicTarget.id);
-    
+
     setClinicSaving(false);
     if (error) { setClinicError(error.message); return; }
     setEditClinicTarget(null);
-    setClinicForm({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '', feature_followup: true, feature_ia: true });
+    setClinicForm({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '', feature_followup: true, feature_ia: true, meta_status: 'none', google_status: 'none', site_status: 'none', forms_status: 'none' });
     fetchClinics();
   };
 
@@ -512,6 +526,35 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                 ]}
                 onSelect={v => setCategoryFilter(v)}
               />
+              {(() => {
+                const inactiveCounts = {
+                  any:      clinics.filter(c => c.whatsapp_status !== 'connected' || c.meta_status === 'inactive' || c.google_status === 'inactive' || c.site_status === 'inactive' || c.forms_status === 'inactive').length,
+                  whatsapp: clinics.filter(c => c.whatsapp_status !== 'connected').length,
+                  meta:     clinics.filter(c => c.meta_status === 'inactive').length,
+                  google:   clinics.filter(c => c.google_status === 'inactive').length,
+                  site:     clinics.filter(c => c.site_status === 'inactive').length,
+                  forms:    clinics.filter(c => c.forms_status === 'inactive').length,
+                };
+                const labels: Record<string, string> = { any: 'Qualquer inativo', whatsapp: 'WhatsApp inativo', meta: 'Meta inativo', google: 'Google inativo', site: 'Site inativo', forms: 'Forms inativo' };
+                return (
+                  <DropdownFilter
+                    id="inativos"
+                    label={inactiveFilter ? labels[inactiveFilter] : 'Inativos'}
+                    active={inactiveFilter !== ''}
+                    selected={inactiveFilter}
+                    options={[
+                      { value: '', label: 'Todos' },
+                      { value: 'any',      label: 'Qualquer inativo', count: inactiveCounts.any },
+                      { value: 'whatsapp', label: 'WhatsApp inativo', count: inactiveCounts.whatsapp },
+                      { value: 'meta',     label: 'Meta inativo',     count: inactiveCounts.meta },
+                      { value: 'google',   label: 'Google inativo',   count: inactiveCounts.google },
+                      { value: 'site',     label: 'Site inativo',     count: inactiveCounts.site },
+                      { value: 'forms',    label: 'Forms inativo',    count: inactiveCounts.forms },
+                    ]}
+                    onSelect={v => setInactiveFilter(v)}
+                  />
+                );
+              })()}
               {activeFunctions.map(fn => {
                 const usersWithFn = orgUsers.filter(u => clinicMembers.some(m => m.function === fn.value && m.org_user_id === u.id));
                 const selectedId = memberFilters[fn.value] || '';
@@ -549,166 +592,216 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
               <p className="text-slate-500 font-medium text-sm">Nenhuma clínica vinculada a esta organização.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-              {clinics.filter(c =>
-                c.name.toLowerCase().includes(clinicSearch.toLowerCase()) &&
-                (categoryFilter === '' || c.category === categoryFilter) &&
-                Object.entries(memberFilters).every(([fn, uid]) =>
-                  !uid || clinicMembers.some(m => m.clinic_id === c.id && m.function === fn && m.org_user_id === uid)
-                )
-              ).map((clinic) => {
-                const members = clinicMembers.filter(m => m.clinic_id === clinic.id);
-                return (
-                  <motion.div
-                    key={clinic.id}
-                    whileHover={{ y: -1 }}
-                    className={cn(
-                      "p-3 rounded-xl border shadow-sm transition-all relative",
-                      activeClinicId === clinic.id
-                        ? "bg-violet-50 border-violet-300 shadow-violet-100"
-                        : "bg-white border-slate-200 hover:border-violet-200 hover:shadow-md"
-                    )}
-                  >
-                    {/* Header row */}
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="w-7 h-7 rounded-lg bg-violet-100 flex items-center justify-center">
-                        <Building2 className="w-3.5 h-3.5 text-violet-600" />
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <span className={cn(
-                          "text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-full",
-                          clinic.plan === 'enterprise' ? "bg-amber-100 text-amber-700"
-                            : clinic.plan === 'pro' ? "bg-violet-100 text-violet-700"
-                            : "bg-slate-100 text-slate-500"
-                        )}>
-                          {clinic.plan}
-                        </span>
-                        <div className="relative">
-                          <button
-                            onClick={e => { e.stopPropagation(); setOpenMenuId(openMenuId === clinic.id ? null : clinic.id); }}
-                            className="w-6 h-6 flex items-center justify-center rounded-lg hover:bg-slate-100 transition-colors"
-                          >
-                            <MoreVertical className="w-3.5 h-3.5 text-slate-400" />
-                          </button>
-                          {openMenuId === clinic.id && (
-                            <div className="absolute right-0 top-7 z-50 bg-white border border-slate-200 rounded-xl shadow-lg py-1 min-w-[160px]">
-                              {canAddClinicUsers && (
-                                <button
-                                  onClick={e => { e.stopPropagation(); setClinicUsersView({ id: clinic.id, name: clinic.name }); fetchClinicUsers(clinic.id); setOpenMenuId(null); }}
-                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
-                                >
-                                  <Users className="w-3.5 h-3.5 text-teal-600" />
-                                  Usuários da Clínica
-                                </button>
-                              )}
-                              {canSetResponsaveis && (
-                                <button
-                                  onClick={e => {
-                                    e.stopPropagation();
-                                    setResponsibleTarget(clinic);
-                                    const form: Record<string, string> = {};
-                                    CLINIC_FUNCTIONS.forEach(f => {
-                                      const m = clinicMembers.find(m => m.clinic_id === clinic.id && m.function === f.value);
-                                      form[f.value] = m?.org_user_id || '';
-                                    });
-                                    setResponsibleForm(form);
-                                    setOpenMenuId(null);
-                                  }}
-                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
-                                >
-                                  <UserCheck className="w-3.5 h-3.5 text-violet-600" />
-                                  Definir Responsáveis
-                                </button>
-                              )}
-                              {canManageClinics && (
-                                <button
-                                  onClick={e => {
-                                    e.stopPropagation();
-                                    setEditClinicTarget(clinic);
-                                    setClinicForm({
-                                      name: clinic.name,
-                                      plan: clinic.plan,
-                                      category: clinic.category || '',
-                                      ownerName: '', ownerEmail: '', ownerPassword: '',
-                                      feature_followup: clinic.features?.feature_followup !== false,
-                                      feature_ia: clinic.features?.feature_ia !== false,
-                                    });
-                                    setOpenMenuId(null);
-                                  }}
-                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
-                                >
-                                  <Settings className="w-3.5 h-3.5 text-blue-600" />
-                                  Editar Clínica
-                                </button>
-                              )}
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+              <table className="w-full">
+                <thead>
+                  <tr className="text-left text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-100 bg-slate-50/50">
+                    <th className="px-6 py-3">Cliente</th>
+                    <th className="px-6 py-3">Responsáveis</th>
+                    <th className="px-6 py-3">Funções</th>
+                    <th className="px-6 py-3">Plano</th>
+                    <th className="px-6 py-3 text-right">Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {clinics.filter(c =>
+                    c.name.toLowerCase().includes(clinicSearch.toLowerCase()) &&
+                    (categoryFilter === '' || c.category === categoryFilter) &&
+                    Object.entries(memberFilters).every(([fn, uid]) =>
+                      !uid || clinicMembers.some(m => m.clinic_id === c.id && m.function === fn && m.org_user_id === uid)
+                    ) &&
+                    (inactiveFilter === '' ||
+                      (inactiveFilter === 'any'      && (c.whatsapp_status !== 'connected' || c.meta_status === 'inactive' || c.google_status === 'inactive' || c.site_status === 'inactive' || c.forms_status === 'inactive')) ||
+                      (inactiveFilter === 'whatsapp' && c.whatsapp_status !== 'connected') ||
+                      (inactiveFilter === 'meta'     && c.meta_status === 'inactive') ||
+                      (inactiveFilter === 'google'   && c.google_status === 'inactive') ||
+                      (inactiveFilter === 'site'     && c.site_status === 'inactive') ||
+                      (inactiveFilter === 'forms'    && c.forms_status === 'inactive'))
+                  ).map((clinic) => {
+                    const members = clinicMembers.filter(m => m.clinic_id === clinic.id);
+                    const isOutro = clinic.category === 'outro';
+                    const TypeIcon = isOutro ? Building : Stethoscope;
+                    const channelsAll = [
+                      { key: 'whatsapp', label: 'WhatsApp', img: WhatsappLogo, has: true,                                                       active: clinic.whatsapp_status === 'connected' },
+                      { key: 'meta',     label: 'Meta',     img: MetaLogo,     has: !!clinic.meta_status   && clinic.meta_status   !== 'none', active: clinic.meta_status   === 'active' },
+                      { key: 'google',   label: 'Google',   img: GoogleLogo,   has: !!clinic.google_status && clinic.google_status !== 'none', active: clinic.google_status === 'active' },
+                      { key: 'site',     label: 'Site',     Icon: Globe,       iconCls: 'text-teal-600',   bgCls: 'bg-teal-50 border-teal-100',     has: !!clinic.site_status   && clinic.site_status   !== 'none', active: clinic.site_status   === 'active' },
+                      { key: 'forms',    label: 'Forms',    Icon: FileText,    iconCls: 'text-indigo-600', bgCls: 'bg-indigo-50 border-indigo-100', has: !!clinic.forms_status  && clinic.forms_status  !== 'none', active: clinic.forms_status  === 'active' },
+                    ];
+                    const channelsList = channelsAll.filter(c => c.has);
+
+                    return (
+                      <tr key={clinic.id} className={cn(
+                        "border-b border-slate-50 last:border-0 hover:bg-slate-50/50 transition-colors",
+                        activeClinicId === clinic.id && "bg-violet-50/40"
+                      )}>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <div className={cn(
+                              "w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border shadow-sm",
+                              isOutro
+                                ? "bg-gradient-to-br from-white to-slate-50 border-slate-200"
+                                : "bg-gradient-to-br from-white to-emerald-50/40 border-violet-100"
+                            )}>
+                              <TypeIcon className={cn("w-4 h-4", isOutro ? "text-slate-600" : "text-violet-600")} strokeWidth={2.5} />
                             </div>
+                            <p className="text-sm font-bold text-slate-900">{clinic.name}</p>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          {members.length > 0 ? (
+                            <div className="flex flex-col gap-0.5">
+                              {CLINIC_FUNCTIONS.map(fn => {
+                                const m = members.find(m => m.function === fn.value);
+                                if (!m) return null;
+                                const u = orgUsers.find(u => u.id === m.org_user_id);
+                                if (!u) return null;
+                                return (
+                                  <span key={fn.value} className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+                                    <fn.Icon className={cn("w-3 h-3 shrink-0", fn.color)} />
+                                    <span className={cn("shrink-0 text-[10px] uppercase tracking-wider", fn.color)}>{fn.label}</span>
+                                    <span className="text-slate-300">·</span>
+                                    <span className="truncate text-slate-700">{u.full_name || u.email}</span>
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <span className="text-[11px] text-slate-300 italic">Sem responsáveis</span>
                           )}
-                        </div>
-                      </div>
-                    </div>
-
-                    <p className="text-xs font-bold text-slate-900 mb-1.5 truncate">{clinic.name}</p>
-
-                    {/* Responsáveis */}
-                    {members.length > 0 && (
-                      <div className="mb-1.5 space-y-0.5">
-                        {CLINIC_FUNCTIONS.map(fn => {
-                          const m = members.find(m => m.function === fn.value);
-                          if (!m) return null;
-                          const u = orgUsers.find(u => u.id === m.org_user_id);
-                          if (!u) return null;
-                          return (
-                            <div key={fn.value} className="flex items-center gap-1 text-[9px] font-semibold text-slate-500 truncate">
-                              <fn.Icon className={cn("w-2.5 h-2.5 shrink-0", fn.color)} />
-                              <span className={cn("shrink-0", fn.color)}>{fn.label}</span>
-                              <span className="text-slate-300">·</span>
-                              <span className="truncate">{u.full_name || u.email}</span>
+                        </td>
+                        <td className="px-6 py-4">
+                          {channelsList.length > 0 ? (
+                            <div className="flex items-center gap-1.5">
+                              {channelsList.map((ch: any) => (
+                                <div
+                                  key={ch.key}
+                                  title={`${ch.label} ${ch.active ? 'ativo' : 'inativo'}`}
+                                  className={cn(
+                                    "relative w-8 h-8 rounded-lg border flex items-center justify-center bg-white",
+                                    ch.active
+                                      ? (ch.bgCls || "border-slate-200")
+                                      : "border-slate-200 grayscale opacity-50"
+                                  )}
+                                >
+                                  {ch.img ? (
+                                    <img src={ch.img} alt={ch.label} className="w-5 h-5 object-contain" />
+                                  ) : ch.Icon ? (
+                                    <ch.Icon className={cn("w-3.5 h-3.5", ch.active ? ch.iconCls : "text-slate-400")} />
+                                  ) : null}
+                                  <span className={cn(
+                                    "absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border-2 border-white",
+                                    ch.active ? "bg-emerald-500 shadow-sm shadow-emerald-200" : "bg-slate-300"
+                                  )} />
+                                </div>
+                              ))}
                             </div>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {/* Status WhatsApp */}
-                    <div className={cn(
-                      "flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-[10px] font-bold mb-1.5 border",
-                      clinic.whatsapp_status === 'connected'
-                        ? "bg-emerald-700 text-white border-emerald-800"
-                        : "bg-slate-50 text-slate-400 border-slate-100"
-                    )}>
-                      {clinic.whatsapp_status === 'connected'
-                        ? <><Wifi className="w-3 h-3" /> WhatsApp Conectado</>
-                        : <><WifiOff className="w-3 h-3" /> WhatsApp Desconectado</>
-                      }
-                    </div>
-
-                    <button
-                      onClick={() => {
-                        if (activeClinicId === clinic.id) {
-                          setActiveClinicId(null);
-                          setActiveClinicName(null);
-                        } else {
-                          setActiveClinicId(clinic.id);
-                          setActiveClinicName(clinic.name);
-                          onEnterClinic();
-                        }
-                      }}
-                      className={cn(
-                        "w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-[10px] font-bold transition-all",
-                        activeClinicId === clinic.id
-                          ? "bg-violet-600 text-white hover:bg-violet-700"
-                          : "bg-violet-500 text-white hover:bg-violet-600"
-                      )}
-                    >
-                      {activeClinicId === clinic.id ? (
-                        <><LogIn className="w-3 h-3" /> Visualizando</>
-                      ) : (
-                        <><ArrowRight className="w-3 h-3" /> Visualizar</>
-                      )}
-                    </button>
-                  </motion.div>
-                );
-              })}
+                          ) : (
+                            <span className="text-[11px] text-slate-300 italic">—</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className={cn(
+                            "inline-flex items-center text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-md",
+                            clinic.plan === 'enterprise' ? "bg-amber-100 text-amber-700"
+                              : clinic.plan === 'pro' ? "bg-violet-100 text-violet-700"
+                              : "bg-slate-100 text-slate-500"
+                          )}>{clinic.plan}</span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => {
+                                if (activeClinicId === clinic.id) {
+                                  setActiveClinicId(null);
+                                  setActiveClinicName(null);
+                                } else {
+                                  setActiveClinicId(clinic.id);
+                                  setActiveClinicName(clinic.name);
+                                  onEnterClinic();
+                                }
+                              }}
+                              className={cn(
+                                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                                activeClinicId === clinic.id
+                                  ? "bg-violet-600 text-white hover:bg-violet-700"
+                                  : "bg-violet-500 text-white hover:bg-violet-600"
+                              )}
+                            >
+                              {activeClinicId === clinic.id ? (<><LogIn className="w-3 h-3" /> Visualizando</>) : (<><ArrowRight className="w-3 h-3" /> Visualizar</>)}
+                            </button>
+                            <div className="relative">
+                              <button
+                                onClick={e => { e.stopPropagation(); setOpenMenuId(openMenuId === clinic.id ? null : clinic.id); }}
+                                className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 transition-colors"
+                              >
+                                <MoreVertical className="w-3.5 h-3.5 text-slate-400" />
+                              </button>
+                              {openMenuId === clinic.id && (
+                                <div className="absolute right-0 top-7 z-50 bg-white border border-slate-200 rounded-xl shadow-lg py-1 min-w-[180px]">
+                                  {canAddClinicUsers && (
+                                    <button
+                                      onClick={e => { e.stopPropagation(); setClinicUsersView({ id: clinic.id, name: clinic.name }); fetchClinicUsers(clinic.id); setOpenMenuId(null); }}
+                                      className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                                    >
+                                      <Users className="w-3.5 h-3.5 text-teal-600" />
+                                      Usuários da Clínica
+                                    </button>
+                                  )}
+                                  {canSetResponsaveis && (
+                                    <button
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        setResponsibleTarget(clinic);
+                                        const form: Record<string, string> = {};
+                                        CLINIC_FUNCTIONS.forEach(f => {
+                                          const m = clinicMembers.find(m => m.clinic_id === clinic.id && m.function === f.value);
+                                          form[f.value] = m?.org_user_id || '';
+                                        });
+                                        setResponsibleForm(form);
+                                        setOpenMenuId(null);
+                                      }}
+                                      className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                                    >
+                                      <UserCheck className="w-3.5 h-3.5 text-violet-600" />
+                                      Definir Responsáveis
+                                    </button>
+                                  )}
+                                  {canManageClinics && (
+                                    <button
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        setEditClinicTarget(clinic);
+                                        setClinicForm({
+                                          name: clinic.name,
+                                          plan: clinic.plan,
+                                          category: clinic.category || '',
+                                          ownerName: '', ownerEmail: '', ownerPassword: '',
+                                          feature_followup: clinic.features?.feature_followup !== false,
+                                          feature_ia: clinic.features?.feature_ia !== false,
+                                          meta_status: clinic.meta_status || 'none',
+                                          google_status: clinic.google_status || 'none',
+                                          site_status: clinic.site_status || 'none',
+                                          forms_status: clinic.forms_status || 'none',
+                                        });
+                                        setOpenMenuId(null);
+                                      }}
+                                      className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                                    >
+                                      <Settings className="w-3.5 h-3.5 text-blue-600" />
+                                      Editar Clínica
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
@@ -933,6 +1026,53 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                           <div className={cn("w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all shadow-sm", clinicForm.feature_ia ? "right-0.5" : "left-0.5")} />
                         </button>
                       </div>
+                    </div>
+                  </div>
+                )}
+
+                {editClinicTarget && (
+                  <div className="pt-1 border-t border-slate-100">
+                    <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Funções</p>
+                    <p className="text-[10px] text-slate-400 mb-3">Indique quais funções este cliente possui e quais estão ativas no momento.</p>
+                    <div className="space-y-2">
+                      {([
+                        { key: 'meta_status', label: 'Meta Ads', desc: 'Facebook / Instagram Ads' },
+                        { key: 'google_status', label: 'Google Ads', desc: 'Campanhas no Google' },
+                        { key: 'site_status', label: 'Site institucional', desc: 'Página/landing pública' },
+                        { key: 'forms_status', label: 'Formulários', desc: 'Lead forms / captação' },
+                      ] as const).map((ch) => {
+                        const current = clinicForm[ch.key];
+                        const options: { v: ChannelStatus; label: string; cls: string }[] = [
+                          { v: 'none', label: 'Não tem', cls: 'bg-slate-200 text-slate-600' },
+                          { v: 'inactive', label: 'Inativo', cls: 'bg-amber-500 text-white' },
+                          { v: 'active', label: 'Ativo', cls: 'bg-emerald-600 text-white' },
+                        ];
+                        return (
+                          <div key={ch.key} className="py-2 px-3 rounded-xl bg-slate-50 border border-slate-100">
+                            <div className="flex items-center justify-between mb-1.5">
+                              <div>
+                                <p className="text-xs font-bold text-slate-700">{ch.label}</p>
+                                <p className="text-[10px] text-slate-400">{ch.desc}</p>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-3 gap-1.5">
+                              {options.map((o) => (
+                                <button
+                                  key={o.v}
+                                  type="button"
+                                  onClick={() => setClinicForm(f => ({ ...f, [ch.key]: o.v }))}
+                                  className={cn(
+                                    "py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-wider transition-all",
+                                    current === o.v ? o.cls + ' border-transparent shadow-sm' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+                                  )}
+                                >
+                                  {o.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}

@@ -1084,6 +1084,10 @@ export interface Clinic {
   google_ad_mcc_id?: string | null;
   google_ad_mcc_token?: string | null;
   features?: { feature_followup?: boolean; feature_ia?: boolean } | null;
+  meta_status?: 'none' | 'inactive' | 'active';
+  google_status?: 'none' | 'inactive' | 'active';
+  site_status?: 'none' | 'inactive' | 'active';
+  forms_status?: 'none' | 'inactive' | 'active';
 }
 
 export interface AIConfig {

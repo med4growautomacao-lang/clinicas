@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<title>Mockup: Novo card de cliente</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  .grid-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.5rem; }
+</style>
+</head>
+<body class="bg-slate-50 p-10">
+
+<h1 class="text-3xl font-bold text-slate-900 mb-2">Mockup — Card de Cliente</h1>
+<p class="text-sm text-slate-500 mb-8">Grid de canais (WhatsApp, Meta, Google, Site, Forms) com status visual. Bolinha verde = ativo, cinza = inativo.</p>
+
+<div class="grid-cards">
+
+  <!-- Card 1: Aline Morais — 3 de 5 ativos -->
+  <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden p-5">
+    <div class="flex items-start justify-between mb-3">
+      <div class="w-10 h-10 bg-violet-100 rounded-xl flex items-center justify-center">
+        <svg class="w-5 h-5 text-violet-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-100 px-2 py-1 rounded-md uppercase tracking-widest">Pro</span>
+        <button class="text-slate-400 hover:text-slate-700">⋮</button>
+      </div>
+    </div>
+
+    <h3 class="text-base font-bold text-slate-900">Aline Morais</h3>
+    <p class="text-xs text-slate-500 mb-4">Gestor de Tráfego · Yago Blanco</p>
+
+    <div class="border-t border-slate-100 pt-4 mb-3">
+      <div class="grid grid-cols-5 gap-2">
+        <!-- WhatsApp ATIVO -->
+        <div class="flex flex-col items-center gap-1.5">
+          <div class="relative w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center">
+            <svg class="w-5 h-5 text-emerald-600" fill="currentColor" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163a11.867 11.867 0 01-1.587-5.946C.16 5.335 5.495 0 12.05 0c3.181 0 6.167 1.24 8.413 3.488a11.82 11.82 0 013.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 01-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884a9.86 9.86 0 001.51 5.26l-.999 3.648 3.978-1.607z"/></svg>
+            <span class="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white"></span>
+          </div>
+          <span class="text-[9px] font-bold text-slate-600 uppercase tracking-wider">WhatsApp</span>
+        </div>
+        <!-- Meta ATIVO -->
+        <div class="flex flex-col items-center gap-1.5">
+          <div class="relative w-9 h-9 rounded-xl bg-sky-50 border border-sky-100 flex items-center justify-center">
+            <svg class="w-5 h-5 text-sky-600" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm-1.5 7.5h3v2h-3v-2zm0 4h3v5h-3v-5z"/></svg>
+            <span class="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white"></span>
+          </div>
+          <span class="text-[9px] font-bold text-slate-600 uppercase tracking-wider">Meta</span>
+        </div>
+        <!-- Google INATIVO -->
+        <div class="flex flex-col items-center gap-1.5">
+          <div class="relative w-9 h-9 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center opacity-60">
+            <svg class="w-5 h-5 text-slate-400" fill="currentColor" viewBox="0 0 24 24"><path d="M22.18 10.27h-9.84v3.74h5.66c-.5 2.42-2.59 3.81-5.66 3.81-3.45 0-6.25-2.74-6.25-6.18 0-3.44 2.8-6.18 6.25-6.18 1.49 0 2.83.53 3.87 1.39l2.83-2.83C16.97 1.78 14.84.69 12.34.69 6.95.69 2.61 5.03 2.61 10.4s4.34 9.71 9.73 9.71c5.61 0 9.32-3.93 9.32-9.46 0-.7-.07-1.06-.18-1.38z"/></svg>
+            <span class="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-slate-300 border-2 border-white"></span>
+          </div>
+          <span class="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Google</span>
+        </div>
+        <!-- Site ATIVO -->
+        <div class="flex flex-col items-center gap-1.5">
+          <div class="relative w-9 h-9 rounded-xl bg-teal-50 border border-teal-100 flex items-center justify-center">
+            <svg class="w-5 h-5 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z M3.6 9h16.8 M3.6 15h16.8 M11.5 3a17 17 0 000 18 M12.5 3a17 17 0 010 18"/></svg>
+            <span class="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white"></span>
+          </div>
+          <span class="text-[9px] font-bold text-slate-600 uppercase tracking-wider">Site</span>
+        </div>
+        <!-- Forms INATIVO -->
+        <div class="flex flex-col items-center gap-1.5">
+          <div class="relative w-9 h-9 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center opacity-60">
+            <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+            <span class="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-slate-300 border-2 border-white"></span>
+          </div>
+          <span class="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Forms</span>
+        </div>
+      </div>
+    </div>
+
+    <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3">3 de 5 canais ativos</p>
+
+    <button class="w-full py-2.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-sm font-bold transition-all">
+      Visualizar
+    </button>
+  </div>
+
+  <!-- Card 2: Cliente "outro" (sem clínica) — só WhatsApp + Meta -->
+  <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden p-5">
+    <div class="flex items-start justify-between mb-3">
+      <div class="w-10 h-10 bg-slate-700 rounded-xl flex items-center justify-center">
+        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="text-[10px] font-bold text-slate-700 bg-slate-100 border border-slate-200 px-2 py-1 rounded-md uppercase tracking-widest">Free</span>
+        <button class="text-slate-400 hover:text-slate-700">⋮</button>
+      </div>
+    </div>
+
+    <h3 class="text-base font-bold text-slate-900">Rent a Wish - SJP</h3>
+    <p class="text-xs text-slate-500 mb-4">Comercial · sem responsável</p>
+
+    <div class="border-t border-slate-100 pt-4 mb-3">
+      <div class="grid grid-cols-5 gap-2">
+        <!-- WhatsApp ATIVO -->
+        <div class="flex flex-col items-center gap-1.5">
+          <div class="relative w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center">
+            <svg class="w-5 h-5 text-emerald-600" fill="currentColor" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163a11.867 11.867 0 01-1.587-5.946C.16 5.335 5.495 0 12.05 0c3.181 0 6.167 1.24 8.413 3.488a11.82 11.82 0 013.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 01-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884a9.86 9.86 0 001.51 5.26l-.999 3.648 3.978-1.607z"/></svg>
+            <span class="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white"></span>
+          </div>
+          <span class="text-[9px] font-bold text-slate-600 uppercase tracking-wider">WhatsApp</span>
+        </div>
+        <!-- Meta INATIVO -->
+        <div class="flex flex-col items-center gap-1.5">
+          <div class="relative w-9 h-9 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center opacity-60">
+            <svg class="w-5 h-5 text-slate-400" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm-1.5 7.5h3v2h-3v-2zm0 4h3v5h-3v-5z"/></svg>
+            <span class="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-slate-300 border-2 border-white"></span>
+          </div>
+          <span class="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Meta</span>
+        </div>
+        <!-- Google INATIVO -->
+        <div class="flex flex-col items-center gap-1.5">
+          <div class="relative w-9 h-9 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center opacity-60">
+            <svg class="w-5 h-5 text-slate-400" fill="currentColor" viewBox="0 0 24 24"><path d="M22.18 10.27h-9.84v3.74h5.66c-.5 2.42-2.59 3.81-5.66 3.81-3.45 0-6.25-2.74-6.25-6.18 0-3.44 2.8-6.18 6.25-6.18 1.49 0 2.83.53 3.87 1.39l2.83-2.83C16.97 1.78 14.84.69 12.34.69 6.95.69 2.61 5.03 2.61 10.4s4.34 9.71 9.73 9.71c5.61 0 9.32-3.93 9.32-9.46 0-.7-.07-1.06-.18-1.38z"/></svg>
+            <span class="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-slate-300 border-2 border-white"></span>
+          </div>
+          <span class="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Google</span>
+        </div>
+        <!-- Site INATIVO -->
+        <div class="flex flex-col items-center gap-1.5">
+          <div class="relative w-9 h-9 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center opacity-60">
+            <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            <span class="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-slate-300 border-2 border-white"></span>
+          </div>
+          <span class="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Site</span>
+        </div>
+        <!-- Forms INATIVO -->
+        <div class="flex flex-col items-center gap-1.5">
+          <div class="relative w-9 h-9 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center opacity-60">
+            <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2"/></svg>
+            <span class="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-slate-300 border-2 border-white"></span>
+          </div>
+          <span class="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Forms</span>
+        </div>
+      </div>
+    </div>
+
+    <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3">1 de 5 canais ativos</p>
+
+    <button class="w-full py-2.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-sm font-bold transition-all">
+      Visualizar
+    </button>
+  </div>
+
+  <!-- Card 3: 5 de 5 ativos -->
+  <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden p-5">
+    <div class="flex items-start justify-between mb-3">
+      <div class="w-10 h-10 bg-teal-600 rounded-xl flex items-center justify-center">
+        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5"/></svg>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-100 px-2 py-1 rounded-md uppercase tracking-widest">Enterprise</span>
+        <button class="text-slate-400 hover:text-slate-700">⋮</button>
+      </div>
+    </div>
+
+    <h3 class="text-base font-bold text-slate-900">Dra. Eloisa Delgado</h3>
+    <p class="text-xs text-slate-500 mb-4">Clínica · Yago Blanco</p>
+
+    <div class="border-t border-slate-100 pt-4 mb-3">
+      <div class="grid grid-cols-5 gap-2">
+        <div class="flex flex-col items-center gap-1.5">
+          <div class="relative w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center">
+            <svg class="w-5 h-5 text-emerald-600" fill="currentColor" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163a11.867 11.867 0 01-1.587-5.946C.16 5.335 5.495 0 12.05 0c3.181 0 6.167 1.24 8.413 3.488a11.82 11.82 0 013.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 01-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884a9.86 9.86 0 001.51 5.26l-.999 3.648 3.978-1.607z"/></svg>
+            <span class="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white"></span>
+          </div>
+          <span class="text-[9px] font-bold text-slate-600 uppercase tracking-wider">WhatsApp</span>
+        </div>
+        <div class="flex flex-col items-center gap-1.5">
+          <div class="relative w-9 h-9 rounded-xl bg-sky-50 border border-sky-100 flex items-center justify-center">
+            <svg class="w-5 h-5 text-sky-600" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm-1.5 7.5h3v2h-3v-2zm0 4h3v5h-3v-5z"/></svg>
+            <span class="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white"></span>
+          </div>
+          <span class="text-[9px] font-bold text-slate-600 uppercase tracking-wider">Meta</span>
+        </div>
+        <div class="flex flex-col items-center gap-1.5">
+          <div class="relative w-9 h-9 rounded-xl bg-rose-50 border border-rose-100 flex items-center justify-center">
+            <svg class="w-5 h-5 text-rose-600" fill="currentColor" viewBox="0 0 24 24"><path d="M22.18 10.27h-9.84v3.74h5.66c-.5 2.42-2.59 3.81-5.66 3.81-3.45 0-6.25-2.74-6.25-6.18 0-3.44 2.8-6.18 6.25-6.18 1.49 0 2.83.53 3.87 1.39l2.83-2.83C16.97 1.78 14.84.69 12.34.69 6.95.69 2.61 5.03 2.61 10.4s4.34 9.71 9.73 9.71c5.61 0 9.32-3.93 9.32-9.46 0-.7-.07-1.06-.18-1.38z"/></svg>
+            <span class="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white"></span>
+          </div>
+          <span class="text-[9px] font-bold text-slate-600 uppercase tracking-wider">Google</span>
+        </div>
+        <div class="flex flex-col items-center gap-1.5">
+          <div class="relative w-9 h-9 rounded-xl bg-teal-50 border border-teal-100 flex items-center justify-center">
+            <svg class="w-5 h-5 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z M3.6 9h16.8 M3.6 15h16.8 M11.5 3a17 17 0 000 18 M12.5 3a17 17 0 010 18"/></svg>
+            <span class="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white"></span>
+          </div>
+          <span class="text-[9px] font-bold text-slate-600 uppercase tracking-wider">Site</span>
+        </div>
+        <div class="flex flex-col items-center gap-1.5">
+          <div class="relative w-9 h-9 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center">
+            <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2"/></svg>
+            <span class="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white"></span>
+          </div>
+          <span class="text-[9px] font-bold text-slate-600 uppercase tracking-wider">Forms</span>
+        </div>
+      </div>
+    </div>
+
+    <p class="text-[10px] font-bold text-emerald-700 uppercase tracking-widest mb-3">5 de 5 canais ativos · Stack completa</p>
+
+    <button class="w-full py-2.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-sm font-bold transition-all">
+      Visualizar
+    </button>
+  </div>
+
+</div>
+
+<div class="mt-12 p-6 bg-white border border-slate-200 rounded-2xl max-w-3xl">
+  <h2 class="text-base font-bold text-slate-900 mb-2">Sobre este preview</h2>
+  <p class="text-sm text-slate-600 mb-4">
+    Esse é o layout proposto para os cards de cliente na tela de Organização. Cada cliente mostra 5 canais
+    (WhatsApp, Meta Ads, Google Ads, Site, Formulários) com indicador visual:
+  </p>
+  <ul class="text-sm text-slate-600 space-y-1.5 list-disc list-inside">
+    <li><b>Bolinha verde</b> no canto do ícone = canal ativo, ícone colorido com fundo da cor da marca</li>
+    <li><b>Bolinha cinza</b> + ícone esmaecido = canal inativo / não configurado</li>
+    <li><b>Linha de contagem</b> resume "X de 5 canais ativos" para varredura rápida</li>
+    <li>Mantém PRO/Free/Enterprise no topo, e o botão "Visualizar" fica no rodapé do card</li>
+  </ul>
+</div>
+
+</body>
+</html>

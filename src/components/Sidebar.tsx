@@ -211,7 +211,11 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
       <div className="p-4 mt-auto border-t border-slate-100 bg-slate-50/50 space-y-3">
         <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-sm group">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5 min-w-0">
+            <button
+              onClick={() => setActiveTab('profile')}
+              className="flex items-center gap-2.5 min-w-0 flex-1 text-left hover:opacity-80 transition-opacity"
+              title="Ver meu perfil"
+            >
               <div className="w-8 h-8 rounded-lg bg-teal-800 flex items-center justify-center text-white font-bold text-xs shrink-0">
                 {profile?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || (userRole === 'medico' ? 'DR' : 'AD')}
               </div>
@@ -221,11 +225,11 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
                 </span>
                 <span className="text-[9px] font-medium text-teal-600 flex items-center gap-1">
                   <ShieldCheck className="w-2.5 h-2.5" />
-                  Concluir Sessão
+                  Ver Perfil
                 </span>
               </div>
-            </div>
-            <button 
+            </button>
+            <button
               onClick={() => signOut()}
               className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
               title="Sair do sistema"

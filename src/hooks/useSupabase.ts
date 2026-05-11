@@ -255,7 +255,7 @@ export function useAppointments(options?: { daysBack?: number; daysForward?: num
       .gte('date', fromStr)
       .lte('date', toStr);
 
-    if (userRole === 'medico' || userRole === 'medico_gestor') {
+    if (userRole === 'medico') {
       query = query.eq('doctor.user_id', profile.id);
     }
 

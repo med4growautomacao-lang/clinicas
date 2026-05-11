@@ -10,6 +10,7 @@ import { Settings } from './components/Settings';
 import SuperAdmin from './components/SuperAdmin';
 import { MarketingAnalytics } from './components/MarketingAnalytics';
 import { OrgAdmin } from './components/OrgAdmin';
+import { UserProfile } from './components/UserProfile';
 
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Login } from './components/Login';
@@ -78,6 +79,7 @@ function AppContent() {
     { id: 'marketing',       el: <MarketingAnalytics /> },
     { id: 'super-admin',     el: <SuperAdmin /> },
     { id: 'org-admin',       el: <OrgAdmin onEnterClinic={() => handleSetActiveTab('dashboard')} /> },
+    { id: 'profile',         el: <UserProfile /> },
   ];
 
   return (

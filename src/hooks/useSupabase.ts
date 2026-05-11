@@ -30,6 +30,7 @@ export interface Doctor {
   created_at: string;
   working_hours?: any;
   consultation_duration?: number;
+  slot_step?: number | null;
   days_off?: string[];
   blocked_times?: { date: string; start: string; end: string }[];
 }
@@ -227,6 +228,7 @@ export interface Appointment {
   status: 'pendente' | 'confirmado' | 'compareceu' | 'realizado' | 'cancelado' | 'faltou';
   source: 'ia' | 'manual' | 'site' | null;
   modality: 'presencial' | 'online';
+  duration_minutes?: number;
   notes: string | null;
   created_at: string;
   // Joined
@@ -299,7 +301,14 @@ export function useAppointments(options?: { daysBack?: number; daysForward?: num
       .insert({ ...apt, clinic_id: activeClinicId })
       .select('*, patient:patients(name, cpf, phone), doctor:doctors(name, user_id)')
       .single();
-    if (error) { setError(error.message); return null; }
+    if (error) {
+      const msg = error.code === '23P01'
+        ? 'Esse horário foi reservado por outra pessoa. Atualize a lista e escolha outro.'
+        : error.message;
+      setError(msg);
+      if (error.code === '23P01') fetch(true);
+      return null;
+    }
     setData(prev => [data, ...prev]);
     return data;
   };
@@ -307,7 +316,14 @@ export function useAppointments(options?: { daysBack?: number; daysForward?: num
   const update = async (id: string, updates: Partial<Appointment>) => {
     setData(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
     const { error } = await supabase.from('appointments').update(updates).eq('id', id);
-    if (error) { setError(error.message); fetch(true); return false; }
+    if (error) {
+      const msg = error.code === '23P01'
+        ? 'Esse horário foi reservado por outra pessoa. Atualize a lista e escolha outro.'
+        : error.message;
+      setError(msg);
+      fetch(true);
+      return false;
+    }
     return true;
   };
 

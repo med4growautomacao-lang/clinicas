@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import {
@@ -125,39 +125,35 @@ export function Appointments() {
     return doctors.find(d => d.user_id === profile?.id);
   }, [doctors, profile?.id]);
 
-  const availableSlots = useMemo(() => {
-    if (!formData.doctor_id || !formData.date) return null;
+  const [availableSlots, setAvailableSlots] = useState<string[] | null>(null);
+  const [loadingSlots, setLoadingSlots] = useState(false);
 
-    const doctor = doctors.find(d => d.id === formData.doctor_id);
-    if (!doctor) return null;
-
-    if (doctor.days_off && doctor.days_off.includes(formData.date)) {
-      return []; // Dia de folga
+  useEffect(() => {
+    if (!formData.doctor_id || !formData.date) {
+      setAvailableSlots(null);
+      return;
     }
-
-    const localDate = new Date(`${formData.date}T00:00:00`);
-    const dayOfWeek = localDate.getDay().toString();
-
-    const duration = doctor.consultation_duration || 30;
-    const shifts = doctor.working_hours?.[dayOfWeek] || [];
-    let doctorSlots: string[] = [];
-
-    shifts.forEach((shift: any) => {
-      let currentMins = timeToMins(shift.start);
-      const endMins = timeToMins(shift.end);
-
-      while (currentMins + duration <= endMins) {
-        doctorSlots.push(minsToTime(currentMins));
-        currentMins += duration;
+    let cancelled = false;
+    setLoadingSlots(true);
+    supabase.rpc('get_available_slots', {
+      p_doctor_id: formData.doctor_id,
+      p_date: formData.date,
+    }).then(({ data, error }) => {
+      if (cancelled) return;
+      if (error) { console.error('get_available_slots:', error); setAvailableSlots([]); }
+      else {
+        let slots = (data || []).map((s: any) => (s.slot_time || '').toString().substring(0, 5));
+        // Em edição: o slot do próprio appointment deve continuar aparecendo
+        if (selectedAppointment && selectedAppointment.doctor_id === formData.doctor_id && selectedAppointment.date === formData.date) {
+          const ownTime = (selectedAppointment.time || '').toString().substring(0, 5);
+          if (ownTime && !slots.includes(ownTime)) slots = [...slots, ownTime].sort();
+        }
+        setAvailableSlots(slots);
       }
+      setLoadingSlots(false);
     });
-
-    const bookedTimes = appointments
-      .filter(a => a.doctor_id === doctor.id && a.date === formData.date && a.id !== selectedAppointment?.id && a.status !== 'cancelado' && a.status !== 'faltou')
-      .map(a => a.time.toString().substring(0, 5));
-
-    return doctorSlots.filter(slot => !bookedTimes.includes(slot));
-  }, [formData.doctor_id, formData.date, doctors, appointments, selectedAppointment]);
+    return () => { cancelled = true; };
+  }, [formData.doctor_id, formData.date, selectedAppointment, appointments]);
 
   const filteredAppointments = useMemo(() => {
     const list = appointments.filter((apt) => {
@@ -960,10 +956,15 @@ export function Appointments() {
                 {formData.doctor_id && formData.date && (
                   <div className="animate-in fade-in slide-in-from-top-2 duration-300">
                     <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Horário *</label>
-                    {!availableSlots || availableSlots.length === 0 ? (
+                    {loadingSlots ? (
+                      <div className="p-4 bg-slate-50 border border-slate-100 rounded-xl text-slate-400 text-sm font-bold flex items-center">
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Carregando horários disponíveis...
+                      </div>
+                    ) : !availableSlots || availableSlots.length === 0 ? (
                       <div className="p-4 bg-rose-50 border border-rose-100 rounded-xl text-rose-600 text-sm font-bold flex items-center">
                         <AlertCircle className="w-4 h-4 mr-2" />
-                        Esse médico não atende nesta data.
+                        Sem horários disponíveis nesta data.
                       </div>
                     ) : (
                       <div className="grid grid-cols-4 sm:grid-cols-5 gap-2 mt-1">

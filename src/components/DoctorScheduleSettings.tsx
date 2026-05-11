@@ -46,6 +46,7 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
   );
 
   const [duration, setDuration] = useState<number>(doctor.consultation_duration || 30);
+  const [slotStep, setSlotStep] = useState<number | null>(doctor.slot_step ?? null);
   const [daysOff, setDaysOff] = useState<string[]>(doctor.days_off || []);
   const [newDayOff, setNewDayOff] = useState('');
 
@@ -103,6 +104,7 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
         .update({
           working_hours: workingHours,
           consultation_duration: duration,
+          slot_step: slotStep,
           days_off: daysOff,
           blocked_times: blockedTimes,
         })
@@ -209,6 +211,40 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
                   ))}
                 </div>
                 <p className="text-xs text-slate-400 font-medium mt-3">Essa duração será usada para dividir a agenda em blocos na hora de visualizar vagas.</p>
+              </div>
+
+              <div className="mb-8 p-5 bg-white rounded-xl border border-slate-200 shadow-sm">
+                <label className="block text-sm font-bold text-slate-700 mb-3">Intervalo entre vagas</label>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    onClick={() => setSlotStep(null)}
+                    className={cn(
+                      "px-4 py-2 rounded-lg font-semibold text-sm border transition-all",
+                      slotStep === null
+                        ? "bg-teal-600 border-teal-600 text-white shadow-md shadow-teal-100"
+                        : "bg-white border-slate-200 text-slate-600 hover:border-teal-300 hover:bg-teal-50"
+                    )}
+                  >
+                    Igual à duração
+                  </button>
+                  {[15, 20, 30, 45, 60].map(min => (
+                    <button
+                      key={min}
+                      onClick={() => setSlotStep(min)}
+                      className={cn(
+                        "px-4 py-2 rounded-lg font-semibold text-sm border transition-all",
+                        slotStep === min
+                          ? "bg-teal-600 border-teal-600 text-white shadow-md shadow-teal-100"
+                          : "bg-white border-slate-200 text-slate-600 hover:border-teal-300 hover:bg-teal-50"
+                      )}
+                    >
+                      {min} min
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-slate-400 font-medium mt-3">
+                  De quanto em quanto tempo uma nova vaga é oferecida. Ex: duração 60min + intervalo 30min → 09:00, 09:30, 10:00... Cada vaga continua durando {duration} min.
+                </p>
               </div>
 
               <div className="space-y-4">

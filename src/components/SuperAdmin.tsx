@@ -9,6 +9,7 @@ import {
   Eye, EyeOff, Save, KeyRound, Power
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
+import { useToast } from './ui/toast';
 
 // ─── tipos de modal ───────────────────────────────────────────────────────────
 type ModalState =
@@ -425,6 +426,7 @@ function AddUserModal({
     ? [{ v: 'org_admin', l: 'Admin' }, { v: 'org_owner', l: 'Owner' }, { v: 'org_team', l: 'Equipe' }]
     : [{ v: 'gestor', l: 'Gestor' }, { v: 'medico', l: 'Médico' }, { v: 'secretaria', l: 'Secretária' }];
 
+  const showToast = useToast();
   const [form, setForm] = useState({ name: '', email: '', password: '', role: roles[0].v });
   const [saving, setSaving] = useState(false);
   const [showPass, setShowPass] = useState(false);
@@ -435,7 +437,7 @@ function AddUserModal({
     const ok = await onSubmit(form);
     setSaving(false);
     if (ok) onClose();
-    else alert('Erro ao adicionar usuário. Email pode já estar em uso.');
+    else showToast('Erro ao adicionar usuário. Email pode já estar em uso.', 'error');
   };
 
   return (
@@ -812,6 +814,7 @@ function EditOrgModal({
 
 // ─── SystemSettingsTab ────────────────────────────────────────────────────────
 function SystemSettingsTab() {
+  const showToast = useToast();
   const { settings, loading, updateSetting } = useGlobalSystemSettings();
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
@@ -834,7 +837,7 @@ function SystemSettingsTab() {
       setEditingKey(null);
       setNewKey('');
     } else {
-      alert('Erro ao salvar configuração.');
+      showToast('Erro ao salvar configuração.', 'error');
     }
   };
 
@@ -968,6 +971,7 @@ function SystemSettingsTab() {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function SuperAdmin() {
+  const showToast = useToast();
   const { data: clinics, loading: clinicsLoading, create: createClinic, update: updateClinic, deleteClinic } = useClinics();
   const { data: orgs, loading: orgsLoading, create: createOrg, update: updateOrg, remove: deleteOrg } = useOrganizations();
   const { clinicUsers, orgUsers, usersLoading, addClinicUser, addOrgUser, removeClinicUser, totalUsers, refetchUsers } = useSuperAdminData();
@@ -992,12 +996,12 @@ export default function SuperAdmin() {
   const handleDeleteClinic = async (clinic: Clinic) => {
     // Delete validation already done in component
     const ok = await deleteClinic(clinic.id);
-    if (!ok) alert('Erro ao excluir clínica.');
+    if (!ok) showToast('Erro ao excluir clínica.', 'error');
   };
 
   const handleCreateClinic = async (data: any) => {
     const { error } = await createClinic(data);
-    if (error) alert('Erro: ' + error.message);
+    if (error) showToast('Erro: ' + error.message, 'error');
   };
 
   const handleEditClinic = async (data: any) => {
@@ -1008,7 +1012,7 @@ export default function SuperAdmin() {
       category: data.category,
       features: data.features,
     } as any);
-    if (!ok) alert('Erro ao atualizar clínica.');
+    if (!ok) showToast('Erro ao atualizar clínica.', 'error');
   };
 
   // Handlers Orgs
@@ -1021,29 +1025,29 @@ export default function SuperAdmin() {
     if (!confirm(msg)) return;
 
     const ok = await deleteOrg(org.id);
-    if (!ok) alert('Erro ao excluir organização.');
+    if (!ok) showToast('Erro ao excluir organização.', 'error');
   };
 
   const handleToggleClinicActive = async (clinic: Clinic) => {
     const ok = await updateClinic(clinic.id, { is_active: !clinic.is_active });
-    if (!ok) alert('Erro ao alterar status da clínica.');
+    if (!ok) showToast('Erro ao alterar status da clínica.', 'error');
   };
 
   const handleToggleClinicFeature = async (clinic: Clinic, feature: 'feature_followup' | 'feature_ia') => {
     const current = clinic.features ?? { feature_followup: true, feature_ia: true };
     const newFeatures = { ...current, [feature]: current[feature] === false ? true : false };
     const ok = await updateClinic(clinic.id, { features: newFeatures } as any);
-    if (!ok) alert('Erro ao alterar funcionalidade.');
+    if (!ok) showToast('Erro ao alterar funcionalidade.', 'error');
   };
 
   const handleToggleOrgActive = async (org: Organization) => {
     const ok = await updateOrg(org.id, { is_active: !org.is_active });
-    if (!ok) alert('Erro ao alterar status da organização.');
+    if (!ok) showToast('Erro ao alterar status da organização.', 'error');
   };
 
   const handleCreateOrg = async (data: { name: string; plan: string }) => {
     const { error } = await createOrg(data);
-    if (error) alert('Erro: ' + error.message);
+    if (error) showToast('Erro: ' + error.message, 'error');
   };
 
   const handleEditOrg = async (data: { name: string; plan: string }) => {
@@ -1052,7 +1056,7 @@ export default function SuperAdmin() {
         name: data.name,
         plan: data.plan
       });
-      if (!ok) alert('Erro ao atualizar organização.');
+      if (!ok) showToast('Erro ao atualizar organização.', 'error');
     }
   };
 

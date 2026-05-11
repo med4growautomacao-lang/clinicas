@@ -42,12 +42,14 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useSettings, useProtocols, Protocol, Clinic, AIConfig, WhatsappInstance } from "../hooks/useSupabase";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
+import { useToast } from "./ui/toast";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import WhatsappLogo from "../assets/logos/Logo Whatsapp.png";
 
 export function Settings() {
     const { userRole } = useAuth();
+    const showToast = useToast();
     const { clinic, aiConfig, whatsapp, loading, updateClinic, updateAI, updateWhatsapp, generateConnectToken } = useSettings();
     const [activeTab, setActiveTab] = useState<"clinic" | "integrations" | "protocols">(() => (localStorage.getItem('settingsTab') as any) || "clinic");
     const [activeIntTab, setActiveIntTab] = useState<'whatsapp' | 'meta' | 'google'>(() => (localStorage.getItem('settingsIntTab') as any) || 'whatsapp');
@@ -165,7 +167,7 @@ export function Settings() {
             });
         } catch (error: any) {
             console.error('Erro ao conectar WhatsApp:', error);
-            alert('Erro ao iniciar conexão: ' + error.message);
+            showToast('Erro ao iniciar conexão: ' + error.message, 'error');
         } finally {
             setConnecting(false);
         }

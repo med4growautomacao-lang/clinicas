@@ -14,6 +14,7 @@ import { UserProfile } from './components/UserProfile';
 import { TeamManagement } from './components/TeamManagement';
 
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { ToastProvider } from './components/ui/toast';
 import { Login } from './components/Login';
 import { ConnectPage } from './components/ConnectPage';
 import { RedirectPage } from './components/RedirectPage';
@@ -127,7 +128,9 @@ export default function App() {
   if (path === '/termos') return <TermsOfUse />;
   return (
     <AuthProvider>
-      <AppContent />
+      <ToastProvider>
+        <AppContent />
+      </ToastProvider>
     </AuthProvider>
   );
 }

@@ -15,9 +15,11 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useDoctors, Doctor } from "../hooks/useSupabase";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
+import { useToast } from "./ui/toast";
 
 export function DoctorsManagement() {
     const { activeClinicId } = useAuth();
+    const showToast = useToast();
     const { data: doctors, loading, error, refetch, update, remove } = useDoctors();
     const [showModal, setShowModal] = useState(false);
     const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
@@ -48,11 +50,11 @@ export function DoctorsManagement() {
     const handleSubmit = async () => {
         if (!formData.name.trim()) return;
         if (!formData.crm.trim()) {
-            alert("O CRM/CRO é obrigatório para cadastrar um profissional.");
+            showToast("O CRM/CRO é obrigatório para cadastrar um profissional.", "error");
             return;
         }
         if (modalMode === 'create' && !formData.email.trim()) {
-            alert("O e-mail é obrigatório para cadastrar um profissional.");
+            showToast("O e-mail é obrigatório para cadastrar um profissional.", "error");
             return;
         }
         setSubmitting(true);
@@ -97,7 +99,7 @@ export function DoctorsManagement() {
             setFormData({ name: '', specialty: '', crm: '', email: '' });
             setShowModal(false);
         } catch (err: any) {
-            alert("Erro ao salvar: " + err.message);
+            showToast("Erro ao salvar: " + err.message, "error");
         } finally {
             setSubmitting(false);
         }

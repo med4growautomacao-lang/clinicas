@@ -12,6 +12,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { format, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useAuth } from "../contexts/AuthContext";
+import { useToast } from "./ui/toast";
 import {
     usePatients, useMedicalRecords, useDoctors, usePrescriptions, useExamRequests,
     Patient, MedicalRecord, Prescription, PrescriptionMed, ExamRequest, ExamItem, Doctor,
@@ -160,6 +161,7 @@ function RecordPrescriptions({ recordId, prescriptions, examRequests, doctors, p
 // ─── Conteúdo (só monta após autenticação) ───────────────────────────────────
 function MedicalRecordsContent({ encKey, onLock }: { encKey: CryptoKey; onLock: () => void }) {
     const { clinicName } = useAuth();
+    const showToast = useToast();
     const { data: patients, loading: patientsLoading, create: createPatient, update: updatePatient, remove: removePatient, refetch: refetchPatients } = usePatients();
     const { data: doctors } = useDoctors();
     const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
@@ -296,7 +298,7 @@ function MedicalRecordsContent({ encKey, onLock }: { encKey: CryptoKey; onLock: 
             setShowRecordModal(false);
         } catch (err) {
             console.error('[Prontuário] Erro na criptografia:', err);
-            alert('Erro ao criptografar os dados. Verifique o console.');
+            showToast('Erro ao criptografar os dados. Verifique o console.', 'error');
         } finally {
             setSubmitting(false);
         }

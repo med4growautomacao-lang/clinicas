@@ -128,7 +128,6 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
   const [clinicUserForm, setClinicUserForm] = useState({ name: '', email: '', password: '', role: 'gestor' });
   const [clinicUserSaving, setClinicUserSaving] = useState(false);
   const [clinicUserError, setClinicUserError] = useState('');
-  const [showClinicUserPassword, setShowClinicUserPassword] = useState(false);
 
   // Modal: usuários da clínica
   const [clinicUsersView, setClinicUsersView] = useState<{ id: string; name: string } | null>(null);
@@ -312,39 +311,46 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
 
   const handleAddClinicUser = async () => {
     if (!clinicUserTarget) return;
-    if (!clinicUserForm.name.trim() || !clinicUserForm.email.trim()) {
+    const name = clinicUserForm.name.trim();
+    const email = clinicUserForm.email.trim().toLowerCase();
+    if (!name || !email) {
       setClinicUserError('Preencha nome e e-mail.');
       return;
     }
-    if (!isMedicoRole(clinicUserForm.role) && !clinicUserForm.password.trim()) {
-      setClinicUserError('Preencha a senha.');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setClinicUserError('E-mail inválido.');
       return;
     }
     setClinicUserSaving(true);
     setClinicUserError('');
 
-    if (isMedicoRole(clinicUserForm.role)) {
-      // Médico: pré-cadastra sem criar conta auth — o próprio médico cria a senha no login
-      const { error } = await supabase.from('pending_clinic_users').upsert({
-        clinic_id: clinicUserTarget.id,
-        email: clinicUserForm.email.trim().toLowerCase(),
-        full_name: clinicUserForm.name.trim(),
-        role: clinicUserForm.role,
-      }, { onConflict: 'email,clinic_id' });
+    // Checa duplicidade em clinic_users e pending_clinic_users
+    const [existingActive, existingPending] = await Promise.all([
+      supabase.from('clinic_users').select('id').ilike('email', email).maybeSingle(),
+      supabase.from('pending_clinic_users').select('id').ilike('email', email).maybeSingle(),
+    ]);
+    if (existingActive.data) {
+      setClinicUserError('Já existe um usuário ativo com esse e-mail.');
       setClinicUserSaving(false);
-      if (error) { setClinicUserError(error.message); return; }
-    } else {
-      // Gestor / Secretária: cria conta auth imediatamente
-      const { error } = await supabase.rpc('add_user_to_clinic', {
-        p_clinic_id: clinicUserTarget.id,
-        p_full_name: clinicUserForm.name.trim(),
-        p_email: clinicUserForm.email.trim(),
-        p_password: clinicUserForm.password,
-        p_role: clinicUserForm.role,
-      });
-      setClinicUserSaving(false);
-      if (error) { setClinicUserError(error.message); return; }
+      return;
     }
+    if (existingPending.data) {
+      setClinicUserError('Já existe um pré-cadastro com esse e-mail.');
+      setClinicUserSaving(false);
+      return;
+    }
+
+    // Pré-cadastro unificado: insere em pending_clinic_users
+    // O próprio usuário criará a senha ao acessar a aba "Criar Conta" no login.
+    const { error } = await supabase.from('pending_clinic_users').insert({
+      clinic_id: clinicUserTarget.id,
+      email,
+      full_name: name,
+      role: clinicUserForm.role,
+    });
+
+    setClinicUserSaving(false);
+    if (error) { setClinicUserError(error.message); return; }
 
     setClinicUserTarget(null);
     setClinicUserForm({ name: '', email: '', password: '', role: 'gestor' });
@@ -1195,21 +1201,9 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                   className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500" placeholder="Nome completo" />
                 <input value={clinicUserForm.email} onChange={e => setClinicUserForm(f => ({ ...f, email: e.target.value }))}
                   className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500" placeholder="Email" type="email" />
-                {!isMedicoRole(clinicUserForm.role) && (
-                  <div className="relative">
-                    <input value={clinicUserForm.password} onChange={e => setClinicUserForm(f => ({ ...f, password: e.target.value }))}
-                      type={showClinicUserPassword ? 'text' : 'password'}
-                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500 pr-10" placeholder="Senha" />
-                    <button type="button" onClick={() => setShowClinicUserPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
-                      {showClinicUserPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                )}
-                {isMedicoRole(clinicUserForm.role) && (
-                  <p className="text-[11px] text-slate-400 bg-slate-50 rounded-lg px-3 py-2 leading-relaxed">
-                    O médico receberá um e-mail de confirmação e criará a própria senha ao acessar o app pela primeira vez.
-                  </p>
-                )}
+                <p className="text-[11px] text-sky-800 bg-sky-50 border border-sky-100 rounded-lg px-3 py-2 leading-relaxed">
+                  Após o pré-cadastro, o membro deve acessar a tela de login → aba <span className="font-bold">"Criar Conta"</span> → usar este e-mail e definir a própria senha.
+                </p>
                 <div>
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Papel</label>
                   <div className="flex gap-2">
@@ -1225,7 +1219,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                 {clinicUserError && <p className="text-xs text-red-500 font-bold">{clinicUserError}</p>}
                 <button onClick={handleAddClinicUser} disabled={clinicUserSaving}
                   className="w-full py-3 bg-teal-600 hover:bg-teal-700 disabled:bg-slate-100 disabled:text-slate-400 text-white rounded-xl font-black text-sm transition-all flex items-center justify-center gap-2">
-                  {clinicUserSaving ? <><Loader2 className="w-4 h-4 animate-spin" /> Adicionando...</> : 'Adicionar Usuário'}
+                  {clinicUserSaving ? <><Loader2 className="w-4 h-4 animate-spin" /> Pré-cadastrando...</> : 'Pré-cadastrar'}
                 </button>
               </div>
             </motion.div>

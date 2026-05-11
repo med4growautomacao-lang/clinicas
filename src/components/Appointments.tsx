@@ -138,16 +138,12 @@ export function Appointments() {
     supabase.rpc('get_available_slots', {
       p_doctor_id: formData.doctor_id,
       p_date: formData.date,
+      p_exclude_appointment_id: selectedAppointment?.id ?? null,
     }).then(({ data, error }) => {
       if (cancelled) return;
       if (error) { console.error('get_available_slots:', error); setAvailableSlots([]); }
       else {
-        let slots = (data || []).map((s: any) => (s.slot_time || '').toString().substring(0, 5));
-        // Em edição: o slot do próprio appointment deve continuar aparecendo
-        if (selectedAppointment && selectedAppointment.doctor_id === formData.doctor_id && selectedAppointment.date === formData.date) {
-          const ownTime = (selectedAppointment.time || '').toString().substring(0, 5);
-          if (ownTime && !slots.includes(ownTime)) slots = [...slots, ownTime].sort();
-        }
+        const slots = (data || []).map((s: any) => (s.slot_time || '').toString().substring(0, 5));
         setAvailableSlots(slots);
       }
       setLoadingSlots(false);

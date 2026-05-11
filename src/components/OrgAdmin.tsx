@@ -400,9 +400,6 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
           <h2 className="text-3xl font-bold tracking-tight text-slate-900">
             Gestão <span className="text-violet-600">Organizacional</span>
           </h2>
-          <p className="text-slate-500 font-medium text-base">
-            {profile?.organization_name} — visão geral das clínicas
-          </p>
         </div>
         {activeClinicId && (
           <div className="flex items-center gap-3 px-4 py-2 bg-violet-50 border border-violet-200 rounded-xl">
@@ -600,7 +597,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                   <tr className="text-left text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-100">
                     <th className="px-6 py-3">Cliente</th>
                     <th className="px-6 py-3">Responsáveis</th>
-                    <th className="px-6 py-3">Funções</th>
+                    <th className="px-6 py-3">Integrações</th>
                     <th className="px-6 py-3">Plano</th>
                     <th className="px-6 py-3 text-right">Ações</th>
                   </tr>
@@ -1048,8 +1045,8 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
 
                 {editClinicTarget && (
                   <div className="pt-1 border-t border-slate-100">
-                    <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Funções</p>
-                    <p className="text-[10px] text-slate-400 mb-3">Indique quais funções este cliente possui e quais estão ativas no momento.</p>
+                    <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Integrações</p>
+                    <p className="text-[10px] text-slate-400 mb-3">Indique quais integrações este cliente possui e quais estão ativas no momento.</p>
                     <div className="space-y-2">
                       {([
                         { key: 'meta_status', label: 'Meta Ads', desc: 'Facebook / Instagram Ads' },

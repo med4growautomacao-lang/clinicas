@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Med4Grow — Design Documentation for Google Ads API Access</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm; }
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+    color: #111;
+    line-height: 1.45;
+    font-size: 11pt;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 24px;
+  }
+  h1 { font-size: 16pt; margin: 0 0 6px; }
+  h2 { font-size: 12pt; margin: 18px 0 4px; }
+  p { margin: 4px 0 10px; }
+  ul { margin: 4px 0 12px 22px; padding: 0; }
+  li { margin: 2px 0; }
+  .note { color: #c0202c; font-size: 10pt; margin-bottom: 14px; }
+  .label { font-weight: bold; }
+  .mockup {
+    border: 1px solid #c9c9c9;
+    border-radius: 10px;
+    padding: 14px;
+    margin: 12px 0;
+    background: #fafafa;
+  }
+  .mockup-title {
+    background: #1d3a8a;
+    color: #fff;
+    padding: 10px 14px;
+    border-radius: 8px 8px 0 0;
+    font-weight: bold;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .mockup-body {
+    background: #fff7d6;
+    border: 1px solid #e3d28a;
+    padding: 12px;
+    border-radius: 0 0 8px 8px;
+    margin-top: -1px;
+  }
+  .metric-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin: 10px 0;
+  }
+  .metric {
+    background: #d3e1f5;
+    border: 1px solid #aac3e6;
+    border-radius: 6px;
+    padding: 10px;
+    text-align: center;
+  }
+  .metric .lbl { font-weight: bold; font-size: 10pt; margin-bottom: 4px; }
+  .metric .val { font-size: 12pt; }
+  .small { font-size: 9.5pt; color: #555; }
+  .pill {
+    display: inline-block;
+    background: #fff;
+    border: 1px solid #aaa;
+    border-radius: 4px;
+    padding: 2px 10px;
+    font-size: 10pt;
+  }
+  code { background: #f0f0f0; padding: 1px 5px; border-radius: 3px; font-size: 10pt; }
+  a { color: #1a4ed8; }
+</style>
+</head>
+<body>
+
+<h1>Design Documentation</h1>
+<p class="small">Google Ads API Access Application · Med4Grow</p>
+
+<p class="note">Note: This document describes the architecture, intended usage and mockups of the Med4Grow platform's integration with the Google Ads API.</p>
+
+<p><span class="label">Company Name:</span> Med4Grow (commercial brands: <em>MedDesk</em> for medical verticals, <em>WakeDesk</em> for general business verticals).</p>
+
+<h2>Business Model</h2>
+<p>
+  Med4Grow is a B2B SaaS platform that provides medical clinics, dental clinics and small/medium-sized businesses with a complete operational system: CRM and sales funnel for inbound leads, smart scheduling, electronic medical records, WhatsApp Business integration with an AI assistant, financial control, and consolidated marketing analytics.
+</p>
+<p>
+  We do not operate as a media agency and we do not run paid ads on behalf of third parties. Each of our customers owns their own Google Ads account. Through an opt-in flow, the customer grants Med4Grow read access to their account (via MCC link) so that performance metrics can be displayed within the Med4Grow platform alongside Meta Ads spend and organic WhatsApp leads. The Google Ads API is used <strong>strictly for reporting and read-only synchronization</strong>; we do not create, edit or manage campaigns on behalf of our clients through the API.
+</p>
+<p>
+  We do use Google Ads ourselves as an advertiser, to acquire new clinics as Med4Grow customers (Search, Performance Max and YouTube campaigns). That advertising activity uses our own account directly through the Google Ads UI, not through the API.
+</p>
+
+<h2>Tool Access / Use</h2>
+<p>
+  The Med4Grow web application is the only place from which the Google Ads API is called. It is used by three audiences:
+</p>
+<ul>
+  <li><strong>Clinic owners and managers</strong> (our paying customers): view dashboards and download CSV / PDF reports of their own ads performance, side-by-side with their leads pipeline and revenue.</li>
+  <li><strong>Org-admin users</strong> from organizations that group multiple clinics: view aggregated performance across the clinics they administer.</li>
+  <li><strong>Internal Med4Grow support staff</strong> (super-admin role): troubleshoot and provide assisted onboarding.</li>
+</ul>
+<p>
+  Each customer authorizes access to their own Google Ads account explicitly. The platform stores the linked account ID and an MCC token in our database (Supabase, hosted on AWS). Customers can revoke access at any time from their settings page. No third party outside the customer's own organization can view their data.
+</p>
+<p>
+  A scheduled background job runs every hour, pulling updated performance metrics from the Google Ads API into our database so dashboards stay fresh without manual refresh. The same job pauses synchronization if the customer revokes access or downgrades their plan.
+</p>
+
+<h2>Tool Design</h2>
+<p>
+  Architecture:
+</p>
+<ul>
+  <li><strong>Frontend:</strong> React + TypeScript single-page application served from our domain. Renders dashboards and reports.</li>
+  <li><strong>Backend:</strong> Supabase (PostgreSQL + edge functions, written in TypeScript/Deno).</li>
+  <li><strong>Sync layer:</strong> An hourly edge function (a CRON-triggered worker) reads the list of opted-in clinic accounts, calls the Google Ads API on behalf of each one, normalizes the response and writes the metrics into the <code>marketing_data</code> table.</li>
+  <li><strong>UI layer:</strong> The frontend queries <code>marketing_data</code> through Supabase's REST/Realtime layer to draw charts and tables. Users can filter by date range, by campaign or by clinic. PDF and CSV exports are generated client-side from the same data.</li>
+</ul>
+<p>
+  All access is gated by Supabase Row-Level Security policies, so a clinic can only ever see its own performance data. Tokens used to talk to the Google Ads API are stored encrypted at rest.
+</p>
+
+<h2>API Services Called</h2>
+<ul>
+  <li><strong>GoogleAdsService.SearchStream</strong> — to retrieve performance metrics (impressions, clicks, conversions, cost) at account, campaign and ad-group granularity via GAQL queries.</li>
+  <li><strong>CustomerService</strong> — to validate the linked customer ID and surface human-readable account names in our UI.</li>
+  <li><strong>CustomerClientService</strong> — to enumerate the child accounts available under our MCC for the onboarding flow.</li>
+  <li><strong>CampaignService</strong> (read-only) — to list campaigns and their status for the campaign-level performance views.</li>
+</ul>
+<p>
+  No mutating endpoints are called. We do not create, edit, pause or delete entities on behalf of our customers through the API.
+</p>
+
+<h2>Tool Mockups</h2>
+<p>Below are wireframe mockups of the Med4Grow Marketing Analytics screens that consume Google Ads data. Real screenshots are attached at the end of this document.</p>
+
+<div class="mockup">
+  <div class="mockup-title">
+    <span>Marketing Analytics</span>
+    <span style="background:#fff;color:#1d3a8a;padding:4px 10px;border-radius:4px;font-size:10pt;">Aline Morais (clinic)</span>
+  </div>
+  <div class="mockup-body">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <strong>Google Ads — Account-Level Performance</strong>
+      <span class="pill">October 2026 ▾</span>
+    </div>
+    <div class="metric-grid">
+      <div class="metric"><div class="lbl">Impressions</div><div class="val">101,120</div></div>
+      <div class="metric"><div class="lbl">Clicks</div><div class="val">5,430</div></div>
+      <div class="metric"><div class="lbl">Conversions</div><div class="val">492</div></div>
+      <div class="metric"><div class="lbl">Cost</div><div class="val">R$ 1,038.00</div></div>
+    </div>
+    <p class="small" style="margin:0;"><a href="#">Click for Campaign-Level Performance →</a></p>
+  </div>
+</div>
+
+<div class="mockup">
+  <div class="mockup-title">
+    <span>Consolidated Lead Origin</span>
+    <span style="background:#fff;color:#1d3a8a;padding:4px 10px;border-radius:4px;font-size:10pt;">Last 30 days</span>
+  </div>
+  <div class="mockup-body">
+    <div class="metric-grid" style="grid-template-columns:repeat(3,1fr);">
+      <div class="metric" style="background:#dbeefe;border-color:#9bc5e8;"><div class="lbl">Google Ads</div><div class="val">312 leads<br/><span class="small">CPL R$ 3.32</span></div></div>
+      <div class="metric" style="background:#e7e0fb;border-color:#b5a3e8;"><div class="lbl">Meta Ads</div><div class="val">487 leads<br/><span class="small">CPL R$ 5.78</span></div></div>
+      <div class="metric" style="background:#dff5e1;border-color:#a3d3a9;"><div class="lbl">WhatsApp Orgânico</div><div class="val">204 leads</div></div>
+    </div>
+    <p class="small" style="margin:0;">Data refreshed hourly from Google Ads API and Meta Marketing API.</p>
+  </div>
+</div>
+
+<h2>Background Job Description</h2>
+<p>
+  Our SQL/Supabase backend syncs with the Google Ads API hourly to update each opt-in customer's performance metrics. The job:
+</p>
+<ul>
+  <li>Reads the list of <code>clinics</code> with <code>google_status = 'active'</code> in our database;</li>
+  <li>For each, calls <code>GoogleAdsService.SearchStream</code> with a GAQL query scoped to the last 90 days of metrics;</li>
+  <li>Upserts the rows into <code>marketing_data</code> (clinic_id, date, platform, investment, conversions_value);</li>
+  <li>Logs the run, surfaces errors to the support dashboard, and retries with exponential backoff on transient failures.</li>
+</ul>
+
+<h2>Screenshots</h2>
+<p class="small">Real screenshots of the live application are attached as image pages following this document.</p>
+
+</body>
+</html>

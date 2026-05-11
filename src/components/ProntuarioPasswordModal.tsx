@@ -174,18 +174,25 @@ export function ProntuarioPasswordModal({ onAuthorized }: Props) {
         if (!recovered) { setRecoveryError("Senha incorreta."); return; }
         setRecoveryResult(recovered);
       } else {
-        // Sem pin_encrypted — verifica credenciais e reseta o PIN
+        // Sem pin_encrypted — verifica credenciais e gera novo PIN via UPDATE
         const email = data?.email ?? savedEmail;
         if (!email) { setRecoveryError("Não foi possível identificar o e-mail."); return; }
         const { error: authErr } = await supabase.auth.signInWithPassword({ email, password: recoveryLoginPw.trim() });
         if (authErr) { setRecoveryError("Senha incorreta."); return; }
-        await supabase.from("prontuario_passwords")
-          .delete()
+
+        const generated = generatePin();
+        const hash = await sha256(generated);
+        const { error: updateErr } = await supabase.from("prontuario_passwords")
+          .update({ password_hash: hash, pin_encrypted: null })
           .eq("user_id", profile.id)
           .eq("clinic_id", activeClinicId);
+        if (updateErr) { setRecoveryError("Erro ao resetar PIN. Contate o suporte."); return; }
+
+        setNewPin(generated);
         setShowRecovery(false);
         setRecoveryLoginPw("");
-        await init();
+        setPin("");
+        setStep("show-pin");
       }
     } catch {
       setRecoveryError("Erro ao recuperar PIN.");

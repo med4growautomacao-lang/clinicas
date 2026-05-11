@@ -226,6 +226,7 @@ export interface Appointment {
   time: string;
   status: 'pendente' | 'confirmado' | 'compareceu' | 'realizado' | 'cancelado' | 'faltou';
   source: 'ia' | 'manual' | 'site' | null;
+  modality: 'presencial' | 'online';
   notes: string | null;
   created_at: string;
   // Joined

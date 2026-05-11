@@ -24,6 +24,8 @@ import {
   Info,
   Eye,
   EyeOff,
+  Video,
+  MapPin,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -99,7 +101,7 @@ export function Appointments() {
   const [showModal, setShowModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
-  const [formData, setFormData] = useState({ patient_id: '', doctor_id: '', date: '', time: '', notes: '', status: 'pendente' as any });
+  const [formData, setFormData] = useState({ patient_id: '', doctor_id: '', date: '', time: '', notes: '', status: 'pendente' as any, modality: 'presencial' as 'presencial' | 'online' });
   const [submitting, setSubmitting] = useState(false);
   const [showScheduleSettings, setShowScheduleSettings] = useState(false);
   const [doctorToConfigure, setDoctorToConfigure] = useState<any>(null);
@@ -442,6 +444,7 @@ export function Appointments() {
         time: formData.time,
         notes: formData.notes || null,
         status: formData.status,
+        modality: formData.modality,
         source: 'manual',
       });
 
@@ -452,7 +455,7 @@ export function Appointments() {
       }
     }
 
-    setFormData({ patient_id: '', doctor_id: '', date: '', time: '', notes: '', status: 'pendente' });
+    setFormData({ patient_id: '', doctor_id: '', date: '', time: '', notes: '', status: 'pendente', modality: 'presencial' });
     setSelectedAppointment(null);
     setShowModal(false);
     setSubmitting(false);
@@ -501,7 +504,8 @@ export function Appointments() {
       date: apt.date,
       time: apt.time,
       notes: apt.notes || '',
-      status: apt.status
+      status: apt.status,
+      modality: (apt.modality as 'presencial' | 'online') || 'presencial'
     });
     setShowModal(true);
   };
@@ -579,7 +583,7 @@ export function Appointments() {
               </AnimatePresence>
             </div>
           )}
-          <Button className="py-5 px-6 group" onClick={() => { setSelectedAppointment(null); setFormData({ patient_id: '', doctor_id: '', date: '', time: '', notes: '', status: 'pendente' }); setShowModal(true); }}>
+          <Button className="py-5 px-6 group" onClick={() => { setSelectedAppointment(null); setFormData({ patient_id: '', doctor_id: '', date: '', time: '', notes: '', status: 'pendente', modality: 'presencial' }); setShowModal(true); }}>
             <Plus className="w-5 h-5 mr-2 group-hover:rotate-90 transition-transform" />
             Nova Consulta
           </Button>
@@ -733,6 +737,15 @@ export function Appointments() {
                                 {format(parseISO(apt.date), 'dd/MM/yyyy')}
                               </span>
                               <span className="flex items-center text-slate-400 font-medium text-xs mt-0.5"><Clock className="w-3 h-3 mr-1.5" />{apt.time?.substring(0, 5)}</span>
+                              <span className={cn(
+                                "inline-flex items-center gap-1 mt-1 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border self-start",
+                                apt.modality === 'online'
+                                  ? "text-sky-700 bg-sky-50 border-sky-100"
+                                  : "text-slate-500 bg-slate-50 border-slate-200"
+                              )}>
+                                {apt.modality === 'online' ? <Video className="w-2.5 h-2.5" /> : <MapPin className="w-2.5 h-2.5" />}
+                                {apt.modality === 'online' ? 'Online' : 'Presencial'}
+                              </span>
                             </div>
                           </td>
                           <td className="px-6 py-4">
@@ -834,6 +847,38 @@ export function Appointments() {
                   onChange={val => setFormData(p => ({ ...p, status: val as any }))}
                   options={Object.entries(statusLabel).map(([value, label]) => ({ value, label }))}
                 />
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Modalidade</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setFormData(p => ({ ...p, modality: 'presencial' }))}
+                      className={cn(
+                        "flex items-center justify-center gap-2 py-3 rounded-xl border text-xs font-bold transition-all",
+                        formData.modality === 'presencial'
+                          ? "bg-teal-600 text-white border-teal-600 shadow-lg shadow-teal-200"
+                          : "bg-white text-slate-600 border-slate-200 hover:border-teal-400 hover:text-teal-700 hover:bg-teal-50"
+                      )}
+                    >
+                      <MapPin className="w-4 h-4" />
+                      Presencial
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormData(p => ({ ...p, modality: 'online' }))}
+                      className={cn(
+                        "flex items-center justify-center gap-2 py-3 rounded-xl border text-xs font-bold transition-all",
+                        formData.modality === 'online'
+                          ? "bg-teal-600 text-white border-teal-600 shadow-lg shadow-teal-200"
+                          : "bg-white text-slate-600 border-slate-200 hover:border-teal-400 hover:text-teal-700 hover:bg-teal-50"
+                      )}
+                    >
+                      <Video className="w-4 h-4" />
+                      Online
+                    </button>
+                  </div>
+                </div>
 
                 {formData.doctor_id && formData.date && (
                   <div className="animate-in fade-in slide-in-from-top-2 duration-300">
@@ -1012,6 +1057,15 @@ export function Appointments() {
                           </div>
                         </div>
                       <div className="flex items-center gap-2">
+                        <span className={cn(
+                          "inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold border uppercase",
+                          apt.modality === 'online'
+                            ? "text-sky-700 bg-sky-50 border-sky-100"
+                            : "text-slate-500 bg-slate-50 border-slate-200"
+                        )}>
+                          {apt.modality === 'online' ? <Video className="w-3 h-3" /> : <MapPin className="w-3 h-3" />}
+                          {apt.modality === 'online' ? 'Online' : 'Presencial'}
+                        </span>
                         <span className={cn("px-2 py-0.5 rounded text-[10px] font-bold border uppercase", statusColor[apt.status] || statusColor.pendente)}>
                           {statusLabel[apt.status] || apt.status}
                         </span>
@@ -1027,7 +1081,7 @@ export function Appointments() {
               </div>
 
               <div className="p-6 border-t border-slate-100 bg-slate-50">
-                <Button className="w-full py-6 font-bold" onClick={() => { setShowDayModal(false); setFormData({ patient_id: '', doctor_id: '', date: selectedDay!, time: '', notes: '', status: 'pendente' }); setShowModal(true); }}>
+                <Button className="w-full py-6 font-bold" onClick={() => { setShowDayModal(false); setSelectedAppointment(null); setFormData({ patient_id: '', doctor_id: '', date: selectedDay!, time: '', notes: '', status: 'pendente', modality: 'presencial' }); setShowModal(true); }}>
                   <Plus className="w-5 h-5 mr-2" /> Agendar Nova Consulta
                 </Button>
               </div>

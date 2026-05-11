@@ -193,18 +193,21 @@ export function usePatients() {
       .select()
       .single();
     if (error) { setError(error.message); return null; }
+    setData(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
     return data;
   };
 
   const update = async (id: string, updates: Partial<Patient>) => {
+    setData(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
     const { error } = await supabase.from('patients').update(updates).eq('id', id);
-    if (error) { setError(error.message); return false; }
+    if (error) { setError(error.message); fetch(true); return false; }
     return true;
   };
 
   const remove = async (id: string) => {
+    setData(prev => prev.filter(p => p.id !== id));
     const { error } = await supabase.from('patients').delete().eq('id', id);
-    if (error) { setError(error.message); return false; }
+    if (error) { setError(error.message); fetch(true); return false; }
     return true;
   };
 
@@ -296,6 +299,7 @@ export function useAppointments(options?: { daysBack?: number; daysForward?: num
       .select('*, patient:patients(name, cpf, phone), doctor:doctors(name, user_id)')
       .single();
     if (error) { setError(error.message); return null; }
+    setData(prev => [data, ...prev]);
     return data;
   };
 
@@ -307,8 +311,9 @@ export function useAppointments(options?: { daysBack?: number; daysForward?: num
   };
 
   const remove = async (id: string) => {
+    setData(prev => prev.filter(a => a.id !== id));
     const { error } = await supabase.from('appointments').delete().eq('id', id);
-    if (error) { setError(error.message); return false; }
+    if (error) { setError(error.message); fetch(true); return false; }
     return true;
   };
 
@@ -520,24 +525,25 @@ export function useLeads(options?: { pageSize?: number }) {
       .select()
       .single();
     if (error) { setError(error.message); return null; }
+    setData(prev => [data, ...prev]);
     return data;
   };
 
   const update = async (id: string, updates: Partial<Lead>) => {
-    // Atualização otimista: move imediatamente na UI
     setData(prev => prev.map(l => l.id === id ? { ...l, ...updates } : l));
     const { error } = await supabase.from('leads').update(updates).eq('id', id);
     if (error) {
       setError(error.message);
-      fetch(true); // reverte ao estado real do banco
+      fetch(true);
       return false;
     }
     return true;
   };
 
   const remove = async (id: string) => {
+    setData(prev => prev.filter(l => l.id !== id));
     const { error } = await supabase.from('leads').delete().eq('id', id);
-    if (error) { setError(error.message); return false; }
+    if (error) { setError(error.message); fetch(true); return false; }
     return true;
   };
 
@@ -955,18 +961,21 @@ export function useFinancial() {
       .select()
       .single();
     if (error) { setError(error.message); return null; }
+    setData(prev => [data, ...prev]);
     return data;
   };
 
   const update = async (id: string, updates: Partial<FinancialTransaction>) => {
+    setData(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
     const { error } = await supabase.from('financial_transactions').update(updates).eq('id', id);
-    if (error) { setError(error.message); return false; }
+    if (error) { setError(error.message); fetch(true); return false; }
     return true;
   };
 
   const remove = async (id: string) => {
+    setData(prev => prev.filter(t => t.id !== id));
     const { error } = await supabase.from('financial_transactions').delete().eq('id', id);
-    if (error) { setError(error.message); return false; }
+    if (error) { setError(error.message); fetch(true); return false; }
     return true;
   };
 
@@ -1029,18 +1038,21 @@ export function useMedicalRecords(patientId: string | null) {
       .select('*, doctor:doctors(name)')
       .single();
     if (error) { setError(error.message); return null; }
+    setData(prev => [data, ...prev]);
     return data;
   };
 
   const update = async (id: string, updates: Partial<MedicalRecord>) => {
+    setData(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
     const { error } = await supabase.from('medical_records').update(updates).eq('id', id);
-    if (error) { setError(error.message); return false; }
+    if (error) { setError(error.message); fetch(true); return false; }
     return true;
   };
 
   const remove = async (id: string) => {
+    setData(prev => prev.filter(r => r.id !== id));
     const { error } = await supabase.from('medical_records').delete().eq('id', id);
-    if (error) { setError(error.message); return false; }
+    if (error) { setError(error.message); fetch(true); return false; }
     return true;
   };
 

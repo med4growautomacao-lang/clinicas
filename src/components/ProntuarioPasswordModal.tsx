@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Lock, Eye, EyeOff, ShieldCheck, Copy, Check } from "lucide-react";
+import { Lock, Eye, EyeOff, ShieldCheck, Copy, Check, AlertTriangle } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { deriveKey, encryptPinForRecovery, decryptPinFromRecovery } from "../lib/prontuarioCrypto";
@@ -20,18 +20,22 @@ interface Props {
 export function ProntuarioPasswordModal({ onAuthorized }: Props) {
   const { profile, activeClinicId } = useAuth();
 
-  const [step, setStep] = useState<"loading" | "show-pin" | "enter-pin">("loading");
+  const [step, setStep] = useState<"loading" | "show-pin" | "enter-pin" | "setup-recovery">("loading");
+
+  // show-pin step
   const [newPin, setNewPin] = useState("");
   const [copied, setCopied] = useState(false);
   const [savedEmail, setSavedEmail] = useState("");
   const [recoveryPassword, setRecoveryPassword] = useState("");
   const [recoveryLoading, setRecoveryLoading] = useState(false);
 
+  // enter-pin step
   const [pin, setPin] = useState("");
   const [showPin, setShowPin] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // forgot-pin recovery
   const [showRecovery, setShowRecovery] = useState(false);
   const [recoveryLoginPw, setRecoveryLoginPw] = useState("");
   const [recoveryLoading2, setRecoveryLoading2] = useState(false);
@@ -39,69 +43,49 @@ export function ProntuarioPasswordModal({ onAuthorized }: Props) {
   const [recoveryError, setRecoveryError] = useState("");
   const [recoveryCopied, setRecoveryCopied] = useState(false);
 
-  const handleRecoverPin = async () => {
-    if (!profile?.id || !activeClinicId || !recoveryLoginPw.trim()) return;
-    setRecoveryLoading2(true);
-    setRecoveryError("");
-    setRecoveryResult("");
-    try {
-      const { data } = await supabase
-        .from("prontuario_passwords")
-        .select("pin_encrypted")
-        .eq("user_id", profile.id)
-        .eq("clinic_id", activeClinicId)
-        .maybeSingle();
+  // setup-recovery step (insiste até configurar)
+  const [pendingKey, setPendingKey] = useState<CryptoKey | null>(null);
+  const [pendingEmail, setPendingEmail] = useState("");
+  const [pendingPin, setPendingPin] = useState("");
+  const [setupPw, setSetupPw] = useState("");
+  const [setupLoading, setSetupLoading] = useState(false);
+  const [setupError, setSetupError] = useState("");
 
-      if (!data?.pin_encrypted) {
-        setRecoveryError("Recuperação não disponível. Contate o administrador.");
-        return;
-      }
-      const recovered = await decryptPinFromRecovery(data.pin_encrypted, recoveryLoginPw.trim(), profile.id);
-      if (!recovered) {
-        setRecoveryError("Senha incorreta.");
-        return;
-      }
-      setRecoveryResult(recovered);
-    } catch {
-      setRecoveryError("Erro ao recuperar PIN.");
-    } finally {
-      setRecoveryLoading2(false);
+  const init = React.useCallback(async () => {
+    if (!profile?.id || !activeClinicId) return;
+    setStep("loading");
+
+    const { data } = await supabase
+      .from("prontuario_passwords")
+      .select("email")
+      .eq("user_id", profile.id)
+      .eq("clinic_id", activeClinicId)
+      .maybeSingle();
+
+    if (data) {
+      setSavedEmail(data.email);
+      setStep("enter-pin");
+    } else {
+      const generated = generatePin();
+      const hash = await sha256(generated);
+
+      const { data: { user } } = await supabase.auth.getUser();
+      const email = user?.email ?? profile.id;
+
+      await supabase.from("prontuario_passwords").upsert(
+        { user_id: profile.id, clinic_id: activeClinicId, email, password_hash: hash },
+        { onConflict: "user_id,clinic_id" }
+      );
+
+      setNewPin(generated);
+      setSavedEmail(email);
+      setStep("show-pin");
     }
-  };
-
-  useEffect(() => {
-    async function init() {
-      if (!profile?.id || !activeClinicId) return;
-
-      const { data } = await supabase
-        .from("prontuario_passwords")
-        .select("email")
-        .eq("user_id", profile.id)
-        .eq("clinic_id", activeClinicId)
-        .maybeSingle();
-
-      if (data) {
-        setSavedEmail(data.email);
-        setStep("enter-pin");
-      } else {
-        const generated = generatePin();
-        const hash = await sha256(generated);
-
-        const { data: { user } } = await supabase.auth.getUser();
-        const email = user?.email ?? profile.id;
-
-        await supabase.from("prontuario_passwords").upsert(
-          { user_id: profile.id, clinic_id: activeClinicId, email, password_hash: hash },
-          { onConflict: "user_id,clinic_id" }
-        );
-
-        setNewPin(generated);
-        setSavedEmail(email);
-        setStep("show-pin");
-      }
-    }
-    init();
   }, [profile?.id, activeClinicId]);
+
+  useEffect(() => { init(); }, [init]);
+
+  // ── show-pin ──────────────────────────────────────────────────────────────
 
   const handleCopy = () => {
     navigator.clipboard.writeText(newPin);
@@ -129,6 +113,8 @@ export function ProntuarioPasswordModal({ onAuthorized }: Props) {
     onAuthorized(savedEmail, key);
   };
 
+  // ── enter-pin ─────────────────────────────────────────────────────────────
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!pin.trim() || !profile?.id || !activeClinicId) return;
@@ -140,29 +126,97 @@ export function ProntuarioPasswordModal({ onAuthorized }: Props) {
 
       const { data, error: dbError } = await supabase
         .from("prontuario_passwords")
-        .select("email, password_hash")
+        .select("email, password_hash, pin_encrypted")
         .eq("user_id", profile.id)
         .eq("clinic_id", activeClinicId)
         .maybeSingle();
 
       if (dbError) throw dbError;
-      if (!data) {
-        setError("Nenhuma senha configurada. Contate o administrador.");
-        return;
-      }
-      if (data.password_hash !== hash) {
-        setError("PIN incorreto. Tente novamente.");
-        return;
-      }
+      if (!data) { setError("Nenhuma senha configurada. Contate o administrador."); return; }
+      if (data.password_hash !== hash) { setError("PIN incorreto. Tente novamente."); return; }
 
       const key = await deriveKey(pin.trim(), profile.id, activeClinicId);
-      onAuthorized(data.email, key);
+
+      if (!data.pin_encrypted) {
+        // Ainda não configurou recuperação — insiste até configurar
+        setPendingKey(key);
+        setPendingEmail(data.email);
+        setPendingPin(pin.trim());
+        setPin("");
+        setStep("setup-recovery");
+      } else {
+        onAuthorized(data.email, key);
+      }
     } catch (err: any) {
       setError("Erro ao verificar: " + err.message);
     } finally {
       setLoading(false);
     }
   };
+
+  // ── forgot-pin recovery ───────────────────────────────────────────────────
+
+  const handleRecoverPin = async () => {
+    if (!profile?.id || !activeClinicId || !recoveryLoginPw.trim()) return;
+    setRecoveryLoading2(true);
+    setRecoveryError("");
+    setRecoveryResult("");
+    try {
+      const { data } = await supabase
+        .from("prontuario_passwords")
+        .select("pin_encrypted, email")
+        .eq("user_id", profile.id)
+        .eq("clinic_id", activeClinicId)
+        .maybeSingle();
+
+      if (data?.pin_encrypted) {
+        const recovered = await decryptPinFromRecovery(data.pin_encrypted, recoveryLoginPw.trim(), profile.id);
+        if (!recovered) { setRecoveryError("Senha incorreta."); return; }
+        setRecoveryResult(recovered);
+      } else {
+        // Sem pin_encrypted — verifica credenciais e reseta o PIN
+        const email = data?.email ?? savedEmail;
+        if (!email) { setRecoveryError("Não foi possível identificar o e-mail."); return; }
+        const { error: authErr } = await supabase.auth.signInWithPassword({ email, password: recoveryLoginPw.trim() });
+        if (authErr) { setRecoveryError("Senha incorreta."); return; }
+        await supabase.from("prontuario_passwords")
+          .delete()
+          .eq("user_id", profile.id)
+          .eq("clinic_id", activeClinicId);
+        setShowRecovery(false);
+        setRecoveryLoginPw("");
+        await init();
+      }
+    } catch {
+      setRecoveryError("Erro ao recuperar PIN.");
+    } finally {
+      setRecoveryLoading2(false);
+    }
+  };
+
+  // ── setup-recovery ────────────────────────────────────────────────────────
+
+  const handleSaveRecovery = async () => {
+    if (!profile?.id || !activeClinicId || !setupPw.trim() || !pendingKey) return;
+    setSetupLoading(true);
+    setSetupError("");
+    try {
+      const pin_encrypted = await encryptPinForRecovery(pendingPin, setupPw.trim(), profile.id);
+      if (pin_encrypted) {
+        await supabase.from("prontuario_passwords")
+          .update({ pin_encrypted })
+          .eq("user_id", profile.id)
+          .eq("clinic_id", activeClinicId);
+      }
+      onAuthorized(pendingEmail, pendingKey);
+    } catch {
+      setSetupError("Erro ao salvar. Tente novamente.");
+    } finally {
+      setSetupLoading(false);
+    }
+  };
+
+  // ── render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="h-full flex items-center justify-center bg-slate-50">
@@ -318,6 +372,57 @@ export function ProntuarioPasswordModal({ onAuthorized }: Props) {
               </div>
             )}
           </form>
+        )}
+
+        {step === "setup-recovery" && (
+          <div className="space-y-4">
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <p className="text-[11px] text-amber-800 leading-relaxed">
+                <strong>Recuperação de PIN não configurada.</strong> Se esquecer o PIN, não conseguirá acessar os prontuários. Configure agora para evitar bloqueios.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-[11px] font-semibold text-slate-600">
+                Senha de login (para recuperação do PIN)
+              </p>
+              <input
+                type="password"
+                value={setupPw}
+                onChange={e => { setSetupPw(e.target.value); setSetupError(""); }}
+                placeholder="Sua senha de acesso ao sistema"
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-200 transition-all"
+                onKeyDown={e => e.key === "Enter" && handleSaveRecovery()}
+                autoFocus
+              />
+              <p className="text-[10px] text-slate-400 leading-relaxed">
+                Criptografa seu PIN localmente. O servidor nunca tem acesso a esta chave.
+              </p>
+            </div>
+
+            {setupError && (
+              <p className="text-xs font-semibold text-rose-600 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2">
+                {setupError}
+              </p>
+            )}
+
+            <button
+              onClick={handleSaveRecovery}
+              disabled={setupLoading || !setupPw.trim()}
+              className="w-full py-3 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-300 text-white font-bold text-sm rounded-xl transition-colors"
+            >
+              {setupLoading ? "Salvando..." : "Salvar e Entrar"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => pendingKey && onAuthorized(pendingEmail, pendingKey)}
+              className="w-full text-xs font-semibold text-slate-400 hover:text-slate-600 transition-colors pt-1"
+            >
+              Pular por agora (será solicitado novamente)
+            </button>
+          </div>
         )}
       </div>
     </div>

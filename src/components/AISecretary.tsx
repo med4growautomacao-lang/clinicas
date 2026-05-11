@@ -673,7 +673,7 @@ function AllFollowupsView() {
 interface HandoffRule {
   id: string;
   name: string;
-  type: 'keyword';
+  type: 'keyword' | 'ai_phrase';
   keywords?: string;
   move_to_stage?: string;
   action?: string;

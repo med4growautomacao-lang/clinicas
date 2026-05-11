@@ -2,15 +2,13 @@ import React, { useState } from "react";
 import { Card, CardContent } from "./ui/card";
 import { Button } from "./ui/button";
 import {
-    Users,
     Plus,
     Settings,
     Stethoscope,
-    ChevronRight,
     X,
     Loader2,
     AlertCircle,
-    KeyRound,
+    Clock,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -20,31 +18,29 @@ import { useAuth } from "../contexts/AuthContext";
 
 export function DoctorsManagement() {
     const { activeClinicId } = useAuth();
-    const { data: doctors, loading, error, refetch, createWithAuth, update, remove } = useDoctors();
+    const { data: doctors, loading, error, refetch, update, remove } = useDoctors();
     const [showModal, setShowModal] = useState(false);
     const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
     const [selectedDoctorId, setSelectedDoctorId] = useState<string | null>(null);
-    const [formData, setFormData] = useState({ 
-        name: '', 
-        specialty: '', 
+    const [formData, setFormData] = useState({
+        name: '',
+        specialty: '',
         crm: '',
         email: '',
-        password: ''
     });
     const [submitting, setSubmitting] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
-    const [showResetPinConfirm, setShowResetPinConfirm] = useState<string | null>(null);
-    const [resetPinDone, setResetPinDone] = useState<string | null>(null);
+
     const openCreateModal = () => {
         setModalMode('create');
-        setFormData({ name: '', specialty: '', crm: '', email: '', password: '' });
+        setFormData({ name: '', specialty: '', crm: '', email: '' });
         setSelectedDoctorId(null);
         setShowModal(true);
     };
 
     const openEditModal = (doc: Doctor) => {
         setModalMode('edit');
-        setFormData({ name: doc.name, specialty: doc.specialty || '', crm: doc.crm || '' });
+        setFormData({ name: doc.name, specialty: doc.specialty || '', crm: doc.crm || '', email: '' });
         setSelectedDoctorId(doc.id);
         setShowModal(true);
     };
@@ -63,22 +59,42 @@ export function DoctorsManagement() {
 
         try {
             if (modalMode === 'create') {
-                await createWithAuth({
-                    name: formData.name,
-                    email: formData.email,
-                    password: formData.password,
-                    specialty: formData.specialty || null,
-                    crm: formData.crm
-                });
+                // Pré-cadastra o email para o médico criar a própria conta no login
+                const { error: pendingErr } = await supabase
+                    .from('pending_clinic_users')
+                    .upsert({
+                        clinic_id: activeClinicId,
+                        email: formData.email.trim().toLowerCase(),
+                        full_name: formData.name.trim(),
+                        role: 'medico',
+                        crm: formData.crm.trim(),
+                        specialty: formData.specialty.trim() || null,
+                    }, { onConflict: 'email,clinic_id' });
+                if (pendingErr) throw pendingErr;
+
+                // Cria o registro no corpo clínico (user_id null até o médico ativar a conta)
+                const { error: doctorErr } = await supabase
+                    .from('doctors')
+                    .insert({
+                        clinic_id: activeClinicId,
+                        name: formData.name.trim(),
+                        specialty: formData.specialty.trim() || null,
+                        crm: formData.crm.trim(),
+                        status: 'offline',
+                        user_id: null,
+                    });
+                if (doctorErr) throw doctorErr;
+
+                refetch(true, true);
             } else if (selectedDoctorId) {
-                await update(selectedDoctorId, { 
-                    name: formData.name, 
-                    specialty: formData.specialty || null, 
-                    crm: formData.crm || null 
+                await update(selectedDoctorId, {
+                    name: formData.name,
+                    specialty: formData.specialty || null,
+                    crm: formData.crm || null,
                 });
             }
 
-            setFormData({ name: '', specialty: '', crm: '', email: '', password: '' });
+            setFormData({ name: '', specialty: '', crm: '', email: '' });
             setShowModal(false);
         } catch (err: any) {
             alert("Erro ao salvar: " + err.message);
@@ -94,30 +110,22 @@ export function DoctorsManagement() {
         setSubmitting(false);
     };
 
-    const handleResetPin = async (doc: Doctor) => {
-        if (!doc.user_id || !activeClinicId) return;
-        await supabase
-            .from('prontuario_passwords')
-            .delete()
-            .eq('user_id', doc.user_id)
-            .eq('clinic_id', activeClinicId);
-        setShowResetPinConfirm(null);
-        setResetPinDone(doc.id);
-        setTimeout(() => setResetPinDone(null), 3000);
-    };
 
     const toggleStatus = async (doc: Doctor) => {
         const newStatus = doc.status === 'atendendo' ? 'pausa' : 'atendendo';
         await update(doc.id, { status: newStatus });
     };
 
-    const statusLabel = (s: string) => s === 'atendendo' ? 'Atendendo' : s === 'pausa' ? 'Em Pausa' : 'Offline';
-    const statusColor = (s: string) => s === 'atendendo' ? 'bg-emerald-500' : s === 'pausa' ? 'bg-amber-400' : 'bg-slate-400';
-    const statusBadge = (s: string) => s === 'atendendo'
-        ? "bg-emerald-50 text-emerald-600 border-emerald-100"
-        : s === 'pausa'
-            ? "bg-amber-50 text-amber-600 border-amber-100"
-            : "bg-slate-50 text-slate-600 border-slate-100";
+    const isPending = (doc: Doctor) => !doc.user_id;
+    const statusLabel = (doc: Doctor) => isPending(doc) ? 'Aguardando cadastro' : doc.status === 'atendendo' ? 'Atendendo' : doc.status === 'pausa' ? 'Em Pausa' : 'Offline';
+    const statusColor = (doc: Doctor) => isPending(doc) ? 'bg-violet-300' : doc.status === 'atendendo' ? 'bg-emerald-500' : doc.status === 'pausa' ? 'bg-amber-400' : 'bg-slate-400';
+    const statusBadge = (doc: Doctor) => isPending(doc)
+        ? "bg-violet-50 text-violet-600 border-violet-100"
+        : doc.status === 'atendendo'
+            ? "bg-emerald-50 text-emerald-600 border-emerald-100"
+            : doc.status === 'pausa'
+                ? "bg-amber-50 text-amber-600 border-amber-100"
+                : "bg-slate-50 text-slate-600 border-slate-100";
 
     const avatarColors = [
         "bg-blue-50", "bg-yellow-50", "bg-purple-50", "bg-rose-50", "bg-emerald-50",
@@ -168,22 +176,29 @@ export function DoctorsManagement() {
                         transition={{ duration: 0.2 }}
                     >
                         <Card className="border border-slate-200 shadow-sm overflow-hidden group hover:shadow-md transition-all relative">
-                            <div className={cn("h-1.5 w-full", statusColor(doc.status))} />
+                            <div className={cn("h-1.5 w-full", statusColor(doc))} />
                             <CardContent className="p-6">
                                 <div className="flex justify-between items-start mb-4">
                                     <div className={cn("w-16 h-16 rounded-xl flex items-center justify-center group-hover:scale-105 transition-transform text-2xl font-bold text-slate-600", avatarColors[i % avatarColors.length])}>
                                         {doc.name.split(' ').map(n => n[0]).slice(0, 2).join('')}
                                     </div>
                                     <div className="flex flex-col items-end gap-2 text-right">
-                                        <button
-                                            onClick={() => toggleStatus(doc)}
-                                            className={cn(
-                                                "text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border cursor-pointer hover:opacity-80 transition-opacity whitespace-nowrap",
-                                                statusBadge(doc.status)
-                                            )}
-                                        >
-                                            {statusLabel(doc.status)}
-                                        </button>
+                                        {isPending(doc) ? (
+                                            <span className={cn("flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border whitespace-nowrap", statusBadge(doc))}>
+                                                <Clock className="w-3 h-3" />
+                                                Aguardando cadastro
+                                            </span>
+                                        ) : (
+                                            <button
+                                                onClick={() => toggleStatus(doc)}
+                                                className={cn(
+                                                    "text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border cursor-pointer hover:opacity-80 transition-opacity whitespace-nowrap",
+                                                    statusBadge(doc)
+                                                )}
+                                            >
+                                                {statusLabel(doc)}
+                                            </button>
+                                        )}
                                         {doc.crm && <p className="text-[10px] font-bold text-slate-400 uppercase">{doc.crm}</p>}
                                     </div>
                                 </div>
@@ -212,61 +227,17 @@ export function DoctorsManagement() {
 
                             <div className="px-6 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between group-hover:bg-teal-50/30 transition-colors">
                                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                                    {doc.is_active ? 'Status: Ativo' : 'Status: Inativo'}
+                                    {isPending(doc) ? 'Conta pendente' : doc.is_active ? 'Status: Ativo' : 'Status: Inativo'}
                                 </span>
                                 <div className="flex items-center gap-3">
-                                {resetPinDone === doc.id ? (
-                                    <span className="text-[10px] font-bold text-teal-600 uppercase">PIN resetado</span>
-                                ) : (
                                     <button
-                                        onClick={() => setShowResetPinConfirm(doc.id)}
-                                        className="flex items-center gap-1 text-[10px] font-bold text-slate-400 hover:text-amber-600 transition-colors uppercase"
+                                        onClick={() => setShowDeleteConfirm(doc.id)}
+                                        className="text-xs font-bold text-rose-400 hover:text-rose-600 transition-colors uppercase"
                                     >
-                                        <KeyRound className="w-3 h-3" />
-                                        Reset PIN
+                                        Excluir
                                     </button>
-                                )}
-                                <button
-                                    onClick={() => setShowDeleteConfirm(doc.id)}
-                                    className="text-xs font-bold text-rose-400 hover:text-rose-600 transition-colors uppercase"
-                                >
-                                    Excluir
-                                </button>
                                 </div>
                             </div>
-
-                            {/* Reset PIN Confirmation Overlay */}
-                            <AnimatePresence>
-                                {showResetPinConfirm === doc.id && (
-                                    <motion.div
-                                        initial={{ opacity: 0 }}
-                                        animate={{ opacity: 1 }}
-                                        exit={{ opacity: 0 }}
-                                        className="absolute inset-0 bg-white/95 z-10 flex flex-col items-center justify-center p-6 text-center"
-                                    >
-                                        <KeyRound className="w-10 h-10 text-amber-500 mb-2" />
-                                        <h4 className="text-sm font-bold text-slate-900 mb-1">Resetar PIN do prontuário?</h4>
-                                        <p className="text-xs text-slate-500 mb-4">
-                                            O médico precisará criar um novo PIN no próximo acesso.
-                                        </p>
-                                        <div className="flex gap-2 w-full">
-                                            <Button
-                                                variant="outline"
-                                                className="flex-1 h-8 text-[10px] font-bold"
-                                                onClick={() => setShowResetPinConfirm(null)}
-                                            >
-                                                Cancelar
-                                            </Button>
-                                            <Button
-                                                className="flex-1 h-8 text-[10px] font-bold bg-amber-500 hover:bg-amber-600"
-                                                onClick={() => handleResetPin(doc)}
-                                            >
-                                                Resetar
-                                            </Button>
-                                        </div>
-                                    </motion.div>
-                                )}
-                            </AnimatePresence>
 
                             {/* Delete Confirmation Overlay */}
                             <AnimatePresence>
@@ -385,28 +356,17 @@ export function DoctorsManagement() {
                                 </div>
 
                                 {modalMode === 'create' && (
-                                    <>
-                                        <div>
-                                            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 font-bold">E-mail de Login *</label>
-                                            <input
-                                                type="email"
-                                                value={formData.email}
-                                                onChange={e => setFormData(p => ({ ...p, email: e.target.value }))}
-                                                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-300 font-medium text-sm transition-all"
-                                                placeholder="email@clinica.com"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 font-bold">Senha Inicial *</label>
-                                            <input
-                                                type="password"
-                                                value={formData.password}
-                                                onChange={e => setFormData(p => ({ ...p, password: e.target.value }))}
-                                                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-300 font-medium text-sm transition-all"
-                                                placeholder="••••••••"
-                                            />
-                                        </div>
-                                    </>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 font-bold">E-mail de Login *</label>
+                                        <input
+                                            type="email"
+                                            value={formData.email}
+                                            onChange={e => setFormData(p => ({ ...p, email: e.target.value }))}
+                                            className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-300 font-medium text-sm transition-all"
+                                            placeholder="email@clinica.com"
+                                        />
+                                        <p className="text-[11px] text-slate-400 mt-1.5">O médico deverá criar a conta em "Criar conta" na tela de login usando este e-mail.</p>
+                                    </div>
                                 )}
                             </div>
 

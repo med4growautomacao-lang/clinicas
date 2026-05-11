@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Lock, Eye, EyeOff, ShieldCheck, Copy, Check } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
-import { deriveKey } from "../lib/prontuarioCrypto";
+import { deriveKey, encryptPinForRecovery, decryptPinFromRecovery } from "../lib/prontuarioCrypto";
 
 async function sha256(text: string): Promise<string> {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
@@ -24,11 +24,50 @@ export function ProntuarioPasswordModal({ onAuthorized }: Props) {
   const [newPin, setNewPin] = useState("");
   const [copied, setCopied] = useState(false);
   const [savedEmail, setSavedEmail] = useState("");
+  const [recoveryPassword, setRecoveryPassword] = useState("");
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
 
   const [pin, setPin] = useState("");
   const [showPin, setShowPin] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const [showRecovery, setShowRecovery] = useState(false);
+  const [recoveryLoginPw, setRecoveryLoginPw] = useState("");
+  const [recoveryLoading2, setRecoveryLoading2] = useState(false);
+  const [recoveryResult, setRecoveryResult] = useState("");
+  const [recoveryError, setRecoveryError] = useState("");
+  const [recoveryCopied, setRecoveryCopied] = useState(false);
+
+  const handleRecoverPin = async () => {
+    if (!profile?.id || !activeClinicId || !recoveryLoginPw.trim()) return;
+    setRecoveryLoading2(true);
+    setRecoveryError("");
+    setRecoveryResult("");
+    try {
+      const { data } = await supabase
+        .from("prontuario_passwords")
+        .select("pin_encrypted")
+        .eq("user_id", profile.id)
+        .eq("clinic_id", activeClinicId)
+        .maybeSingle();
+
+      if (!data?.pin_encrypted) {
+        setRecoveryError("Recuperação não disponível. Contate o administrador.");
+        return;
+      }
+      const recovered = await decryptPinFromRecovery(data.pin_encrypted, recoveryLoginPw.trim(), profile.id);
+      if (!recovered) {
+        setRecoveryError("Senha incorreta.");
+        return;
+      }
+      setRecoveryResult(recovered);
+    } catch {
+      setRecoveryError("Erro ao recuperar PIN.");
+    } finally {
+      setRecoveryLoading2(false);
+    }
+  };
 
   useEffect(() => {
     async function init() {
@@ -72,6 +111,20 @@ export function ProntuarioPasswordModal({ onAuthorized }: Props) {
 
   const handleConfirmPin = async () => {
     if (!profile?.id || !activeClinicId) return;
+    setRecoveryLoading(true);
+    try {
+      if (recoveryPassword.trim()) {
+        const pin_encrypted = await encryptPinForRecovery(newPin, recoveryPassword.trim(), profile.id);
+        if (pin_encrypted) {
+          await supabase.from("prontuario_passwords")
+            .update({ pin_encrypted })
+            .eq("user_id", profile.id)
+            .eq("clinic_id", activeClinicId);
+        }
+      }
+    } catch { /* não bloqueia */ } finally {
+      setRecoveryLoading(false);
+    }
     const key = await deriveKey(newPin, profile.id, activeClinicId);
     onAuthorized(savedEmail, key);
   };
@@ -150,11 +203,27 @@ export function ProntuarioPasswordModal({ onAuthorized }: Props) {
             <p className="text-[11px] text-slate-500 text-center leading-relaxed">
               Anote este PIN — ele não será exibido novamente. Você precisará dele toda vez que acessar o módulo de prontuários.
             </p>
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
+              <p className="text-[11px] font-semibold text-slate-600">
+                Senha de login (para recuperação do PIN)
+              </p>
+              <input
+                type="password"
+                value={recoveryPassword}
+                onChange={e => setRecoveryPassword(e.target.value)}
+                placeholder="Sua senha de acesso ao sistema"
+                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-200 transition-all"
+              />
+              <p className="text-[10px] text-slate-400 leading-relaxed">
+                Usada para criptografar o PIN localmente. Nem o servidor tem acesso a esta chave.
+              </p>
+            </div>
             <button
               onClick={handleConfirmPin}
-              className="w-full py-3 bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm rounded-xl transition-colors"
+              disabled={recoveryLoading}
+              className="w-full py-3 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-300 text-white font-bold text-sm rounded-xl transition-colors"
             >
-              OK, guardei minha senha
+              {recoveryLoading ? "Salvando..." : "OK, guardei minha senha"}
             </button>
           </div>
         )}
@@ -195,6 +264,59 @@ export function ProntuarioPasswordModal({ onAuthorized }: Props) {
             >
               {loading ? "Verificando..." : "Acessar Prontuários"}
             </button>
+
+            <button
+              type="button"
+              onClick={() => { setShowRecovery(v => !v); setRecoveryLoginPw(""); setRecoveryResult(""); setRecoveryError(""); }}
+              className="w-full text-xs font-semibold text-slate-400 hover:text-teal-600 transition-colors pt-1"
+            >
+              {showRecovery ? "Cancelar" : "Esqueci meu PIN"}
+            </button>
+
+            {showRecovery && (
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                {!recoveryResult ? (
+                  <>
+                    <p className="text-[11px] text-slate-500 leading-relaxed">
+                      Informe sua <strong>senha de login</strong> para recuperar o PIN.
+                    </p>
+                    <input
+                      type="password"
+                      value={recoveryLoginPw}
+                      onChange={e => { setRecoveryLoginPw(e.target.value); setRecoveryError(""); }}
+                      placeholder="Senha de login"
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-200 transition-all"
+                      onKeyDown={e => e.key === "Enter" && handleRecoverPin()}
+                    />
+                    {recoveryError && (
+                      <p className="text-xs font-semibold text-rose-600">{recoveryError}</p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleRecoverPin}
+                      disabled={recoveryLoading2 || !recoveryLoginPw.trim()}
+                      className="w-full py-2 bg-slate-700 hover:bg-slate-800 disabled:bg-slate-300 text-white font-bold text-xs rounded-lg transition-colors"
+                    >
+                      {recoveryLoading2 ? "Verificando..." : "Recuperar PIN"}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-[11px] text-slate-500 text-center">Seu PIN de prontuário</p>
+                    <div className="text-3xl font-black tracking-[12px] text-slate-900 text-center py-2">
+                      {recoveryResult}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { navigator.clipboard.writeText(recoveryResult); setRecoveryCopied(true); setTimeout(() => setRecoveryCopied(false), 2000); }}
+                      className="w-full text-xs font-semibold text-teal-600 hover:text-teal-800 transition-colors"
+                    >
+                      {recoveryCopied ? "✓ Copiado!" : "Copiar PIN"}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
           </form>
         )}
       </div>

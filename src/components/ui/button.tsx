@@ -1,6 +1,6 @@
 import * as React from "react";
 import { cn } from "@/src/lib/utils";
-import { motion } from "framer-motion";
+import { motion } from "motion/react";
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: "default" | "outline" | "ghost" | "secondary" | "destructive";
@@ -35,7 +35,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           sizes[size as keyof typeof sizes],
           className
         )}
-        {...props}
+        {...(props as any)}
       />
     );
   },

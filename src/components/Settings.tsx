@@ -94,10 +94,8 @@ export function Settings() {
     const handleSave = async () => {
         setSaving(true);
         try {
-            if (activeTab === 'branding' || activeTab === 'clinic') {
+            if (activeTab === 'clinic') {
                 await Promise.all([updateClinic(localClinic), updateAI(localAI)]);
-            } else if (activeTab === 'ai') {
-                await updateAI(localAI);
             } else if (activeTab === 'integrations') {
                 // Salva tanto WhatsApp quanto as novas configurações do Meta no Clinic
                 await Promise.all([
@@ -1620,8 +1618,9 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
 })()}
                                     </pre>
                                     <div className="absolute top-12 right-6 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                                        <Button 
-                                            vari                                            onClick={(e) => {
+                                        <Button
+                                            variant="ghost"
+                                            onClick={(e) => {
                                                 const script = systemSettings?.global_tracking_script || '<!-- Script Global não configurado no banco system_settings -->';
                                                 const finalScript = script.replace(/{{WA_PRE_MSG}}/g, clinicData.wa_pre_msg || 'Olá! Vim do site.')
                                                                           .replace(/{{PHONE}}/g, clinicData.phone ? clinicData.phone.replace(/\D/g, '') : 'SEUNUMERO')

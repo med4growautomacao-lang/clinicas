@@ -566,7 +566,7 @@ function EditClinicModal({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-bold text-slate-600 mb-1.5">Plano</label>
-              <select value={form.plan} onChange={e => setForm(f => ({ ...f, plan: e.target.value }))}
+              <select value={form.plan} onChange={e => setForm(f => ({ ...f, plan: e.target.value as "enterprise" | "pro" | "free" }))}
                 className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 bg-white text-sm">
                 <option value="free">Free</option>
                 <option value="pro">Pro</option>

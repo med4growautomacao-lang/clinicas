@@ -60,6 +60,42 @@ export async function decryptField(value: string | null | undefined, key: Crypto
   }
 }
 
+// Derivação client-side da chave de recuperação de PIN (usa a senha de login do médico)
+export async function derivePinRecoveryKey(loginPassword: string, userId: string): Promise<CryptoKey> {
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw', new TextEncoder().encode(loginPassword), 'PBKDF2', false, ['deriveKey']
+  );
+  return crypto.subtle.deriveKey(
+    {
+      name: 'PBKDF2',
+      salt: new TextEncoder().encode(`prontuario:pin_recovery:${userId}`),
+      iterations: 100000,
+      hash: 'SHA-256',
+    },
+    keyMaterial,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+}
+
+export async function encryptPinForRecovery(pin: string, loginPassword: string, userId: string): Promise<string | null> {
+  const key = await derivePinRecoveryKey(loginPassword, userId);
+  return encryptField(pin, key);
+}
+
+export async function decryptPinFromRecovery(pin_encrypted: string, loginPassword: string, userId: string): Promise<string | null> {
+  try {
+    const key = await derivePinRecoveryKey(loginPassword, userId);
+    const result = await decryptField(pin_encrypted, key);
+    // Verifica se o resultado parece um PIN válido (4 dígitos numéricos)
+    if (result && /^\d{4}$/.test(result)) return result;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // Para campos JSONB: encripta como { _enc: "enc:..." }
 export async function encryptJSON(obj: any, key: CryptoKey): Promise<any> {
   if (obj == null) return null;

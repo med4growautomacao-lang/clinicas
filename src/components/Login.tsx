@@ -63,8 +63,7 @@ export function Login() {
         return;
       }
 
-      // Create account via Supabase Auth (sends confirmation email)
-      const { error: signUpError } = await supabase.auth.signUp({
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email: regEmail,
         password: regPassword,
       });
@@ -76,6 +75,11 @@ export function Login() {
           throw signUpError;
         }
         return;
+      }
+
+      // Confirmação de email desabilitada: ativa o médico imediatamente
+      if (signUpData?.user) {
+        await supabase.rpc('activate_pending_medico', { p_email: regEmail });
       }
 
       setRegSuccess(true);
@@ -193,17 +197,16 @@ export function Login() {
                 <div className="flex flex-col items-center gap-4 py-4 text-center">
                   <CheckCircle2 className="w-12 h-12 text-teal-500" />
                   <div>
-                    <p className="font-black text-slate-900 text-base">Verifique seu e-mail</p>
+                    <p className="font-black text-slate-900 text-base">Conta criada com sucesso!</p>
                     <p className="text-sm text-slate-500 mt-1 leading-relaxed">
-                      Enviamos um link de confirmação para <strong>{regEmail}</strong>.<br />
-                      Clique no link para ativar sua conta e fazer login.
+                      Sua conta foi ativada. Faça login com o e-mail <strong>{regEmail}</strong> e a senha que você acabou de criar.
                     </p>
                   </div>
                   <button
-                    onClick={() => { setTab('login'); setRegSuccess(false); }}
+                    onClick={() => { setTab('login'); setRegSuccess(false); setEmail(regEmail); }}
                     className="text-sm font-bold text-teal-600 hover:text-teal-700"
                   >
-                    Voltar para o login
+                    Fazer login
                   </button>
                 </div>
               ) : (

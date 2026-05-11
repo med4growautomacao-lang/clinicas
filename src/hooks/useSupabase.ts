@@ -226,7 +226,7 @@ export interface Appointment {
   notes: string | null;
   created_at: string;
   // Joined
-  patient?: { name: string };
+  patient?: { name: string; cpf?: string | null; phone?: string | null };
   doctor?: { name: string };
 }
 
@@ -1090,6 +1090,7 @@ export interface AIConfig {
   followup_enabled: boolean;
   followup_message: string;
   followup_delay: number;
+  handoff_enabled: boolean;
   handoff_rules: any[] | null;
   transition_rules: any[] | null;
   finish_service_enabled: boolean;

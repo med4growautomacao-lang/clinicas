@@ -207,6 +207,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      // Fallback: médico pode ter criado conta sem a ativação ter sido concluída
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (authUser?.email) {
+        const { data: activated } = await supabase.rpc('activate_pending_medico', { p_email: authUser.email });
+        if (activated?.ok) {
+          await fetchProfile(userId);
+          return;
+        }
+      }
       console.warn('AuthContext: No profile found in users or org_users');
     } catch (error) {
       console.error('AuthContext: Profile error:', error);

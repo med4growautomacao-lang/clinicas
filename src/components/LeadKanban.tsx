@@ -1761,7 +1761,7 @@ export function LeadKanban() {
                       <motion.div
                         key={ticket.id}
                         draggable={!isClosed && !lead.converted_patient_id}
-                        onDragStart={!isClosed && !lead.converted_patient_id ? (e) => handleDragStart(e, ticket) : undefined}
+                        onDragStart={!isClosed && !lead.converted_patient_id ? (e) => handleDragStart(e as unknown as React.DragEvent<Element>, ticket) : undefined}
                         whileHover={{ y: isClosed ? 0 : -1 }}
                         className={cn(
                           "px-3 py-2.5 rounded-lg border shadow-sm transition-all group",

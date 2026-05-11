@@ -293,7 +293,7 @@ export function useAppointments(options?: { daysBack?: number; daysForward?: num
     const { data, error } = await supabase
       .from('appointments')
       .insert({ ...apt, clinic_id: activeClinicId })
-      .select('*, patient:patients(name, cpf, phone), doctor:doctors!inner(name, user_id)')
+      .select('*, patient:patients(name, cpf, phone), doctor:doctors(name, user_id)')
       .single();
     if (error) { setError(error.message); return null; }
     return data;

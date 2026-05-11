@@ -419,16 +419,23 @@ export function Appointments() {
   const handleSubmit = async () => {
     if (!formData.patient_id || !formData.doctor_id || !formData.date || !formData.time) return;
     setSubmitting(true);
+    setError(null);
 
     if (selectedAppointment) {
       const becomingRealizado = selectedAppointment.status !== 'realizado' && formData.status === 'realizado';
-      await update(selectedAppointment.id, formData);
+      const ok = await update(selectedAppointment.id, formData);
+
+      if (!ok) {
+        setError('Erro ao atualizar agendamento. Tente novamente.');
+        setSubmitting(false);
+        return;
+      }
 
       if (becomingRealizado) {
         await onAppointmentRealizado(formData.patient_id, selectedAppointment.id, formData.date, formData.time, 0, null, 'pago', '', [], selectedAppointment.ticket_id);
       }
     } else {
-      await create({
+      const result = await create({
         patient_id: formData.patient_id,
         doctor_id: formData.doctor_id,
         date: formData.date,
@@ -437,6 +444,12 @@ export function Appointments() {
         status: formData.status,
         source: 'manual',
       });
+
+      if (!result) {
+        setError('Erro ao criar agendamento. Verifique os dados e tente novamente.');
+        setSubmitting(false);
+        return;
+      }
     }
 
     setFormData({ patient_id: '', doctor_id: '', date: '', time: '', notes: '', status: 'pendente' });
@@ -825,32 +838,34 @@ export function Appointments() {
                 {formData.doctor_id && formData.date && (
                   <div className="animate-in fade-in slide-in-from-top-2 duration-300">
                     <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Horário *</label>
-                    {availableSlots === null ? (
-                       <p className="text-sm text-slate-400 ml-1 font-medium italic">Selecione médico e data para ver horários.</p>
-                     ) : availableSlots.length === 0 ? (
-                       <div className="p-4 bg-rose-50 border border-rose-100 rounded-xl text-rose-600 text-sm font-bold flex items-center">
-                          <AlertCircle className="w-4 h-4 mr-2" />
-                          Esse médico não atende nesta data.
-                       </div>
-                     ) : (
-                       <div className="grid grid-cols-4 sm:grid-cols-5 gap-2 mt-1">
-                         {availableSlots.map(slot => (
-                           <button
-                             key={slot}
-                             type="button"
-                             onClick={() => setFormData(p => ({ ...p, time: slot }))}
-                             className={cn(
-                               "py-2.5 text-xs font-bold rounded-lg transition-all border",
-                               formData.time === slot
-                                 ? "bg-teal-600 text-white border-teal-600 shadow-lg shadow-teal-200"
-                                 : "bg-white text-slate-600 border-slate-200 hover:border-teal-400 hover:text-teal-700 hover:bg-teal-50 active:scale-95"
-                             )}
-                           >
-                             {slot}
-                           </button>
-                         ))}
-                       </div>
-                     )}
+                    <div className="group/field flex items-center gap-3 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus-within:border-teal-400 focus-within:ring-4 focus-within:ring-teal-100/30 focus-within:bg-white transition-all duration-300">
+                      <Clock className="w-4 h-4 text-slate-400 group-focus-within/field:text-teal-500 transition-colors flex-shrink-0" />
+                      <input
+                        type="time"
+                        value={formData.time}
+                        onChange={e => setFormData(p => ({ ...p, time: e.target.value }))}
+                        className="flex-1 bg-transparent border-none outline-none text-sm font-bold text-slate-700"
+                      />
+                    </div>
+                    {availableSlots && availableSlots.length > 0 && (
+                      <div className="grid grid-cols-4 sm:grid-cols-5 gap-2 mt-2">
+                        {availableSlots.map(slot => (
+                          <button
+                            key={slot}
+                            type="button"
+                            onClick={() => setFormData(p => ({ ...p, time: slot }))}
+                            className={cn(
+                              "py-2 text-xs font-bold rounded-lg transition-all border",
+                              formData.time === slot
+                                ? "bg-teal-600 text-white border-teal-600 shadow-lg shadow-teal-200"
+                                : "bg-white text-slate-600 border-slate-200 hover:border-teal-400 hover:text-teal-700 hover:bg-teal-50 active:scale-95"
+                            )}
+                          >
+                            {slot}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
 

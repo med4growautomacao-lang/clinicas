@@ -108,11 +108,16 @@ export function Settings() {
         }
     };
 
+    const ATTEMPT_TIMEOUT_MS = 120_000;
+    const attemptStartRef = useRef<number | null>(null);
+
     useEffect(() => {
         let interval: any;
-        
+        let timeoutId: any;
+
         if (whatsapp?.status === 'connecting' || whatsapp?.status === 'qr_pending') {
-            // Envia o primeiro sinal imediatamente
+            if (!attemptStartRef.current) attemptStartRef.current = Date.now();
+
             const sendSignal = async () => {
                 if (!clinic?.id) return;
                 console.log('Enviando sinal de keep-alive para WhatsApp Bridge...');
@@ -122,15 +127,29 @@ export function Settings() {
             };
 
             sendSignal();
-            
-            // Define o intervalo de 15 segundos
             interval = setInterval(sendSignal, 15000);
+
+            // Aborta após o timeout: marca como disconnected
+            const elapsed = Date.now() - attemptStartRef.current;
+            const remaining = Math.max(0, ATTEMPT_TIMEOUT_MS - elapsed);
+            timeoutId = setTimeout(async () => {
+                attemptStartRef.current = null;
+                try {
+                    await updateWhatsapp({ status: 'disconnected', qr_code: null });
+                    console.log('Tentativa de conexão WhatsApp expirou após 2 min.');
+                } catch (err) {
+                    console.error('Erro ao abortar conexão por timeout:', err);
+                }
+            }, remaining);
+        } else {
+            attemptStartRef.current = null;
         }
 
         return () => {
             if (interval) clearInterval(interval);
+            if (timeoutId) clearTimeout(timeoutId);
         };
-    }, [whatsapp?.status, clinic?.id]);
+    }, [whatsapp?.status, clinic?.id, updateWhatsapp]);
 
     const handleWhatsappConnect = async () => {
         if (!clinic?.id) return;

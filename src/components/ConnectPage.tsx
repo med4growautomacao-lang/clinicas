@@ -3,6 +3,7 @@ import { Loader2, CheckCircle2, QrCode, Smartphone, Info, RefreshCw, XCircle } f
 import { motion, AnimatePresence } from 'framer-motion';
 
 const EDGE_URL = 'https://yzpclhuifquhfqpiwysh.supabase.co/functions/v1/whatsapp-qr-public';
+const ATTEMPT_TIMEOUT_SECONDS = 120;
 
 interface QRState {
   status: string;
@@ -17,6 +18,9 @@ export function ConnectPage() {
   const [invalid, setInvalid] = useState(false);
   const [loadingInitial, setLoadingInitial] = useState(true);
   const [requesting, setRequesting] = useState(false);
+  const [attempting, setAttempting] = useState(false);
+  const [secondsLeft, setSecondsLeft] = useState<number>(ATTEMPT_TIMEOUT_SECONDS);
+  const [timedOut, setTimedOut] = useState(false);
   const intervalRef = React.useRef<any>(null);
   const connectedRef = React.useRef(false);
 
@@ -37,13 +41,16 @@ export function ConnectPage() {
   const handleStartConnection = async () => {
     if (!token || requesting) return;
     setRequesting(true);
+    setTimedOut(false);
+    setAttempting(true);
+    setSecondsLeft(ATTEMPT_TIMEOUT_SECONDS);
     try {
       const response = await fetch(`${EDGE_URL.replace('whatsapp-qr-public', 'whatsapp-bridge')}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'create', token })
       });
-      
+
       if (!response.ok) {
         const errorData = await response.json();
         console.error('Bridge Error Details:', errorData);
@@ -54,6 +61,33 @@ export function ConnectPage() {
       setTimeout(() => setRequesting(false), 2000);
     }
   };
+
+  // Timer de tentativa: aborta após ATTEMPT_TIMEOUT_SECONDS
+  useEffect(() => {
+    if (!attempting) return;
+    const interval = setInterval(() => {
+      setSecondsLeft(s => {
+        if (s <= 1) {
+          // Timeout: cancela e volta para a tela "Pronto para Conectar?"
+          clearQr();
+          setState(prev => ({ ...prev, status: 'disconnected', qr_code: null }));
+          setAttempting(false);
+          setTimedOut(true);
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [attempting, clearQr]);
+
+  // Para o timer quando conecta com sucesso
+  useEffect(() => {
+    if (state.status === 'connected') {
+      setAttempting(false);
+      setTimedOut(false);
+    }
+  }, [state.status]);
 
   useEffect(() => {
     if (!token) { 
@@ -94,7 +128,7 @@ export function ConnectPage() {
 
   useEffect(() => {
     let pulseInterval: any;
-    if (token && (state.status === 'connecting' || state.status === 'qr_pending')) {
+    if (token && attempting && (state.status === 'connecting' || state.status === 'qr_pending')) {
       const sendSignal = async () => {
         try {
           await fetch(`${EDGE_URL.replace('whatsapp-qr-public', 'whatsapp-bridge')}`, {
@@ -106,13 +140,13 @@ export function ConnectPage() {
           console.error('Pulse error:', err);
         }
       };
-      
+
       pulseInterval = setInterval(sendSignal, 15000);
     }
     return () => {
       if (pulseInterval) clearInterval(pulseInterval);
     };
-  }, [state.status, token]);
+  }, [state.status, token, attempting]);
 
   if (loadingInitial) {
     return (
@@ -284,12 +318,22 @@ export function ConnectPage() {
                   ))}
                 </div>
 
-                <button
-                  onClick={() => { clearQr(); setState(s => ({ ...s, status: 'disconnected', qr_code: null })); }}
-                  className="text-xs text-slate-400 hover:text-red-500 font-bold transition-colors underline underline-offset-2"
-                >
-                  Cancelar conexão
-                </button>
+                <div className="space-y-2">
+                  <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-amber-50 border border-amber-100 rounded-full">
+                    <RefreshCw className="w-3 h-3 text-amber-600 animate-spin" />
+                    <span className="text-[10px] font-bold text-amber-700 uppercase tracking-widest">
+                      Aborta em {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, '0')}
+                    </span>
+                  </div>
+                  <div>
+                    <button
+                      onClick={() => { clearQr(); setAttempting(false); setState(s => ({ ...s, status: 'disconnected', qr_code: null })); }}
+                      className="text-xs text-slate-400 hover:text-red-500 font-bold transition-colors underline underline-offset-2"
+                    >
+                      Cancelar conexão
+                    </button>
+                  </div>
+                </div>
               </motion.div>
             ) : (
               <motion.div
@@ -302,13 +346,22 @@ export function ConnectPage() {
                 <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-2">
                     <Smartphone className="w-10 h-10 text-slate-300" />
                 </div>
-                
+
                 <div className="space-y-3">
                     <h1 className="text-3xl font-black text-slate-900 tracking-tight">Pronto para Conectar?</h1>
                     <p className="text-slate-500 font-medium text-sm max-w-[280px] mx-auto leading-relaxed">
                         Clique no botão abaixo para gerar um código de conexão seguro para sua conta.
                     </p>
                 </div>
+
+                {timedOut && (
+                  <div className="bg-rose-50 rounded-2xl p-4 flex gap-3 text-left border border-rose-100">
+                    <Info className="w-5 h-5 text-rose-600 shrink-0" />
+                    <p className="text-xs font-bold text-rose-700 leading-relaxed">
+                      A tentativa anterior expirou após {ATTEMPT_TIMEOUT_SECONDS / 60} minutos sem conexão. Clique abaixo para gerar um novo link.
+                    </p>
+                  </div>
+                )}
 
                 <button
                     onClick={handleStartConnection}

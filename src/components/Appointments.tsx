@@ -160,20 +160,25 @@ export function Appointments() {
   }, [formData.doctor_id, formData.date, doctors, appointments, selectedAppointment]);
 
   const filteredAppointments = useMemo(() => {
-    return appointments.filter((apt) => {
+    const list = appointments.filter((apt) => {
       const patientName = apt.patient?.name || '';
       const patientCpf = apt.patient?.cpf || '';
       const patientPhone = apt.patient?.phone || '';
       const doctorName = apt.doctor?.name || '';
 
-      const matchesSearch = !searchTerm || 
+      const matchesSearch = !searchTerm ||
         patientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         patientCpf.includes(searchTerm) ||
         patientPhone.includes(searchTerm);
-        
+
       const matchesDoctor = filter === "Todos" || doctorName.includes(filter);
       const matchesDate = dateFilter === "today" ? apt.date === format(new Date(), 'yyyy-MM-dd') : true;
       return matchesSearch && matchesDoctor && matchesDate;
+    });
+    // Ordena por data asc, hora asc — dias mais próximos no topo, dentro do mesmo dia mais cedo primeiro
+    return list.sort((a, b) => {
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      return (a.time || '').localeCompare(b.time || '');
     });
   }, [appointments, filter, dateFilter, searchTerm]);
 
@@ -198,6 +203,36 @@ export function Appointments() {
     });
     return items.sort((a, b) => a.date.localeCompare(b.date) || (a.start || '').localeCompare(b.start || ''));
   }, [doctors, filter, dateFilter]);
+
+  // Linha do tempo combinada: agendamentos + bloqueios, ordenados por data+hora
+  type TimelineItem =
+    | { kind: 'apt'; date: string; time: string; sortTime: string; apt: any }
+    | { kind: 'blocked'; date: string; time: string; sortTime: string; bl: any };
+
+  const timelineItems = useMemo<TimelineItem[]>(() => {
+    const items: TimelineItem[] = filteredAppointments.map(apt => ({
+      kind: 'apt',
+      date: apt.date,
+      time: apt.time || '',
+      sortTime: apt.time || '00:00',
+      apt,
+    }));
+    if (showBlocked) {
+      blockedListItems.forEach(bl => {
+        items.push({
+          kind: 'blocked',
+          date: bl.date,
+          time: bl.start || '',
+          sortTime: bl.type === 'day' ? '00:00' : (bl.start || '00:00'),
+          bl,
+        });
+      });
+    }
+    return items.sort((a, b) => {
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      return a.sortTime.localeCompare(b.sortTime);
+    });
+  }, [filteredAppointments, blockedListItems, showBlocked]);
 
   const selectedDayBlockedDoctors = useMemo(() => {
     if (!selectedDay) return [];
@@ -660,47 +695,87 @@ export function Appointments() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {showBlocked && blockedListItems.map((bl, i) => (
-                        <motion.tr key={`bl-${i}`} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }} className="bg-rose-50/60">
-                          <td className="px-6 py-4">
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-lg bg-rose-100 flex items-center justify-center text-rose-400 text-lg">⊘</div>
-                              <div>
-                                <span className="font-semibold text-rose-700 text-sm">{bl.type === 'day' ? 'Dia Bloqueado' : bl.name}</span>
+                      {timelineItems.map((item, i) => {
+                        const prevDate = i > 0 ? timelineItems[i - 1].date : null;
+                        const showDayHeader = item.date !== prevDate;
+                        const today = format(new Date(), 'yyyy-MM-dd');
+                        const isToday = item.date === today;
+                        const dayLabel = format(parseISO(item.date), "EEEE, dd 'de' MMMM", { locale: ptBR });
+                        const dayItems = timelineItems.filter(t => t.date === item.date);
+                        const dayAppts = dayItems.filter(t => t.kind === 'apt').length;
+                        const dayBlocks = dayItems.filter(t => t.kind === 'blocked').length;
+                        const dayHeader = showDayHeader ? (
+                          <tr className="bg-slate-50/80">
+                            <td colSpan={6} className="px-6 py-2">
+                              <div className="flex items-center gap-3">
+                                <span className={cn(
+                                  "text-[11px] font-bold uppercase tracking-widest capitalize",
+                                  isToday ? "text-teal-700" : "text-slate-500"
+                                )}>
+                                  {isToday ? `Hoje · ${dayLabel}` : dayLabel}
+                                </span>
+                                <span className="text-[10px] font-bold text-slate-400 bg-white border border-slate-200 px-1.5 py-0.5 rounded-md">
+                                  {dayAppts} {dayAppts === 1 ? 'consulta' : 'consultas'}
+                                </span>
+                                {dayBlocks > 0 && (
+                                  <span className="text-[10px] font-bold text-rose-500 bg-rose-50 border border-rose-100 px-1.5 py-0.5 rounded-md">
+                                    {dayBlocks} {dayBlocks === 1 ? 'bloqueio' : 'bloqueios'}
+                                  </span>
+                                )}
                               </div>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className={cn("inline-flex items-center gap-2 px-2.5 py-1 rounded-lg border text-xs font-bold", getDoctorColor(bl.doctorId).bg, getDoctorColor(bl.doctorId).text, getDoctorColor(bl.doctorId).border)}>
-                              <Stethoscope className="w-3.5 h-3.5" />
-                              {bl.doctorName}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="flex flex-col">
-                              <span className="flex items-center text-slate-700 font-semibold text-sm">
-                                <CalendarIcon className="w-3.5 h-3.5 mr-2 text-rose-400" />
-                                {format(parseISO(bl.date), 'dd/MM/yyyy')}
-                              </span>
-                              {bl.type === 'time' && (
-                                <span className="flex items-center text-slate-400 font-medium text-xs mt-0.5"><Clock className="w-3 h-3 mr-1.5" />{bl.start} – {bl.end}</span>
-                              )}
-                              {bl.type === 'day' && (
-                                <span className="flex items-center text-rose-300 font-medium text-xs mt-0.5">Dia todo</span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4" />
-                          <td className="px-6 py-4">
-                            <span className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold border bg-rose-100 text-rose-600 border-rose-200">
-                              Bloqueado
-                            </span>
-                          </td>
-                          <td className="px-6 py-4" />
-                        </motion.tr>
-                      ))}
-                      {filteredAppointments.map((apt, i) => (
-                        <motion.tr key={apt.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }} className="hover:bg-slate-50 group transition-all">
+                            </td>
+                          </tr>
+                        ) : null;
+
+                        if (item.kind === 'blocked') {
+                          const bl = item.bl;
+                          return (
+                            <React.Fragment key={`bl-${i}-${bl.date}-${bl.doctorId}`}>
+                              {dayHeader}
+                              <motion.tr initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(i, 15) * 0.02 }} className="bg-rose-50/40">
+                                <td className="px-6 py-4">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-lg bg-rose-100 flex items-center justify-center text-rose-400 text-lg">⊘</div>
+                                    <span className="font-semibold text-rose-700 text-sm">{bl.type === 'day' ? 'Dia Bloqueado' : bl.name}</span>
+                                  </div>
+                                </td>
+                                <td className="px-6 py-4">
+                                  <div className={cn("inline-flex items-center gap-2 px-2.5 py-1 rounded-lg border text-xs font-bold", getDoctorColor(bl.doctorId).bg, getDoctorColor(bl.doctorId).text, getDoctorColor(bl.doctorId).border)}>
+                                    <Stethoscope className="w-3.5 h-3.5" />
+                                    {bl.doctorName}
+                                  </div>
+                                </td>
+                                <td className="px-6 py-4">
+                                  <div className="flex flex-col">
+                                    <span className="flex items-center text-slate-700 font-semibold text-sm">
+                                      <CalendarIcon className="w-3.5 h-3.5 mr-2 text-rose-400" />
+                                      {format(parseISO(bl.date), 'dd/MM/yyyy')}
+                                    </span>
+                                    {bl.type === 'time' && (
+                                      <span className="flex items-center text-slate-400 font-medium text-xs mt-0.5"><Clock className="w-3 h-3 mr-1.5" />{bl.start} – {bl.end}</span>
+                                    )}
+                                    {bl.type === 'day' && (
+                                      <span className="flex items-center text-rose-300 font-medium text-xs mt-0.5">Dia todo</span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="px-6 py-4" />
+                                <td className="px-6 py-4">
+                                  <span className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold border bg-rose-100 text-rose-600 border-rose-200">
+                                    Bloqueado
+                                  </span>
+                                </td>
+                                <td className="px-6 py-4" />
+                              </motion.tr>
+                            </React.Fragment>
+                          );
+                        }
+
+                        const apt = item.apt;
+                        return (
+                          <React.Fragment key={apt.id}>
+                            {dayHeader}
+                            <motion.tr initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(i, 15) * 0.02 }} className="hover:bg-slate-50 group transition-all">
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-3">
                               <div className="w-10 h-10 rounded-lg bg-slate-50 flex items-center justify-center"><User className="w-5 h-5 text-slate-600" /></div>
@@ -776,8 +851,10 @@ export function Appointments() {
                               <button onClick={() => openDeleteConfirm(apt)} className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors"><Trash2 className="w-4 h-4" /></button>
                             </div>
                           </td>
-                        </motion.tr>
-                      ))}
+                            </motion.tr>
+                          </React.Fragment>
+                        );
+                      })}
                     </tbody>
                   </table>
                 )}

@@ -1,6 +1,7 @@
 const ENC_PREFIX = "enc:";
 
-export async function deriveKey(pin: string, clinicId: string): Promise<CryptoKey> {
+// Key derived from the doctor's PIN — unique per doctor per clinic
+export async function deriveKey(pin: string, userId: string, clinicId: string): Promise<CryptoKey> {
   const keyMaterial = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(pin),
@@ -11,7 +12,7 @@ export async function deriveKey(pin: string, clinicId: string): Promise<CryptoKe
   return crypto.subtle.deriveKey(
     {
       name: "PBKDF2",
-      salt: new TextEncoder().encode(`prontuario:${clinicId}`),
+      salt: new TextEncoder().encode(`prontuario:${userId}:${clinicId}`),
       iterations: 100000,
       hash: "SHA-256",
     },
@@ -48,7 +49,7 @@ export async function encryptField(value: string | null | undefined, key: Crypto
 
 export async function decryptField(value: string | null | undefined, key: CryptoKey): Promise<string | null> {
   if (!value) return value ?? null;
-  if (!value.startsWith(ENC_PREFIX)) return value; // dados legados em texto plano
+  if (!value.startsWith(ENC_PREFIX)) return value; // plain text (legacy)
   try {
     const combined = Uint8Array.from(atob(value.slice(ENC_PREFIX.length)), c => c.charCodeAt(0));
     const iv = combined.slice(0, 12);
@@ -60,22 +61,22 @@ export async function decryptField(value: string | null | undefined, key: Crypto
   }
 }
 
-// Derivação client-side da chave de recuperação de PIN (usa a senha de login do médico)
+// PIN recovery: encrypt the PIN with the doctor's login password (client-side, server-blind)
 export async function derivePinRecoveryKey(loginPassword: string, userId: string): Promise<CryptoKey> {
   const keyMaterial = await crypto.subtle.importKey(
-    'raw', new TextEncoder().encode(loginPassword), 'PBKDF2', false, ['deriveKey']
+    "raw", new TextEncoder().encode(loginPassword), "PBKDF2", false, ["deriveKey"]
   );
   return crypto.subtle.deriveKey(
     {
-      name: 'PBKDF2',
+      name: "PBKDF2",
       salt: new TextEncoder().encode(`prontuario:pin_recovery:${userId}`),
       iterations: 100000,
-      hash: 'SHA-256',
+      hash: "SHA-256",
     },
     keyMaterial,
-    { name: 'AES-GCM', length: 256 },
+    { name: "AES-GCM", length: 256 },
     false,
-    ['encrypt', 'decrypt']
+    ["encrypt", "decrypt"]
   );
 }
 
@@ -88,7 +89,6 @@ export async function decryptPinFromRecovery(pin_encrypted: string, loginPasswor
   try {
     const key = await derivePinRecoveryKey(loginPassword, userId);
     const result = await decryptField(pin_encrypted, key);
-    // Verifica se o resultado parece um PIN válido (4 dígitos numéricos)
     if (result && /^\d{4}$/.test(result)) return result;
     return null;
   } catch {
@@ -96,17 +96,17 @@ export async function decryptPinFromRecovery(pin_encrypted: string, loginPasswor
   }
 }
 
-// Para campos JSONB: encripta como { _enc: "enc:..." }
+// For JSONB fields: encrypt as { _enc: "enc:..." }
 export async function encryptJSON(obj: any, key: CryptoKey): Promise<any> {
   if (obj == null) return null;
   const enc = await encryptField(JSON.stringify(obj), key);
   return { _enc: enc };
 }
 
-// Suporta tanto arrays legados quanto { _enc: "..." }
+// Supports both legacy plain arrays and { _enc: "..." }
 export async function decryptJSON<T>(value: any, key: CryptoKey): Promise<T | null> {
   if (!value) return null;
-  if (Array.isArray(value)) return value as T; // array legado sem criptografia
+  if (Array.isArray(value)) return value as T;
   if (value._enc) {
     const plain = await decryptField(value._enc, key);
     if (!plain) return null;

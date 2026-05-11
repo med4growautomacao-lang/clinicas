@@ -42,8 +42,6 @@ export function ProntuarioPasswordModal({ onAuthorized }: Props) {
   const [recoveryResult, setRecoveryResult] = useState("");
   const [recoveryError, setRecoveryError] = useState("");
   const [recoveryCopied, setRecoveryCopied] = useState(false);
-  // ID of the user who last set up recovery (stored in the DB row)
-  const [recoveryOwnerId, setRecoveryOwnerId] = useState("");
 
   // setup-recovery step
   const [pendingKey, setPendingKey] = useState<CryptoKey | null>(null);
@@ -58,27 +56,25 @@ export function ProntuarioPasswordModal({ onAuthorized }: Props) {
     if (!profile?.id || !activeClinicId) return;
     setStep("loading");
 
-    // Clinic-level: one row per clinic (not per user)
     const { data } = await supabase
       .from("prontuario_passwords")
-      .select("email, user_id")
+      .select("email")
+      .eq("user_id", profile.id)
       .eq("clinic_id", activeClinicId)
       .maybeSingle();
 
     if (data) {
       setSavedEmail(data.email);
-      setRecoveryOwnerId(data.user_id ?? "");
       setStep("enter-pin");
     } else {
       const generated = generatePin();
       const hash = await sha256(generated);
-
       const { data: { user } } = await supabase.auth.getUser();
       const email = user?.email ?? profile.id;
 
       await supabase.from("prontuario_passwords").upsert(
         { user_id: profile.id, clinic_id: activeClinicId, email, password_hash: hash },
-        { onConflict: "clinic_id" }
+        { onConflict: "user_id,clinic_id" }
       );
 
       setNewPin(generated);
@@ -105,15 +101,15 @@ export function ProntuarioPasswordModal({ onAuthorized }: Props) {
         const pin_encrypted = await encryptPinForRecovery(newPin, recoveryPassword.trim(), profile.id);
         if (pin_encrypted) {
           await supabase.from("prontuario_passwords")
-            .update({ pin_encrypted, user_id: profile.id })
+            .update({ pin_encrypted })
+            .eq("user_id", profile.id)
             .eq("clinic_id", activeClinicId);
         }
       }
     } catch { /* não bloqueia */ } finally {
       setRecoveryLoading(false);
     }
-    // Key is clinic-level: derived from PIN + clinicId only
-    const key = await deriveKey(newPin, activeClinicId);
+    const key = await deriveKey(newPin, profile.id, activeClinicId);
     onAuthorized(savedEmail, key);
   };
 
@@ -130,16 +126,16 @@ export function ProntuarioPasswordModal({ onAuthorized }: Props) {
 
       const { data, error: dbError } = await supabase
         .from("prontuario_passwords")
-        .select("email, password_hash, pin_encrypted, user_id")
+        .select("email, password_hash, pin_encrypted")
+        .eq("user_id", profile.id)
         .eq("clinic_id", activeClinicId)
         .maybeSingle();
 
       if (dbError) throw dbError;
-      if (!data) { setError("Nenhuma senha configurada. Contate o administrador."); return; }
+      if (!data) { setError("Nenhum PIN configurado. Contate o administrador."); return; }
       if (data.password_hash !== hash) { setError("PIN incorreto. Tente novamente."); return; }
 
-      // Clinic-level key: derived from PIN + clinicId (same for all users in the clinic)
-      const key = await deriveKey(pin.trim(), activeClinicId);
+      const key = await deriveKey(pin.trim(), profile.id, activeClinicId);
 
       if (!data.pin_encrypted) {
         setPendingKey(key);
@@ -167,32 +163,29 @@ export function ProntuarioPasswordModal({ onAuthorized }: Props) {
     try {
       const { data } = await supabase
         .from("prontuario_passwords")
-        .select("pin_encrypted, email, user_id")
+        .select("pin_encrypted, email")
+        .eq("user_id", profile.id)
         .eq("clinic_id", activeClinicId)
         .maybeSingle();
 
       if (data?.pin_encrypted) {
-        // Recovery exists: decrypt PIN using the recovery owner's credentials
-        const ownerId = data.user_id ?? recoveryOwnerId;
-        const recovered = await decryptPinFromRecovery(data.pin_encrypted, recoveryLoginPw.trim(), ownerId);
+        const recovered = await decryptPinFromRecovery(data.pin_encrypted, recoveryLoginPw.trim(), profile.id);
         if (!recovered) { setRecoveryError("Senha incorreta."); return; }
         setRecoveryResult(recovered);
       } else {
-        // No recovery — any clinic user can reset by verifying their own login credentials
+        // No recovery — reset PIN by verifying login credentials
         const { data: { user } } = await supabase.auth.getUser();
-        const currentEmail = user?.email ?? data?.email ?? savedEmail;
-        if (!currentEmail) { setRecoveryError("Não foi possível identificar o e-mail."); return; }
+        const email = user?.email ?? data?.email ?? savedEmail;
+        if (!email) { setRecoveryError("Não foi possível identificar o e-mail."); return; }
 
-        const { error: authErr } = await supabase.auth.signInWithPassword({
-          email: currentEmail,
-          password: recoveryLoginPw.trim(),
-        });
+        const { error: authErr } = await supabase.auth.signInWithPassword({ email, password: recoveryLoginPw.trim() });
         if (authErr) { setRecoveryError("Senha incorreta."); return; }
 
         const generated = generatePin();
         const hash = await sha256(generated);
         const { error: updateErr } = await supabase.from("prontuario_passwords")
-          .update({ password_hash: hash, pin_encrypted: null, user_id: profile.id })
+          .update({ password_hash: hash, pin_encrypted: null })
+          .eq("user_id", profile.id)
           .eq("clinic_id", activeClinicId);
         if (updateErr) { setRecoveryError("Erro ao resetar PIN. Contate o suporte."); return; }
 
@@ -219,7 +212,8 @@ export function ProntuarioPasswordModal({ onAuthorized }: Props) {
       const pin_encrypted = await encryptPinForRecovery(pendingPin, setupPw.trim(), profile.id);
       if (pin_encrypted) {
         await supabase.from("prontuario_passwords")
-          .update({ pin_encrypted, user_id: profile.id })
+          .update({ pin_encrypted })
+          .eq("user_id", profile.id)
           .eq("clinic_id", activeClinicId);
       }
       onAuthorized(pendingEmail, pendingKey);
@@ -255,7 +249,7 @@ export function ProntuarioPasswordModal({ onAuthorized }: Props) {
           <div className="space-y-4">
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-center">
               <p className="text-xs font-bold text-amber-700 mb-3 uppercase tracking-wide">
-                PIN da clínica — prontuários
+                Seu PIN de prontuário
               </p>
               <div className="text-4xl font-black tracking-[12px] text-slate-900 mb-3">
                 {newPin}
@@ -269,7 +263,7 @@ export function ProntuarioPasswordModal({ onAuthorized }: Props) {
               </button>
             </div>
             <p className="text-[11px] text-slate-500 text-center leading-relaxed">
-              Anote este PIN e compartilhe com os médicos autorizados. Todos usam o mesmo PIN da clínica.
+              Anote este PIN — ele é pessoal e não será exibido novamente. Você precisará dele toda vez que acessar os prontuários.
             </p>
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
               <p className="text-[11px] font-semibold text-slate-600">
@@ -338,7 +332,7 @@ export function ProntuarioPasswordModal({ onAuthorized }: Props) {
               onClick={() => { setShowRecovery(v => !v); setRecoveryLoginPw(""); setRecoveryResult(""); setRecoveryError(""); }}
               className="w-full text-xs font-semibold text-slate-400 hover:text-teal-600 transition-colors pt-1"
             >
-              {showRecovery ? "Cancelar" : "Esqueci o PIN"}
+              {showRecovery ? "Cancelar" : "Esqueci meu PIN"}
             </button>
 
             {showRecovery && (
@@ -346,7 +340,7 @@ export function ProntuarioPasswordModal({ onAuthorized }: Props) {
                 {!recoveryResult ? (
                   <>
                     <p className="text-[11px] text-slate-500 leading-relaxed">
-                      Informe sua <strong>senha de login</strong> para recuperar ou redefinir o PIN da clínica.
+                      Informe sua <strong>senha de login</strong> para recuperar o PIN.
                     </p>
                     <input
                       type="password"
@@ -370,7 +364,7 @@ export function ProntuarioPasswordModal({ onAuthorized }: Props) {
                   </>
                 ) : (
                   <>
-                    <p className="text-[11px] text-slate-500 text-center">PIN da clínica</p>
+                    <p className="text-[11px] text-slate-500 text-center">Seu PIN de prontuário</p>
                     <div className="text-3xl font-black tracking-[12px] text-slate-900 text-center py-2">
                       {recoveryResult}
                     </div>

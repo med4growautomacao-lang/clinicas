@@ -11,6 +11,7 @@ import SuperAdmin from './components/SuperAdmin';
 import { MarketingAnalytics } from './components/MarketingAnalytics';
 import { OrgAdmin } from './components/OrgAdmin';
 import { UserProfile } from './components/UserProfile';
+import { TeamManagement } from './components/TeamManagement';
 
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Login } from './components/Login';
@@ -55,6 +56,19 @@ function AppContent() {
     }
   }, [loading, userRole, activeClinicId, handleSetActiveTab]);
 
+  // Redireciona se o role atual não tem acesso à aba ativa
+  useEffect(() => {
+    if (loading) return;
+    const ROLE_ALLOWED_TABS: Record<string, string[]> = {
+      medico: ['appointments', 'medical-records', 'profile'],
+      vendedor: ['dashboard', 'marketing', 'ai-secretary', 'finance', 'settings', 'profile'],
+    };
+    const allowed = ROLE_ALLOWED_TABS[userRole];
+    if (allowed && !allowed.includes(activeTab)) {
+      handleSetActiveTab(allowed[0]);
+    }
+  }, [loading, userRole, activeTab, handleSetActiveTab]);
+
   if (loading) {
     return (
       <div className="h-screen bg-slate-50 flex flex-col items-center justify-center gap-4">
@@ -80,6 +94,7 @@ function AppContent() {
     { id: 'super-admin',     el: <SuperAdmin /> },
     { id: 'org-admin',       el: <OrgAdmin onEnterClinic={() => handleSetActiveTab('dashboard')} /> },
     { id: 'profile',         el: <UserProfile /> },
+    { id: 'team',            el: <TeamManagement /> },
   ];
 
   return (

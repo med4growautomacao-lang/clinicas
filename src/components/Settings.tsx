@@ -206,6 +206,15 @@ export function Settings() {
     }
 
     const isSecretaria = userRole === 'secretaria';
+    const isVendedor = userRole === 'vendedor';
+    const restrictedIntegrations = isSecretaria || isVendedor;
+
+    useEffect(() => {
+        if (restrictedIntegrations && (activeIntTab === 'meta' || activeIntTab === 'google')) {
+            setActiveIntTab('whatsapp');
+            localStorage.setItem('settingsIntTab', 'whatsapp');
+        }
+    }, [restrictedIntegrations, activeIntTab]);
 
     const tabs = [
         { id: "clinic", label: "Dados da Clínica", icon: Building2, color: "text-emerald-600" },
@@ -286,7 +295,7 @@ export function Settings() {
                         <MessageCircle className={cn("w-4 h-4", activeIntTab === 'whatsapp' ? "text-white" : "text-emerald-500")} />
                         WhatsApp
                     </button>
-                    {!isSecretaria && (
+                    {!restrictedIntegrations && (
                         <button
                             onClick={() => { setActiveIntTab('meta'); localStorage.setItem('settingsIntTab', 'meta'); }}
                             className={cn(
@@ -300,7 +309,7 @@ export function Settings() {
                             Meta Ads
                         </button>
                     )}
-                    {!isSecretaria && (
+                    {!restrictedIntegrations && (
                         <button
                             onClick={() => { setActiveIntTab('google'); localStorage.setItem('settingsIntTab', 'google'); }}
                             className={cn(

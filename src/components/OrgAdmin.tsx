@@ -49,7 +49,7 @@ const ORG_ROLES = [
   { value: 'org_admin', label: 'Admin' },
   { value: 'org_team', label: 'Team' },
 ];
-const CLINIC_ROLES = ['gestor', 'medico_gestor', 'medico', 'secretaria'];
+const CLINIC_ROLES = ['gestor', 'medico_gestor', 'medico', 'secretaria', 'vendedor'];
 const PLANS = ['free', 'pro', 'enterprise'];
 const CLINIC_CATEGORIES = [
   { value: 'clinica', label: 'Clínica' },
@@ -1064,7 +1064,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                       <button key={r} onClick={() => setClinicUserForm(f => ({ ...f, role: r }))}
                         className={cn("flex-1 py-2 rounded-xl text-xs font-bold capitalize transition-all border",
                           clinicUserForm.role === r ? "bg-teal-600 text-white border-teal-600" : "bg-slate-50 text-slate-600 border-slate-200 hover:border-teal-300")}>
-                        {r === 'medico' ? 'Médico' : r === 'medico_gestor' ? 'Médico Gestor' : r === 'secretaria' ? 'Secretária' : 'Gestor'}
+                        {r === 'medico' ? 'Médico' : r === 'medico_gestor' ? 'Médico Gestor' : r === 'secretaria' ? 'Secretária' : r === 'vendedor' ? 'Vendedor' : 'Gestor'}
                       </button>
                     ))}
                   </div>
@@ -1141,7 +1141,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                           >
                             {CLINIC_ROLES.map(r => (
                               <option key={r} value={r}>
-                                {r === 'medico' ? 'Médico' : r === 'medico_gestor' ? 'Médico Gestor' : r === 'secretaria' ? 'Secretária' : 'Gestor'}
+                                {r === 'medico' ? 'Médico' : r === 'medico_gestor' ? 'Médico Gestor' : r === 'secretaria' ? 'Secretária' : r === 'vendedor' ? 'Vendedor' : 'Gestor'}
                               </option>
                             ))}
                           </select>

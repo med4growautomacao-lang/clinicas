@@ -197,14 +197,6 @@ export function Settings() {
         setConnectLink(`${window.location.origin}/connect?token=${token}`);
     };
 
-    if (loading) {
-        return (
-            <div className="flex items-center justify-center h-64">
-                <Loader2 className="w-8 h-8 text-teal-600 animate-spin" />
-            </div>
-        );
-    }
-
     const isSecretaria = userRole === 'secretaria';
     const isVendedor = userRole === 'vendedor';
     const restrictedIntegrations = isSecretaria || isVendedor;
@@ -215,6 +207,14 @@ export function Settings() {
             localStorage.setItem('settingsIntTab', 'whatsapp');
         }
     }, [restrictedIntegrations, activeIntTab]);
+
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center h-64">
+                <Loader2 className="w-8 h-8 text-teal-600 animate-spin" />
+            </div>
+        );
+    }
 
     const tabs = [
         { id: "clinic", label: "Dados da Clínica", icon: Building2, color: "text-emerald-600" },

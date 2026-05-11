@@ -1,6 +1,6 @@
 const ENC_PREFIX = "enc:";
 
-export async function deriveKey(pin: string, userId: string, clinicId: string): Promise<CryptoKey> {
+export async function deriveKey(pin: string, clinicId: string): Promise<CryptoKey> {
   const keyMaterial = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(pin),
@@ -11,13 +11,13 @@ export async function deriveKey(pin: string, userId: string, clinicId: string): 
   return crypto.subtle.deriveKey(
     {
       name: "PBKDF2",
-      salt: new TextEncoder().encode(`prontuario:${userId}:${clinicId}`),
+      salt: new TextEncoder().encode(`prontuario:${clinicId}`),
       iterations: 100000,
       hash: "SHA-256",
     },
     keyMaterial,
     { name: "AES-GCM", length: 256 },
-    true, // extractable for sessionStorage caching
+    true,
     ["encrypt", "decrypt"]
   );
 }

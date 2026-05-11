@@ -807,8 +807,8 @@ export function Appointments() {
                               <span className={cn(
                                 "inline-flex items-center gap-1 mt-1 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border self-start",
                                 apt.modality === 'online'
-                                  ? "text-sky-700 bg-sky-50 border-sky-100"
-                                  : "text-slate-500 bg-slate-50 border-slate-200"
+                                  ? "text-rose-500 bg-rose-50/70 border-rose-100/70"
+                                  : "text-emerald-500 bg-emerald-50/70 border-emerald-100/70"
                               )}>
                                 {apt.modality === 'online' ? <Video className="w-2.5 h-2.5" /> : <MapPin className="w-2.5 h-2.5" />}
                                 {apt.modality === 'online' ? 'Online' : 'Presencial'}
@@ -1130,8 +1130,8 @@ export function Appointments() {
                         <span className={cn(
                           "inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold border uppercase",
                           apt.modality === 'online'
-                            ? "text-sky-700 bg-sky-50 border-sky-100"
-                            : "text-slate-500 bg-slate-50 border-slate-200"
+                            ? "text-rose-500 bg-rose-50/70 border-rose-100/70"
+                            : "text-emerald-500 bg-emerald-50/70 border-emerald-100/70"
                         )}>
                           {apt.modality === 'online' ? <Video className="w-3 h-3" /> : <MapPin className="w-3 h-3" />}
                           {apt.modality === 'online' ? 'Online' : 'Presencial'}

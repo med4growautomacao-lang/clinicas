@@ -1195,7 +1195,9 @@ export function LeadKanban() {
     const hasEntryFilter = entryDateFrom || entryDateTo;
     const hasConvFilter = convDateFrom || convDateTo;
     const hasSearch = searchQuery.trim().length > 0;
-    const base = showResolved ? tickets : tickets.filter(t => t.status !== 'closed');
+    // Ignora tickets órfãos (lead deletado → lead_id virou NULL por SET NULL)
+    const base = (showResolved ? tickets : tickets.filter(t => t.status !== 'closed'))
+      .filter(t => t.lead);
     if (!hasSourceFilter && !hasEntryFilter && !hasConvFilter && !hasSearch) return base;
 
     return base.filter(ticket => {

@@ -316,8 +316,8 @@ export function Appointments() {
     }
     await update(apt.id, { status: newStatus as any });
 
+    // Status compareceu → cria registro no prontuário (movimentação de lead/ticket é feita pelo trigger no banco)
     if (newStatus === 'compareceu' && apt.status !== 'compareceu') {
-      // 1. Cria registro no prontuário se ainda não existir
       const { data: existing } = await supabase
         .from('medical_records')
         .select('id')
@@ -334,68 +334,6 @@ export function Appointments() {
           diagnosis: null,
           prescription: null,
         });
-      }
-
-      // 2. Move lead para etapa "Compareceu" (cria a etapa se não existir)
-      let { data: compareceuStage } = await supabase
-        .from('funnel_stages')
-        .select('id')
-        .eq('clinic_id', activeClinicId)
-        .eq('slug', 'compareceu')
-        .maybeSingle();
-
-      if (!compareceuStage) {
-        const { data: lastStage } = await supabase
-          .from('funnel_stages')
-          .select('position')
-          .eq('clinic_id', activeClinicId)
-          .order('position', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        const { data: newStage } = await supabase
-          .from('funnel_stages')
-          .insert({ name: 'Compareceu', slug: 'compareceu', is_system: true, clinic_id: activeClinicId, position: (lastStage?.position ?? -1) + 1 })
-          .select()
-          .single();
-        compareceuStage = newStage;
-      }
-
-      if (compareceuStage) {
-        // Busca lead pelo converted_patient_id ou pelo telefone do paciente
-        let leadId: string | null = null;
-        const { data: byPatient } = await supabase
-          .from('leads')
-          .select('id')
-          .eq('converted_patient_id', apt.patient_id)
-          .eq('clinic_id', activeClinicId)
-          .maybeSingle();
-        leadId = byPatient?.id ?? null;
-
-        if (!leadId) {
-          const patient = patients.find(p => p.id === apt.patient_id);
-          if (patient?.phone) {
-            const { data: byPhone } = await supabase
-              .from('leads')
-              .select('id')
-              .eq('phone', patient.phone)
-              .eq('clinic_id', activeClinicId)
-              .maybeSingle();
-            leadId = byPhone?.id ?? null;
-          }
-        }
-
-        if (leadId) {
-          // Move ticket aberto do lead
-          const { data: openTicket } = await supabase
-            .from('tickets')
-            .select('id')
-            .eq('lead_id', leadId)
-            .eq('status', 'open')
-            .maybeSingle();
-          if (openTicket) {
-            await supabase.from('tickets').update({ stage_id: compareceuStage.id }).eq('id', openTicket.id);
-          }
-        }
       }
     }
   };

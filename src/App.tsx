@@ -57,6 +57,17 @@ function AppContent() {
     }
   }, [loading, userRole, activeClinicId, handleSetActiveTab]);
 
+  // Permite navegação cross-component via evento global
+  // Ex: from Finance: window.dispatchEvent(new CustomEvent('app-navigate', { detail: { tab: 'ai-secretary' } }))
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.tab) handleSetActiveTab(detail.tab);
+    };
+    window.addEventListener('app-navigate', handler);
+    return () => window.removeEventListener('app-navigate', handler);
+  }, [handleSetActiveTab]);
+
   // Redireciona se o role atual não tem acesso à aba ativa
   useEffect(() => {
     if (loading) return;

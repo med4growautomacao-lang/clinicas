@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { matchesSearch } from "../lib/search";
+import { MoneyInput } from "./ui/money-input";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   format,
@@ -1493,12 +1494,10 @@ export function Appointments() {
               <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
                 {/* Valor */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Valor (R$)</label>
-                  <input
-                    type="text" inputMode="decimal" placeholder="0,00"
-                    value={realizadoDialog.value}
-                    onChange={e => setRealizadoDialog(prev => prev ? { ...prev, value: e.target.value } : null)}
-                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Valor</label>
+                  <MoneyInput
+                    value={Number(realizadoDialog.value) || 0}
+                    onChange={v => setRealizadoDialog(prev => prev ? { ...prev, value: String(v) } : null)}
                     autoFocus
                   />
                 </div>

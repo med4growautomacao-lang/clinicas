@@ -350,15 +350,19 @@ export function Dashboard() {
         {/* Lado Esquerdo: Grid de Cards Principais (3 colunas) */}
         <div className="lg:col-span-3 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {[
-            // Primeira Linha: Faturamento, Investimento, ROAS
-            { title: "Faturamento", value: `R$ ${stats.totalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: trendLabel, icon: TrendingUp, color: "bg-emerald-50 text-emerald-600" },
-            { title: "Investimento", value: `R$ ${stats.totalInvestment.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: "Investido no período", icon: DollarSign, color: "bg-amber-50 text-amber-600" },
-            { title: "ROAS", value: roas > 0 ? `${roas.toFixed(2).replace('.', ',')}x` : "—", trend: "Retorno sobre investimento", icon: Activity, color: "bg-teal-50 text-teal-600" },
+            // Primeira Linha: Recebido, A Receber, Investimento
+            { title: "Recebido", value: `R$ ${stats.totalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: "Pago no caixa", icon: TrendingUp, color: "bg-emerald-50 text-emerald-600" },
+            { title: "A Receber", value: `R$ ${stats.pendingRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: "Transações pendentes", icon: Clock, color: "bg-amber-50 text-amber-600" },
+            { title: "Investimento", value: `R$ ${stats.totalInvestment.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: "Em mídia paga", icon: DollarSign, color: "bg-sky-50 text-sky-600" },
+
+            // Segunda Linha: ROAS, Convertido, Vendas
+            { title: "ROAS", value: roas > 0 ? `${roas.toFixed(2).replace('.', ',')}x` : "—", trend: "Recebido ÷ Investimento", icon: Activity, color: "bg-teal-50 text-teal-600" },
+            { title: "Convertido (Marketing)", value: `R$ ${stats.totalConversionsValue.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: "Valor de leads fechados", icon: ShoppingCart, color: "bg-violet-50 text-violet-600" },
             
-            // Segunda Linha: Novos Leads, Agendamentos, Vendas
+            // Terceira Linha: Novos Leads, Agendamentos, Vendas
             { title: "Novos Leads", value: `+${stats.totalLeads}`, trend: "Interações no período", icon: MessageSquare, color: "bg-indigo-50 text-indigo-600" },
             { title: "Agendamentos", value: stats.totalAppointments.toString(), trend: trendLabel, icon: CalendarCheck, color: "bg-teal-50 text-teal-600" },
-            { title: "Vendas", value: stats.totalSales.toString(), trend: "Convertidos no período", icon: ShoppingCart, color: "bg-rose-50 text-rose-600" },
+            { title: "Vendas (Leads)", value: stats.totalSales.toString(), trend: "Convertidos no período", icon: ShoppingCart, color: "bg-rose-50 text-rose-600" },
 
             // Terceira Linha: Atendimento (SLA, Tempo Resposta, Ciclo Vendas)
             { title: "Estouros de SLA", value: stats.totalSlaBreaches.toString(), trend: "Atrasos no atendimento", icon: AlertCircle, color: "bg-red-50 text-red-600" },

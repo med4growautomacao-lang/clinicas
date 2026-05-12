@@ -1401,6 +1401,16 @@ function ChatsView() {
     }
   }, [leads, selectedLeadId]);
 
+  // Atalho de outros módulos: se sessionStorage tiver open_lead_id, abre esse lead
+  useEffect(() => {
+    if (leads.length === 0) return;
+    const pendingId = sessionStorage.getItem('open_lead_id');
+    if (pendingId && leads.some(l => l.id === pendingId)) {
+      setSelectedLeadId(pendingId);
+      sessionStorage.removeItem('open_lead_id');
+    }
+  }, [leads]);
+
   if (leadsLoading) {
     return (
       <div className="flex items-center justify-center h-64">

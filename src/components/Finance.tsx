@@ -29,10 +29,16 @@ import {
   Edit2,
   Trash2,
   AlertCircle,
+  Info,
+  Clock,
+  User,
+  Phone,
+  Hash,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { useFinancial, FinancialTransaction } from "../hooks/useSupabase";
+import { MoneyInput } from "./ui/money-input";
 import { format, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -283,12 +289,86 @@ export function Finance() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {transactions.slice(0, 10).map((tx) => (
+                {transactions.slice(0, 10).map((tx) => {
+                  const anyTx = tx as any;
+                  const apt = anyTx.appointment;
+                  const conv = anyTx.conversions?.[0];
+                  const leadId = conv?.lead_id;
+                  const leadName = conv?.lead?.name || apt?.patient?.name || anyTx.patient?.name;
+                  const leadPhone = conv?.lead?.phone || apt?.patient?.phone || anyTx.patient?.phone;
+                  const ticketId = apt?.ticket_id;
+                  const aptTime = apt?.time ? String(apt.time).substring(0, 5) : null;
+                  const txTime = tx.created_at ? format(new Date(tx.created_at), 'HH:mm') : null;
+                  const hasInfo = leadName || leadPhone || ticketId || aptTime || txTime;
+                  const openLead = () => {
+                    if (!leadId) return;
+                    sessionStorage.setItem('open_lead_id', leadId);
+                    window.dispatchEvent(new CustomEvent('app-navigate', { detail: { tab: 'ai-secretary' } }));
+                  };
+                  return (
                   <tr key={tx.id} className="hover:bg-slate-50/80 transition-colors group">
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="text-sm font-medium text-slate-600">
-                        {tx.date ? format(parseISO(tx.date), 'dd/MM/yyyy') : '-'}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <div className="flex flex-col">
+                          <span className="text-sm font-medium text-slate-600">
+                            {tx.date ? format(parseISO(tx.date), 'dd/MM/yyyy') : '-'}
+                          </span>
+                          {txTime && (
+                            <span className="text-[10px] font-medium text-slate-400 flex items-center gap-1 mt-0.5">
+                              <Clock className="w-2.5 h-2.5" /> {txTime}
+                            </span>
+                          )}
+                        </div>
+                        {hasInfo && (
+                          <div className="relative group/tip">
+                            <Info className="w-3.5 h-3.5 text-slate-300 hover:text-teal-500 transition-colors cursor-help" />
+                            <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-1.5 hidden group-hover/tip:block z-50 pointer-events-none">
+                              <div className="bg-slate-800 text-white text-xs rounded-lg px-3 py-2 shadow-xl whitespace-nowrap space-y-1">
+                                {txTime && (
+                                  <div className="flex items-center gap-1.5">
+                                    <Clock className="w-3 h-3 text-slate-300" />
+                                    <span className="font-medium">Registrado às {txTime}</span>
+                                  </div>
+                                )}
+                                {aptTime && (
+                                  <div className="flex items-center gap-1.5">
+                                    <Clock className="w-3 h-3 text-slate-300" />
+                                    <span className="font-medium">Consulta {aptTime}</span>
+                                  </div>
+                                )}
+                                {leadName && (
+                                  <div className="flex items-center gap-1.5">
+                                    <User className="w-3 h-3 text-slate-300" />
+                                    <span className="font-medium">{leadName}</span>
+                                  </div>
+                                )}
+                                {leadPhone && (
+                                  <div className="flex items-center gap-1.5">
+                                    <Phone className="w-3 h-3 text-slate-300" />
+                                    <span className="font-medium">{leadPhone}</span>
+                                  </div>
+                                )}
+                                {ticketId && (
+                                  <div className="flex items-center gap-1.5">
+                                    <Hash className="w-3 h-3 text-slate-300" />
+                                    <span className="font-mono text-[10px] text-slate-300">{ticketId.substring(0, 8)}</span>
+                                  </div>
+                                )}
+                                <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-slate-800" />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        {leadId && (
+                          <button
+                            onClick={openLead}
+                            title="Abrir conversa do lead"
+                            className="p-1 text-slate-300 hover:text-violet-600 hover:bg-violet-50 rounded transition-all"
+                          >
+                            <ArrowUpRight className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex flex-col">
@@ -336,7 +416,8 @@ export function Finance() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -369,10 +450,10 @@ export function Finance() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Valor *</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">R$</span>
-                      <input type="number" step="0.01" value={formData.amount} onChange={e => setFormData(p => ({ ...p, amount: e.target.value }))} className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 font-bold text-sm" placeholder="0,00" />
-                    </div>
+                    <MoneyInput
+                      value={Number(formData.amount) || 0}
+                      onChange={v => setFormData(p => ({ ...p, amount: String(v) }))}
+                    />
                   </div>
                   <div>
                     <CustomDatePicker

@@ -734,6 +734,8 @@ export function useTickets() {
 export interface DashboardStats {
   totalAppointments: number;
   totalRevenue: number;
+  pendingRevenue: number;
+  totalConversionsValue: number;
   totalLeads: number;
   newPatients: number;
   totalSales: number;
@@ -754,11 +756,13 @@ export interface DashboardStats {
 export function useDashboardStats(dateRange?: { start: string; end: string }) {
   const { profile, activeClinicId } = useAuth();
   const [data, setData] = useState<DashboardStats>({
-    totalAppointments: 0, 
-    totalRevenue: 0, 
-    totalLeads: 0, 
-    newPatients: 0, 
-    totalSales: 0, 
+    totalAppointments: 0,
+    totalRevenue: 0,
+    pendingRevenue: 0,
+    totalConversionsValue: 0,
+    totalLeads: 0,
+    newPatients: 0,
+    totalSales: 0,
     totalInvestment: 0,
     totalSlaBreaches: 0,
     avgResponseTime: 0,
@@ -785,6 +789,8 @@ export function useDashboardStats(dateRange?: { start: string; end: string }) {
       setData({
         totalAppointments: r?.totalAppointments || 0,
         totalRevenue: Number(r?.totalRevenue || 0),
+        pendingRevenue: Number(r?.pendingRevenue || 0),
+        totalConversionsValue: Number(r?.totalConversionsValue || 0),
         totalLeads: r?.totalLeads || 0,
         newPatients: r?.newPatients || 0,
         totalSales: r?.totalSales || 0,
@@ -850,7 +856,12 @@ export function useFinancial() {
     if (!silent) setLoading(true);
     const { data, error } = await supabase
       .from('financial_transactions')
-      .select('*')
+      .select(`
+        *,
+        patient:patients(name, phone),
+        appointment:appointments(id, time, ticket_id),
+        conversions!conversions_financial_transaction_id_fkey(lead_id, lead:leads(name, phone))
+      `)
       .eq('clinic_id', activeClinicId)
       .order('date', { ascending: false });
     

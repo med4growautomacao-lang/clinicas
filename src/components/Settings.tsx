@@ -43,6 +43,7 @@ import { useSettings, useProtocols, Protocol, Clinic, AIConfig, WhatsappInstance
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "./ui/toast";
+import { MoneyInput } from "./ui/money-input";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import WhatsappLogo from "../assets/logos/Logo Whatsapp.png";
@@ -561,14 +562,10 @@ export function Settings() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Valor padrão (R$)</label>
-                                    <input
-                                        type="text"
-                                        inputMode="decimal"
-                                        placeholder="0,00"
-                                        value={protocolModal.item.price ?? ''}
-                                        onChange={e => setProtocolModal(prev => ({ ...prev, item: { ...prev.item!, price: e.target.value === '' ? null : Number(e.target.value.replace(',', '.')) } }))}
-                                        className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Valor padrão</label>
+                                    <MoneyInput
+                                        value={protocolModal.item.price ?? 0}
+                                        onChange={v => setProtocolModal(prev => ({ ...prev, item: { ...prev.item!, price: v || null } }))}
                                     />
                                 </div>
                             </div>

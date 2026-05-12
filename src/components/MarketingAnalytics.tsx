@@ -1456,9 +1456,38 @@ function MetricRow({ label, periods, metrics, compareMetrics, isComparing, platf
         const isCalculated = ['cpl', 'cpa', 'cpapt'].includes(valueKey);
 
         if (isEditing && period === 'dia' && valueKey && !isCalculated) {
+          const isMoney = valueKey === 'investment' || valueKey === 'conversions_value' || valueKey === 'conv_value';
           return (
             <td key={idx} className="px-4 py-2 border-r border-slate-50 last:border-r-0">
-              <input type="number" value={editValues[editKey]} onChange={e => setEditValues((prev: any) => ({ ...prev, [editKey]: e.target.value }))} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-black text-center text-slate-900 focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all placeholder:text-slate-300" placeholder="0" />
+              <input
+                type="text"
+                inputMode={isMoney ? 'decimal' : 'numeric'}
+                value={editValues[editKey] ?? ''}
+                onChange={e => {
+                  const raw = e.target.value;
+                  if (isMoney) {
+                    // aceita "2.500,50" ou "2500.50" - normaliza pra US no state
+                    const cleaned = raw.replace(/[^\d.,]/g, '');
+                    const hasComma = cleaned.includes(',');
+                    const hasDot = cleaned.includes('.');
+                    let normalized = cleaned;
+                    if (hasComma && hasDot) {
+                      const lastComma = cleaned.lastIndexOf(',');
+                      const lastDot = cleaned.lastIndexOf('.');
+                      normalized = lastComma > lastDot
+                        ? cleaned.replace(/\./g, '').replace(',', '.')
+                        : cleaned.replace(/,/g, '');
+                    } else if (hasComma) {
+                      normalized = cleaned.replace(',', '.');
+                    }
+                    setEditValues((prev: any) => ({ ...prev, [editKey]: normalized }));
+                  } else {
+                    setEditValues((prev: any) => ({ ...prev, [editKey]: raw.replace(/\D/g, '') }));
+                  }
+                }}
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-black text-center text-slate-900 focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all placeholder:text-slate-300"
+                placeholder="0"
+              />
             </td>
           );
         }

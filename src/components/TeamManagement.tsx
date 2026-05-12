@@ -195,12 +195,22 @@ export function TeamManagement() {
       return;
     }
     setSubmitting(true);
-    const table = member.pending ? "pending_clinic_users" : "clinic_users";
-    const { error: delError } = await supabase.from(table).delete().eq("id", member.id);
-    if (delError) {
-      setError(delError.message);
-      setSubmitting(false);
-      return;
+    if (member.pending) {
+      // Pré-cadastros são limpos diretamente — não têm conta auth ainda
+      const { error: delError } = await supabase.from("pending_clinic_users").delete().eq("id", member.id);
+      if (delError) {
+        setError(delError.message);
+        setSubmitting(false);
+        return;
+      }
+    } else {
+      // Usuário ativo: limpa tudo (clinic_users + org_users + auth.users + prontuario_passwords)
+      const { error: rpcError } = await supabase.rpc("delete_user_full", { p_user_id: member.id });
+      if (rpcError) {
+        setError(rpcError.message);
+        setSubmitting(false);
+        return;
+      }
     }
     setMembers((prev) => prev.filter((m) => m.id !== member.id));
     setShowDeleteConfirm(null);

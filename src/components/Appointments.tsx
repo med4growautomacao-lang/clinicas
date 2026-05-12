@@ -304,6 +304,16 @@ export function Appointments() {
       setRealizadoDialog({ apt, value: '', paymentMethod: '', status: 'pago', description: '', protocolIds: [] });
       return;
     }
+    if (newStatus === 'cancelado') {
+      // RPC atômica: cancela + reverte transação financeira (se houver)
+      const { error: cancelErr } = await supabase.rpc('cancel_appointment', {
+        p_appointment_id: apt.id,
+        p_reason: null,
+        p_revert_transaction: true,
+      });
+      if (cancelErr) setError('Erro ao cancelar: ' + cancelErr.message);
+      return;
+    }
     await update(apt.id, { status: newStatus as any });
 
     if (newStatus === 'compareceu' && apt.status !== 'compareceu') {

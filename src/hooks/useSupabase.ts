@@ -275,8 +275,8 @@ export function useAppointments(options?: { daysBack?: number; daysForward?: num
     if (!silent) setLoading(false);
   }, [activeClinicId, userRole, profile?.id, DAYS_BACK, DAYS_FORWARD]);
 
-  useEffect(() => { 
-    fetch(); 
+  useEffect(() => {
+    fetch();
     if (!activeClinicId) return;
 
     const channel = supabase
@@ -291,7 +291,19 @@ export function useAppointments(options?: { daysBack?: number; daysForward?: num
       })
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    // Polling defensivo: cobre casos em que o WebSocket do realtime cai sem notificar
+    // (aba em background, oscilação de rede, n8n inserindo por outro caminho)
+    const interval = setInterval(() => { fetch(true); }, 30_000);
+
+    // Refetch ao voltar pra aba (caso o realtime tenha perdido eventos enquanto em background)
+    const onVisible = () => { if (document.visibilityState === 'visible') fetch(true); };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [fetch, activeClinicId]);
 
   const create = async (apt: Partial<Appointment>) => {

@@ -186,16 +186,15 @@ export function ChatThread({
         const sorted = [...messages].sort((a, b) =>
           new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
         );
-        const seenDates = new Set<string>();
         return (
           <div className="space-y-6 pb-4">
-            {sorted.map((msg) => {
+            {sorted.map((msg, i) => {
               const isOutbound = msg.direction === 'outbound';
               const isAI = msg.sender === 'ai';
               const currentDate = new Date(msg.created_at);
-              const dateKey = format(currentDate, 'yyyy-MM-dd');
-              const showDateSeparator = !seenDates.has(dateKey);
-              if (showDateSeparator) seenDates.add(dateKey);
+              const prevDate = i > 0 ? new Date(sorted[i - 1].created_at) : null;
+              const showDateSeparator = !prevDate ||
+                format(prevDate, 'yyyy-MM-dd') !== format(currentDate, 'yyyy-MM-dd');
 
               return (
                 <React.Fragment key={msg.id}>

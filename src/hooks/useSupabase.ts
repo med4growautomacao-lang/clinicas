@@ -372,6 +372,7 @@ export interface Lead {
   email: string | null;
   source: string | null;
   capture_channel: string | null;
+  /** @deprecated Use vw_lead_active_stage ou tickets.stage_id (lead = só identidade, etapa vive no ticket aberto). */
   stage_id: string | null;
   estimated_value: number | null;
   notes: string | null;
@@ -558,6 +559,26 @@ export function useLeads(options?: { pageSize?: number }) {
     return data;
   };
 
+  const createWithTicket = async (lead: Partial<Lead> & { stage_id?: string | null }) => {
+    if (!activeClinicId) return null;
+    const { data, error } = await supabase.rpc('create_lead_with_ticket', {
+      p_clinic_id: activeClinicId,
+      p_name: lead.name || '',
+      p_phone: lead.phone || null,
+      p_email: lead.email || null,
+      p_source: lead.source || 'manual',
+      p_capture_channel: lead.capture_channel || 'manual',
+      p_stage_id: lead.stage_id || null,
+      p_estimated_value: lead.estimated_value ?? null,
+      p_avatar_url: lead.avatar_url || null,
+    });
+    if (error) { setError(error.message); return null; }
+    const result = data as any;
+    if (!result?.success) { setError(result?.error || 'Erro ao criar lead'); return null; }
+    await fetch(true);
+    return { id: result.lead_id, ticket_id: result.ticket_id, stage_id: result.stage_id } as any;
+  };
+
   const update = async (id: string, updates: Partial<Lead>) => {
     setData(prev => prev.map(l => l.id === id ? { ...l, ...updates } : l));
     const { error } = await supabase.from('leads').update(updates).eq('id', id);
@@ -576,7 +597,7 @@ export function useLeads(options?: { pageSize?: number }) {
     return true;
   };
 
-  return { data, loading, loadingMore, hasMore, error, refetch: fetch, loadMore, create, update, remove };
+  return { data, loading, loadingMore, hasMore, error, refetch: fetch, loadMore, create, createWithTicket, update, remove };
 }
 
 // ==========================================

@@ -399,26 +399,8 @@ export function MarketingAnalytics() {
         }
       });
 
-      // Fallback: count leads in Conversão stage not already in conversions table
-      if (conversionStageId) {
-        leads.forEach(lead => {
-          if (lead.stage_id !== conversionStageId) return;
-          if (countedLeadDates.has(lead.id)) return;
-          const convDate = lead.updated_at ? parseISO(lead.updated_at) : null;
-          if (convDate && convDate >= p.start && convDate <= p.end) {
-            const platform = getPlatformForLead(lead);
-            const dateStr = format(convDate, 'yyyy-MM-dd');
-            const manualConvs = marketingData.find(d => d.date === dateStr && d.platform === platform)?.manual_conversions_count;
-            if (manualConvs === null || manualConvs === undefined || manualConvs === 0) {
-              stats[pKey][platform].convs += 1;
-            }
-            const manualConvValue = marketingData.find(d => d.date === dateStr && d.platform === platform)?.conversions_value;
-            if (!manualConvValue) {
-              stats[pKey][platform].conv_value += Number(lead.estimated_value || 0);
-            }
-          }
-        });
-      }
+      // Fallback removido: lead.stage_id foi deprecado (agora é fonte única em tickets.stage_id).
+      // A tabela `conversions` é a fonte canônica para contagem de conversões.
 
       appointments.forEach(apt => {
         const aptDate = parseISO(apt.date);

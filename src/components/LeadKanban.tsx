@@ -93,7 +93,7 @@ function ExportModal({ onClose }: { onClose: () => void }) {
     try {
       let query = supabase
         .from('chat_messages')
-        .select('id, direction, sender, message, created_at, lead_id, leads!left(name, phone, source, capture_channel, stage_id)')
+        .select('id, direction, sender, message, created_at, lead_id, leads!left(name, phone, source, capture_channel)')
         .eq('clinic_id', activeClinicId)
         .gte('created_at', dateFrom + 'T00:00:00')
         .lte('created_at', dateTo + 'T23:59:59')
@@ -107,10 +107,24 @@ function ExportModal({ onClose }: { onClose: () => void }) {
       const stageMap: Record<string, string> = {};
       stages.forEach(s => { stageMap[s.id] = s.name; });
 
+      // Stage atual de cada lead vem do ticket aberto (vw_lead_active_stage)
+      const leadIds = Array.from(new Set((rows || []).map((r: any) => r.lead_id).filter(Boolean)));
+      const stageByLead: Record<string, string | null> = {};
+      if (leadIds.length > 0) {
+        const { data: vwRows } = await supabase
+          .from('vw_lead_active_stage')
+          .select('lead_id, stage_id')
+          .in('lead_id', leadIds);
+        (vwRows || []).forEach((s: any) => { stageByLead[s.lead_id] = s.stage_id; });
+      }
+
       let filtered = (rows || []).filter((r: any) => {
         const lead = r.leads;
         if (selectedSource !== null && (lead?.source ?? '') !== selectedSource) return false;
-        if (selectedStageId && lead?.stage_id !== selectedStageId) return false;
+        if (selectedStageId) {
+          const currentStage = r.lead_id ? stageByLead[r.lead_id] : null;
+          if (currentStage !== selectedStageId) return false;
+        }
         return true;
       });
 
@@ -126,7 +140,8 @@ function ExportModal({ onClose }: { onClose: () => void }) {
         const header = ['Data', 'Lead', 'Telefone', 'Origem', 'Etapa', 'Direção', 'Remetente', 'Mensagem'];
         const csvRows = filtered.map((r: any) => {
           const lead = r.leads;
-          const stageName = lead?.stage_id ? (stageMap[lead.stage_id] || '') : '';
+          const currentStageId = r.lead_id ? stageByLead[r.lead_id] : null;
+          const stageName = currentStageId ? (stageMap[currentStageId] || '') : '';
           const source = SOURCE_LABELS[lead?.source ?? ''] || lead?.source || '';
           const msg = getContent(r.message).replace(/"/g, '""').replace(/\n/g, ' ');
           return [
@@ -151,8 +166,9 @@ function ExportModal({ onClose }: { onClose: () => void }) {
           const lid = r.lead_id || 'sem_lead';
           if (!grouped[lid]) {
             const lead = r.leads;
+            const currentStageId = r.lead_id ? stageByLead[r.lead_id] : null;
             grouped[lid] = {
-              lead: { id: lid, name: lead?.name || '', phone: lead?.phone || '', source: lead?.source || '', stage: lead?.stage_id ? (stageMap[lead.stage_id] || '') : '' },
+              lead: { id: lid, name: lead?.name || '', phone: lead?.phone || '', source: lead?.source || '', stage: currentStageId ? (stageMap[currentStageId] || '') : '' },
               messages: []
             };
           }
@@ -980,7 +996,7 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
 
 export function LeadKanban() {
   const { data: stages, loading: stagesLoading, reorder: reorderStages, update: updateStage, create: createStage, remove: removeStage } = useFunnelStages();
-  const { data: leads, create, update, remove } = useLeads({ pageSize: 150 });
+  const { data: leads, create, createWithTicket, update, remove } = useLeads({ pageSize: 150 });
   const { tickets, loading: ticketsLoading, moveTicket, openTicket, closeTicket, finalizeTicket } = useTickets();
   const { byLead: conversionsByLead, create: createConversion } = useConversions();
   const { aiConfig, updateAI } = useSettings();
@@ -1097,12 +1113,12 @@ export function LeadKanban() {
       const isConversao = stages.find(s => s.id === targetStageId)?.slug === 'ganho';
       const isOrcamento = stages.find(s => s.id === targetStageId)?.slug === 'orcamento';
 
+      // Lead = só identidade. Stage vai pro TICKET via fluxos próprios (RPC ou moveTicket).
       const payload = {
         name: formData.name,
         phone: formData.phone || null,
         source: formData.source || null,
         capture_channel: formData.capture_channel || 'whatsapp',
-        stage_id: targetStageId || null,
         estimated_value: formData.estimated_value ? Number(formData.estimated_value) : 0,
         loss_reason: isPerdido ? (formData.loss_reason || null) : null,
         avatar_url: formData.avatar_url || null,
@@ -1126,10 +1142,8 @@ export function LeadKanban() {
           }
         }
       } else {
-        const newLead = await create(payload);
-        if (newLead && targetStageId && !isPerdido) {
-          await openTicket(newLead.id, targetStageId);
-        }
+        // Cria lead + ticket atomicamente via RPC
+        await createWithTicket({ ...payload, stage_id: targetStageId || null });
       }
 
       setFormData({ name: '', phone: '', source: 'sincronizacao', capture_channel: 'whatsapp', stage_id: '', estimated_value: '', loss_reason: '', avatar_url: '' });
@@ -2464,6 +2478,7 @@ export function LeadKanban() {
           <LeadChat
             lead={chatLead.lead}
             ticketId={chatLead.ticketId}
+            currentStageId={tickets.find(t => t.id === chatLead.ticketId)?.stage_id ?? null}
             onClose={() => setChatLead(null)}
             isDragging={draggedLead !== null}
             onGanho={() => setGanhoLead({ id: chatLead.lead.id, name: chatLead.lead.name, prevStageId: null, ticketId: chatLead.ticketId })}

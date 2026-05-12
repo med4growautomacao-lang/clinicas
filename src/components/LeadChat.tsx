@@ -14,12 +14,13 @@ interface LeadChatProps {
   onClose: () => void;
   isDragging?: boolean;
   ticketId?: string;
+  currentStageId?: string | null;
   onGanho?: () => void;
   onPerdido?: () => void;
   onStageChange?: (stageId: string) => void;
 }
 
-export function LeadChat({ lead, onClose, isDragging = false, ticketId, onGanho, onPerdido, onStageChange }: LeadChatProps) {
+export function LeadChat({ lead, onClose, isDragging = false, ticketId, currentStageId, onGanho, onPerdido, onStageChange }: LeadChatProps) {
   const { data: messages, loading } = useChatMessages(lead.id, lead.phone);
   const { update: updateLead } = useLeads();
   const { byLead: conversionsByLead } = useConversions();
@@ -126,11 +127,8 @@ export function LeadChat({ lead, onClose, isDragging = false, ticketId, onGanho,
         <div className="px-5 py-2 border-b border-slate-100 bg-slate-50/60 flex items-center gap-2">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider shrink-0">Etapa</span>
           <select
-            value={lead.stage_id || ''}
-            onChange={e => {
-              updateLead(lead.id, { stage_id: e.target.value });
-              onStageChange?.(e.target.value);
-            }}
+            value={currentStageId || ''}
+            onChange={e => onStageChange?.(e.target.value)}
             className="flex-1 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 transition-all"
           >
             {stages.map(s => (

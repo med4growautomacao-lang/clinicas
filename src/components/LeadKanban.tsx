@@ -995,8 +995,30 @@ export function LeadKanban() {
   const [submitting, setSubmitting] = useState(false);
   const [chatLead, setChatLead] = useState<{ lead: any; ticketId: string } | null>(null);
   const [scheduleLead, setScheduleLead] = useState<{ lead: Lead; ticketId: string } | null>(null);
-  const [scheduleForm, setScheduleForm] = useState({ doctor_id: '', date: '', time: '', notes: '' });
+  const [scheduleForm, setScheduleForm] = useState({ doctor_id: '', date: '', time: '', notes: '', modality: 'presencial' as 'presencial' | 'online' });
   const [scheduleSubmitting, setScheduleSubmitting] = useState(false);
+  const [scheduleSlots, setScheduleSlots] = useState<string[] | null>(null);
+  const [scheduleSlotsLoading, setScheduleSlotsLoading] = useState(false);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!scheduleForm.doctor_id || !scheduleForm.date) {
+      setScheduleSlots(null);
+      return;
+    }
+    let cancelled = false;
+    setScheduleSlotsLoading(true);
+    supabase.rpc('get_available_slots', {
+      p_doctor_id: scheduleForm.doctor_id,
+      p_date: scheduleForm.date,
+    }).then(({ data, error }) => {
+      if (cancelled) return;
+      if (error) { console.error('get_available_slots:', error); setScheduleSlots([]); }
+      else setScheduleSlots((data || []).map((s: any) => (s.slot_time || '').toString().substring(0, 5)));
+      setScheduleSlotsLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [scheduleForm.doctor_id, scheduleForm.date]);
   const { create: createAppointment } = useAppointments();
   const { data: doctors } = useDoctors();
   const { data: patients, create: createPatient } = usePatients();
@@ -1864,7 +1886,7 @@ export function LeadKanban() {
                               </div>
                               <div className="flex flex-col items-end gap-1.5 shrink-0 ml-2">
                                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <button title="Agendar consulta" onClick={() => { setScheduleLead({ lead, ticketId: ticket.id }); setScheduleForm({ doctor_id: doctors[0]?.id || '', date: '', time: '', notes: '' }); }} className="p-0.5 text-slate-400 hover:text-indigo-600 rounded transition-colors"><CalendarPlus className="w-3 h-3" /></button>
+                                  <button title="Agendar consulta" onClick={() => { setScheduleLead({ lead, ticketId: ticket.id }); setScheduleForm({ doctor_id: doctors[0]?.id || '', date: '', time: '', notes: '', modality: 'presencial' }); setScheduleError(null); setScheduleSlots(null); }} className="p-0.5 text-slate-400 hover:text-indigo-600 rounded transition-colors"><CalendarPlus className="w-3 h-3" /></button>
                                   {!ticket.outcome && !isClosed && (
                                     <div className="relative">
                                       <button
@@ -2496,25 +2518,51 @@ export function LeadKanban() {
               <div className="p-5 space-y-3">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Médico *</label>
-                  <select value={scheduleForm.doctor_id} onChange={e => setScheduleForm(p => ({ ...p, doctor_id: e.target.value }))} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium outline-none focus:ring-2 focus:ring-teal-200">
+                  <select value={scheduleForm.doctor_id} onChange={e => setScheduleForm(p => ({ ...p, doctor_id: e.target.value, time: '' }))} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium outline-none focus:ring-2 focus:ring-teal-200">
                     <option value="">Selecione</option>
                     {doctors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                   </select>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Data *</label>
-                    <input type="date" value={scheduleForm.date} onChange={e => setScheduleForm(p => ({ ...p, date: e.target.value }))} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium outline-none focus:ring-2 focus:ring-teal-200" />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Hora *</label>
-                    <input type="time" value={scheduleForm.time} onChange={e => setScheduleForm(p => ({ ...p, time: e.target.value }))} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium outline-none focus:ring-2 focus:ring-teal-200" />
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Data *</label>
+                  <input type="date" value={scheduleForm.date} onChange={e => setScheduleForm(p => ({ ...p, date: e.target.value, time: '' }))} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium outline-none focus:ring-2 focus:ring-teal-200" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Modalidade</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button type="button" onClick={() => setScheduleForm(p => ({ ...p, modality: 'presencial' }))} className={`py-2 rounded-lg border text-xs font-bold transition-all ${scheduleForm.modality === 'presencial' ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-white text-slate-600 border-slate-200 hover:border-emerald-300'}`}>Presencial</button>
+                    <button type="button" onClick={() => setScheduleForm(p => ({ ...p, modality: 'online' }))} className={`py-2 rounded-lg border text-xs font-bold transition-all ${scheduleForm.modality === 'online' ? 'bg-sky-500 text-white border-sky-500' : 'bg-white text-slate-600 border-slate-200 hover:border-sky-300'}`}>Online</button>
                   </div>
                 </div>
+                {scheduleForm.doctor_id && scheduleForm.date && (
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Horário *</label>
+                    {scheduleSlotsLoading ? (
+                      <div className="p-3 bg-slate-50 border border-slate-100 rounded-lg text-slate-400 text-xs font-bold flex items-center">
+                        <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" /> Carregando horários...
+                      </div>
+                    ) : !scheduleSlots || scheduleSlots.length === 0 ? (
+                      <div className="p-3 bg-rose-50 border border-rose-100 rounded-lg text-rose-600 text-xs font-bold">
+                        Sem horários disponíveis nesta data.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {scheduleSlots.map(s => (
+                          <button key={s} type="button" onClick={() => setScheduleForm(p => ({ ...p, time: s }))} className={`py-1.5 text-xs font-bold rounded border transition-all ${scheduleForm.time === s ? 'bg-teal-600 text-white border-teal-600' : 'bg-white text-slate-600 border-slate-200 hover:border-teal-300'}`}>{s}</button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Observações</label>
                   <input type="text" value={scheduleForm.notes} onChange={e => setScheduleForm(p => ({ ...p, notes: e.target.value }))} placeholder="Opcional..." className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium outline-none focus:ring-2 focus:ring-teal-200" />
                 </div>
+                {scheduleError && (
+                  <div className="p-3 bg-rose-50 border border-rose-100 rounded-lg text-rose-600 text-xs font-medium">
+                    {scheduleError}
+                  </div>
+                )}
               </div>
               <div className="flex gap-3 p-5 border-t border-slate-100 bg-slate-50">
                 <Button variant="outline" className="flex-1 font-bold" onClick={() => setScheduleLead(null)}>Cancelar</Button>
@@ -2523,8 +2571,8 @@ export function LeadKanban() {
                   disabled={!scheduleForm.doctor_id || !scheduleForm.date || !scheduleForm.time || scheduleSubmitting}
                   onClick={async () => {
                     setScheduleSubmitting(true);
+                    setScheduleError(null);
                     const sl = scheduleLead.lead;
-                    // Garante que o lead tem um paciente vinculado
                     let patientId = sl.converted_patient_id;
                     if (!patientId) {
                       const existing = patients.find(p => p.phone === sl.phone);
@@ -2540,7 +2588,25 @@ export function LeadKanban() {
                       }
                     }
                     if (patientId) {
-                      await createAppointment({ patient_id: patientId, doctor_id: scheduleForm.doctor_id, date: scheduleForm.date, time: scheduleForm.time, notes: scheduleForm.notes || null, status: 'pendente', source: 'manual', ticket_id: scheduleLead.ticketId } as any);
+                      const result = await createAppointment({
+                        patient_id: patientId,
+                        doctor_id: scheduleForm.doctor_id,
+                        date: scheduleForm.date,
+                        time: scheduleForm.time,
+                        notes: scheduleForm.notes || null,
+                        status: 'pendente',
+                        source: 'manual',
+                        modality: scheduleForm.modality,
+                        ticket_id: scheduleLead.ticketId,
+                      } as any);
+                      if (!result) {
+                        setScheduleError('Não foi possível agendar. Esse horário pode já estar reservado — atualize a lista de horários e tente novamente.');
+                        setScheduleSlots(null);
+                        // força refetch dos slots
+                        setTimeout(() => setScheduleForm(p => ({ ...p, time: '' })), 0);
+                        setScheduleSubmitting(false);
+                        return;
+                      }
                     }
                     setScheduleLead(null);
                     setScheduleSubmitting(false);

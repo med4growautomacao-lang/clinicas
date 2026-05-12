@@ -193,8 +193,11 @@ export function Appointments() {
 
   const selectedDayAppointments = useMemo(() => {
     if (!selectedDay) return [];
-    return appointments.filter(apt => apt.date === selectedDay);
-  }, [appointments, selectedDay]);
+    return appointments.filter(apt =>
+      apt.date === selectedDay &&
+      (filter === 'Todos' || (apt.doctor?.name || '').includes(filter))
+    );
+  }, [appointments, selectedDay, filter]);
 
   const blockedListItems = useMemo(() => {
     const relevantDoctors = filter === "Todos" ? doctors : doctors.filter(d => d.name.includes(filter));
@@ -245,17 +248,22 @@ export function Appointments() {
 
   const selectedDayBlockedDoctors = useMemo(() => {
     if (!selectedDay) return [];
-    return doctors.filter(d => d.days_off?.includes(selectedDay));
-  }, [doctors, selectedDay]);
+    return doctors.filter(d =>
+      d.days_off?.includes(selectedDay) &&
+      (filter === 'Todos' || d.name.includes(filter))
+    );
+  }, [doctors, selectedDay, filter]);
 
   const selectedDayBlockedTimes = useMemo(() => {
     if (!selectedDay) return [];
-    return doctors.flatMap(d =>
-      (d.blocked_times || [])
-        .filter((bt: any) => bt.date === selectedDay)
-        .map((bt: any) => ({ ...bt, doctorName: d.name }))
-    ).sort((a: any, b: any) => a.start.localeCompare(b.start));
-  }, [doctors, selectedDay]);
+    return doctors
+      .filter(d => filter === 'Todos' || d.name.includes(filter))
+      .flatMap(d =>
+        (d.blocked_times || [])
+          .filter((bt: any) => bt.date === selectedDay)
+          .map((bt: any) => ({ ...bt, doctorName: d.name }))
+      ).sort((a: any, b: any) => a.start.localeCompare(b.start));
+  }, [doctors, selectedDay, filter]);
 
   const handleDayClick = (date: string) => {
     setSelectedDay(date);
@@ -1263,7 +1271,11 @@ export function Appointments() {
 
               <div className="p-6 border-t border-slate-100 bg-slate-50 grid grid-cols-3 gap-2">
                 <Button variant="destructive" className="col-span-1 py-5 font-bold" onClick={() => {
-                  setBlockForm({ doctor_id: doctors[0]?.id || '', type: 'day', start: '08:00', end: '12:00', name: '', repeat: 'none', interval: 1, weekdays: [], monthlyMode: 'day_of_month', until: '' });
+                  // Médico só pode bloquear o próprio horário; outros podem escolher qualquer médico da clínica
+                  const defaultDoctorId = (userRole === 'medico' || userRole === 'medico_gestor')
+                    ? (currentDoctor?.id || doctors[0]?.id || '')
+                    : (doctors[0]?.id || '');
+                  setBlockForm({ doctor_id: defaultDoctorId, type: 'day', start: '08:00', end: '12:00', name: '', repeat: 'none', interval: 1, weekdays: [], monthlyMode: 'day_of_month', until: '' });
                   setShowBlockModal(true);
                 }}>
                   <Trash2 className="w-4 h-4 mr-2" /> Bloquear
@@ -1298,7 +1310,10 @@ export function Appointments() {
                     icon={Stethoscope}
                     value={blockForm.doctor_id}
                     onChange={val => setBlockForm(p => ({ ...p, doctor_id: val }))}
-                    options={doctors.map(d => ({ value: d.id, label: d.name }))}
+                    options={(userRole === 'medico' && currentDoctor
+                      ? [currentDoctor]
+                      : doctors
+                    ).map(d => ({ value: d.id, label: d.name }))}
                     placeholder="Selecione..."
                   />
                 </div>

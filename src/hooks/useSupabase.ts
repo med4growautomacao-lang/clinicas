@@ -652,7 +652,17 @@ export function useTickets() {
       .channel(`tickets_realtime_${activeClinicId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets', filter: `clinic_id=eq.${activeClinicId}` }, () => { fetch(true); })
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+
+    // Polling defensivo: cobre WebSocket caído / aba em background
+    const interval = setInterval(() => { fetch(true); }, 30_000);
+    const onVisible = () => { if (document.visibilityState === 'visible') fetch(true); };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [fetch, activeClinicId]);
 
   const moveTicket = async (ticketId: string, stageId: string) => {

@@ -7,7 +7,14 @@ Pasta com as versões do system prompt usado no AI Agent do n8n (secretária vir
 | Versão | Arquivo | Quando | Principais mudanças |
 |--------|---------|--------|---------------------|
 | V2 | [agent-secretaria-v2.md](./agent-secretaria-v2.md) | até 2026-05-12 | Mecânica básica de agendamento. Sem histórico do paciente. Permitia tool Think. |
-| **V3 (atual)** | [agent-secretaria-v3.md](./agent-secretaria-v3.md) | 2026-05-12 | + Regra #0 chama `VER_HISTORICO_PACIENTE` no início. + Encerramento escreve `summary` do ticket. + Proibição explícita de raciocínio em voz alta. Adaptação de cumprimento por cenário. |
+| **V3 (atual)** | [agent-secretaria-v3.md](./agent-secretaria-v3.md) | 2026-05-12 | + Regra #0 chama `VER_HISTORICO_PACIENTE` no início. + Proibição de raciocínio em voz alta. Adaptação de cumprimento por cenário. **Removido o bloco SUMMARY** (vazava no texto pro paciente). |
+
+## Outros guias
+
+| Arquivo | Conteúdo |
+|---------|----------|
+| [n8n-reset-flow.md](./n8n-reset-flow.md) | Como ligar os comandos de reset (test_reset_full / test_reset_for_rebook) no n8n |
+| [n8n-handoff-tool-and-prompt.md](./n8n-handoff-tool-and-prompt.md) | Como configurar o handoff via tool `ACIONAR_HANDOFF` (substitui o texto-marcador "Gatilho:") |
 
 ## Changelog detalhado V2 → V3
 

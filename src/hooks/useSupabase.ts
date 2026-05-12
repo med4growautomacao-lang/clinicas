@@ -624,9 +624,11 @@ export function useTickets() {
 
   const moveTicket = async (ticketId: string, stageId: string) => {
     setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, stage_id: stageId } : t));
-    const { data, error } = await supabase.from('tickets').update({ stage_id: stageId }).eq('id', ticketId).select('lead_id').single();
-    if (error) { fetch(true); return false; }
-    if (data?.lead_id) await supabase.from('leads').update({ stage_id: stageId }).eq('id', data.lead_id);
+    const { data, error } = await supabase.rpc('move_lead_stage', {
+      p_ticket_id: ticketId,
+      p_new_stage_id: stageId,
+    });
+    if (error || !(data as any)?.success) { fetch(true); return false; }
     return true;
   };
 
@@ -768,133 +770,29 @@ export function useDashboardStats(dateRange?: { start: string; end: string }) {
   const load = useCallback(async (silent = false) => {
     if (!activeClinicId) return;
     if (!silent) setLoading(true);
-    const clinicId = activeClinicId;
-
     const now = new Date();
     const startOfMonth = dateRange?.start || new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
     const endOfMonth = dateRange?.end || new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
 
     try {
-      // Buscar o stage "Conversão" (is_fixed=true) da clínica
-      const { data: convStage } = await supabase
-        .from('funnel_stages')
-        .select('id')
-        .eq('clinic_id', clinicId)
-        .eq('is_fixed', true)
-        .maybeSingle();
-
-      const [aptsRes, revenueRes, patientsRes, leadsRes, salesRes, investRes, slaRes, cycleRes, responseTimeRes] = await Promise.all([
-        supabase.from('appointments').select('id, date')
-          .eq('clinic_id', clinicId).gte('date', startOfMonth).lte('date', endOfMonth),
-        supabase.from('financial_transactions').select('amount, date')
-          .eq('clinic_id', clinicId).eq('type', 'receita').eq('status', 'pago')
-          .gte('date', startOfMonth).lte('date', endOfMonth),
-        supabase.from('patients').select('id', { count: 'exact', head: true })
-          .eq('clinic_id', clinicId).gte('created_at', startOfMonth).lte('created_at', endOfMonth + 'T23:59:59'),
-        supabase.from('leads').select('id, created_at, sla_breach_count')
-          .eq('clinic_id', clinicId).gte('created_at', startOfMonth).lte('created_at', endOfMonth + 'T23:59:59'),
-        // Vendas: leads no stage de Conversão
-        convStage?.id
-          ? supabase.from('leads').select('id, created_at')
-              .eq('clinic_id', clinicId).eq('stage_id', convStage.id).gte('created_at', startOfMonth).lte('created_at', endOfMonth + 'T23:59:59')
-          : Promise.resolve({ data: [] }),
-        // Investimento em marketing
-        supabase.from('marketing_data').select('investment, date')
-          .eq('clinic_id', clinicId).gte('date', startOfMonth).lte('date', endOfMonth),
-        // Estouros de SLA (soma do campo na tabela leads no período)
-        supabase.from('leads').select('sla_breach_count')
-          .eq('clinic_id', clinicId).gte('created_at', startOfMonth).lte('created_at', endOfMonth + 'T23:59:59'),
-        // Ciclo de vendas (histórico de conversão)
-        convStage?.id
-          ? supabase.from('lead_stage_history')
-              .select('lead_id, changed_at, leads(created_at)')
-              .eq('clinic_id', clinicId)
-              .eq('new_stage_id', convStage.id)
-              .gte('changed_at', startOfMonth)
-              .lte('changed_at', endOfMonth + 'T23:59:59')
-          : Promise.resolve({ data: [] }),
-        // Tempo de resposta (estimativa simplificada baseada no handoff se existir, ou mensagens)
-        supabase.from('leads').select('created_at, handoff_triggered_at')
-          .eq('clinic_id', clinicId)
-          .not('handoff_triggered_at', 'is', null)
-          .gte('created_at', startOfMonth)
-          .lte('created_at', endOfMonth + 'T23:59:59')
-      ]);
-
-      const dailyData: Record<string, any> = {};
-
-      // Helper para inicializar datas no range sem problemas de timezone
-      const startParts = startOfMonth.split('-').map(Number);
-      const endParts = endOfMonth.split('-').map(Number);
-      const startDate = new Date(startParts[0], startParts[1] - 1, startParts[2]);
-      const endDate = new Date(endParts[0], endParts[1] - 1, endParts[2]);
-
-      for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-        const year = d.getFullYear();
-        const month = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        const dateStr = `${year}-${month}-${day}`;
-        dailyData[dateStr] = { date: dateStr, agendamentos: 0, faturamento: 0, leads: 0, vendas: 0, investimento: 0 };
-      }
-
-      const toLocalDateStr = (utcString: string) => {
-        if (!utcString) return "";
-        const d = new Date(utcString);
-        const year = d.getFullYear();
-        const month = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-      };
-
-      (aptsRes.data || []).forEach(a => {
-        if (dailyData[a.date]) dailyData[a.date].agendamentos++;
+      const { data, error } = await supabase.rpc('get_dashboard_stats', {
+        p_clinic_id: activeClinicId,
+        p_date_from: startOfMonth,
+        p_date_to: endOfMonth,
       });
-      (revenueRes.data || []).forEach(r => {
-        if (dailyData[r.date]) dailyData[r.date].faturamento += Number(r.amount || 0);
-      });
-      (leadsRes.data || []).forEach(l => {
-        const date = toLocalDateStr(l.created_at);
-        if (dailyData[date]) dailyData[date].leads++;
-      });
-      (salesRes.data || []).forEach(s => {
-        const date = toLocalDateStr(s.created_at);
-        if (dailyData[date]) dailyData[date].vendas++;
-      });
-      (investRes.data || []).forEach(i => {
-        if (dailyData[i.date]) dailyData[i.date].investimento += Number(i.investment || 0);
-      });
-
-      const totalRevenue = (revenueRes.data || []).reduce((sum, t) => sum + Number(t.amount || 0), 0);
-      const totalInvestment = (investRes.data || []).reduce((sum, t) => sum + Number(t.investment || 0), 0);
-      const totalSlaBreaches = (slaRes.data || []).reduce((sum, l) => sum + (l.sla_breach_count || 0), 0);
-
-      // Ciclo de Vendas (Dias)
-      const cycles = (cycleRes.data || []).filter((h: any) => h.leads?.created_at).map((h: any) => {
-        const created = new Date(h.leads.created_at);
-        const converted = new Date(h.changed_at);
-        return (converted.getTime() - created.getTime()) / (1000 * 60 * 60 * 24);
-      });
-      const avgSalesCycle = cycles.length > 0 ? cycles.reduce((a, b) => a + b, 0) / cycles.length : 0;
-
-      // Tempo de Resposta (Minutos)
-      const responseTimes = (responseTimeRes.data || []).map(l => {
-        const created = new Date(l.created_at);
-        const responded = new Date(l.handoff_triggered_at);
-        return (responded.getTime() - created.getTime()) / (1000 * 60);
-      });
-      const avgResponseTime = responseTimes.length > 0 ? responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length : 0;
-
+      if (error) throw error;
+      const r = data as any;
       setData({
-        totalAppointments: (aptsRes.data || []).length,
-        totalRevenue,
-        totalLeads: (leadsRes.data || []).length,
-        newPatients: patientsRes.count || 0,
-        totalSales: (salesRes.data || []).length,
-        totalInvestment,
-        totalSlaBreaches,
-        avgResponseTime,
-        avgSalesCycle,
-        chartData: Object.values(dailyData).sort((a, b) => a.date.localeCompare(b.date)) as any
+        totalAppointments: r?.totalAppointments || 0,
+        totalRevenue: Number(r?.totalRevenue || 0),
+        totalLeads: r?.totalLeads || 0,
+        newPatients: r?.newPatients || 0,
+        totalSales: r?.totalSales || 0,
+        totalInvestment: Number(r?.totalInvestment || 0),
+        totalSlaBreaches: r?.totalSlaBreaches || 0,
+        avgResponseTime: Number(r?.avgResponseTime || 0),
+        avgSalesCycle: Number(r?.avgSalesCycle || 0),
+        chartData: (r?.chartData || []) as any,
       });
     } catch (error) {
       console.error('Erro ao carregar estatísticas do dashboard:', error);

@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
+import { matchesSearch } from "../lib/search";
 import {
   Card,
   CardContent,
@@ -1356,6 +1357,11 @@ export function AISecretary() {
 function ChatsView() {
   const { data: leads, loading: leadsLoading, loadingMore, hasMore, loadMore } = useLeads({ pageSize: 20 });
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const [leadSearch, setLeadSearch] = useState('');
+  const filteredLeads = useMemo(() => {
+    if (!leadSearch.trim()) return leads;
+    return leads.filter(l => matchesSearch(leadSearch, { name: l.name, email: l.email, phone: l.phone }, ['phone']));
+  }, [leads, leadSearch]);
   const selectedLead = leads.find(l => l.id === selectedLeadId);
   const { data: messages, loading: messagesLoading } = useChatMessages(selectedLeadId || undefined, selectedLead?.phone);
 
@@ -1415,7 +1421,9 @@ function ChatsView() {
           <div className="relative mt-4">
             <input
               type="text"
-              placeholder="Buscar paciente..."
+              value={leadSearch}
+              onChange={e => setLeadSearch(e.target.value)}
+              placeholder="Buscar por nome, telefone ou email..."
               className="w-full pl-10 pr-4 py-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-teal-100 transition-all font-medium placeholder:text-slate-400"
             />
             <User className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
@@ -1434,8 +1442,12 @@ function ChatsView() {
             <div className="p-8 text-center text-slate-400">
               <p className="text-sm font-medium">Nenhum atendimento ativo no momento.</p>
             </div>
+          ) : filteredLeads.length === 0 ? (
+            <div className="p-8 text-center text-slate-400">
+              <p className="text-sm font-medium">Nenhum resultado para "{leadSearch}".</p>
+            </div>
           ) : (
-            leads.map((lead) => {
+            filteredLeads.map((lead) => {
               const isMeta = !!lead.fb_campaign_name || lead.source === 'meta_ads';
               const isGoogle = !!lead.g_campaign_name || lead.source === 'google_ads';
               return (

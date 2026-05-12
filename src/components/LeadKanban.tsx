@@ -1198,24 +1198,11 @@ export function LeadKanban() {
     const base = showResolved ? tickets : tickets.filter(t => t.status !== 'closed');
     if (!hasSourceFilter && !hasEntryFilter && !hasConvFilter && !hasSearch) return base;
 
-    const lowerSearch = searchQuery.toLowerCase();
-
     return base.filter(ticket => {
       const lead = ticket.lead;
       if (!lead) return true;
-      if (hasSearch) {
-        // Normalização para busca por nome (ignora acentos)
-        const normalize = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-        const normalizedName = normalize(lead.name || "");
-        const normalizedSearch = normalize(lowerSearch);
-        const nameMatch = normalizedName.includes(normalizedSearch);
-        
-        // Normalização para busca por telefone (apenas números)
-        const cleanPhone = (lead.phone || "").replace(/\D/g, "");
-        const cleanSearch = lowerSearch.replace(/\D/g, "");
-        const phoneMatch = cleanSearch.length > 0 && cleanPhone.includes(cleanSearch);
-
-        if (!nameMatch && !phoneMatch) return false;
+      if (hasSearch && !matchesSearch(searchQuery, { name: lead.name, email: lead.email, phone: lead.phone }, ['phone'])) {
+        return false;
       }
       if (hasSourceFilter) {
         const isMeta = !!lead.fb_campaign_name || lead.source === 'meta_ads';

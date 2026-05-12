@@ -2573,43 +2573,39 @@ export function LeadKanban() {
                     setScheduleSubmitting(true);
                     setScheduleError(null);
                     const sl = scheduleLead.lead;
-                    let patientId = sl.converted_patient_id;
-                    if (!patientId) {
-                      const existing = patients.find(p => p.phone === sl.phone);
-                      if (existing) {
-                        patientId = existing.id;
-                        supabase.from('leads').update({ converted_patient_id: existing.id }).eq('id', sl.id);
-                      } else {
-                        const newPatient = await createPatient({ name: sl.name, phone: sl.phone || null, email: sl.email || null });
-                        if (newPatient) {
-                          patientId = newPatient.id;
-                          supabase.from('leads').update({ converted_patient_id: newPatient.id }).eq('id', sl.id);
-                        }
-                      }
+                    // RPC atômica: resolve paciente + vincula lead + cria appointment com proteção a sobreposição
+                    const { data, error } = await supabase.rpc('convert_lead_to_appointment', {
+                      p_clinic_id: sl.clinic_id,
+                      p_lead_id: sl.id,
+                      p_doctor_id: scheduleForm.doctor_id,
+                      p_date: scheduleForm.date,
+                      p_time: scheduleForm.time,
+                      p_modality: scheduleForm.modality,
+                      p_notes: scheduleForm.notes || null,
+                      p_ticket_id: scheduleLead.ticketId || null,
+                    });
+                    setScheduleSubmitting(false);
+                    if (error) {
+                      setScheduleError(error.message || 'Erro ao agendar.');
+                      return;
                     }
-                    if (patientId) {
-                      const result = await createAppointment({
-                        patient_id: patientId,
-                        doctor_id: scheduleForm.doctor_id,
-                        date: scheduleForm.date,
-                        time: scheduleForm.time,
-                        notes: scheduleForm.notes || null,
-                        status: 'pendente',
-                        source: 'manual',
-                        modality: scheduleForm.modality,
-                        ticket_id: scheduleLead.ticketId,
-                      } as any);
-                      if (!result) {
-                        setScheduleError('Não foi possível agendar. Esse horário pode já estar reservado — atualize a lista de horários e tente novamente.');
+                    const result = data as { success: boolean; error_code?: string };
+                    if (!result?.success) {
+                      const msgs: Record<string, string> = {
+                        slot_conflict: 'Esse horário acabou de ser reservado. Escolha outro.',
+                        lead_not_found: 'Lead não encontrado.',
+                        doctor_not_found: 'Médico não encontrado.',
+                        doctor_clinic_mismatch: 'Médico não pertence à clínica.',
+                        doctor_inactive: 'Médico inativo.',
+                      };
+                      setScheduleError(msgs[result?.error_code || ''] || 'Não foi possível agendar.');
+                      if (result?.error_code === 'slot_conflict') {
                         setScheduleSlots(null);
-                        // força refetch dos slots
                         setTimeout(() => setScheduleForm(p => ({ ...p, time: '' })), 0);
-                        setScheduleSubmitting(false);
-                        return;
                       }
+                      return;
                     }
                     setScheduleLead(null);
-                    setScheduleSubmitting(false);
                   }}
                 >
                   {scheduleSubmitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CalendarPlus className="w-4 h-4 mr-2" />}

@@ -271,10 +271,10 @@ export function Appointments() {
   };
 
   const onAppointmentRealizado = async (
-    patientId: string,
+    _patientId: string,
     appointmentId: string,
-    date: string,
-    time: string,
+    _date: string,
+    _time: string,
     value: number,
     paymentMethod: string | null,
     txStatus: 'pago' | 'pendente' = 'pago',
@@ -282,82 +282,18 @@ export function Appointments() {
     protocolIds: string[] = [],
     ticketId?: string | null
   ) => {
-    const finMethod = (['pix', 'cartao', 'dinheiro', 'plano'] as const).includes(paymentMethod as any)
-      ? (paymentMethod as 'pix' | 'cartao' | 'dinheiro' | 'plano')
-      : null;
-
-    await createTransaction({
-      patient_id: patientId,
-      appointment_id: appointmentId,
-      type: 'receita',
-      category: 'Consulta',
-      amount: value,
-      description: description || 'Consulta realizada',
-      payment_method: finMethod,
-      status: txStatus,
-      date,
-      protocol_ids: protocolIds,
+    // RPC atômica: muda status, cria transação, cria conversão, move ticket — tudo em uma transação no banco
+    const { error } = await supabase.rpc('finalize_appointment', {
+      p_appointment_id: appointmentId,
+      p_value: value,
+      p_payment_method: paymentMethod,
+      p_payment_status: txStatus,
+      p_description: description || null,
+      p_protocol_ids: protocolIds,
+      p_ticket_id: ticketId || null,
     });
-
-    // Busca lead vinculado ao paciente
-    let leadId: string | null = null;
-    const { data: byPatient } = await supabase
-      .from('leads')
-      .select('id')
-      .eq('converted_patient_id', patientId)
-      .maybeSingle();
-
-    if (byPatient) {
-      leadId = byPatient.id;
-    } else {
-      const { data: patient } = await supabase
-        .from('patients')
-        .select('phone')
-        .eq('id', patientId)
-        .maybeSingle();
-      if (patient?.phone) {
-        const { data: byPhone } = await supabase
-          .from('leads')
-          .select('id')
-          .eq('clinic_id', activeClinicId)
-          .eq('phone', patient.phone)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (byPhone) {
-          leadId = byPhone.id;
-          await supabase.from('leads').update({ converted_patient_id: patientId }).eq('id', byPhone.id);
-        }
-      }
-    }
-
-    if (leadId) {
-      await createConversion({
-        lead_id: leadId,
-        value,
-        description: description || 'Consulta realizada',
-        payment_method: paymentMethod,
-        protocol_ids: protocolIds,
-        converted_at: `${date}T${time?.substring(0, 5)}:00`,
-      });
-    }
-
-    // Move ticket para ganho
-    const resolveTicketId = ticketId || null;
-    if (resolveTicketId) {
-      const { data: ganhoStage } = await supabase
-        .from('funnel_stages')
-        .select('id')
-        .eq('clinic_id', activeClinicId)
-        .eq('slug', 'ganho')
-        .maybeSingle();
-      if (ganhoStage) {
-        await supabase.from('tickets').update({
-          stage_id: ganhoStage.id,
-          outcome: 'ganho',
-          outcome_at: new Date().toISOString()
-        }).eq('id', resolveTicketId);
-      }
+    if (error) {
+      setError('Erro ao finalizar a consulta: ' + error.message);
     }
   };
 

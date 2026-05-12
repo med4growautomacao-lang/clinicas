@@ -36,13 +36,12 @@ import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { LeadKanban } from "./LeadKanban";
 import { ServiceDashboard } from "./ServiceDashboard";
-import { extractMessageText } from "./LeadChat";
+import { ChatThread } from "./ChatThread";
 import { useLeads, useChatMessages, useSettings, useFunnelStages, FunnelStage } from "../hooks/useSupabase";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
 import SemOrigemLogo from "../assets/logos/Logo Sem origem.png";
-import { format, parseISO, isToday, isYesterday, isSameDay } from "date-fns";
-import { ptBR } from "date-fns/locale";
+import { format, parseISO } from "date-fns";
 
 function ValidationModal({ isOpen, onClose, missingTags }: { isOpen: boolean, onClose: () => void, missingTags: string[] }) {
   if (!isOpen) return null;
@@ -1365,35 +1364,6 @@ function ChatsView() {
   const selectedLead = leads.find(l => l.id === selectedLeadId);
   const { data: messages, loading: messagesLoading } = useChatMessages(selectedLeadId || undefined, selectedLead?.phone);
 
-  const scrollRef = React.useRef<HTMLDivElement>(null);
-
-  // Solução Definitiva: MutationObserver para o scroll no ChatsView
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el || !selectedLeadId) return; // Só rola se tiver lead selecionado
-
-    const scrollDown = () => {
-      el.scrollTop = el.scrollHeight;
-    };
-
-    // Força o scroll na montagem ou na troca de contato
-    scrollDown();
-
-    const observer = new MutationObserver((mutations) => {
-      scrollDown();
-    });
-
-    observer.observe(el, {
-      childList: true,
-      subtree: true,
-      characterData: true
-    });
-
-    return () => {
-      observer.disconnect();
-    };
-  }, [messagesLoading, selectedLeadId]); 
-
   // Auto-select first lead if none selected
   useEffect(() => {
     if (leads.length > 0 && !selectedLeadId) {
@@ -1592,91 +1562,14 @@ function ChatsView() {
               </div>
             </CardHeader>
 
-            <CardContent 
-              ref={scrollRef}
-              className="flex-1 overflow-y-auto overflow-x-hidden p-6 space-y-6 bg-slate-50/20 custom-scrollbar"
-            >
-              {messagesLoading ? (
-                <div className="flex items-center justify-center h-full">
-                  <Loader2 className="w-6 h-6 text-teal-600 animate-spin" />
-                </div>
-              ) : messages.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-4 opacity-50">
-                  <MessageSquare className="w-8 h-8" />
-                  <p className="text-sm font-medium">Aguardando primeira mensagem...</p>
-                </div>
-              ) : (
-                messages.map((msg, i) => {
-                  const isOutbound = msg.direction === 'outbound';
-                  const isAI = msg.sender === 'ai';
-                  
-                  const currentDate = parseISO(msg.created_at);
-                  const prevDate = i > 0 ? parseISO(messages[i - 1].created_at) : null;
-                  const showDateSeparator = !prevDate || !isSameDay(currentDate, prevDate);
-
-                  const getDateLabel = (date: Date) => {
-                    if (isToday(date)) return 'Hoje';
-                    if (isYesterday(date)) return 'Ontem';
-                    return format(date, "d 'de' MMMM", { locale: ptBR });
-                  };
-
-                  return (
-                    <React.Fragment key={msg.id || i}>
-                      {showDateSeparator && (
-                        <div className="flex justify-center my-8 sticky top-2 z-10 pointer-events-none">
-                          <span className="bg-white/95 backdrop-blur-sm border border-slate-100 text-[10px] font-bold text-slate-500 uppercase tracking-widest px-4 py-1.5 rounded-full shadow-sm">
-                            {getDateLabel(currentDate)}
-                          </span>
-                        </div>
-                      )}
-                      <div 
-                        className={cn(
-                          "flex gap-4 max-w-[85%] min-w-0",
-                          isOutbound ? "ml-auto flex-row-reverse" : ""
-                        )}
-                      >
-                        {!isOutbound && !isAI && selectedLead.avatar_url ? (
-                          <img src={selectedLead.avatar_url} alt={selectedLead.name} className="w-8 h-8 rounded-lg object-cover border border-slate-200 shadow-sm" />
-                        ) : (
-                          <div className={cn(
-                            "w-8 h-8 rounded-lg shadow-sm flex-shrink-0 flex items-center justify-center",
-                            isAI ? "bg-teal-600 shadow-md" : 
-                            (isOutbound ? "bg-slate-800 shadow-md" : "bg-white border border-slate-200")
-                          )}>
-                            {isAI ? (
-                              <Bot className="w-5 h-5 text-white" />
-                            ) : (
-                              <User className={cn("w-4 h-4", isOutbound ? "text-white" : "text-slate-400")} />
-                            )}
-                          </div>
-                        )}
-                  <div className={cn(
-                    "px-4 py-3 rounded-2xl text-sm shadow-sm max-w-full overflow-hidden break-words",
-                    isAI 
-                      ? "bg-teal-600 text-white rounded-tr-none" 
-                      : (isOutbound 
-                          ? "bg-slate-800 text-white rounded-tr-none"
-                          : "bg-white border border-slate-200 text-slate-700 rounded-tl-none")
-                  )}>
-                    <p className="text-sm font-medium leading-relaxed whitespace-pre-wrap break-words">
-                          {extractMessageText(msg.message)}
-                        </p>
-                        <div className="flex items-center justify-between gap-4 mt-1">
-                          <span className={cn(
-                            "text-[9px] block opacity-60 font-bold uppercase ml-auto",
-                            isOutbound ? "text-white text-right" : "text-slate-400"
-                          )}>
-                            {format(new Date(msg.created_at), 'HH:mm')}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </React.Fragment>
-                );
-              })
-            )
-          }
-            </CardContent>
+            <ChatThread
+              messages={messages}
+              loading={messagesLoading}
+              leadAvatarUrl={selectedLead.avatar_url}
+              leadName={selectedLead.name}
+              emptyTitle="Aguardando primeira mensagem..."
+              className="bg-slate-50/20"
+            />
           </>
         )}
       </Card>

@@ -1,11 +1,13 @@
-import React, { useState, useEffect, useRef } from "react";
-import { X, Send, Bot, User, Loader2, MessageSquare, Phone, ThumbsUp, ThumbsDown, TrendingUp } from "lucide-react";
+import React, { useState } from "react";
+import { X, Phone, ThumbsUp, ThumbsDown, TrendingUp } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Button } from "./ui/button";
-import { useChatMessages, ChatMessage, Lead, useLeads, useFunnelStages, useConversions } from "../hooks/useSupabase";
-import { format, isToday, isYesterday } from "date-fns";
-import { ptBR } from "date-fns/locale";
+import { useChatMessages, Lead, useLeads, useFunnelStages, useConversions } from "../hooks/useSupabase";
 import { cn } from "@/src/lib/utils";
+import { ChatThread } from "./ChatThread";
+
+// Reexports — outros módulos importam daqui (ex.: AISecretary)
+export { extractMessageText, detectMedia, MediaBubble } from "./ChatThread";
+export type { MediaKind } from "./ChatThread";
 
 interface LeadChatProps {
   lead: Lead;
@@ -17,132 +19,12 @@ interface LeadChatProps {
   onStageChange?: (stageId: string) => void;
 }
 
-function stripToolCallPrefix(text: string): string {
-  if (!text.startsWith('[Used tools:')) return text;
-  let depth = 0;
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] === '[') depth++;
-    else if (text[i] === ']') {
-      depth--;
-      if (depth === 0) return text.slice(i + 1).trimStart();
-    }
-  }
-  return text;
-}
-
-export function extractMessageText(message: any): string {
-  if (!message) return '';
-
-  // 1) Se for string, tenta extrair o content de dentro de um JSON
-  if (typeof message === 'string') {
-    const trimmed = message.trim();
-    if (trimmed.startsWith('{')) {
-      // Tenta JSON.parse direto
-      try {
-        const parsed = JSON.parse(trimmed);
-        if (parsed.content) return extractMessageText(parsed.content);
-        if (parsed.text) return stripToolCallPrefix(parsed.text);
-        if (parsed.output) return stripToolCallPrefix(parsed.output);
-      } catch {
-        // JSON.parse falhou (ex: quebra de linha literal dentro do valor)
-        // Fallback: regex para extrair o campo "content"
-        const match = trimmed.match(/"content"\s*:\s*"([\s\S]*?)"\s*[,}]/);
-        if (match) {
-          return stripToolCallPrefix(match[1].replace(/\\n/g, '\n').replace(/\\"/g, '"'));
-        }
-      }
-    }
-    return stripToolCallPrefix(trimmed);
-  }
-
-  // 2) Se for objeto com "content"
-  if (message.content != null) {
-    if (typeof message.content === 'string') {
-      // Se o content em si parece ser JSON, recursa para extrair o real
-      const c = message.content.trim();
-      if (c.startsWith('{')) return extractMessageText(c);
-      return stripToolCallPrefix(message.content);
-    }
-    if (Array.isArray(message.content)) {
-      return message.content
-        .map((block: any) => block?.text || block?.content || '')
-        .filter(Boolean)
-        .join('\n');
-    }
-  }
-
-  // 3) Campos alternativos
-  if (typeof message.text === 'string') return stripToolCallPrefix(message.text);
-  if (typeof message.output === 'string') return stripToolCallPrefix(message.output);
-
-  // 4) Último recurso: concatena valores string do objeto
-  const values = Object.values(message).filter(v => typeof v === 'string') as string[];
-  if (values.length > 0) return stripToolCallPrefix(values.join(' '));
-  return JSON.stringify(message);
-}
-
 export function LeadChat({ lead, onClose, isDragging = false, ticketId, onGanho, onPerdido, onStageChange }: LeadChatProps) {
-  const { data: messages, loading, send } = useChatMessages(lead.id, lead.phone);
+  const { data: messages, loading } = useChatMessages(lead.id, lead.phone);
   const { update: updateLead } = useLeads();
   const { byLead: conversionsByLead } = useConversions();
   const [showConversions, setShowConversions] = useState(false);
   const { data: stages } = useFunnelStages();
-  const [content, setContent] = useState("");
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const endRef = useRef<HTMLDivElement>(null);
-  const [sending, setSending] = useState(false);
-
-  // Solução Definitiva: MutationObserver para observar o DOM real
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-
-    // Rola para o final de forma síncrona
-    const scrollDown = () => {
-      el.scrollTop = el.scrollHeight;
-    };
-
-    // Força o scroll na montagem (caso já tenha mensagens cacheadas)
-    scrollDown();
-
-    // Observa qualquer mudança no HTML interno do container (novas mensagens)
-    const observer = new MutationObserver((mutations) => {
-      // Se houver adição de nós, força o scroll
-      scrollDown();
-    });
-
-    observer.observe(el, {
-      childList: true, // Observa elementos adicionados ou removidos
-      subtree: true,   // Observa os filhos dos filhos
-      characterData: true // Observa mudanças de texto
-    });
-
-    // Como o framer-motion faz um slide-in de 300ms, damos um "empurrãozinho"
-    // contínuo durante o primeiro meio segundo de vida do componente
-    let pings = 0;
-    const interval = setInterval(() => {
-      scrollDown();
-      pings++;
-      if (pings > 10) clearInterval(interval); // 500ms total
-    }, 50);
-
-    return () => {
-      observer.disconnect();
-      clearInterval(interval);
-    };
-  }, [loading]); // Só recria se o loading mudar
-
-  const handleSend = async () => {
-    if (!content.trim() || sending) return;
-    setSending(true);
-    await send({ 
-      message: { role: 'user', content: content.trim() }, 
-      lead_id: lead.id, 
-      phone: lead.phone 
-    });
-    setContent("");
-    setSending(false);
-  };
 
   return (
     <>
@@ -258,147 +140,12 @@ export function LeadChat({ lead, onClose, isDragging = false, ticketId, onGanho,
         </div>
       )}
 
-      {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden p-6 bg-slate-50/50 custom-scrollbar relative block">
-        {loading ? (
-          <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400">
-            <Loader2 className="w-8 h-8 animate-spin" />
-            <p className="text-sm font-medium">Carregando conversa...</p>
-          </div>
-        ) : messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-4 opacity-50">
-            <div className="w-16 h-16 bg-white rounded-2xl shadow-sm flex items-center justify-center">
-              <MessageSquare className="w-8 h-8 text-teal-600" />
-            </div>
-            <p className="text-sm font-medium text-center max-w-[200px]">Nenhuma mensagem encontrada nesta jornada.</p>
-          </div>
-        ) : (() => {
-            const getDateLabel = (date: Date) => {
-              if (isToday(date)) return 'Hoje';
-              if (isYesterday(date)) return 'Ontem';
-              return format(date, "d 'de' MMMM", { locale: ptBR });
-            };
-            const sorted = [...messages].sort((a, b) =>
-              new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-            );
-            const seenDates = new Set<string>();
-            return (
-              <div className="space-y-6 pb-4">
-                {sorted.map((msg) => {
-                  const isOutbound = msg.direction === 'outbound';
-                  const isAI = msg.sender === 'ai';
-                  const currentDate = new Date(msg.created_at);
-                  const dateKey = format(currentDate, 'yyyy-MM-dd');
-                  const showDateSeparator = !seenDates.has(dateKey);
-                  if (showDateSeparator) seenDates.add(dateKey);
-
-                  return (
-                    <React.Fragment key={msg.id}>
-                      {showDateSeparator && (
-                        <div className="flex items-center gap-3 my-8 px-1">
-                          <div className="flex-1 h-px bg-slate-200" />
-                          <span className="bg-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-widest px-3 py-1 rounded-full shrink-0">
-                            {getDateLabel(currentDate)}
-                          </span>
-                          <div className="flex-1 h-px bg-slate-200" />
-                        </div>
-                      )}
-                      <div
-                        className={cn(
-                          "flex gap-4 max-w-[85%] min-w-0",
-                          isOutbound ? "ml-auto flex-row-reverse" : ""
-                        )}
-                      >
-                        {!isOutbound && !isAI && lead.avatar_url ? (
-                          <div className="relative w-8 h-8 shrink-0">
-                            <img
-                              src={lead.avatar_url}
-                              alt={lead.name}
-                              className="w-8 h-8 rounded-lg object-cover border border-slate-200 shadow-sm"
-                              onError={e => { e.currentTarget.style.display = 'none'; (e.currentTarget.nextElementSibling as HTMLElement).style.display = 'flex'; }}
-                            />
-                            <div style={{ display: 'none' }} className="absolute inset-0 w-8 h-8 rounded-lg bg-white border border-slate-200 shadow-sm items-center justify-center">
-                              <User className="w-4 h-4 text-slate-400" />
-                            </div>
-                          </div>
-                        ) : (
-                          <div className={cn(
-                            "w-8 h-8 rounded-lg shadow-sm flex-shrink-0 flex items-center justify-center",
-                            isAI ? "bg-teal-600 shadow-md" :
-                            (isOutbound ? "bg-slate-800 shadow-md" : "bg-white border border-slate-200")
-                          )}>
-                            {isAI ? (
-                              <Bot className="w-5 h-5 text-white" />
-                            ) : (
-                              <User className={cn("w-4 h-4", isOutbound ? "text-white" : "text-slate-400")} />
-                            )}
-                          </div>
-                        )}
-
-                        <div className={cn(
-                          "px-4 py-3 rounded-2xl text-sm shadow-sm max-w-full overflow-hidden break-words",
-                          isAI
-                            ? "bg-teal-600 text-white rounded-tr-none"
-                            : (isOutbound
-                                ? "bg-slate-800 text-white rounded-tr-none"
-                                : "bg-white border border-slate-200 text-slate-700 rounded-tl-none")
-                        )}>
-                          <p className="text-sm font-medium leading-relaxed whitespace-pre-wrap">
-                            {extractMessageText(msg.message)}
-                          </p>
-                          <div className="flex items-center justify-between gap-4 mt-1">
-                            <span className={cn(
-                              "text-[9px] block opacity-60 font-bold uppercase ml-auto",
-                              isOutbound || isAI ? "text-white text-right" : "text-slate-400"
-                            )}>
-                              {format(new Date(msg.created_at), 'HH:mm')}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </React.Fragment>
-                  );
-                })}
-                {/* Elemento âncora invisível no final exato do container */}
-                <div ref={endRef} className="h-1 opacity-0 pointer-events-none" />
-              </div>
-            );
-          })()
-      }
-    </div>
-
-    {/* Input Area */}
-    <div className="p-6 border-t border-slate-100 bg-white">
-      <div className="relative group">
-        <textarea
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              handleSend();
-            }
-          }}
-          placeholder="Digite uma mensagem..."
-          className="w-full pl-4 pr-14 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-200 font-medium text-sm min-h-[50px] max-h-[150px] resize-none transition-all group-hover:bg-white"
-        />
-          <button
-            onClick={handleSend}
-            disabled={!content.trim() || sending}
-            className={cn(
-              "absolute right-2 bottom-2 p-2 rounded-lg transition-all",
-              content.trim() && !sending 
-                ? "bg-teal-600 text-white shadow-md hover:scale-105 active:scale-95" 
-                : "bg-slate-100 text-slate-400"
-            )}
-          >
-            {sending ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-          </button>
-        </div>
-        <p className="text-[10px] text-slate-400 mt-3 text-center font-medium">
-          As respostas enviadas aqui serão encaminhadas via WhatsApp.
-        </p>
-      </div>
+      <ChatThread
+        messages={messages}
+        loading={loading}
+        leadAvatarUrl={lead.avatar_url}
+        leadName={lead.name}
+      />
     </motion.div>
 
     {/* Modal de Conversões */}

@@ -1354,7 +1354,7 @@ export function AISecretary() {
 }
 
 function ChatsView() {
-  const { data: leads, loading: leadsLoading, loadingMore, hasMore, loadMore } = useLeads({ pageSize: 20 });
+  const { data: leads, loading: leadsLoading, loadingMore, hasMore, loadMore, update: updateLead } = useLeads({ pageSize: 20 });
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [leadSearch, setLeadSearch] = useState('');
   const filteredLeads = useMemo(() => {
@@ -1551,14 +1551,32 @@ function ChatsView() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <span className={cn(
-                  "text-[10px] font-bold uppercase px-2 py-1 rounded",
-                  selectedLead.ai_enabled !== false 
-                    ? "bg-emerald-50 text-emerald-600 border border-emerald-100" 
-                    : "bg-slate-100 text-slate-500"
-                )}>
-                  {selectedLead.ai_enabled !== false ? "Modo Inteligente" : "Modo Manual"}
-                </span>
+                <button
+                  onClick={() => updateLead(selectedLead.id, { ai_enabled: selectedLead.ai_enabled === false ? true : false })}
+                  title={selectedLead.ai_enabled !== false ? "Clique para pausar a IA deste lead" : "Clique para reativar a IA deste lead"}
+                  className={cn(
+                    "flex items-center gap-2 px-2.5 py-1 rounded-full border transition-all cursor-pointer active:scale-95",
+                    selectedLead.ai_enabled !== false
+                      ? "bg-emerald-50 border-emerald-200 hover:bg-emerald-100"
+                      : "bg-slate-100 border-slate-200 hover:bg-slate-200"
+                  )}
+                >
+                  <span className={cn(
+                    "relative inline-flex w-7 h-4 rounded-full transition-colors",
+                    selectedLead.ai_enabled !== false ? "bg-emerald-500" : "bg-slate-300"
+                  )}>
+                    <span className={cn(
+                      "absolute top-0.5 w-3 h-3 bg-white rounded-full shadow transition-all",
+                      selectedLead.ai_enabled !== false ? "left-3.5" : "left-0.5"
+                    )} />
+                  </span>
+                  <span className={cn(
+                    "text-[10px] font-bold uppercase tracking-wider",
+                    selectedLead.ai_enabled !== false ? "text-emerald-700" : "text-slate-500"
+                  )}>
+                    IA {selectedLead.ai_enabled !== false ? "ON" : "OFF"}
+                  </span>
+                </button>
               </div>
             </CardHeader>
 

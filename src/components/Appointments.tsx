@@ -111,6 +111,23 @@ export function Appointments() {
   const [showDayModal, setShowDayModal] = useState(false);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showBlockModal, setShowBlockModal] = useState(false);
+  const [submittingBlock, setSubmittingBlock] = useState(false);
+  const [blockForm, setBlockForm] = useState<{
+    doctor_id: string;
+    type: 'day' | 'time';
+    start: string;
+    end: string;
+    name: string;
+    repeat: 'none' | 'weekly' | 'monthly';
+    interval: number;
+    weekdays: number[]; // 0=dom..6=sab
+    monthlyMode: 'day_of_month' | 'nth_weekday';
+    until: string; // YYYY-MM-DD
+  }>({
+    doctor_id: '', type: 'day', start: '08:00', end: '12:00', name: '',
+    repeat: 'none', interval: 1, weekdays: [], monthlyMode: 'day_of_month', until: ''
+  });
   const [openStatusApt, setOpenStatusApt] = useState<{ id: string; top: number; left: number } | null>(null);
   const [realizadoDialog, setRealizadoDialog] = useState<{
     apt: any;
@@ -443,6 +460,100 @@ export function Appointments() {
       protocolIds,
       apt.ticket_id
     );
+  };
+
+  const expandRecurrence = (startDateStr: string): string[] => {
+    const dates: string[] = [startDateStr];
+    if (blockForm.repeat === 'none' || !blockForm.until) return dates;
+    const start = new Date(`${startDateStr}T00:00:00`);
+    const end = new Date(`${blockForm.until}T00:00:00`);
+    if (end <= start) return dates;
+    const limit = 365 * 2; // safety cap
+    if (blockForm.repeat === 'weekly') {
+      const wd = blockForm.weekdays.length > 0 ? [...blockForm.weekdays].sort() : [start.getDay()];
+      // Para cada semana (a cada interval), pega cada dia da semana selecionado
+      let weekStart = new Date(start);
+      weekStart.setDate(weekStart.getDate() - weekStart.getDay()); // domingo da semana
+      let safety = 0;
+      while (weekStart <= end && safety < limit) {
+        for (const d of wd) {
+          const candidate = new Date(weekStart);
+          candidate.setDate(candidate.getDate() + d);
+          if (candidate > start && candidate <= end) {
+            dates.push(candidate.toISOString().split('T')[0]);
+          }
+        }
+        weekStart.setDate(weekStart.getDate() + 7 * blockForm.interval);
+        safety++;
+      }
+    } else if (blockForm.repeat === 'monthly') {
+      if (blockForm.monthlyMode === 'nth_weekday') {
+        // Repete na Nª <dia-da-semana> do mês
+        const weekday = start.getDay();
+        const nth = Math.ceil(start.getDate() / 7); // 1..5
+        const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+        let safety = 0;
+        while (safety < limit) {
+          cursor.setMonth(cursor.getMonth() + blockForm.interval);
+          // Acha a Nª ocorrência de `weekday` no mês `cursor`
+          const firstOfMonth = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+          const offset = (weekday - firstOfMonth.getDay() + 7) % 7;
+          const target = new Date(firstOfMonth);
+          target.setDate(1 + offset + (nth - 1) * 7);
+          if (target.getMonth() !== cursor.getMonth()) { safety++; continue; }
+          if (target > end) break;
+          if (target > start) dates.push(target.toISOString().split('T')[0]);
+          safety++;
+        }
+      } else {
+        // Modo "mesmo dia do mês"
+        const dayOfMonth = start.getDate();
+        const candidate = new Date(start);
+        let safety = 0;
+        while (safety < limit) {
+          candidate.setMonth(candidate.getMonth() + blockForm.interval);
+          candidate.setDate(dayOfMonth);
+          if (candidate.getDate() !== dayOfMonth) { safety++; continue; }
+          if (candidate > end) break;
+          dates.push(candidate.toISOString().split('T')[0]);
+          safety++;
+        }
+      }
+    }
+    return Array.from(new Set(dates)).sort();
+  };
+
+  const handleSubmitBlock = async () => {
+    if (!selectedDay || !blockForm.doctor_id) return;
+    const doctor = doctors.find(d => d.id === blockForm.doctor_id);
+    if (!doctor) return;
+    if (blockForm.type === 'time' && blockForm.start >= blockForm.end) {
+      setError('Horário de início deve ser menor que o fim.');
+      return;
+    }
+    setSubmittingBlock(true);
+    try {
+      const allDates = expandRecurrence(selectedDay);
+      if (blockForm.type === 'day') {
+        const newDaysOff = Array.from(new Set([...(doctor.days_off || []), ...allDates]));
+        const { error } = await supabase.from('doctors').update({ days_off: newDaysOff }).eq('id', doctor.id);
+        if (error) throw error;
+      } else {
+        const newBlocks = allDates.map(d => ({
+          date: d, start: blockForm.start, end: blockForm.end,
+          name: blockForm.name || 'Bloqueio'
+        }));
+        const newBlockedTimes = [...(doctor.blocked_times || []), ...newBlocks];
+        const { error } = await supabase.from('doctors').update({ blocked_times: newBlockedTimes }).eq('id', doctor.id);
+        if (error) throw error;
+      }
+      await refetchDoctors(true);
+      setShowBlockModal(false);
+    } catch (e: any) {
+      setError(e.message || 'Erro ao bloquear horário.');
+    } finally {
+      setSubmittingBlock(false);
+    }
   };
 
   const handleSubmit = async () => {
@@ -1150,9 +1261,225 @@ export function Appointments() {
               )}
               </div>
 
-              <div className="p-6 border-t border-slate-100 bg-slate-50">
-                <Button className="w-full py-6 font-bold" onClick={() => { setShowDayModal(false); setSelectedAppointment(null); setFormData({ patient_id: '', doctor_id: '', date: selectedDay!, time: '', notes: '', status: 'pendente', modality: 'presencial' }); setShowModal(true); }}>
-                  <Plus className="w-5 h-5 mr-2" /> Agendar Nova Consulta
+              <div className="p-6 border-t border-slate-100 bg-slate-50 grid grid-cols-3 gap-2">
+                <Button variant="destructive" className="col-span-1 py-5 font-bold" onClick={() => {
+                  setBlockForm({ doctor_id: doctors[0]?.id || '', type: 'day', start: '08:00', end: '12:00', name: '', repeat: 'none', interval: 1, weekdays: [], monthlyMode: 'day_of_month', until: '' });
+                  setShowBlockModal(true);
+                }}>
+                  <Trash2 className="w-4 h-4 mr-2" /> Bloquear
+                </Button>
+                <Button className="col-span-2 py-5 font-bold" onClick={() => { setShowDayModal(false); setSelectedAppointment(null); setFormData({ patient_id: '', doctor_id: '', date: selectedDay!, time: '', notes: '', status: 'pendente', modality: 'presencial' }); setShowModal(true); }}>
+                  <Plus className="w-5 h-5 mr-2" /> Nova Consulta
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal de Bloqueio */}
+      <AnimatePresence>
+        {showBlockModal && selectedDay && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4" onClick={() => setShowBlockModal(false)}>
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between p-6 border-b border-slate-100">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">Bloquear Horário</h3>
+                  <p className="text-xs text-slate-500 font-medium capitalize">{format(parseISO(selectedDay), "EEEE, d 'de' MMMM", { locale: ptBR })}</p>
+                </div>
+                <button onClick={() => setShowBlockModal(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+              </div>
+
+              <div className="p-6 space-y-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Médico *</label>
+                  <CustomDropdown
+                    label=""
+                    icon={Stethoscope}
+                    value={blockForm.doctor_id}
+                    onChange={val => setBlockForm(p => ({ ...p, doctor_id: val }))}
+                    options={doctors.map(d => ({ value: d.id, label: d.name }))}
+                    placeholder="Selecione..."
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Tipo de Bloqueio</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button type="button" onClick={() => setBlockForm(p => ({ ...p, type: 'day' }))} className={cn(
+                      "flex items-center justify-center gap-2 py-3 rounded-xl border text-xs font-bold transition-all",
+                      blockForm.type === 'day'
+                        ? "bg-rose-500 text-white border-rose-500 shadow-md shadow-rose-200"
+                        : "bg-white text-slate-600 border-slate-200 hover:border-rose-300"
+                    )}>
+                      <CalendarIcon className="w-4 h-4" /> Dia todo
+                    </button>
+                    <button type="button" onClick={() => setBlockForm(p => ({ ...p, type: 'time' }))} className={cn(
+                      "flex items-center justify-center gap-2 py-3 rounded-xl border text-xs font-bold transition-all",
+                      blockForm.type === 'time'
+                        ? "bg-rose-500 text-white border-rose-500 shadow-md shadow-rose-200"
+                        : "bg-white text-slate-600 border-slate-200 hover:border-rose-300"
+                    )}>
+                      <Clock className="w-4 h-4" /> Horário específico
+                    </button>
+                  </div>
+                </div>
+
+                {blockForm.type === 'time' && (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Início</label>
+                        <input type="time" value={blockForm.start} onChange={e => setBlockForm(p => ({ ...p, start: e.target.value }))} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-teal-400" />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Fim</label>
+                        <input type="time" value={blockForm.end} onChange={e => setBlockForm(p => ({ ...p, end: e.target.value }))} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-teal-400" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Motivo (opcional)</label>
+                      <input type="text" value={blockForm.name} onChange={e => setBlockForm(p => ({ ...p, name: e.target.value }))} placeholder="Ex: Almoço, Reunião..." className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-teal-400 placeholder:text-slate-300" />
+                    </div>
+                  </>
+                )}
+
+                {/* Recorrência */}
+                <div className="pt-2 border-t border-slate-100">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Recorrência</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {([
+                      { v: 'none' as const, label: 'Não repetir' },
+                      { v: 'weekly' as const, label: 'Semanal' },
+                      { v: 'monthly' as const, label: 'Mensal' },
+                    ]).map(opt => (
+                      <button
+                        key={opt.v}
+                        type="button"
+                        onClick={() => setBlockForm(p => {
+                          const next = { ...p, repeat: opt.v };
+                          if (opt.v === 'weekly' && selectedDay && next.weekdays.length === 0) {
+                            next.weekdays = [new Date(`${selectedDay}T00:00:00`).getDay()];
+                          }
+                          if (opt.v !== 'none' && !next.until) {
+                            const d = new Date(`${selectedDay || new Date().toISOString().split('T')[0]}T00:00:00`);
+                            d.setMonth(d.getMonth() + 3);
+                            next.until = d.toISOString().split('T')[0];
+                          }
+                          return next;
+                        })}
+                        className={cn(
+                          "py-2 rounded-xl border text-xs font-bold transition-all",
+                          blockForm.repeat === opt.v
+                            ? "bg-teal-600 text-white border-teal-600 shadow-md shadow-teal-100"
+                            : "bg-white text-slate-600 border-slate-200 hover:border-teal-300"
+                        )}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {blockForm.repeat !== 'none' && (
+                    <div className="mt-3 space-y-3 p-3 bg-slate-50 border border-slate-100 rounded-xl">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-500">Repetir a cada</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={12}
+                          value={blockForm.interval}
+                          onChange={e => setBlockForm(p => ({ ...p, interval: Math.max(1, Number(e.target.value) || 1) }))}
+                          className="w-14 px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm font-bold text-center"
+                        />
+                        <span className="text-xs font-bold text-slate-500">{blockForm.repeat === 'weekly' ? (blockForm.interval > 1 ? 'semanas' : 'semana') : (blockForm.interval > 1 ? 'meses' : 'mês')}</span>
+                      </div>
+
+                      {blockForm.repeat === 'weekly' && (
+                        <div>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Dias da semana</p>
+                          <div className="flex gap-1.5">
+                            {['D', 'S', 'T', 'Q', 'Q', 'S', 'S'].map((letter, idx) => (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() => setBlockForm(p => ({
+                                  ...p,
+                                  weekdays: p.weekdays.includes(idx)
+                                    ? p.weekdays.filter(d => d !== idx)
+                                    : [...p.weekdays, idx].sort()
+                                }))}
+                                className={cn(
+                                  "w-8 h-8 rounded-full text-xs font-bold border transition-all",
+                                  blockForm.weekdays.includes(idx)
+                                    ? "bg-teal-600 text-white border-teal-600"
+                                    : "bg-white text-slate-500 border-slate-200 hover:border-teal-300"
+                                )}
+                              >
+                                {letter}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {blockForm.repeat === 'monthly' && selectedDay && (() => {
+                        const d = new Date(`${selectedDay}T00:00:00`);
+                        const dayOfMonth = d.getDate();
+                        const weekday = d.getDay();
+                        const nth = Math.ceil(dayOfMonth / 7); // 1..5
+                        const NTH_LABELS = ['1ª', '2ª', '3ª', '4ª', '5ª'];
+                        const WEEKDAY_FULL = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
+                        return (
+                          <div className="space-y-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setBlockForm(p => ({ ...p, monthlyMode: 'day_of_month' }))}
+                              className={cn(
+                                "w-full px-3 py-2 rounded-lg border text-xs font-bold text-left transition-all",
+                                blockForm.monthlyMode === 'day_of_month'
+                                  ? "bg-teal-600 text-white border-teal-600"
+                                  : "bg-white text-slate-600 border-slate-200 hover:border-teal-300"
+                              )}
+                            >
+                              Mensal no dia {dayOfMonth}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setBlockForm(p => ({ ...p, monthlyMode: 'nth_weekday' }))}
+                              className={cn(
+                                "w-full px-3 py-2 rounded-lg border text-xs font-bold text-left transition-all",
+                                blockForm.monthlyMode === 'nth_weekday'
+                                  ? "bg-teal-600 text-white border-teal-600"
+                                  : "bg-white text-slate-600 border-slate-200 hover:border-teal-300"
+                              )}
+                            >
+                              Mensal na {NTH_LABELS[nth - 1]} {WEEKDAY_FULL[weekday]}
+                            </button>
+                          </div>
+                        );
+                      })()}
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Repetir até</label>
+                        <input
+                          type="date"
+                          value={blockForm.until}
+                          min={selectedDay || undefined}
+                          onChange={e => setBlockForm(p => ({ ...p, until: e.target.value }))}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold text-slate-700"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex gap-3 p-6 border-t border-slate-100 bg-slate-50">
+                <Button variant="outline" className="flex-1" onClick={() => setShowBlockModal(false)}>Cancelar</Button>
+                <Button variant="destructive" className="flex-1" onClick={handleSubmitBlock} disabled={!blockForm.doctor_id || submittingBlock}>
+                  {submittingBlock ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Trash2 className="w-4 h-4 mr-2" />}
+                  Bloquear
                 </Button>
               </div>
             </motion.div>

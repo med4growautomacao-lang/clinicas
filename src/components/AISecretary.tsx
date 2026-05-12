@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { matchesSearch } from "../lib/search";
+import { supabase } from "../lib/supabase";
+import { useToast } from "./ui/toast";
 import {
   Card,
   CardContent,
@@ -31,6 +33,8 @@ import {
   MessageCircle,
   Info,
   Star,
+  RotateCcw,
+  Repeat,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -1597,14 +1601,33 @@ function ChatsView() {
 
 function ConfigView() {
   const { aiConfig, updateAI, loading } = useSettings();
+  const showToast = useToast();
   const [subTab, setSubTab] = useState<"config" | "handoff">("config");
   const [saving, setSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [localConfig, setLocalConfig] = useState<any>(null);
+  const [resetting, setResetting] = useState<string | null>(null);
 
   const setConfig = (updates: any) => {
     setLocalConfig((p: any) => ({ ...p, ...updates }));
     setIsDirty(true);
+  };
+
+  const runReset = async (phone: string, mode: 'full' | 'rebook') => {
+    if (!phone.trim()) return;
+    const label = mode === 'full' ? 'primeiro contato' : 'reagendamento';
+    if (!confirm(`Resetar dados de ${phone} no modo "${label}"?\n\n${mode === 'full' ? 'Apaga TUDO (paciente, agendamentos, conversões, financeiro, prontuário, chat).' : 'Apaga chat e lead, mantém paciente e histórico clínico.'}`)) return;
+    setResetting(`${phone}:${mode}`);
+    try {
+      const rpcName = mode === 'full' ? 'test_reset_full' : 'test_reset_for_rebook';
+      const { data, error } = await supabase.rpc(rpcName, { p_phone: phone.trim() });
+      if (error) throw error;
+      showToast(`Reset (${label}) executado. ${JSON.stringify(data?.deleted || {})}`, 'success');
+    } catch (err: any) {
+      showToast(`Erro no reset: ${err.message}`, 'error');
+    } finally {
+      setResetting(null);
+    }
   };
 
   useEffect(() => {
@@ -1744,10 +1767,29 @@ function ConfigView() {
                         className="flex-1 px-3 py-2 border border-slate-200 rounded-lg font-mono text-sm focus:ring-2 focus:ring-red-100 focus:border-red-400 outline-none"
                       />
                       <button
+                        onClick={() => runReset(num, 'full')}
+                        disabled={!num.trim() || resetting === `${num}:full`}
+                        title="Reset completo (primeiro contato absoluto)"
+                        className="flex items-center gap-1 px-2 py-2 text-[10px] font-bold text-red-600 hover:bg-red-50 border border-red-200 rounded-lg transition-all disabled:opacity-40"
+                      >
+                        {resetting === `${num}:full` ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                        ZERAR
+                      </button>
+                      <button
+                        onClick={() => runReset(num, 'rebook')}
+                        disabled={!num.trim() || resetting === `${num}:rebook`}
+                        title="Reset de reagendamento (mantém paciente)"
+                        className="flex items-center gap-1 px-2 py-2 text-[10px] font-bold text-amber-700 hover:bg-amber-50 border border-amber-200 rounded-lg transition-all disabled:opacity-40"
+                      >
+                        {resetting === `${num}:rebook` ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Repeat className="w-3.5 h-3.5" />}
+                        REAGEND.
+                      </button>
+                      <button
                         onClick={() => {
                           const nums = (localConfig.test_numbers || []).filter((_: string, i: number) => i !== idx);
                           setConfig({ test_numbers: nums });
                         }}
+                        title="Remover número da lista"
                         className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
                       >
                         <X className="w-4 h-4" />
@@ -1762,22 +1804,46 @@ function ConfigView() {
                     Adicionar número
                   </button>
                 </div>
-                <p className="text-xs text-slate-400 pl-1">Formato internacional, sem espaços (ex: 5511999990000).</p>
+                <p className="text-xs text-slate-400 pl-1">Formato internacional, sem espaços (ex: 5511999990000). Botões executam reset imediato sem precisar de mensagem.</p>
               </div>
 
-              {/* Frase de reinício — sempre visível */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">
-                  Frase de Reinício de Ciclo
-                </label>
-                <input
-                  type="text"
-                  value={localConfig.test_reset_phrase || ''}
-                  onChange={(e) => setConfig({ test_reset_phrase: e.target.value })}
-                  placeholder="ex: reiniciar teste"
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg font-medium text-sm focus:ring-2 focus:ring-red-100 focus:border-red-400 outline-none"
-                />
-                <p className="text-xs text-slate-400 pl-1">Quando enviada por um número permitido, reinicia o ciclo da conversa.</p>
+              {/* Frases de reinício via mensagem */}
+              <div className="space-y-3 pt-2 border-t border-slate-100">
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">
+                  Frases de Reinício (via mensagem do WhatsApp)
+                </p>
+
+                <div className="space-y-1.5">
+                  <label className="flex items-center gap-1.5 text-[11px] font-bold text-red-600 pl-1">
+                    <RotateCcw className="w-3 h-3" /> Reset completo (primeiro contato)
+                  </label>
+                  <input
+                    type="text"
+                    value={localConfig.test_reset_phrase || ''}
+                    onChange={(e) => setConfig({ test_reset_phrase: e.target.value })}
+                    placeholder="ex: reiniciar agente teste"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg font-medium text-sm focus:ring-2 focus:ring-red-100 focus:border-red-400 outline-none"
+                  />
+                  <p className="text-[11px] text-slate-400 pl-1">Apaga TUDO (paciente, agendamentos, conversões, financeiro, prontuário, chat).</p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="flex items-center gap-1.5 text-[11px] font-bold text-amber-700 pl-1">
+                    <Repeat className="w-3 h-3" /> Reset de reagendamento (paciente volta)
+                  </label>
+                  <input
+                    type="text"
+                    value={localConfig.test_reset_phrase_rebook || ''}
+                    onChange={(e) => setConfig({ test_reset_phrase_rebook: e.target.value })}
+                    placeholder="ex: simular reagendamento"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg font-medium text-sm focus:ring-2 focus:ring-amber-100 focus:border-amber-400 outline-none"
+                  />
+                  <p className="text-[11px] text-slate-400 pl-1">Apaga chat e lead, fecha tickets abertos. Mantém paciente, agendamentos antigos e financeiro.</p>
+                </div>
+
+                <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-[11px] text-slate-500 leading-relaxed">
+                  <strong className="text-slate-700">Como funciona:</strong> o n8n detecta a frase exata enviada por um número da lista acima e chama a RPC <code className="font-mono bg-white px-1 rounded">test_reset_full</code> ou <code className="font-mono bg-white px-1 rounded">test_reset_for_rebook</code> no Supabase. As frases são case-insensitive (deixe minúsculas no n8n).
+                </div>
               </div>
             </div>
           </CardContent>

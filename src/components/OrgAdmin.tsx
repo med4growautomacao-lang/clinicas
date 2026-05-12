@@ -4,6 +4,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { Building2, Users, ArrowRight, LogIn, Loader2, X, Eye, EyeOff, Search, MoreVertical, UserPlus, Wifi, WifiOff, Settings, UserCheck, TrendingUp, UserCog, ChevronDown, Check, Trash2, MessageCircle, Globe, FileText, BarChart3, Search as SearchIcon, LayoutGrid, List as ListIcon, Stethoscope, Briefcase, AlertCircle, Plus, Building, Activity } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
+import { matchesSearch } from "../lib/search";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
 import WhatsappLogo from "../assets/logos/Logo Whatsapp.png";
@@ -610,7 +611,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                 </thead>
                 <tbody>
                   {clinics.filter(c =>
-                    c.name.toLowerCase().includes(clinicSearch.toLowerCase()) &&
+                    matchesSearch(clinicSearch, { name: c.name }) &&
                     (categoryFilter === '' || c.category === categoryFilter) &&
                     Object.entries(memberFilters).every(([fn, uid]) =>
                       !uid || clinicMembers.some(m => m.clinic_id === c.id && m.function === fn && m.org_user_id === uid)

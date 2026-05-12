@@ -28,6 +28,7 @@ import {
   MapPin,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
+import { matchesSearch } from "../lib/search";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   format,
@@ -170,19 +171,17 @@ export function Appointments() {
 
   const filteredAppointments = useMemo(() => {
     const list = appointments.filter((apt) => {
-      const patientName = apt.patient?.name || '';
-      const patientCpf = apt.patient?.cpf || '';
-      const patientPhone = apt.patient?.phone || '';
       const doctorName = apt.doctor?.name || '';
 
-      const matchesSearch = !searchTerm ||
-        patientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        patientCpf.includes(searchTerm) ||
-        patientPhone.includes(searchTerm);
+      const okSearch = matchesSearch(searchTerm, {
+        name: apt.patient?.name,
+        cpf: apt.patient?.cpf,
+        phone: apt.patient?.phone,
+      }, ['cpf', 'phone']);
 
       const matchesDoctor = filter === "Todos" || doctorName.includes(filter);
       const matchesDate = dateFilter === "today" ? apt.date === format(new Date(), 'yyyy-MM-dd') : true;
-      return matchesSearch && matchesDoctor && matchesDate;
+      return okSearch && matchesDoctor && matchesDate;
     });
     // Ordena por data asc, hora asc — dias mais próximos no topo, dentro do mesmo dia mais cedo primeiro
     return list.sort((a, b) => {

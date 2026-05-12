@@ -20,6 +20,7 @@ import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserRole } from "../contexts/AuthContext";
 import { supabase } from "../lib/supabase";
+import { matchesSearch } from "../lib/search";
 
 // Logo removed for professional medicine icon
 
@@ -175,7 +176,7 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
                     />
                   </div>
                   <div className="py-1 max-h-44 overflow-y-auto custom-scrollbar">
-                  {clinics.filter(c => c.name.toLowerCase().includes(clinicPickerSearch.toLowerCase())).map(c => (
+                  {clinics.filter(c => matchesSearch(clinicPickerSearch, { name: c.name })).map(c => (
                     <button
                       key={c.id}
                       onClick={() => {

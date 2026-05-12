@@ -13,6 +13,7 @@ import { format, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "./ui/toast";
+import { matchesSearch } from "../lib/search";
 import {
     usePatients, useMedicalRecords, useDoctors, usePrescriptions, useExamRequests,
     Patient, MedicalRecord, Prescription, PrescriptionMed, ExamRequest, ExamItem, Doctor,
@@ -246,10 +247,9 @@ function MedicalRecordsContent({ encKey, onLock }: { encKey: CryptoKey; onLock: 
         if (patients.length > 0 && !selectedPatient) setSelectedPatient(patients[0]);
     }, [patients]);
 
-    const filteredPatients = patients.filter(p => {
-        const t = searchTerm.toLowerCase();
-        return p.name.toLowerCase().includes(t) || p.cpf?.includes(t) || p.phone?.includes(t);
-    });
+    const filteredPatients = patients.filter(p =>
+        matchesSearch(searchTerm, { name: p.name, cpf: p.cpf, phone: p.phone }, ['cpf', 'phone'])
+    );
 
     const getInitials = (name: string) => name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
     const getAge = (d: string | null) => d ? `${Math.floor((Date.now() - new Date(d).getTime()) / (365.25 * 24 * 60 * 60 * 1000))} anos` : '—';

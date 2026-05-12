@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { useToast } from './ui/toast';
+import { matchesSearch } from '../lib/search';
 
 // ─── tipos de modal ───────────────────────────────────────────────────────────
 type ModalState =
@@ -983,10 +984,10 @@ export default function SuperAdmin() {
   const loading = clinicsLoading || orgsLoading || usersLoading;
 
   const q = search.toLowerCase();
-  const filteredClinics = clinics.filter(c => c.name.toLowerCase().includes(q));
+  const filteredClinics = clinics.filter(c => matchesSearch(search, { name: c.name }));
   const filteredOrgs = orgs.filter(o =>
-    o.name.toLowerCase().includes(q) ||
-    clinics.some(c => c.organization_id === o.id && c.name.toLowerCase().includes(q))
+    matchesSearch(search, { name: o.name }) ||
+    clinics.some(c => c.organization_id === o.id && matchesSearch(search, { name: c.name }))
   );
 
   const clinicsInOrg = (orgId: string) => filteredClinics.filter(c => c.organization_id === orgId);

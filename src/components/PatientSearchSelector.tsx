@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
+import { matchesSearch } from "../lib/search";
 import { Search, X, User, Phone, Fingerprint, Plus, Users } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -41,25 +42,18 @@ export function PatientSearchSelector({
 
   const filteredPatients = useMemo(() => {
     if (!searchTerm) return allPatients.slice(0, 8);
-    const term = searchTerm.toLowerCase();
     return allPatients.filter(p =>
-      p.name?.toLowerCase().includes(term) ||
-      p.cpf?.includes(term) ||
-      p.phone?.includes(term)
+      matchesSearch(searchTerm, { name: p.name, cpf: p.cpf, phone: p.phone }, ['cpf', 'phone'])
     ).slice(0, 8);
   }, [allPatients, searchTerm]);
 
   const filteredLeads = useMemo(() => {
     if (!leads.length || !onSelectLead) return [];
-    const term = searchTerm.toLowerCase();
-    // Exclude leads that are already patients (converted_patient_id set and in allPatients)
     const patientIds = new Set(allPatients.map(p => p.id));
     const unlinkedLeads = leads.filter(l => !l.converted_patient_id || !patientIds.has(l.converted_patient_id));
     if (!searchTerm) return unlinkedLeads.slice(0, 5);
     return unlinkedLeads.filter(l =>
-      l.name?.toLowerCase().includes(term) ||
-      l.phone?.includes(term) ||
-      l.email?.toLowerCase().includes(term)
+      matchesSearch(searchTerm, { name: l.name, email: l.email, phone: l.phone }, ['phone'])
     ).slice(0, 5);
   }, [leads, allPatients, searchTerm, onSelectLead]);
 

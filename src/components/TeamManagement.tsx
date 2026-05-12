@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/src/lib/utils";
+import { matchesSearch } from "../lib/search";
 
 interface TeamMember {
   id: string;
@@ -86,11 +87,8 @@ export function TeamManagement() {
   }, [activeClinicId]);
 
   const filteredMembers = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    if (!term) return members;
-    return members.filter(
-      (m) => m.full_name.toLowerCase().includes(term) || m.email.toLowerCase().includes(term)
-    );
+    if (!search.trim()) return members;
+    return members.filter(m => matchesSearch(search, { name: m.full_name, email: m.email }));
   }, [members, search]);
 
   const openCreate = () => {

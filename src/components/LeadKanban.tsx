@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
+import { matchesSearch } from "../lib/search";
 import {
   Settings,
   GripVertical,
@@ -73,7 +74,7 @@ function ExportModal({ onClose }: { onClose: () => void }) {
   const allSources: string[] = Array.from(new Set<string>(leads.map((l: any) => ((l.source ?? '') as string)))).sort();
 
   const filteredLeads = leads.filter(l =>
-    !leadSearch || l.name.toLowerCase().includes(leadSearch.toLowerCase()) || (l.phone || '').includes(leadSearch)
+    matchesSearch(leadSearch, { name: l.name, email: l.email, phone: l.phone }, ['phone'])
   );
 
   useEffect(() => {

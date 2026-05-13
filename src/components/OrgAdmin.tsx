@@ -586,7 +586,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
 
       {/* Clinics grid */}
       {activeSubTab === "clinics" && (
-        <div className="flex-1">
+        <div className="flex-1 min-h-0 flex flex-col">
           {loadingClinics ? (
             <div className="flex items-center justify-center h-48">
               <Loader2 className="w-8 h-8 text-violet-500 animate-spin" />
@@ -597,8 +597,8 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
               <p className="text-slate-500 font-medium text-sm">Nenhuma clínica vinculada a esta organização.</p>
             </div>
           ) : (
-            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm mb-8">
-              <div className="max-h-[calc(100vh-280px)] overflow-y-auto custom-scrollbar rounded-2xl">
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm flex-1 min-h-0 flex flex-col">
+              <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar rounded-2xl">
               <table className="w-full">
                 <thead className="sticky top-0 z-10 bg-slate-50">
                   <tr className="text-left text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-100">

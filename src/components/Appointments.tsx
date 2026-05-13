@@ -579,7 +579,7 @@ export function Appointments() {
           </p>
         </motion.div>
         <div className="flex items-center gap-3">
-          {(userRole === 'medico' || userRole === 'medico_gestor') && currentDoctor && (
+          {userRole === 'medico' && currentDoctor && (
              <Button variant="outline" className="py-5 px-6 font-bold" onClick={() => { setDoctorToConfigure(currentDoctor); setShowScheduleSettings(true); }}>
                <Settings className="w-5 h-5 mr-2 text-slate-500" /> Configurar Agenda
              </Button>

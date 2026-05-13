@@ -2190,11 +2190,11 @@ export function LeadKanban() {
       <AnimatePresence>
         {showDeleteConfirm && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setShowDeleteConfirm(false)}>
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-xl shadow-xl w-full max-sm overflow-hidden" onClick={e => e.stopPropagation()}>
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
               <div className="p-6 text-center">
                 <div className="w-12 h-12 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-4"><AlertCircle className="w-6 h-6 text-rose-600" /></div>
-                <h3 className="text-xl font-bold text-slate-900 mb-2">Excluir Lead</h3>
-                <p className="text-slate-500">Tem certeza que deseja excluir este lead? Esta acao nao pode ser desfeita.</p>
+                <h3 className="text-xl font-bold text-slate-900 mb-2">Excluir Ticket</h3>
+                <p className="text-slate-500">Tem certeza que deseja excluir este ticket? Esta ação não pode ser desfeita.</p>
                 {selectedLead && (
                   <div className="mt-4 p-3 bg-slate-50 rounded-lg text-sm text-left border border-slate-100">
                     <p className="font-semibold text-slate-700">{selectedLead.name}</p>

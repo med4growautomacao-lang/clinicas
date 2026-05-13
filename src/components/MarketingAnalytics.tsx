@@ -403,11 +403,15 @@ export function MarketingAnalytics() {
       // A tabela `conversions` é a fonte canônica para contagem de conversões.
 
       appointments.forEach(apt => {
-        const aptDate = parseISO(apt.date);
-        if (aptDate >= p.start && aptDate <= p.end) {
+        // Conta pelo dia da MARCAÇÃO (created_at), não pelo dia da consulta.
+        // Marketing mede atividade comercial, não agenda operacional.
+        // Compara só por DATA (yyyy-mm-dd), ignorando hora — senão appointment criado às 15h em 13/05 fica fora se p.end vier como 13/05 00:00.
+        const aptDateStr = ((apt as any).created_at || apt.date).slice(0, 10);
+        const pStartStr = format(p.start, 'yyyy-MM-dd');
+        const pEndStr = format(p.end, 'yyyy-MM-dd');
+        if (aptDateStr >= pStartStr && aptDateStr <= pEndStr) {
           const platform = patientSourceMap[apt.patient_id] || 'no_track';
-          const dateStr = format(aptDate, 'yyyy-MM-dd');
-          const manualApts = marketingData.find(d => d.date === dateStr && d.platform === platform)?.manual_appointments_count;
+          const manualApts = marketingData.find(d => d.date === aptDateStr && d.platform === platform)?.manual_appointments_count;
 
           if (stats[pKey][platform] && (manualApts === null || manualApts === undefined)) {
             stats[pKey][platform].appointments += 1;

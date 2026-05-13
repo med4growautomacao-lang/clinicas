@@ -404,9 +404,10 @@ export function useFunnelStages() {
   const [data, setData] = useState<FunnelStage[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const fetch = useCallback(async (silent = false) => {
+  const fetch = useCallback(async (silent = false, force = false) => {
     if (!activeClinicId) return;
     const cacheKey = `funnel_stages:${activeClinicId}`;
+    if (force) invalidateCache(cacheKey);
     const cached = getCached<FunnelStage[]>(cacheKey);
     if (cached) { setData(cached); setLoading(false); return; }
     if (!silent) setLoading(true);
@@ -422,6 +423,25 @@ export function useFunnelStages() {
 
   useEffect(() => {
     fetch();
+    if (!activeClinicId) return;
+
+    const channel = supabase
+      .channel(`funnel_stages_realtime_${activeClinicId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'funnel_stages', filter: `clinic_id=eq.${activeClinicId}` }, () => {
+        fetch(true, true);
+      })
+      .subscribe();
+
+    // Polling defensivo
+    const interval = setInterval(() => { fetch(true, true); }, 60_000);
+    const onVisible = () => { if (document.visibilityState === 'visible') fetch(true, true); };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [fetch, activeClinicId]);
 
   const update = async (id: string, updates: Partial<FunnelStage>) => {

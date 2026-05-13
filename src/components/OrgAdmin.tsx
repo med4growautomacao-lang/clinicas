@@ -32,6 +32,7 @@ interface ClinicUser {
   email: string | null;
   role: string;
   created_at: string;
+  is_pending?: boolean;
 }
 
 interface ClinicMember {
@@ -360,22 +361,27 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
 
   const fetchClinicUsers = async (clinicId: string) => {
     setClinicUsersLoading(true);
-    const { data } = await supabase
-      .from('clinic_users')
-      .select('id, full_name, email, role, created_at')
-      .eq('clinic_id', clinicId)
-      .order('role');
-    setClinicUsersData(data || []);
+    const [active, pending] = await Promise.all([
+      supabase.from('clinic_users').select('id, full_name, email, role, created_at').eq('clinic_id', clinicId),
+      supabase.from('pending_clinic_users').select('id, full_name, email, role, created_at').eq('clinic_id', clinicId),
+    ]);
+    const merged: ClinicUser[] = [
+      ...(active.data || []).map(u => ({ ...u, is_pending: false })),
+      ...(pending.data || []).map(u => ({ ...u, is_pending: true })),
+    ].sort((a, b) => a.role.localeCompare(b.role));
+    setClinicUsersData(merged);
     setClinicUsersLoading(false);
   };
 
   const handleChangeClinicUserRole = async (user: ClinicUser, newRole: string) => {
-    await supabase.from('clinic_users').update({ role: newRole }).eq('id', user.id);
+    const table = user.is_pending ? 'pending_clinic_users' : 'clinic_users';
+    await supabase.from(table).update({ role: newRole }).eq('id', user.id);
     if (clinicUsersView) fetchClinicUsers(clinicUsersView.id);
   };
 
-  const handleRemoveClinicUser = async (userId: string) => {
-    await supabase.from('clinic_users').delete().eq('id', userId);
+  const handleRemoveClinicUser = async (user: ClinicUser) => {
+    const table = user.is_pending ? 'pending_clinic_users' : 'clinic_users';
+    await supabase.from(table).delete().eq('id', user.id);
     if (clinicUsersView) fetchClinicUsers(clinicUsersView.id);
   };
 
@@ -1273,12 +1279,27 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                 ) : (
                   <div className="space-y-2">
                     {clinicUsersData.map(u => (
-                      <div key={u.id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
-                        <div className="w-8 h-8 rounded-lg bg-teal-100 flex items-center justify-center text-teal-700 font-bold text-xs shrink-0">
+                      <div key={`${u.is_pending ? 'p' : 'a'}-${u.id}`} className={cn(
+                        "flex items-center gap-3 p-3 rounded-xl border",
+                        u.is_pending
+                          ? "bg-amber-50/60 border-amber-200"
+                          : "bg-slate-50 border-slate-100"
+                      )}>
+                        <div className={cn(
+                          "w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs shrink-0",
+                          u.is_pending ? "bg-amber-100 text-amber-700" : "bg-teal-100 text-teal-700"
+                        )}>
                           {(u.full_name || u.email || '?').slice(0, 2).toUpperCase()}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-xs font-bold text-slate-900 truncate">{u.full_name || '—'}</p>
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-xs font-bold text-slate-900 truncate">{u.full_name || '—'}</p>
+                            {u.is_pending && (
+                              <span className="text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-200 text-amber-800 shrink-0">
+                                Aguardando
+                              </span>
+                            )}
+                          </div>
                           <p className="text-[10px] text-slate-400 truncate">{u.email}</p>
                         </div>
                         {canAddClinicUsers ? (
@@ -1300,7 +1321,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                         )}
                         {canManageClinics && (
                           <button
-                            onClick={() => handleRemoveClinicUser(u.id)}
+                            onClick={() => handleRemoveClinicUser(u)}
                             className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors shrink-0"
                           >
                             <Trash2 className="w-3.5 h-3.5" />

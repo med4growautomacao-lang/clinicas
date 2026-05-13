@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import {
@@ -108,6 +108,18 @@ export function Appointments() {
   const [showScheduleSettings, setShowScheduleSettings] = useState(false);
   const [doctorToConfigure, setDoctorToConfigure] = useState<any>(null);
   const [showDoctorSchedulePicker, setShowDoctorSchedulePicker] = useState(false);
+  const doctorPickerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showDoctorSchedulePicker) return;
+    const handler = (e: MouseEvent) => {
+      if (doctorPickerRef.current && !doctorPickerRef.current.contains(e.target as Node)) {
+        setShowDoctorSchedulePicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showDoctorSchedulePicker]);
 
   const [showPatientModal, setShowPatientModal] = useState(false);
   const [showDayModal, setShowDayModal] = useState(false);
@@ -585,7 +597,7 @@ export function Appointments() {
              </Button>
           )}
           {(userRole === 'gestor' || userRole === 'secretaria' || userRole === 'medico_gestor') && doctors.length > 0 && (
-            <div className="relative">
+            <div className="relative" ref={doctorPickerRef}>
               <Button variant="outline" className="py-5 px-6 font-bold" onClick={() => setShowDoctorSchedulePicker(v => !v)}>
                 <Settings className="w-5 h-5 mr-2 text-slate-500" /> Configurar Agenda
               </Button>

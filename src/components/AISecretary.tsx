@@ -1629,7 +1629,27 @@ function ConfigView() {
       const rpcName = mode === 'full' ? 'test_reset_full' : 'test_reset_for_rebook';
       const { data, error } = await supabase.rpc(rpcName, { p_phone: phone });
       if (error) throw error;
-      showToast(`Reset (${label}) executado. ${JSON.stringify(data?.deleted || {})}`, 'success');
+
+      const labels: Record<string, [string, string]> = {
+        leads: ['lead', 'leads'],
+        tickets: ['ticket', 'tickets'],
+        patients: ['paciente', 'pacientes'],
+        appointments: ['agendamento', 'agendamentos'],
+        chat_messages: ['mensagem', 'mensagens'],
+        conversions: ['conversão', 'conversões'],
+        financial_transactions: ['transação', 'transações'],
+        medical_records: ['prontuário', 'prontuários'],
+        prescriptions: ['receita', 'receitas'],
+        exam_requests: ['exame', 'exames'],
+      };
+      const parts = Object.entries(data?.deleted || {})
+        .filter(([, n]) => Number(n) > 0)
+        .map(([k, n]) => {
+          const [s, p] = labels[k] || [k, k];
+          return `${n} ${Number(n) === 1 ? s : p}`;
+        });
+      const summary = parts.length ? parts.join(' · ') : 'Nada a apagar';
+      showToast(`Reset (${label}) — ${summary}`, 'success');
     } catch (err: any) {
       showToast(`Erro no reset: ${err.message}`, 'error');
     } finally {

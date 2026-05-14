@@ -682,7 +682,7 @@ export function Appointments() {
         <CardContent className="p-0">
           <AnimatePresence mode="wait">
             {viewMode === "list" ? (
-              <motion.div key="list" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="overflow-x-auto">
+              <motion.div key="list" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="overflow-auto max-h-[calc(100vh-320px)]">
                 {filteredAppointments.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-20 text-slate-400">
                     <CalendarIcon className="w-12 h-12 mb-4 text-slate-300" />
@@ -691,7 +691,7 @@ export function Appointments() {
                   </div>
                 ) : (
                   <table className="w-full text-left border-collapse">
-                    <thead>
+                    <thead className="sticky top-0 z-10 bg-slate-50">
                       <tr className="bg-slate-50">
                         <th className="px-6 py-3 font-semibold text-slate-600 uppercase tracking-wider text-[10px]">Paciente</th>
                         <th className="px-6 py-3 font-semibold text-slate-600 uppercase tracking-wider text-[10px]">Médico</th>

@@ -1581,6 +1581,32 @@ function ChatsView() {
                     IA {selectedLead.ai_enabled !== false ? "ON" : "OFF"}
                   </span>
                 </button>
+                <button
+                  onClick={() => updateLead(selectedLead.id, { followup_enabled: selectedLead.followup_enabled === false ? true : false })}
+                  title={selectedLead.followup_enabled !== false ? "Clique para pausar follow-up/lembrete deste lead" : "Clique para reativar follow-up/lembrete deste lead"}
+                  className={cn(
+                    "flex items-center gap-2 px-2.5 py-1 rounded-full border transition-all cursor-pointer active:scale-95",
+                    selectedLead.followup_enabled !== false
+                      ? "bg-sky-50 border-sky-200 hover:bg-sky-100"
+                      : "bg-slate-100 border-slate-200 hover:bg-slate-200"
+                  )}
+                >
+                  <span className={cn(
+                    "relative inline-flex w-7 h-4 rounded-full transition-colors",
+                    selectedLead.followup_enabled !== false ? "bg-sky-500" : "bg-slate-300"
+                  )}>
+                    <span className={cn(
+                      "absolute top-0.5 w-3 h-3 bg-white rounded-full shadow transition-all",
+                      selectedLead.followup_enabled !== false ? "left-3.5" : "left-0.5"
+                    )} />
+                  </span>
+                  <span className={cn(
+                    "text-[10px] font-bold uppercase tracking-wider",
+                    selectedLead.followup_enabled !== false ? "text-sky-700" : "text-slate-500"
+                  )}>
+                    FOLLOW-UP {selectedLead.followup_enabled !== false ? "ON" : "OFF"}
+                  </span>
+                </button>
               </div>
             </CardHeader>
 

@@ -1607,20 +1607,27 @@ function ConfigView() {
   const [isDirty, setIsDirty] = useState(false);
   const [localConfig, setLocalConfig] = useState<any>(null);
   const [resetting, setResetting] = useState<string | null>(null);
+  const [resetConfirm, setResetConfirm] = useState<{ phone: string; mode: 'full' | 'rebook' } | null>(null);
 
   const setConfig = (updates: any) => {
     setLocalConfig((p: any) => ({ ...p, ...updates }));
     setIsDirty(true);
   };
 
-  const runReset = async (phone: string, mode: 'full' | 'rebook') => {
+  const openResetConfirm = (phone: string, mode: 'full' | 'rebook') => {
     if (!phone.trim()) return;
+    setResetConfirm({ phone: phone.trim(), mode });
+  };
+
+  const confirmReset = async () => {
+    if (!resetConfirm) return;
+    const { phone, mode } = resetConfirm;
     const label = mode === 'full' ? 'primeiro contato' : 'reagendamento';
-    if (!confirm(`Resetar dados de ${phone} no modo "${label}"?\n\n${mode === 'full' ? 'Apaga TUDO (paciente, agendamentos, conversões, financeiro, prontuário, chat).' : 'Apaga chat e lead, mantém paciente e histórico clínico.'}`)) return;
     setResetting(`${phone}:${mode}`);
+    setResetConfirm(null);
     try {
       const rpcName = mode === 'full' ? 'test_reset_full' : 'test_reset_for_rebook';
-      const { data, error } = await supabase.rpc(rpcName, { p_phone: phone.trim() });
+      const { data, error } = await supabase.rpc(rpcName, { p_phone: phone });
       if (error) throw error;
       showToast(`Reset (${label}) executado. ${JSON.stringify(data?.deleted || {})}`, 'success');
     } catch (err: any) {
@@ -1767,7 +1774,7 @@ function ConfigView() {
                         className="flex-1 px-3 py-2 border border-slate-200 rounded-lg font-mono text-sm focus:ring-2 focus:ring-red-100 focus:border-red-400 outline-none"
                       />
                       <button
-                        onClick={() => runReset(num, 'full')}
+                        onClick={() => openResetConfirm(num, 'full')}
                         disabled={!num.trim() || resetting === `${num}:full`}
                         title="Reset completo (primeiro contato absoluto)"
                         className="flex items-center gap-1 px-2 py-2 text-[10px] font-bold text-red-600 hover:bg-red-50 border border-red-200 rounded-lg transition-all disabled:opacity-40"
@@ -1776,7 +1783,7 @@ function ConfigView() {
                         ZERAR
                       </button>
                       <button
-                        onClick={() => runReset(num, 'rebook')}
+                        onClick={() => openResetConfirm(num, 'rebook')}
                         disabled={!num.trim() || resetting === `${num}:rebook`}
                         title="Reset de reagendamento (mantém paciente)"
                         className="flex items-center gap-1 px-2 py-2 text-[10px] font-bold text-amber-700 hover:bg-amber-50 border border-amber-200 rounded-lg transition-all disabled:opacity-40"
@@ -1851,6 +1858,41 @@ function ConfigView() {
 
       </div>
     </div>
+
+    <AnimatePresence>
+      {resetConfirm && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setResetConfirm(null)}>
+          <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="p-6 text-center">
+              <div className={cn("w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4", resetConfirm.mode === 'full' ? 'bg-rose-50' : 'bg-amber-50')}>
+                {resetConfirm.mode === 'full'
+                  ? <AlertTriangle className="w-6 h-6 text-rose-600" />
+                  : <Repeat className="w-6 h-6 text-amber-600" />}
+              </div>
+              <h3 className="text-xl font-bold text-slate-900 mb-2">
+                {resetConfirm.mode === 'full' ? 'Reset completo' : 'Reset de reagendamento'}
+              </h3>
+              <p className="text-slate-500 text-sm">
+                {resetConfirm.mode === 'full'
+                  ? 'Apaga TUDO: paciente, agendamentos, conversões, financeiro, prontuário e chat. Esta ação não pode ser desfeita.'
+                  : 'Apaga chat e lead, mantém paciente e histórico clínico. Esta ação não pode ser desfeita.'}
+              </p>
+              <div className="mt-4 p-3 bg-slate-50 rounded-lg text-sm text-left border border-slate-100">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Número</p>
+                <p className="font-mono font-semibold text-slate-700">{resetConfirm.phone}</p>
+              </div>
+            </div>
+            <div className="flex gap-3 p-6 border-t border-slate-100 bg-slate-50">
+              <Button variant="outline" className="flex-1" onClick={() => setResetConfirm(null)}>Cancelar</Button>
+              <Button variant="destructive" className="flex-1" onClick={confirmReset}>
+                {resetConfirm.mode === 'full' ? <RotateCcw className="w-4 h-4 mr-2" /> : <Repeat className="w-4 h-4 mr-2" />}
+                {resetConfirm.mode === 'full' ? 'Zerar' : 'Reagendar'}
+              </Button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   </div>
   );
 }

@@ -1434,10 +1434,7 @@ function ChatsView() {
             filteredLeads.map((lead) => {
               const isMeta = !!lead.fb_campaign_name || lead.source === 'meta_ads';
               const isGoogle = !!lead.g_campaign_name || lead.source === 'google_ads';
-              const lastActivityAt = [lead.last_message_at, lead.last_outbound_at]
-                .filter(Boolean)
-                .sort()
-                .pop() ?? lead.created_at;
+              const lastActivityAt = lead.last_activity_at ?? lead.created_at;
               return (
               <motion.div
                 key={lead.id}

@@ -1764,10 +1764,7 @@ export function LeadKanban() {
                     const isClosed = ticket.status === 'closed';
                     const isPerdido = stage.slug === 'perdido';
                     const semMotivo = isPerdido && !lead.loss_reason && !ticket.loss_reason && !isClosed;
-                    const lastContact = [lead.last_message_at, lead.last_outbound_at]
-                      .filter(Boolean)
-                      .sort()
-                      .pop() ?? lead.created_at;
+                    const lastContact = lead.last_activity_at ?? lead.created_at;
                     const frozen = isClosed || !!lead.converted_patient_id || isPerdido;
                     // Contagem persistente do banco + ciclo atual estourado
                     const currentCycleBreach = (() => {

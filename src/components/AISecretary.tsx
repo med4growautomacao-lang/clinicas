@@ -1434,6 +1434,10 @@ function ChatsView() {
             filteredLeads.map((lead) => {
               const isMeta = !!lead.fb_campaign_name || lead.source === 'meta_ads';
               const isGoogle = !!lead.g_campaign_name || lead.source === 'google_ads';
+              const lastActivityAt = [lead.last_message_at, lead.last_outbound_at]
+                .filter(Boolean)
+                .sort()
+                .pop() ?? lead.created_at;
               return (
               <motion.div
                 key={lead.id}
@@ -1473,7 +1477,7 @@ function ChatsView() {
                         {lead.name}
                       </span>
                       <span className="text-[10px] font-medium text-slate-400">
-                        {format(new Date(lead.last_message_at ?? lead.created_at), 'dd/MM')}
+                        {format(new Date(lastActivityAt), 'dd/MM')}
                       </span>
                     </div>
                     <p className="text-xs text-slate-500 truncate mb-1">
@@ -1503,7 +1507,7 @@ function ChatsView() {
                         })()}
                       </div>
                       <span className="text-[9px] font-bold text-slate-400">
-                        {format(new Date(lead.last_message_at ?? lead.created_at), 'HH:mm')}
+                        {format(new Date(lastActivityAt), 'HH:mm')}
                       </span>
                     </div>
                   </div>

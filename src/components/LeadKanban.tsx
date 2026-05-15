@@ -1718,7 +1718,13 @@ export function LeadKanban() {
       <div className="flex-1 min-h-0">
         <KanbanScrollContainer>
           {stages.map((stage) => {
-            const stageTickets = filteredTickets.filter(t => t.stage_id === stage.id);
+            const stageTickets = filteredTickets
+              .filter(t => t.stage_id === stage.id)
+              .sort((a, b) => {
+                const av = a.lead?.last_activity_at ?? a.lead?.created_at ?? a.opened_at;
+                const bv = b.lead?.last_activity_at ?? b.lead?.created_at ?? b.opened_at;
+                return av < bv ? 1 : av > bv ? -1 : 0;
+              });
             const stageTotal = stageTickets.reduce((sum, t) => {
               const conversions = t.lead ? conversionsByLead[t.lead.id] : undefined;
               const lastConversion = conversions?.[conversions.length - 1];

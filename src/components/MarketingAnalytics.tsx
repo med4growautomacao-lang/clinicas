@@ -1483,7 +1483,7 @@ function StatCard({ title, value, prevValue, type, icon: Icon, color }: any) {
       </div>
       <div className="mt-4">
         <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{title}</h3>
-        <p className="text-xl font-black text-slate-900 mt-1">
+        <p className="text-lg font-black text-slate-900 mt-1 whitespace-nowrap">
           {type === 'currency' ? `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` :
             type === 'percent' ? `${value.toFixed(1)}%` :
             type === 'ratio' ? `${value.toFixed(2)}x` : value.toLocaleString('pt-BR')}

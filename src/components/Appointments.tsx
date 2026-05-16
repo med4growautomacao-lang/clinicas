@@ -491,7 +491,7 @@ export function Appointments() {
       });
 
       if (!result) {
-        setError('Erro ao criar agendamento. Verifique os dados e tente novamente.');
+        setError('Erro ao criar agendamento. Verifique se há um ticket/consulta em aberto não resolvido para este paciente no funil.');
         setSubmitting(false);
         return;
       }

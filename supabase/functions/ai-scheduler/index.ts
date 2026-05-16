@@ -409,11 +409,20 @@ serve(async (req) => {
       }
 
       // 2. Move etapa (se configurado)
+      // A etapa do lead vive no ticket aberto (tickets.stage_id), nao em leads.stage_id
+      // (campo deprecado). Atualizar o ticket dispara trg_log_ticket_stage_change,
+      // que registra o historico e mantem o funil/vw_lead_active_stage corretos.
       let stage_changed = false;
       if (matched.move_to_stage) {
-        await supabaseClient.from("leads").update({ stage_id: matched.move_to_stage }).eq("id", lead.id);
-        actionsTaken.push("stage_moved");
-        stage_changed = true;
+        const { data: movedTickets } = await supabaseClient.from("tickets")
+          .update({ stage_id: matched.move_to_stage })
+          .eq("lead_id", lead.id)
+          .eq("status", "open")
+          .select("id");
+        if (movedTickets && movedTickets.length > 0) {
+          actionsTaken.push("stage_moved");
+          stage_changed = true;
+        }
       }
 
       // 3. Pega creds do uazapi (mesmo se não vai usar, deixa pronto)

@@ -50,7 +50,7 @@ import {
 } from 'recharts';
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { useLeads, useMarketing, MarketingData, Lead, useAppointments, useFunnelStages, useConversions } from "../hooks/useSupabase";
+import { useLeads, useMarketing, MarketingData, Lead, useAppointments, useFunnelStages, useConversions, useTickets } from "../hooks/useSupabase";
 import {
   format,
   startOfDay,
@@ -99,10 +99,14 @@ const METRICS_CONFIG = [
   { id: 'cpapt', label: 'Custo p/ Agend.', color: '#ec4899', type: 'currency', icon: Target, bgColor: 'bg-pink-50 text-pink-600' },
   { id: 'cpa', label: 'CPA (Conv.)', color: '#f43f5e', type: 'currency', icon: Activity, bgColor: 'bg-rose-50 text-rose-600' },
   { id: 'conv_value', label: 'Valor Conv.', color: '#059669', type: 'currency', icon: DollarSign, bgColor: 'bg-green-50 text-green-600' },
+  { id: 'roas', label: 'ROAS', color: '#ea580c', type: 'ratio', icon: TrendingUp, bgColor: 'bg-orange-50 text-orange-600' },
   { id: 'lead_to_apt_rate', label: 'Lead p/ Agend.', color: '#0ea5e9', type: 'percent', icon: Activity, bgColor: 'bg-sky-50 text-sky-600' },
   { id: 'lead_to_conv_rate', label: 'Lead p/ Conv.', color: '#06b6d4', type: 'percent', icon: Activity, bgColor: 'bg-cyan-50 text-cyan-600' },
   { id: 'apt_to_conv_rate', label: 'Agend. p/ Conv.', color: '#8b5cf6', type: 'percent', icon: Activity, bgColor: 'bg-purple-50 text-purple-600' },
 ];
+
+// Paleta de cores (hex) para as etapas do Funil de Vendas configurável
+const FUNNEL_PALETTE = ['#0d9488', '#8b5cf6', '#10b981', '#0ea5e9', '#f59e0b', '#ec4899', '#6366f1', '#ef4444'];
 
 export function MarketingAnalytics() {
   const [period, setPeriod] = useState<Period>('dia');
@@ -117,6 +121,7 @@ export function MarketingAnalytics() {
   const { data: marketingData, loading: mktLoading, fetch: fetchMkt, upsert: upsertMkt } = useMarketing();
   const { data: conversions } = useConversions();
   const { data: stages } = useFunnelStages();
+  const { tickets: funnelTickets } = useTickets();
   const conversionStageId = stages.find(s => s.name.toLowerCase().includes('convers'))?.id || null;
   const [isEditing, setIsEditing] = useState(false);
   const [isComparing, setIsComparing] = useState(false);
@@ -154,6 +159,43 @@ export function MarketingAnalytics() {
     const missing = initial.filter(id => !valid.includes(id));
     return [...valid, ...missing];
   });
+
+  // Configuração das etapas do Funil de Vendas (escolhidas a partir das etapas do funil de oportunidades)
+  const [funnelStagesOrder, setFunnelStagesOrder] = useState<string[]>(() => {
+    const saved = localStorage.getItem('mkt_funnel_order');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [funnelHiddenStages, setFunnelHiddenStages] = useState<string[]>(() => {
+    const saved = localStorage.getItem('mkt_funnel_hidden');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  const funnelEffectiveOrder = (order: string[]) => {
+    const ids = [...stages].sort((a, b) => a.position - b.position).map(s => s.id);
+    const saved = order.filter(id => ids.includes(id));
+    const missing = ids.filter(id => !saved.includes(id));
+    return [...saved, ...missing];
+  };
+
+  const toggleFunnelStage = (id: string) => {
+    const next = funnelHiddenStages.includes(id)
+      ? funnelHiddenStages.filter(x => x !== id)
+      : [...funnelHiddenStages, id];
+    setFunnelHiddenStages(next);
+    localStorage.setItem('mkt_funnel_hidden', JSON.stringify(next));
+  };
+
+  const moveFunnelStage = (id: string, direction: 'up' | 'down') => {
+    const cur = funnelEffectiveOrder(funnelStagesOrder);
+    const i = cur.indexOf(id);
+    if (i === -1) return;
+    const j = direction === 'up' ? i - 1 : i + 1;
+    if (j < 0 || j >= cur.length) return;
+    const next = [...cur];
+    [next[i], next[j]] = [next[j], next[i]];
+    setFunnelStagesOrder(next);
+    localStorage.setItem('mkt_funnel_order', JSON.stringify(next));
+  };
 
   const toggleMetric = (id: string, view: 'dashboard' | 'table') => {
     if (view === 'dashboard') {
@@ -722,6 +764,12 @@ export function MarketingAnalytics() {
                 toggleMetric={(id: string) => toggleMetric(id, 'dashboard')}
                 metricsOrder={dashboardMetricsOrder}
                 moveMetric={(id: string, dir) => moveMetric(id, dir as any, 'dashboard')}
+                funnelStages={stages}
+                funnelTickets={funnelTickets}
+                funnelOrder={funnelStagesOrder}
+                funnelHidden={funnelHiddenStages}
+                toggleFunnelStage={toggleFunnelStage}
+                moveFunnelStage={moveFunnelStage}
               />
             ) : (
               <div className="space-y-4">
@@ -872,7 +920,92 @@ function MetricsConfigButton({ metricsOrder, visibleMetrics, toggleMetric, moveM
   );
 }
 
-function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, isComparing, visibleMetrics, metricsOrder, toggleMetric, moveMetric }: any) {
+function FunnelConfigButton({ stages, order, hidden, toggleStage, moveStage }: any) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  const orderedStages = useMemo(() => {
+    const byId = new Map<string, any>((stages || []).map((s: any) => [s.id, s]));
+    const saved = (order || []).filter((id: string) => byId.has(id));
+    const missing = (stages || [])
+      .filter((s: any) => !saved.includes(s.id))
+      .sort((a: any, b: any) => a.position - b.position)
+      .map((s: any) => s.id);
+    return [...saved, ...missing].map((id: string) => byId.get(id)).filter(Boolean);
+  }, [stages, order]);
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        title="Configurar etapas do funil"
+        className={cn(
+          "w-8 h-8 rounded-lg flex items-center justify-center transition-all",
+          isOpen ? "bg-teal-50 text-teal-600" : "text-slate-300 hover:bg-slate-100 hover:text-slate-500"
+        )}
+      >
+        <SettingsIcon className={cn("w-4 h-4 transition-transform duration-500", isOpen ? "rotate-90" : "")} />
+      </button>
+
+      <AnimatePresence>
+        {isOpen && (
+          <>
+            <div className="fixed inset-0 z-[105]" onClick={() => setIsOpen(false)} />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="absolute top-full right-0 mt-2 w-60 bg-white rounded-2xl border border-slate-200 shadow-2xl z-[110] p-3 overflow-hidden"
+            >
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3 pl-2">Etapas do Funil</p>
+              {orderedStages.length === 0 ? (
+                <p className="text-[10px] text-slate-400 px-2 py-2">Nenhuma etapa de funil encontrada.</p>
+              ) : (
+                <div className="space-y-1">
+                  {orderedStages.map((s: any, idx: number) => {
+                    const isVisible = !(hidden || []).includes(s.id);
+                    return (
+                      <div key={s.id} className="group relative flex items-center gap-1">
+                        <button
+                          onClick={() => toggleStage(s.id)}
+                          className={cn(
+                            "flex-1 flex items-center justify-between px-3 py-2 rounded-xl text-[10px] font-bold transition-all",
+                            isVisible ? "bg-teal-50 text-teal-700" : "text-slate-400 hover:bg-slate-50 hover:text-slate-600"
+                          )}
+                        >
+                          <span className="uppercase tracking-tight truncate">{s.name}</span>
+                          {isVisible && <CheckCircle2 className="w-3 h-3 shrink-0" />}
+                        </button>
+
+                        <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity pr-1">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); moveStage(s.id, 'up'); }}
+                            disabled={idx === 0}
+                            className="p-0.5 hover:bg-slate-100 rounded text-slate-400 disabled:opacity-30"
+                          >
+                            <ChevronLeft className="w-3 h-3 rotate-90" />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); moveStage(s.id, 'down'); }}
+                            disabled={idx === orderedStages.length - 1}
+                            className="p-0.5 hover:bg-slate-100 rounded text-slate-400 disabled:opacity-30"
+                          >
+                            <ChevronLeft className="w-3 h-3 -rotate-90" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, isComparing, visibleMetrics, metricsOrder, toggleMetric, moveMetric, funnelStages, funnelTickets, funnelOrder, funnelHidden, toggleFunnelStage, moveFunnelStage }: any) {
 
   const [selectedMetric, setSelectedMetric] = useState('leads');
   const [selectedPlatform, setSelectedPlatform] = useState<Platform | 'all'>('all');
@@ -978,6 +1111,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
         lead_to_apt_rate: stats.leads > 0 ? (stats.appointments / stats.leads) * 100 : 0,
         lead_to_conv_rate: stats.leads > 0 ? (stats.convs / stats.leads) * 100 : 0,
         apt_to_conv_rate: stats.appointments > 0 ? (stats.convs / stats.appointments) * 100 : 0,
+        roas: stats.investment > 0 ? stats.conv_value / stats.investment : 0,
 
         leads_prev: compStats.leads,
         investment_prev: compStats.investment,
@@ -990,6 +1124,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
         lead_to_apt_rate_prev: compStats.leads > 0 ? (compStats.appointments / compStats.leads) * 100 : 0,
         lead_to_conv_rate_prev: compStats.leads > 0 ? (compStats.convs / compStats.leads) * 100 : 0,
         apt_to_conv_rate_prev: compStats.appointments > 0 ? (compStats.convs / compStats.appointments) * 100 : 0,
+        roas_prev: compStats.investment > 0 ? compStats.conv_value / compStats.investment : 0,
       };
     });
   }, [periods, metricsByPeriod, comparisonMetricsByPeriod, getTotals, selectedPlatform]);
@@ -1006,11 +1141,31 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
 
   const platformTitle = "Origem dos Leads";
 
-  const funnelData = [
-    { name: 'Leads', value: currentTotals.leads, color: '#0d9488', subLabel: 'Total de leads' },
-    { name: 'Agendamentos', value: currentTotals.appointments, color: '#8b5cf6', subLabel: `${((currentTotals.appointments / (currentTotals.leads || 1)) * 100).toFixed(1)}% de conversão` },
-    { name: 'Conversões', value: currentTotals.convs, color: '#10b981', subLabel: `${((currentTotals.convs / (currentTotals.appointments || 1)) * 100).toFixed(1)}% de fechamento` },
-  ];
+  // Funil de Vendas montado a partir das etapas do funil de oportunidades (snapshot atual).
+  // O valor de cada etapa = nº de leads atualmente naquela etapa (tickets por stage_id).
+  const funnelData = useMemo(() => {
+    const byId = new Map<string, any>((funnelStages || []).map((s: any) => [s.id, s]));
+    const savedOrder = (funnelOrder || []).filter((id: string) => byId.has(id));
+    const missing = (funnelStages || [])
+      .filter((s: any) => !savedOrder.includes(s.id))
+      .sort((a: any, b: any) => a.position - b.position)
+      .map((s: any) => s.id);
+    const orderedIds = [...savedOrder, ...missing].filter((id: string) => !(funnelHidden || []).includes(id));
+
+    const base = orderedIds.map((id: string, idx: number) => ({
+      id,
+      name: byId.get(id)?.name || '—',
+      value: (funnelTickets || []).filter((t: any) => t.stage_id === id).length,
+      color: FUNNEL_PALETTE[idx % FUNNEL_PALETTE.length],
+    }));
+
+    return base.map((stage, idx, arr) => ({
+      ...stage,
+      subLabel: idx === 0
+        ? 'Total de leads'
+        : `${((stage.value / (arr[idx - 1].value || 1)) * 100).toFixed(1)}% de conversão`,
+    }));
+  }, [funnelStages, funnelTickets, funnelOrder, funnelHidden]);
 
   return (
     <div className="space-y-6">
@@ -1075,6 +1230,10 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
           else if (id === 'appointments') { value = currentTotals.appointments; prevValue = isComparing ? prevTotals.appointments : null; }
           else if (id === 'convs') { value = currentTotals.convs; prevValue = isComparing ? prevTotals.convs : null; }
           else if (id === 'conv_value') { value = currentTotals.conv_value; prevValue = isComparing ? prevTotals.conv_value : null; }
+          else if (id === 'roas') {
+            value = currentTotals.investment > 0 ? currentTotals.conv_value / currentTotals.investment : 0;
+            prevValue = isComparing ? (prevTotals.investment > 0 ? prevTotals.conv_value / prevTotals.investment : 0) : null;
+          }
           else if (id === 'cpl') {
             value = currentTotals.leads > 0 ? currentTotals.investment / currentTotals.leads : 0;
             prevValue = isComparing ? (prevTotals.leads > 0 ? prevTotals.investment / prevTotals.leads : 0) : null;
@@ -1117,22 +1276,36 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2 bg-white border-slate-200 shadow-xl rounded-3xl p-8 overflow-hidden">
           <CardHeader className="p-0 pb-8">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-teal-50 flex items-center justify-center">
-                <TrendingUp className="w-5 h-5 text-teal-600" />
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-teal-50 flex items-center justify-center">
+                  <TrendingUp className="w-5 h-5 text-teal-600" />
+                </div>
+                <CardTitle className="text-xs font-black text-slate-400 uppercase tracking-widest">Funil de Vendas</CardTitle>
               </div>
-              <CardTitle className="text-xs font-black text-slate-400 uppercase tracking-widest">Funil de Vendas</CardTitle>
+              <FunnelConfigButton
+                stages={funnelStages}
+                order={funnelOrder}
+                hidden={funnelHidden}
+                toggleStage={toggleFunnelStage}
+                moveStage={moveFunnelStage}
+              />
             </div>
           </CardHeader>
 
           <div className="flex flex-col gap-6 max-w-4xl mx-auto w-full">
+            {funnelData.length === 0 && (
+              <p className="text-center text-xs text-slate-400 py-8">
+                Nenhuma etapa selecionada. Use o ⚙️ para escolher as etapas do funil.
+              </p>
+            )}
             {funnelData.map((stage, idx) => (
-              <div key={stage.name} className="relative flex flex-col items-center">
+              <div key={stage.id} className="relative flex flex-col items-center">
                 <div
                   className="h-16 rounded-2xl flex items-center justify-between px-8 shadow-sm transition-all border border-transparent hover:border-slate-100 group w-full"
                   style={{
                     backgroundColor: `${stage.color}10`,
-                    width: `${100 - (idx * 15)}%`
+                    width: `${Math.max(45, 100 - idx * 12)}%`
                   }}
                 >
                   <div className="flex flex-col">
@@ -1233,6 +1406,8 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
               ? `Média R$ ${avg.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
               : activeMetric.type === 'percent'
               ? `Média ${avg.toFixed(1)}%`
+              : activeMetric.type === 'ratio'
+              ? `Média ${avg.toFixed(2)}x`
               : `Média ${avg.toFixed(1)}`;
             return (
               <div className="h-[300px] w-full">
@@ -1250,7 +1425,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
                     <Tooltip
                       contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', padding: '12px' }}
                       formatter={(value: any) => [
-                        activeMetric.type === 'currency' ? `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : activeMetric.type === 'percent' ? `${value.toFixed(1)}%` : value,
+                        activeMetric.type === 'currency' ? `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : activeMetric.type === 'percent' ? `${value.toFixed(1)}%` : activeMetric.type === 'ratio' ? `${value.toFixed(2)}x` : value,
                         activeMetric.label
                       ]}
                     />
@@ -1310,7 +1485,8 @@ function StatCard({ title, value, prevValue, type, icon: Icon, color }: any) {
         <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{title}</h3>
         <p className="text-xl font-black text-slate-900 mt-1">
           {type === 'currency' ? `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` :
-            type === 'percent' ? `${value.toFixed(1)}%` : value.toLocaleString('pt-BR')}
+            type === 'percent' ? `${value.toFixed(1)}%` :
+            type === 'ratio' ? `${value.toFixed(2)}x` : value.toLocaleString('pt-BR')}
         </p>
       </div>
     </Card>
@@ -1432,6 +1608,7 @@ function MetricRow({ label, periods, metrics, compareMetrics, isComparing, platf
         else if (valueKey === 'cpl') { val = currentLeads > 0 ? currentInv / currentLeads : 0; pVal = prevLeads > 0 ? prevInv / prevLeads : 0; }
         else if (valueKey === 'cpapt') { val = currentApts > 0 ? currentInv / currentApts : 0; pVal = (prevMetrics?.appointments || 0) > 0 ? prevInv / prevMetrics.appointments : 0; }
         else if (valueKey === 'cpa') { val = currentConvs > 0 ? currentInv / currentConvs : 0; pVal = (prevMetrics?.convs || 0) > 0 ? prevInv / prevMetrics.convs : 0; }
+        else if (valueKey === 'roas') { val = currentInv > 0 ? currentValue / currentInv : 0; pVal = prevInv > 0 ? (prevMetrics?.conv_value || 0) / prevInv : 0; }
         else if (valueKey === 'leads') { val = currentLeads; pVal = prevLeads; }
         else if (valueKey === 'appointments') { val = currentApts; pVal = prevMetrics?.appointments || 0; }
         else if (valueKey === 'convs') { val = currentConvs; pVal = prevMetrics?.convs || 0; }
@@ -1439,7 +1616,7 @@ function MetricRow({ label, periods, metrics, compareMetrics, isComparing, platf
 
         const delta = pVal > 0 ? ((val - pVal) / pVal) * 100 : null;
 
-        const isCalculated = ['cpl', 'cpa', 'cpapt'].includes(valueKey);
+        const isCalculated = ['cpl', 'cpa', 'cpapt', 'roas'].includes(valueKey);
 
         if (isEditing && period === 'dia' && valueKey && !isCalculated) {
           const isMoney = valueKey === 'investment' || valueKey === 'conversions_value' || valueKey === 'conv_value';
@@ -1482,7 +1659,7 @@ function MetricRow({ label, periods, metrics, compareMetrics, isComparing, platf
           <td key={idx} className="px-6 py-3 text-center border-r border-slate-50 last:border-r-0 whitespace-nowrap">
             <div className="flex flex-col items-center">
               <span className={cn("text-xs font-bold transition-all", isComparing ? "text-slate-900" : "text-slate-600")}>
-                {type === 'currency' ? `R$ ${val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : type === 'percent' ? (val > 0 ? `${val.toFixed(1)}%` : '—') : val}
+                {type === 'currency' ? `R$ ${val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : type === 'percent' ? (val > 0 ? `${val.toFixed(1)}%` : '—') : type === 'ratio' ? `${val.toFixed(2)}x` : val}
               </span>
               {isComparing && (
                 <div className={cn("text-[8px] font-black mt-1 px-1.5 py-0.5 rounded-full", delta && delta > 0 ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600")}>
@@ -1522,7 +1699,7 @@ function SummaryMetricRow({ label, periods, metrics, compareMetrics, isComparing
         const previous = getTotals(prevStats);
 
         let val: any = 0;
-        let formatType: 'num' | 'curr' | 'perc' = 'num';
+        let formatType: 'num' | 'curr' | 'perc' | 'ratio' = 'num';
 
         if (type === 'leads') val = current.leads;
         else if (type === 'convs') val = current.convs;
@@ -1532,6 +1709,7 @@ function SummaryMetricRow({ label, periods, metrics, compareMetrics, isComparing
         else if (type === 'cpl') { val = current.leads > 0 ? current.investment / current.leads : 0; formatType = 'curr'; }
         else if (type === 'cpapt') { val = current.appointments > 0 ? current.investment / current.appointments : 0; formatType = 'curr'; }
         else if (type === 'cpa') { val = current.convs > 0 ? current.investment / current.convs : 0; formatType = 'curr'; }
+        else if (type === 'roas') { val = current.investment > 0 ? current.value / current.investment : 0; formatType = 'ratio'; }
         else if (type === 'lead_to_apt_rate') { val = current.leads > 0 ? (current.appointments / current.leads) * 100 : 0; formatType = 'perc'; }
         else if (type === 'lead_to_conv_rate') { val = current.leads > 0 ? (current.convs / current.leads) * 100 : 0; formatType = 'perc'; }
         else if (type === 'apt_to_conv_rate') { val = current.appointments > 0 ? (current.convs / current.appointments) * 100 : 0; formatType = 'perc'; }
@@ -1539,7 +1717,7 @@ function SummaryMetricRow({ label, periods, metrics, compareMetrics, isComparing
         return (
           <td key={idx} className="px-6 py-3 text-center border-r border-slate-50 last:border-r-0">
             <span className="text-xs font-black text-slate-900">
-              {formatType === 'curr' ? `R$ ${val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : formatType === 'perc' ? `${val.toFixed(1)}%` : val}
+              {formatType === 'curr' ? `R$ ${val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : formatType === 'perc' ? `${val.toFixed(1)}%` : formatType === 'ratio' ? `${val.toFixed(2)}x` : val}
             </span>
           </td>
         );

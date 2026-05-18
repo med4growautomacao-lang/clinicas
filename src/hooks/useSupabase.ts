@@ -640,6 +640,26 @@ export interface Ticket {
   lead?: Lead;
 }
 
+// Funil de coorte da tela de marketing: dos leads criados em [start, end],
+// quantos entraram em cada etapa (lead_stage_history). Chama o RPC marketing_funnel_cohort.
+export function useFunnelCohort(start: string | null, end: string | null) {
+  const { activeClinicId } = useAuth();
+  const [data, setData] = useState<{ stage_id: string; leads: number }[]>([]);
+
+  useEffect(() => {
+    if (!activeClinicId || !start || !end) { setData([]); return; }
+    let cancelled = false;
+    supabase
+      .rpc('marketing_funnel_cohort', { p_clinic_id: activeClinicId, p_start: start, p_end: end })
+      .then(({ data: rows }: any) => {
+        if (!cancelled) setData(Array.isArray(rows) ? rows : []);
+      });
+    return () => { cancelled = true; };
+  }, [activeClinicId, start, end]);
+
+  return data;
+}
+
 export function useTickets() {
   const { activeClinicId, profile, activeClinicName, clinicName } = useAuth();
   const [tickets, setTickets] = useState<Ticket[]>([]);

@@ -50,7 +50,7 @@ import {
 } from 'recharts';
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { useLeads, useMarketing, MarketingData, Lead, useAppointments, useFunnelStages, useConversions, useTickets } from "../hooks/useSupabase";
+import { useLeads, useMarketing, MarketingData, Lead, useAppointments, useFunnelStages, useConversions, useFunnelCohort } from "../hooks/useSupabase";
 import {
   format,
   startOfDay,
@@ -121,7 +121,10 @@ export function MarketingAnalytics() {
   const { data: marketingData, loading: mktLoading, fetch: fetchMkt, upsert: upsertMkt } = useMarketing();
   const { data: conversions } = useConversions();
   const { data: stages } = useFunnelStages();
-  const { tickets: funnelTickets } = useTickets();
+  const funnelCohort = useFunnelCohort(
+    format(dateRange.start, 'yyyy-MM-dd'),
+    format(dateRange.end, 'yyyy-MM-dd')
+  );
   const conversionStageId = stages.find(s => s.name.toLowerCase().includes('convers'))?.id || null;
   const [isEditing, setIsEditing] = useState(false);
   const [isComparing, setIsComparing] = useState(false);
@@ -165,10 +168,17 @@ export function MarketingAnalytics() {
     const saved = localStorage.getItem('mkt_funnel_order');
     return saved ? JSON.parse(saved) : [];
   });
-  const [funnelHiddenStages, setFunnelHiddenStages] = useState<string[]>(() => {
+  const [funnelHiddenStages, setFunnelHiddenStages] = useState<string[] | null>(() => {
     const saved = localStorage.getItem('mkt_funnel_hidden');
-    return saved ? JSON.parse(saved) : [];
+    return saved ? JSON.parse(saved) : null;
   });
+
+  // Padrão: o topo do funil é "Contato via WhatsApp". As etapas de entrada
+  // (Sincronização/Forms) entram ocultas por padrão — todo lead delas passa
+  // por WhatsApp depois. O usuário pode reexibi-las pelo ⚙️.
+  const effectiveFunnelHidden = funnelHiddenStages ?? stages
+    .filter(s => s.slug === 'sincronizacao' || s.slug === 'forms')
+    .map(s => s.id);
 
   const funnelEffectiveOrder = (order: string[]) => {
     const ids = [...stages].sort((a, b) => a.position - b.position).map(s => s.id);
@@ -178,9 +188,9 @@ export function MarketingAnalytics() {
   };
 
   const toggleFunnelStage = (id: string) => {
-    const next = funnelHiddenStages.includes(id)
-      ? funnelHiddenStages.filter(x => x !== id)
-      : [...funnelHiddenStages, id];
+    const next = effectiveFunnelHidden.includes(id)
+      ? effectiveFunnelHidden.filter(x => x !== id)
+      : [...effectiveFunnelHidden, id];
     setFunnelHiddenStages(next);
     localStorage.setItem('mkt_funnel_hidden', JSON.stringify(next));
   };
@@ -765,10 +775,9 @@ export function MarketingAnalytics() {
                 metricsOrder={dashboardMetricsOrder}
                 moveMetric={(id: string, dir) => moveMetric(id, dir as any, 'dashboard')}
                 funnelStages={stages}
-                funnelTickets={funnelTickets}
-                funnelLeads={leads}
+                funnelCohort={funnelCohort}
                 funnelOrder={funnelStagesOrder}
-                funnelHidden={funnelHiddenStages}
+                funnelHidden={effectiveFunnelHidden}
                 toggleFunnelStage={toggleFunnelStage}
                 moveFunnelStage={moveFunnelStage}
               />
@@ -1006,7 +1015,7 @@ function FunnelConfigButton({ stages, order, hidden, toggleStage, moveStage }: a
   );
 }
 
-function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, isComparing, visibleMetrics, metricsOrder, toggleMetric, moveMetric, funnelStages, funnelTickets, funnelLeads, funnelOrder, funnelHidden, toggleFunnelStage, moveFunnelStage }: any) {
+function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, isComparing, visibleMetrics, metricsOrder, toggleMetric, moveMetric, funnelStages, funnelCohort, funnelOrder, funnelHidden, toggleFunnelStage, moveFunnelStage }: any) {
 
   const [selectedMetric, setSelectedMetric] = useState('leads');
   const [selectedPlatform, setSelectedPlatform] = useState<Platform | 'all'>('all');
@@ -1142,9 +1151,8 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
 
   const platformTitle = "Origem dos Leads";
 
-  // Funil de Vendas a partir das etapas do funil de oportunidades, respeitando o filtro de data.
-  // Conta os leads CRIADOS no período; cada etapa = quantos avançaram até ali ou além
-  // (funil cumulativo, pela posição da etapa). Leads em etapa de perda saem da progressão.
+  // Funil de Vendas: coorte por data (padrão de mercado). Dos leads CRIADOS no período,
+  // cada etapa mostra quantos ENTRARAM nela (via lead_stage_history). Respeita o filtro de data.
   const funnelData = useMemo(() => {
     const byId = new Map<string, any>((funnelStages || []).map((s: any) => [s.id, s]));
     const savedOrder = (funnelOrder || []).filter((id: string) => byId.has(id));
@@ -1157,36 +1165,14 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
       .map((id: string) => byId.get(id))
       .filter(Boolean);
 
-    // Leads criados dentro do período selecionado
-    const rangeStart = periods?.[0]?.start;
-    const rangeEnd = periods?.[periods.length - 1]?.end;
-    const periodLeadIds = new Set<string>(
-      (funnelLeads || [])
-        .filter((l: any) => {
-          if (!l.created_at || !rangeStart || !rangeEnd) return false;
-          const d = parseISO(l.created_at);
-          return d >= rangeStart && d <= rangeEnd;
-        })
-        .map((l: any) => l.id)
+    const countByStage = new Map<string, number>(
+      (funnelCohort || []).map((r: any) => [r.stage_id, Number(r.leads) || 0])
     );
-
-    // Etapa mais avançada de cada lead do período (via ticket). Etapas de perda saem do funil.
-    const LOST = new Set(['perdido', 'faltou_cancelou']);
-    const leadFurthest = new Map<string, { pos: number; slug: string }>();
-    (funnelTickets || []).forEach((t: any) => {
-      if (!periodLeadIds.has(t.lead_id)) return;
-      const st = byId.get(t.stage_id);
-      if (!st) return;
-      const cur = leadFurthest.get(t.lead_id);
-      if (!cur || st.position > cur.pos) leadFurthest.set(t.lead_id, { pos: st.position, slug: st.slug });
-    });
-    const positions: number[] = [];
-    leadFurthest.forEach((v) => { if (!LOST.has(v.slug)) positions.push(v.pos); });
 
     const base = visibleStages.map((stage: any, idx: number) => ({
       id: stage.id,
       name: stage.name,
-      value: positions.filter((p) => p >= stage.position).length,
+      value: countByStage.get(stage.id) || 0,
       color: FUNNEL_PALETTE[idx % FUNNEL_PALETTE.length],
     }));
 
@@ -1196,7 +1182,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
         ? 'Leads no período'
         : `${((stage.value / (arr[idx - 1].value || 1)) * 100).toFixed(1)}% de conversão`,
     }));
-  }, [funnelStages, funnelTickets, funnelLeads, funnelOrder, funnelHidden, periods]);
+  }, [funnelStages, funnelCohort, funnelOrder, funnelHidden]);
 
   return (
     <div className="space-y-6">

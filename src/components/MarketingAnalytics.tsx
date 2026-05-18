@@ -766,6 +766,7 @@ export function MarketingAnalytics() {
                 moveMetric={(id: string, dir) => moveMetric(id, dir as any, 'dashboard')}
                 funnelStages={stages}
                 funnelTickets={funnelTickets}
+                funnelLeads={leads}
                 funnelOrder={funnelStagesOrder}
                 funnelHidden={funnelHiddenStages}
                 toggleFunnelStage={toggleFunnelStage}
@@ -1005,7 +1006,7 @@ function FunnelConfigButton({ stages, order, hidden, toggleStage, moveStage }: a
   );
 }
 
-function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, isComparing, visibleMetrics, metricsOrder, toggleMetric, moveMetric, funnelStages, funnelTickets, funnelOrder, funnelHidden, toggleFunnelStage, moveFunnelStage }: any) {
+function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, isComparing, visibleMetrics, metricsOrder, toggleMetric, moveMetric, funnelStages, funnelTickets, funnelLeads, funnelOrder, funnelHidden, toggleFunnelStage, moveFunnelStage }: any) {
 
   const [selectedMetric, setSelectedMetric] = useState('leads');
   const [selectedPlatform, setSelectedPlatform] = useState<Platform | 'all'>('all');
@@ -1141,8 +1142,9 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
 
   const platformTitle = "Origem dos Leads";
 
-  // Funil de Vendas montado a partir das etapas do funil de oportunidades (snapshot atual).
-  // O valor de cada etapa = nº de leads atualmente naquela etapa (tickets por stage_id).
+  // Funil de Vendas a partir das etapas do funil de oportunidades, respeitando o filtro de data.
+  // Conta os leads CRIADOS no período; cada etapa = quantos avançaram até ali ou além
+  // (funil cumulativo, pela posição da etapa). Leads em etapa de perda saem da progressão.
   const funnelData = useMemo(() => {
     const byId = new Map<string, any>((funnelStages || []).map((s: any) => [s.id, s]));
     const savedOrder = (funnelOrder || []).filter((id: string) => byId.has(id));
@@ -1150,22 +1152,51 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
       .filter((s: any) => !savedOrder.includes(s.id))
       .sort((a: any, b: any) => a.position - b.position)
       .map((s: any) => s.id);
-    const orderedIds = [...savedOrder, ...missing].filter((id: string) => !(funnelHidden || []).includes(id));
+    const visibleStages = [...savedOrder, ...missing]
+      .filter((id: string) => !(funnelHidden || []).includes(id))
+      .map((id: string) => byId.get(id))
+      .filter(Boolean);
 
-    const base = orderedIds.map((id: string, idx: number) => ({
-      id,
-      name: byId.get(id)?.name || '—',
-      value: (funnelTickets || []).filter((t: any) => t.stage_id === id).length,
+    // Leads criados dentro do período selecionado
+    const rangeStart = periods?.[0]?.start;
+    const rangeEnd = periods?.[periods.length - 1]?.end;
+    const periodLeadIds = new Set<string>(
+      (funnelLeads || [])
+        .filter((l: any) => {
+          if (!l.created_at || !rangeStart || !rangeEnd) return false;
+          const d = parseISO(l.created_at);
+          return d >= rangeStart && d <= rangeEnd;
+        })
+        .map((l: any) => l.id)
+    );
+
+    // Etapa mais avançada de cada lead do período (via ticket). Etapas de perda saem do funil.
+    const LOST = new Set(['perdido', 'faltou_cancelou']);
+    const leadFurthest = new Map<string, { pos: number; slug: string }>();
+    (funnelTickets || []).forEach((t: any) => {
+      if (!periodLeadIds.has(t.lead_id)) return;
+      const st = byId.get(t.stage_id);
+      if (!st) return;
+      const cur = leadFurthest.get(t.lead_id);
+      if (!cur || st.position > cur.pos) leadFurthest.set(t.lead_id, { pos: st.position, slug: st.slug });
+    });
+    const positions: number[] = [];
+    leadFurthest.forEach((v) => { if (!LOST.has(v.slug)) positions.push(v.pos); });
+
+    const base = visibleStages.map((stage: any, idx: number) => ({
+      id: stage.id,
+      name: stage.name,
+      value: positions.filter((p) => p >= stage.position).length,
       color: FUNNEL_PALETTE[idx % FUNNEL_PALETTE.length],
     }));
 
     return base.map((stage, idx, arr) => ({
       ...stage,
       subLabel: idx === 0
-        ? 'Total de leads'
+        ? 'Leads no período'
         : `${((stage.value / (arr[idx - 1].value || 1)) * 100).toFixed(1)}% de conversão`,
     }));
-  }, [funnelStages, funnelTickets, funnelOrder, funnelHidden]);
+  }, [funnelStages, funnelTickets, funnelLeads, funnelOrder, funnelHidden, periods]);
 
   return (
     <div className="space-y-6">

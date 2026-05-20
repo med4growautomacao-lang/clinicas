@@ -451,7 +451,7 @@ export function Appointments() {
         const { error } = await supabase.from('doctors').update({ blocked_times: newBlockedTimes }).eq('id', doctor.id);
         if (error) throw error;
       }
-      await refetchDoctors(true);
+      await refetchDoctors(true, true);
       setShowBlockModal(false);
     } catch (e: any) {
       setError(e.message || 'Erro ao bloquear horário.');
@@ -475,7 +475,7 @@ export function Appointments() {
         const { error } = await supabase.from('doctors').update({ blocked_times: newBlockedTimes }).eq('id', doctor.id);
         if (error) throw error;
       }
-      await refetchDoctors(true);
+      await refetchDoctors(true, true);
     } catch (e: any) {
       setError(e.message || 'Erro ao remover bloqueio.');
     }

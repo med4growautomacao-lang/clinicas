@@ -273,7 +273,7 @@ export function Appointments() {
       .flatMap(d =>
         (d.blocked_times || [])
           .filter((bt: any) => bt.date === selectedDay)
-          .map((bt: any) => ({ ...bt, doctorName: d.name }))
+          .map((bt: any) => ({ ...bt, doctorId: d.id, doctorName: d.name }))
       ).sort((a: any, b: any) => a.start.localeCompare(b.start));
   }, [doctors, selectedDay, filter]);
 
@@ -457,6 +457,27 @@ export function Appointments() {
       setError(e.message || 'Erro ao bloquear horário.');
     } finally {
       setSubmittingBlock(false);
+    }
+  };
+
+  const handleDeleteBlock = async (doctorId: string, type: 'day' | 'time', date: string, start?: string, end?: string) => {
+    const doctor = doctors.find(d => d.id === doctorId);
+    if (!doctor) return;
+    try {
+      if (type === 'day') {
+        const newDaysOff = (doctor.days_off || []).filter((d: string) => d !== date);
+        const { error } = await supabase.from('doctors').update({ days_off: newDaysOff }).eq('id', doctor.id);
+        if (error) throw error;
+      } else {
+        const newBlockedTimes = (doctor.blocked_times || []).filter((bt: any) =>
+          !(bt.date === date && bt.start === start && bt.end === end)
+        );
+        const { error } = await supabase.from('doctors').update({ blocked_times: newBlockedTimes }).eq('id', doctor.id);
+        if (error) throw error;
+      }
+      await refetchDoctors(true);
+    } catch (e: any) {
+      setError(e.message || 'Erro ao remover bloqueio.');
     }
   };
 
@@ -739,7 +760,7 @@ export function Appointments() {
                           return (
                             <React.Fragment key={`bl-${i}-${bl.date}-${bl.doctorId}`}>
                               {dayHeader}
-                              <motion.tr initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(i, 15) * 0.02 }} className="bg-rose-50/40">
+                              <motion.tr initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(i, 15) * 0.02 }} className="bg-rose-50/40 group hover:bg-rose-100/30 transition-all">
                                 <td className="px-6 py-4">
                                   <div className="flex items-center gap-3">
                                     <div className="w-10 h-10 rounded-lg bg-rose-100 flex items-center justify-center text-rose-400 text-lg">⊘</div>
@@ -772,7 +793,15 @@ export function Appointments() {
                                     Bloqueado
                                   </span>
                                 </td>
-                                <td className="px-6 py-4" />
+                                <td className="px-6 py-4 text-right">
+                                  <button
+                                    onClick={() => handleDeleteBlock(bl.doctorId, bl.type, bl.date, bl.start, bl.end)}
+                                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors opacity-0 group-hover:opacity-100"
+                                    title="Remover bloqueio"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </td>
                               </motion.tr>
                             </React.Fragment>
                           );
@@ -1093,20 +1122,34 @@ export function Appointments() {
                 {(selectedDayBlockedDoctors.length > 0 || selectedDayBlockedTimes.length > 0) && (
                   <div className="space-y-2 pb-1">
                     {selectedDayBlockedDoctors.map(d => (
-                      <div key={d.id} className="flex items-center gap-3 px-4 py-3 bg-rose-50 border border-rose-200 rounded-xl">
+                      <div key={d.id} className="flex items-center gap-3 px-4 py-3 bg-rose-50 border border-rose-200 rounded-xl group">
                         <div className="w-8 h-8 flex items-center justify-center rounded-full bg-rose-100 text-rose-500 font-black text-sm shrink-0">⊘</div>
-                        <div>
+                        <div className="flex-1 min-w-0">
                           <p className="text-sm font-bold text-rose-700">Dia todo — {d.name}</p>
                         </div>
+                        <button
+                          onClick={() => handleDeleteBlock(d.id, 'day', selectedDay!)}
+                          className="p-1.5 text-rose-300 hover:text-rose-600 hover:bg-rose-100 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                          title="Remover bloqueio"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
                       </div>
                     ))}
                     {selectedDayBlockedTimes.map((bt: any, i: number) => (
-                      <div key={i} className="flex items-center gap-3 px-4 py-3 bg-rose-50 border border-rose-200 rounded-xl">
+                      <div key={i} className="flex items-center gap-3 px-4 py-3 bg-rose-50 border border-rose-200 rounded-xl group">
                         <div className="w-8 h-8 flex items-center justify-center rounded-full bg-rose-100 text-rose-500 font-black text-sm shrink-0">⊘</div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-bold text-rose-700">{bt.name}</p>
                           <p className="text-xs text-rose-400 font-medium">{bt.start} – {bt.end}</p>
                         </div>
+                        <button
+                          onClick={() => handleDeleteBlock(bt.doctorId, 'time', bt.date, bt.start, bt.end)}
+                          className="p-1.5 text-rose-300 hover:text-rose-600 hover:bg-rose-100 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                          title="Remover bloqueio"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
                       </div>
                     ))}
                     {selectedDayAppointments.length > 0 && (

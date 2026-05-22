@@ -110,7 +110,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
 
   // Modal: nova clínica
   const [showClinicModal, setShowClinicModal] = useState(false);
-  const [clinicForm, setClinicForm] = useState<{ name: string; plan: string; category: string; ownerName: string; ownerEmail: string; ownerPassword: string; feature_followup: boolean; feature_ia: boolean; meta_status: ChannelStatus; google_status: ChannelStatus; site_status: ChannelStatus; forms_status: ChannelStatus }>({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '', feature_followup: true, feature_ia: true, meta_status: 'none', google_status: 'none', site_status: 'none', forms_status: 'none' });
+  const [clinicForm, setClinicForm] = useState<{ name: string; plan: string; category: string; ownerName: string; ownerEmail: string; ownerPassword: string; feature_followup: boolean; feature_ia: boolean; meta_status: ChannelStatus; google_status: ChannelStatus; site_status: ChannelStatus; forms_status: ChannelStatus; trafficManagerId: string }>({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '', feature_followup: true, feature_ia: true, meta_status: 'none', google_status: 'none', site_status: 'none', forms_status: 'none', trafficManagerId: '' });
   const [categoryFilter, setCategoryFilter] = useState('');
   const [memberFilters, setMemberFilters] = useState<Record<string, string>>({});
   const [inactiveFilter, setInactiveFilter] = useState<string>(''); // '' | 'any' | 'meta' | 'google' | 'site' | 'forms' | 'whatsapp'
@@ -254,13 +254,22 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
       p_owner_email: clinicForm.ownerEmail.trim(),
       p_owner_password: clinicForm.ownerPassword,
     });
-    if (!error && clinicForm.category) {
-      await supabase.from('clinics').update({ category: clinicForm.category }).eq('name', clinicForm.name.trim()).eq('organization_id', profile?.organization_id || '');
+    if (!error) {
+      if (clinicForm.category && newClinic) {
+        await supabase.from('clinics').update({ category: clinicForm.category }).eq('id', newClinic);
+      }
+      if (clinicForm.trafficManagerId && newClinic) {
+        await supabase.from('org_clinic_assignments').insert({
+          clinic_id: newClinic,
+          org_user_id: clinicForm.trafficManagerId,
+          function: 'gestor_trafego'
+        });
+      }
     }
     setClinicSaving(false);
     if (error) { setClinicError(error.message); return; }
     setShowClinicModal(false);
-    setClinicForm({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '', feature_followup: true, feature_ia: true, meta_status: 'none', google_status: 'none', site_status: 'none', forms_status: 'none' });
+    setClinicForm({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '', feature_followup: true, feature_ia: true, meta_status: 'none', google_status: 'none', site_status: 'none', forms_status: 'none', trafficManagerId: '' });
     fetchClinics();
   };
 
@@ -281,10 +290,27 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
       })
       .eq('id', editClinicTarget.id);
 
+    if (!error) {
+      // Remove any existing gestor_trafego assignment
+      await supabase.from('org_clinic_assignments')
+        .delete()
+        .eq('clinic_id', editClinicTarget.id)
+        .eq('function', 'gestor_trafego');
+
+      // Add new one if selected
+      if (clinicForm.trafficManagerId) {
+        await supabase.from('org_clinic_assignments').insert({
+          clinic_id: editClinicTarget.id,
+          org_user_id: clinicForm.trafficManagerId,
+          function: 'gestor_trafego'
+        });
+      }
+    }
+
     setClinicSaving(false);
     if (error) { setClinicError(error.message); return; }
     setEditClinicTarget(null);
-    setClinicForm({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '', feature_followup: true, feature_ia: true, meta_status: 'none', google_status: 'none', site_status: 'none', forms_status: 'none' });
+    setClinicForm({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '', feature_followup: true, feature_ia: true, meta_status: 'none', google_status: 'none', site_status: 'none', forms_status: 'none', trafficManagerId: '' });
     fetchClinics();
   };
 
@@ -797,6 +823,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                                       onClick={e => {
                                         e.stopPropagation();
                                         setEditClinicTarget(clinic);
+                                        const trafficMember = clinicMembers.find(m => m.clinic_id === clinic.id && m.function === 'gestor_trafego');
                                         setClinicForm({
                                           name: clinic.name,
                                           plan: clinic.plan,
@@ -808,6 +835,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                                           google_status: clinic.google_status || 'none',
                                           site_status: clinic.site_status || 'none',
                                           forms_status: clinic.forms_status || 'none',
+                                          trafficManagerId: trafficMember?.org_user_id || '',
                                         });
                                         setOpenMenuId(null);
                                       }}
@@ -1022,6 +1050,19 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                     ))}
                   </select>
                 </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1">Gestor de Tráfego Responsável</label>
+                  <select
+                    value={clinicForm.trafficManagerId}
+                    onChange={e => setClinicForm(f => ({ ...f, trafficManagerId: e.target.value }))}
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white text-slate-700"
+                  >
+                    <option value="">— Nenhum —</option>
+                    {orgUsers.map(u => (
+                      <option key={u.id} value={u.id}>{u.full_name || u.email}</option>
+                    ))}
+                  </select>
+                </div>
                 {editClinicTarget && (
                   <div className="pt-1 border-t border-slate-100">
                     <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Funcionalidades</p>
@@ -1104,7 +1145,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                 )}
                 {!editClinicTarget && (
                   <div className="pt-1 border-t border-slate-100">
-                    <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Gestor Responsável</p>
+                    <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Administrador da Clínica</p>
                     <div className="space-y-2">
                       <input value={clinicForm.ownerName} onChange={e => setClinicForm(f => ({ ...f, ownerName: e.target.value }))}
                         className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500" placeholder="Nome completo" />

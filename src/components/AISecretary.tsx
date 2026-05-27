@@ -1729,6 +1729,7 @@ function ConfigView() {
       </div>
       {subTab === "handoff" && <div className="flex-1 min-h-0"><HandoffView /></div>}
       <div className={cn("grid grid-cols-1 md:grid-cols-2 gap-8 flex-1", subTab !== "config" && "hidden")}>
+      <div className="space-y-8">
       <Card className="border border-slate-200 shadow-sm">
         <CardHeader className="pb-4">
           <CardTitle className="text-xl font-bold text-slate-900 flex items-center gap-3">
@@ -1761,6 +1762,46 @@ function ConfigView() {
           </Button>
         </CardContent>
       </Card>
+
+      <Card className="border border-slate-200 shadow-sm">
+        <CardHeader className="pb-4">
+          <CardTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
+            <Clock className="w-5 h-5 text-teal-600" />
+            Tempo de Aguardo da IA
+          </CardTitle>
+          <CardDescription className="text-slate-500 font-medium">
+            Segundos que a IA aguarda recebendo mensagens em rajada antes de elaborar uma resposta.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">
+              Tempo de aguardo (segundos)
+            </label>
+            <div className="flex items-center gap-3">
+              <input
+                type="number"
+                min={0}
+                max={300}
+                step={1}
+                value={localConfig.response_wait_seconds ?? 0}
+                onChange={(e) => {
+                  const raw = parseInt(e.target.value, 10);
+                  const v = Number.isNaN(raw) ? 0 : Math.max(0, Math.min(300, raw));
+                  setConfig({ response_wait_seconds: v });
+                }}
+                onBlur={() => { if (isDirty) updateAI(localConfig); }}
+                className="w-32 px-3 py-2 border border-slate-200 rounded-lg font-mono text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none"
+              />
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">seg</span>
+            </div>
+            <p className="text-[11px] text-slate-400 pl-1">
+              Use <strong>0</strong> para responder imediatamente. Valores maiores agrupam mensagens enviadas em sequência (ex: 10 seg) antes de a IA processar uma resposta única.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+      </div>
 
       <div className="space-y-8">
         <Card className="border border-red-100 shadow-sm md:col-span-2">

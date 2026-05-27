@@ -1134,6 +1134,7 @@ export interface AIConfig {
   test_mode_enabled: boolean;
   test_numbers: string[];
   test_reset_phrase: string;
+  response_wait_seconds: number;
   updated_at: string;
 }
 

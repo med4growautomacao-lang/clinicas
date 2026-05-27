@@ -31,6 +31,9 @@ export interface Doctor {
   working_hours?: any;
   consultation_duration?: number;
   slot_step?: number | null;
+  min_notice_minutes?: number;
+  buffer_before_minutes?: number;
+  buffer_after_minutes?: number;
   days_off?: string[];
   blocked_times?: { date: string; start: string; end: string }[];
 }

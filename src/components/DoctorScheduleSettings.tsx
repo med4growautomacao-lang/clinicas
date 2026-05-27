@@ -47,6 +47,25 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
 
   const [duration, setDuration] = useState<number>(doctor.consultation_duration || 30);
   const [slotStep, setSlotStep] = useState<number | null>(doctor.slot_step ?? null);
+  const [bufferBefore, setBufferBefore] = useState<number>(doctor.buffer_before_minutes ?? 0);
+  const [bufferAfter, setBufferAfter] = useState<number>(doctor.buffer_after_minutes ?? 0);
+  const [minNoticeMinutes, setMinNoticeMinutes] = useState<number>(doctor.min_notice_minutes ?? 0);
+  const [minNoticeUnit, setMinNoticeUnit] = useState<'minutos' | 'horas' | 'dias'>(() => {
+    const m = doctor.min_notice_minutes ?? 0;
+    if (m === 0) return 'horas';
+    if (m % 1440 === 0) return 'dias';
+    if (m % 60 === 0) return 'horas';
+    return 'minutos';
+  });
+  const minNoticeValue = (() => {
+    if (minNoticeUnit === 'dias') return Math.floor(minNoticeMinutes / 1440);
+    if (minNoticeUnit === 'horas') return Math.floor(minNoticeMinutes / 60);
+    return minNoticeMinutes;
+  })();
+  const setMinNoticeFromUnit = (val: number, unit: 'minutos' | 'horas' | 'dias') => {
+    const mult = unit === 'dias' ? 1440 : unit === 'horas' ? 60 : 1;
+    setMinNoticeMinutes(Math.max(0, val) * mult);
+  };
   const [daysOff, setDaysOff] = useState<string[]>(doctor.days_off || []);
   const [newDayOff, setNewDayOff] = useState('');
 
@@ -105,6 +124,9 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
           working_hours: workingHours,
           consultation_duration: duration,
           slot_step: slotStep,
+          buffer_before_minutes: bufferBefore,
+          buffer_after_minutes: bufferAfter,
+          min_notice_minutes: minNoticeMinutes,
           days_off: daysOff,
           blocked_times: blockedTimes,
         })
@@ -244,6 +266,81 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
                 </div>
                 <p className="text-xs text-slate-400 font-medium mt-3">
                   De quanto em quanto tempo uma nova vaga é oferecida. Ex: duração 60min + intervalo 30min → 09:00, 09:30, 10:00... Cada vaga continua durando {duration} min.
+                </p>
+              </div>
+
+              <div className="mb-8 p-5 bg-white rounded-xl border border-slate-200 shadow-sm">
+                <label className="block text-sm font-bold text-slate-700 mb-3">Buffer antes da consulta</label>
+                <div className="flex flex-wrap gap-3">
+                  {[0, 5, 10, 15, 30].map(min => (
+                    <button
+                      key={min}
+                      onClick={() => setBufferBefore(min)}
+                      className={cn(
+                        "px-4 py-2 rounded-lg font-semibold text-sm border transition-all",
+                        bufferBefore === min
+                          ? "bg-teal-600 border-teal-600 text-white shadow-md shadow-teal-100"
+                          : "bg-white border-slate-200 text-slate-600 hover:border-teal-300 hover:bg-teal-50"
+                      )}
+                    >
+                      {min === 0 ? 'Sem buffer' : `${min} min`}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-slate-400 font-medium mt-3">
+                  Tempo reservado antes de cada consulta (revisão de prontuário, preparo). Não pode haver outro agendamento dentro desse intervalo.
+                </p>
+              </div>
+
+              <div className="mb-8 p-5 bg-white rounded-xl border border-slate-200 shadow-sm">
+                <label className="block text-sm font-bold text-slate-700 mb-3">Buffer após a consulta</label>
+                <div className="flex flex-wrap gap-3">
+                  {[0, 5, 10, 15, 30].map(min => (
+                    <button
+                      key={min}
+                      onClick={() => setBufferAfter(min)}
+                      className={cn(
+                        "px-4 py-2 rounded-lg font-semibold text-sm border transition-all",
+                        bufferAfter === min
+                          ? "bg-teal-600 border-teal-600 text-white shadow-md shadow-teal-100"
+                          : "bg-white border-slate-200 text-slate-600 hover:border-teal-300 hover:bg-teal-50"
+                      )}
+                    >
+                      {min === 0 ? 'Sem buffer' : `${min} min`}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-slate-400 font-medium mt-3">
+                  Tempo reservado depois de cada consulta (anotações, próximo paciente). Não pode haver outro agendamento dentro desse intervalo.
+                </p>
+              </div>
+
+              <div className="mb-8 p-5 bg-white rounded-xl border border-slate-200 shadow-sm">
+                <label className="block text-sm font-bold text-slate-700 mb-3">Aviso mínimo</label>
+                <div className="flex flex-wrap items-center gap-3">
+                  <input
+                    type="number"
+                    min={0}
+                    value={minNoticeValue}
+                    onChange={e => setMinNoticeFromUnit(parseInt(e.target.value || '0', 10), minNoticeUnit)}
+                    className="w-28 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-teal-200 focus:outline-none"
+                  />
+                  <select
+                    value={minNoticeUnit}
+                    onChange={e => {
+                      const u = e.target.value as 'minutos' | 'horas' | 'dias';
+                      setMinNoticeUnit(u);
+                      setMinNoticeFromUnit(minNoticeValue, u);
+                    }}
+                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-teal-200 focus:outline-none"
+                  >
+                    <option value="minutos">Minutos</option>
+                    <option value="horas">Horas</option>
+                    <option value="dias">Dias</option>
+                  </select>
+                </div>
+                <p className="text-xs text-slate-400 font-medium mt-3">
+                  Antecedência mínima exigida para um novo agendamento. Slots dentro desse intervalo a partir de agora não são oferecidos. Use 0 para desativar.
                 </p>
               </div>
 

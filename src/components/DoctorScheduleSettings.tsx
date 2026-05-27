@@ -227,7 +227,7 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
                   >
                     Igual à duração
                   </button>
-                  {[15, 20, 30, 45, 60].map(min => (
+                  {[15, 20, 30, 45, 60, 75, 90].map(min => (
                     <button
                       key={min}
                       onClick={() => setSlotStep(min)}

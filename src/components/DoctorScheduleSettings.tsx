@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { X, Save, Clock, CalendarDays, Plus, Trash2, Loader2, AlertCircle } from "lucide-react";
+import { X, Save, Clock, CalendarDays, Plus, Trash2, Loader2, AlertCircle, SlidersHorizontal } from "lucide-react";
 import { Button } from "./ui/button";
 import { motion } from "framer-motion";
 import { Doctor } from "../hooks/useSupabase";
@@ -25,7 +25,7 @@ const WEEKDAYS = [
 ];
 
 export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorScheduleSettingsProps) {
-  const [activeTab, setActiveTab] = useState<'hours' | 'days' | 'blocked_times'>('hours');
+  const [activeTab, setActiveTab] = useState<'availability' | 'limits' | 'days' | 'blocked_times'>('availability');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -174,13 +174,22 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
         {/* Tabs */}
         <div className="flex bg-white border-b border-slate-100 px-6 pt-4 gap-6">
           <button
-            onClick={() => setActiveTab('hours')}
+            onClick={() => setActiveTab('availability')}
             className={cn(
               "pb-4 font-semibold text-sm border-b-2 transition-colors flex items-center gap-2",
-              activeTab === 'hours' ? "border-teal-600 text-teal-800" : "border-transparent text-slate-500 hover:text-slate-700"
+              activeTab === 'availability' ? "border-teal-600 text-teal-800" : "border-transparent text-slate-500 hover:text-slate-700"
             )}
           >
-            <Clock className="w-4 h-4" /> Horários e Turnos
+            <Clock className="w-4 h-4" /> Disponibilidade
+          </button>
+          <button
+            onClick={() => setActiveTab('limits')}
+            className={cn(
+              "pb-4 font-semibold text-sm border-b-2 transition-colors flex items-center gap-2",
+              activeTab === 'limits' ? "border-teal-600 text-teal-800" : "border-transparent text-slate-500 hover:text-slate-700"
+            )}
+          >
+            <SlidersHorizontal className="w-4 h-4" /> Limites
           </button>
           <button
             onClick={() => setActiveTab('days')}
@@ -211,8 +220,77 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
             </div>
           )}
 
-          {/* ── Horários e Turnos ── */}
-          {activeTab === 'hours' && (
+          {/* ── Disponibilidade (turnos semanais) ── */}
+          {activeTab === 'availability' && (
+            <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}>
+              <div className="space-y-4">
+                <h4 className="font-bold text-slate-800 text-sm pl-1 uppercase tracking-wider">Turnos Semanais</h4>
+                {WEEKDAYS.map(day => {
+                  const shifts = workingHours[day.id] || [];
+                  const isActive = shifts.length > 0;
+                  return (
+                    <div key={day.id} className="p-4 bg-white rounded-xl border border-slate-200 shadow-sm transition-all hover:border-slate-300">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-3">
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              className="sr-only peer"
+                              checked={isActive}
+                              onChange={(e) => {
+                                if (e.target.checked) handleAddShift(day.id);
+                                else setWorkingHours(prev => ({ ...prev, [day.id]: [] }));
+                              }}
+                            />
+                            <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-500"></div>
+                          </label>
+                          <span className={cn("font-bold text-sm", isActive ? "text-slate-900" : "text-slate-400")}>{day.label}</span>
+                        </div>
+                        {isActive && (
+                          <button
+                            onClick={() => handleAddShift(day.id)}
+                            className="text-xs font-bold text-teal-600 bg-teal-50 px-3 py-1.5 rounded-md hover:bg-teal-100 transition-colors flex items-center gap-1.5"
+                          >
+                            <Plus className="w-3.5 h-3.5" /> Adicionar Turno
+                          </button>
+                        )}
+                      </div>
+                      {isActive && shifts.length > 0 && (
+                        <div className="space-y-3 mt-3 pl-14">
+                          {shifts.map((shift, idx) => (
+                            <div key={idx} className="flex items-center gap-3">
+                              <input
+                                type="time"
+                                value={shift.start}
+                                onChange={(e) => handleUpdateShift(day.id, idx, 'start', e.target.value)}
+                                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-teal-200 focus:outline-none"
+                              />
+                              <span className="text-slate-400 font-medium text-xs">até</span>
+                              <input
+                                type="time"
+                                value={shift.end}
+                                onChange={(e) => handleUpdateShift(day.id, idx, 'end', e.target.value)}
+                                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-teal-200 focus:outline-none"
+                              />
+                              <button
+                                onClick={() => handleRemoveShift(day.id, idx)}
+                                className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors ml-2"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </motion.div>
+          )}
+
+          {/* ── Limites (duração, intervalo, buffers, aviso mínimo) ── */}
+          {activeTab === 'limits' && (
             <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}>
               <div className="mb-8 p-5 bg-white rounded-xl border border-slate-200 shadow-sm">
                 <label className="block text-sm font-bold text-slate-700 mb-3">Duração Padrão da Consulta</label>
@@ -342,70 +420,6 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
                 <p className="text-xs text-slate-400 font-medium mt-3">
                   Antecedência mínima exigida para um novo agendamento. Slots dentro desse intervalo a partir de agora não são oferecidos. Use 0 para desativar.
                 </p>
-              </div>
-
-              <div className="space-y-4">
-                <h4 className="font-bold text-slate-800 text-sm pl-1 uppercase tracking-wider">Turnos Semanais</h4>
-                {WEEKDAYS.map(day => {
-                  const shifts = workingHours[day.id] || [];
-                  const isActive = shifts.length > 0;
-                  return (
-                    <div key={day.id} className="p-4 bg-white rounded-xl border border-slate-200 shadow-sm transition-all hover:border-slate-300">
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center gap-3">
-                          <label className="relative inline-flex items-center cursor-pointer">
-                            <input
-                              type="checkbox"
-                              className="sr-only peer"
-                              checked={isActive}
-                              onChange={(e) => {
-                                if (e.target.checked) handleAddShift(day.id);
-                                else setWorkingHours(prev => ({ ...prev, [day.id]: [] }));
-                              }}
-                            />
-                            <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-500"></div>
-                          </label>
-                          <span className={cn("font-bold text-sm", isActive ? "text-slate-900" : "text-slate-400")}>{day.label}</span>
-                        </div>
-                        {isActive && (
-                          <button
-                            onClick={() => handleAddShift(day.id)}
-                            className="text-xs font-bold text-teal-600 bg-teal-50 px-3 py-1.5 rounded-md hover:bg-teal-100 transition-colors flex items-center gap-1.5"
-                          >
-                            <Plus className="w-3.5 h-3.5" /> Adicionar Turno
-                          </button>
-                        )}
-                      </div>
-                      {isActive && shifts.length > 0 && (
-                        <div className="space-y-3 mt-3 pl-14">
-                          {shifts.map((shift, idx) => (
-                            <div key={idx} className="flex items-center gap-3">
-                              <input
-                                type="time"
-                                value={shift.start}
-                                onChange={(e) => handleUpdateShift(day.id, idx, 'start', e.target.value)}
-                                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-teal-200 focus:outline-none"
-                              />
-                              <span className="text-slate-400 font-medium text-xs">até</span>
-                              <input
-                                type="time"
-                                value={shift.end}
-                                onChange={(e) => handleUpdateShift(day.id, idx, 'end', e.target.value)}
-                                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-teal-200 focus:outline-none"
-                              />
-                              <button
-                                onClick={() => handleRemoveShift(day.id, idx)}
-                                className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors ml-2"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
               </div>
             </motion.div>
           )}

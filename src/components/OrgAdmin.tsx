@@ -24,6 +24,7 @@ interface Clinic {
   google_status?: ChannelStatus;
   site_status?: ChannelStatus;
   forms_status?: ChannelStatus;
+  is_active?: boolean | null;
 }
 
 interface ClinicUser {
@@ -114,6 +115,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
   const [categoryFilter, setCategoryFilter] = useState('');
   const [memberFilters, setMemberFilters] = useState<Record<string, string>>({});
   const [inactiveFilter, setInactiveFilter] = useState<string>(''); // '' | 'any' | 'meta' | 'google' | 'site' | 'forms' | 'whatsapp'
+  const [statusFilter, setStatusFilter] = useState<'active' | 'disabled' | 'all'>('active');
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [clinicSaving, setClinicSaving] = useState(false);
   const [clinicError, setClinicError] = useState('');
@@ -144,6 +146,12 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
   const [responsibleForm, setResponsibleForm] = useState<Record<string, string>>({});
   const [responsibleSaving, setResponsibleSaving] = useState(false);
 
+  // Modal: confirmação de exclusão de clínica
+  const [deleteClinicTarget, setDeleteClinicTarget] = useState<Clinic | null>(null);
+  const [deleteConfirmName, setDeleteConfirmName] = useState('');
+  const [deleteSaving, setDeleteSaving] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+
   useEffect(() => {
     if (!openDropdown && !openMenuId) return;
     const close = () => { setOpenDropdown(null); setOpenMenuId(null); };
@@ -161,7 +169,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
     if (canSeeAll) {
       const { data } = await supabase
         .from("clinics")
-        .select("id, name, plan, logo_url, organization_id, category, features, meta_status, google_status, site_status, forms_status")
+        .select("id, name, plan, logo_url, organization_id, category, features, meta_status, google_status, site_status, forms_status, is_active")
         .eq("organization_id", profile.organization_id)
         .order("name");
       clinicsData = data || [];
@@ -175,7 +183,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
       if (assignedIds.length > 0) {
         const { data } = await supabase
           .from("clinics")
-          .select("id, name, plan, logo_url, organization_id, category, features, meta_status, google_status, site_status, forms_status")
+          .select("id, name, plan, logo_url, organization_id, category, features, meta_status, google_status, site_status, forms_status, is_active")
           .in("id", assignedIds)
           .order("name");
         clinicsData = data || [];
@@ -225,6 +233,31 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
     const newFeatures = { ...current, [feature]: current[feature] === false ? true : false };
     await supabase.from('clinics').update({ features: newFeatures }).eq('id', clinic.id);
     setClinics(prev => prev.map(c => c.id === clinic.id ? { ...c, features: newFeatures } : c));
+  };
+
+  const handleToggleClinicActive = async (clinic: Clinic) => {
+    const newValue = !(clinic.is_active ?? true);
+    const { error } = await supabase.from('clinics').update({ is_active: newValue }).eq('id', clinic.id);
+    if (!error) {
+      setClinics(prev => prev.map(c => c.id === clinic.id ? { ...c, is_active: newValue } : c));
+    }
+    setOpenMenuId(null);
+  };
+
+  const handleDeleteClinic = async () => {
+    if (!deleteClinicTarget) return;
+    if (deleteConfirmName !== deleteClinicTarget.name) return;
+    setDeleteSaving(true);
+    setDeleteError('');
+    const { error } = await supabase.rpc('delete_clinic_cascade', { p_clinic_id: deleteClinicTarget.id });
+    setDeleteSaving(false);
+    if (error) {
+      setDeleteError(error.message);
+      return;
+    }
+    setClinics(prev => prev.filter(c => c.id !== deleteClinicTarget.id));
+    setDeleteClinicTarget(null);
+    setDeleteConfirmName('');
   };
 
   const handleSaveOrgSettings = async () => {
@@ -592,6 +625,28 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                   />
                 );
               })()}
+              {(() => {
+                const statusCounts = {
+                  active:   clinics.filter(c => c.is_active !== false).length,
+                  disabled: clinics.filter(c => c.is_active === false).length,
+                  all:      clinics.length,
+                };
+                const statusLabels: Record<string, string> = { active: 'Ativos', disabled: 'Desativados', all: 'Todos' };
+                return (
+                  <DropdownFilter
+                    id="status"
+                    label={statusLabels[statusFilter]}
+                    active={statusFilter !== 'active'}
+                    selected={statusFilter}
+                    options={[
+                      { value: 'active',   label: 'Ativos',      count: statusCounts.active },
+                      { value: 'disabled', label: 'Desativados', count: statusCounts.disabled },
+                      { value: 'all',      label: 'Todos',       count: statusCounts.all },
+                    ]}
+                    onSelect={v => setStatusFilter((v as 'active' | 'disabled' | 'all') || 'active')}
+                  />
+                );
+              })()}
               {activeFunctions.map(fn => {
                 const usersWithFn = orgUsers.filter(u => clinicMembers.some(m => m.function === fn.value && m.org_user_id === u.id));
                 const selectedId = memberFilters[fn.value] || '';
@@ -635,6 +690,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                 <thead className="sticky top-0 z-10 bg-slate-50">
                   <tr className="text-left text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-100">
                     <th className="px-6 py-3">Cliente</th>
+                    <th className="px-4 py-3">Status</th>
                     <th className="px-6 py-3">Responsáveis</th>
                     <th className="px-6 py-3">Integrações</th>
                     <th className="px-6 py-3">Plano</th>
@@ -648,6 +704,9 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                     Object.entries(memberFilters).every(([fn, uid]) =>
                       !uid || clinicMembers.some(m => m.clinic_id === c.id && m.function === fn && m.org_user_id === uid)
                     ) &&
+                    (statusFilter === 'all' ||
+                      (statusFilter === 'active'   && c.is_active !== false) ||
+                      (statusFilter === 'disabled' && c.is_active === false)) &&
                     (inactiveFilter === '' ||
                       (inactiveFilter === 'any'      && (c.whatsapp_status !== 'connected' || c.meta_status === 'inactive' || c.google_status === 'inactive' || c.site_status === 'inactive' || c.forms_status === 'inactive')) ||
                       (inactiveFilter === 'whatsapp' && c.whatsapp_status !== 'connected') ||
@@ -668,10 +727,12 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                     ];
                     const channelsList = channelsAll.filter(c => c.has);
 
+                    const isDisabled = clinic.is_active === false;
                     return (
                       <tr key={clinic.id} className={cn(
                         "border-b border-slate-50 last:border-0 hover:bg-slate-50/50 transition-colors",
-                        activeClinicId === clinic.id && "bg-violet-50/40"
+                        activeClinicId === clinic.id && "bg-violet-50/40",
+                        isDisabled && "opacity-60"
                       )}>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-3">
@@ -685,6 +746,28 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                             </div>
                             <p className="text-sm font-bold text-slate-900">{clinic.name}</p>
                           </div>
+                        </td>
+                        <td className="px-4 py-4">
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={!isDisabled}
+                            disabled={!canManageClinics}
+                            onClick={e => { e.stopPropagation(); handleToggleClinicActive(clinic); }}
+                            title={canManageClinics ? (isDisabled ? 'Ativar clínica' : 'Desativar clínica') : 'Apenas owners e admins podem alterar'}
+                            className={cn(
+                              "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
+                              !isDisabled ? "bg-emerald-500" : "bg-slate-300",
+                              canManageClinics ? "cursor-pointer hover:opacity-90" : "cursor-not-allowed opacity-60"
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                "inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform",
+                                !isDisabled ? "translate-x-[18px]" : "translate-x-0.5"
+                              )}
+                            />
+                          </button>
                         </td>
                         <td className="px-6 py-4">
                           {members.length > 0 ? (
@@ -844,6 +927,24 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                                       <Settings className="w-3.5 h-3.5 text-blue-600" />
                                       Editar Clínica
                                     </button>
+                                  )}
+                                  {canManageClinics && (
+                                    <>
+                                      <div className="my-1 border-t border-slate-100" />
+                                      <button
+                                        onClick={e => {
+                                          e.stopPropagation();
+                                          setDeleteClinicTarget(clinic);
+                                          setDeleteConfirmName('');
+                                          setDeleteError('');
+                                          setOpenMenuId(null);
+                                        }}
+                                        className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 transition-colors"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5 text-red-600" />
+                                        Excluir Clínica
+                                      </button>
+                                    </>
                                   )}
                                 </div>
                               )}
@@ -1166,6 +1267,83 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                 <button onClick={editClinicTarget ? handleUpdateClinic : handleCreateClinic} disabled={clinicSaving}
                   className="w-full py-3 bg-teal-600 hover:bg-teal-700 disabled:bg-slate-100 disabled:text-slate-400 text-white rounded-xl font-black text-sm transition-all flex items-center justify-center gap-2">
                   {clinicSaving ? <><Loader2 className="w-4 h-4 animate-spin" /> Salvando...</> : (editClinicTarget ? 'Salvar Alterações' : 'Criar Clínica')}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal: Confirmação de Exclusão de Clínica */}
+      <AnimatePresence>
+        {deleteClinicTarget && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <div className="w-9 h-9 rounded-xl bg-red-50 border border-red-100 flex items-center justify-center">
+                    <Trash2 className="w-4 h-4 text-red-600" />
+                  </div>
+                  <h3 className="text-base font-black text-slate-900">Excluir clínica permanentemente?</h3>
+                </div>
+                <button
+                  onClick={() => { setDeleteClinicTarget(null); setDeleteConfirmName(''); setDeleteError(''); }}
+                  className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors"
+                >
+                  <X className="w-4 h-4 text-slate-500" />
+                </button>
+              </div>
+
+              <div className="rounded-xl bg-red-50 border border-red-100 p-3 mb-4">
+                <p className="text-xs font-semibold text-red-700 leading-relaxed">
+                  Esta ação é <strong>irreversível</strong>. Todos os dados associados à clínica
+                  <strong> "{deleteClinicTarget.name}"</strong> serão apagados, incluindo pacientes, médicos,
+                  agendamentos, tickets, integrações e usuários.
+                </p>
+                <p className="text-[11px] text-red-600 mt-2 italic">
+                  Considere apenas desativar a clínica se quiser preservar o histórico.
+                </p>
+              </div>
+
+              <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                Digite o nome da clínica para confirmar:
+              </label>
+              <input
+                type="text"
+                value={deleteConfirmName}
+                onChange={e => setDeleteConfirmName(e.target.value)}
+                placeholder={deleteClinicTarget.name}
+                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-200 focus:border-red-300 transition-all"
+                autoFocus
+              />
+
+              {deleteError && (
+                <p className="text-xs text-red-600 mt-2 font-semibold">{deleteError}</p>
+              )}
+
+              <div className="flex items-center gap-2 mt-5">
+                <button
+                  onClick={() => { setDeleteClinicTarget(null); setDeleteConfirmName(''); setDeleteError(''); }}
+                  disabled={deleteSaving}
+                  className="flex-1 px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleDeleteClinic}
+                  disabled={deleteSaving || deleteConfirmName !== deleteClinicTarget.name}
+                  className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {deleteSaving ? (
+                    <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Excluindo...</>
+                  ) : (
+                    <><Trash2 className="w-3.5 h-3.5" /> Excluir definitivamente</>
+                  )}
                 </button>
               </div>
             </motion.div>

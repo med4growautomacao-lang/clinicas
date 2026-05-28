@@ -117,6 +117,7 @@ function ConfirmationsView() {
   const [localConfig, setLocalConfig] = useState<any>(null);
   const [showValidation, setShowValidation] = useState(false);
   const [missingTags, setMissingTags] = useState<string[]>([]);
+  const [tab, setTab] = useState<'before' | 'after'>('before');
 
   const setConfig = (updates: any) => { setLocalConfig((p: any) => ({ ...p, ...updates })); setIsDirty(true); };
 
@@ -175,138 +176,137 @@ function ConfirmationsView() {
         <CardHeader className="pb-4">
           <CardTitle className="text-xl font-bold text-slate-900 flex items-center gap-3">
             <ShieldCheck className="w-6 h-6 text-teal-600" />
-            Confirmacao Comercial
+            Confirmação Comercial
           </CardTitle>
           <CardDescription className="text-slate-500 font-medium">
             Envie mensagens automáticas para evitar faltas e otimizar sua agenda.
           </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-100">
-            <div>
-              <p className="text-sm font-bold text-slate-900">
-                Disparar Confirmações
-              </p>
-              <p className="text-[10px] font-semibold text-slate-500 uppercase pt-0.5">
-                Ativar envio automático via WhatsApp
-              </p>
-            </div>
+          <div className="flex bg-slate-100 p-1 rounded-lg mt-4 w-full">
             <button
-              onClick={() => { const v = !localConfig.confirm_enabled; setLocalConfig({ ...localConfig, confirm_enabled: v }); updateAI({ ...localConfig, confirm_enabled: v }); }}
+              type="button"
+              onClick={() => setTab('before')}
               className={cn(
-                "w-12 h-6 rounded-full relative transition-all",
-                localConfig.confirm_enabled ? "bg-teal-600" : "bg-slate-300"
+                "flex-1 px-3 py-2 text-xs font-bold rounded-md transition-all",
+                tab === 'before' ? "bg-white text-teal-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
               )}
             >
-              <div className={cn(
-                "w-4 h-4 bg-white rounded-full absolute top-1 transition-all shadow-sm",
-                localConfig.confirm_enabled ? "right-1" : "left-1"
-              )}></div>
+              Antes da Consulta
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab('after')}
+              className={cn(
+                "flex-1 px-3 py-2 text-xs font-bold rounded-md transition-all",
+                tab === 'after' ? "bg-white text-teal-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+              )}
+            >
+              Após Confirmação
             </button>
           </div>
-
-          <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1 flex items-center gap-2">
-              <Clock className="w-3 h-3" />
-              Antecedência do Disparo (em minutos)
-            </label>
-            <div className="flex items-center gap-4">
-              <input
-                type="number"
-                value={localConfig.confirm_lead_time || ""}
-                onChange={(e) => setConfig({ confirm_lead_time: parseInt(e.target.value) || 0 })}
-                className="w-32 px-4 py-2 border border-slate-200 rounded-lg font-bold text-teal-700 focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all"
-                placeholder="Ex: 1440"
-              />
-              <div className="flex-1 text-[10px] font-bold text-slate-400 uppercase leading-tight">
-                {localConfig.confirm_lead_time >= 60 
-                  ? `${Math.floor(localConfig.confirm_lead_time / 60)}h ${localConfig.confirm_lead_time % 60}min antes da consulta`
-                  : `${localConfig.confirm_lead_time} minutos antes da consulta`
-                }
-              </div>
-            </div>
-            <div className="grid grid-cols-3 gap-2 mt-2">
-              {[
-                { val: 1440, label: '24h' },
-                { val: 60, label: '1h' },
-                { val: 30, label: '30m' }
-              ].map(shortcut => (
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {tab === 'before' ? (
+            <div className="space-y-6 animate-in fade-in duration-200">
+              <div className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-100">
+                <div>
+                  <p className="text-sm font-bold text-slate-900">Disparar Confirmações</p>
+                  <p className="text-[10px] font-semibold text-slate-500 uppercase pt-0.5">Ativar envio automático via WhatsApp</p>
+                </div>
                 <button
-                  key={shortcut.val}
-                  type="button"
-                  onClick={() => setConfig({ confirm_lead_time: shortcut.val })}
-                  className="px-2 py-1.5 rounded-md border border-slate-100 bg-slate-50 text-[9px] font-bold text-slate-500 hover:bg-slate-100 transition-colors uppercase"
+                  onClick={() => { const v = !localConfig.confirm_enabled; setLocalConfig({ ...localConfig, confirm_enabled: v }); updateAI({ ...localConfig, confirm_enabled: v }); }}
+                  className={cn("w-12 h-6 rounded-full relative transition-all shrink-0", localConfig.confirm_enabled ? "bg-teal-600" : "bg-slate-300")}
                 >
-                  Sugestão: {shortcut.label}
+                  <div className={cn("w-4 h-4 bg-white rounded-full absolute top-1 transition-all shadow-sm", localConfig.confirm_enabled ? "right-1" : "left-1")}></div>
                 </button>
-              ))}
-            </div>
-          </div>
+              </div>
 
-          <div className="space-y-2">
-            <div className="flex justify-between items-center mb-1">
-              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">
-                Template da Mensagem
-              </label>
-            </div>
-            <textarea
-              rows={5}
-              value={localConfig.confirm_message || ""}
-              onChange={(e) => setConfig({ confirm_message: e.target.value })}
-              className="w-full p-4 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all resize-none text-sm leading-relaxed"
-              placeholder="Use {paciente}, {data} e {hora} para personalizar..."
-            />
-            <p className="text-[10px] text-slate-400 font-medium italic pl-1">
-              Variáveis obrigatórias: {"{paciente}"}, {"{data}"} e {"{hora}"}.
-            </p>
-          </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1 flex items-center gap-2">
+                  <Clock className="w-3 h-3" />
+                  Antecedência do Disparo
+                </label>
+                <div className="flex items-center gap-4">
+                  <input
+                    type="number"
+                    value={localConfig.confirm_lead_time || ""}
+                    onChange={(e) => setConfig({ confirm_lead_time: parseInt(e.target.value) || 0 })}
+                    className="w-28 px-4 py-2 border border-slate-200 rounded-lg font-bold text-teal-700 focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all"
+                    placeholder="1440"
+                  />
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">
+                    {localConfig.confirm_lead_time >= 60
+                      ? `${Math.floor(localConfig.confirm_lead_time / 60)}h ${localConfig.confirm_lead_time % 60}min antes`
+                      : `${localConfig.confirm_lead_time} min antes`}
+                  </span>
+                  <div className="flex gap-1 ml-auto">
+                    {[{ val: 1440, label: '24h' }, { val: 60, label: '1h' }, { val: 30, label: '30m' }].map(s => (
+                      <button
+                        key={s.val}
+                        type="button"
+                        onClick={() => setConfig({ confirm_lead_time: s.val })}
+                        className={cn(
+                          "px-2.5 py-1 rounded-md text-[10px] font-bold transition-colors",
+                          localConfig.confirm_lead_time === s.val ? "bg-teal-600 text-white" : "bg-slate-50 text-slate-500 hover:bg-slate-100"
+                        )}
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
 
-          <div className="rounded-xl border border-slate-100 overflow-hidden">
-            <div className="flex items-center justify-between p-4 bg-slate-50">
-              <div>
-                <p className="text-sm font-bold text-slate-900">
-                  Mensagem Pós-Confirmação
-                </p>
-                <p className="text-[10px] font-semibold text-slate-500 uppercase pt-0.5">
-                  Enviada quando o paciente confirma
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Template da Mensagem</label>
+                <textarea
+                  rows={6}
+                  value={localConfig.confirm_message || ""}
+                  onChange={(e) => setConfig({ confirm_message: e.target.value })}
+                  className="w-full p-4 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all resize-none text-sm leading-relaxed"
+                  placeholder="Use {paciente}, {data} e {hora} para personalizar..."
+                />
+                <p className="text-[10px] text-slate-400 font-medium italic pl-1">
+                  Variáveis obrigatórias: {"{paciente}"}, {"{data}"} e {"{hora}"}.
                 </p>
               </div>
-              <button
-                onClick={() => { const v = !localConfig.confirm_post_enabled; setLocalConfig({ ...localConfig, confirm_post_enabled: v }); updateAI({ ...localConfig, confirm_post_enabled: v }); }}
-                className={cn(
-                  "w-12 h-6 rounded-full relative transition-all shrink-0",
-                  localConfig.confirm_post_enabled ? "bg-teal-600" : "bg-slate-300"
-                )}
-              >
-                <div className={cn(
-                  "w-4 h-4 bg-white rounded-full absolute top-1 transition-all shadow-sm",
-                  localConfig.confirm_post_enabled ? "right-1" : "left-1"
-                )}></div>
-              </button>
             </div>
+          ) : (
+            <div className="space-y-6 animate-in fade-in duration-200">
+              <div className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-100">
+                <div>
+                  <p className="text-sm font-bold text-slate-900">Disparar Pós-Confirmação</p>
+                  <p className="text-[10px] font-semibold text-slate-500 uppercase pt-0.5">Enviada quando o paciente confirma</p>
+                </div>
+                <button
+                  onClick={() => { const v = !localConfig.confirm_post_enabled; setLocalConfig({ ...localConfig, confirm_post_enabled: v }); updateAI({ ...localConfig, confirm_post_enabled: v }); }}
+                  className={cn("w-12 h-6 rounded-full relative transition-all shrink-0", localConfig.confirm_post_enabled ? "bg-teal-600" : "bg-slate-300")}
+                >
+                  <div className={cn("w-4 h-4 bg-white rounded-full absolute top-1 transition-all shadow-sm", localConfig.confirm_post_enabled ? "right-1" : "left-1")}></div>
+                </button>
+              </div>
 
-            {localConfig.confirm_post_enabled && (
-              <div className="p-4 bg-white border-t border-slate-100 space-y-2 animate-in fade-in slide-in-from-top-1 duration-300">
+              <div className={cn("space-y-2 transition-opacity", !localConfig.confirm_post_enabled && "opacity-50 pointer-events-none")}>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Template da Mensagem</label>
                 <textarea
-                  rows={4}
+                  rows={6}
                   value={localConfig.confirm_post_message || ""}
                   onChange={(e) => setConfig({ confirm_post_message: e.target.value })}
-                  className="w-full p-3 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all resize-none text-sm leading-relaxed"
+                  className="w-full p-4 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all resize-none text-sm leading-relaxed"
                   placeholder="Ex: Perfeito, {paciente}! Sua consulta no dia {data} às {hora} está confirmada. Te aguardamos!"
                 />
                 <p className="text-[10px] text-slate-400 font-medium italic pl-1">
                   Variáveis disponíveis: {"{paciente}"}, {"{data}"}, {"{hora}"}.
                 </p>
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
           <Button
             onClick={handleSave}
             disabled={saving || !isDirty}
             className={cn("w-full py-6 transition-all", isDirty ? "bg-teal-600 hover:bg-teal-700 text-white" : "bg-slate-100 text-slate-400 cursor-default")}
           >
-            {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : isDirty ? "Salvar Configuração de Confirmação" : "Configuração Salva ✓"}
+            {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : isDirty ? "Salvar Configurações" : "Configuração Salva ✓"}
           </Button>
         </CardContent>
       </Card>
@@ -324,12 +324,19 @@ function ConfirmationsView() {
                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-16 h-1 bg-slate-700 rounded-b-lg" />
                <div className="space-y-4 pt-4">
                  <div className="bg-white/10 w-2/3 h-8 rounded-lg animate-pulse" />
-                 <div className="bg-teal-600 text-white p-4 rounded-2xl rounded-tr-none text-sm font-medium shadow-lg">
-                    {localConfig.confirm_message
-                      .replace('{paciente}', 'João Silva')
-                      .replace('{data}', '15/05')
-                      .replace('{hora}', '14:30')}
+                 <div className="bg-teal-600 text-white p-4 rounded-2xl rounded-tr-none text-sm font-medium shadow-lg whitespace-pre-wrap">
+                    {(tab === 'before' ? (localConfig.confirm_message || '') : (localConfig.confirm_post_message || ''))
+                      .replace(/\{paciente\}/g, 'João Silva')
+                      .replace(/\{data\}/g, '15/05')
+                      .replace(/\{hora\}/g, '14:30') || (tab === 'after' ? 'Mensagem pós-confirmação ainda não configurada.' : '')}
                  </div>
+                 {tab === 'after' && (
+                   <div className="flex justify-end">
+                     <div className="bg-white/10 text-white px-3 py-1.5 rounded-2xl rounded-br-none text-xs font-medium">
+                       Confirmo 👍
+                     </div>
+                   </div>
+                 )}
                  <div className="bg-white/5 w-1/2 h-4 rounded-full ml-auto" />
                </div>
             </div>

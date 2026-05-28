@@ -130,6 +130,8 @@ function ConfirmationsView() {
         confirm_enabled: false,
         confirm_message: "Olá {paciente}, passando para confirmar sua consulta no dia {data} às {hora}. Podemos confirmar?",
         confirm_lead_time: 1440,
+        confirm_post_enabled: false,
+        confirm_post_message: "Perfeito, {paciente}! Sua consulta no dia {data} às {hora} está confirmada. Te aguardamos!",
         response_style: 'cordial',
         response_speed: 'instantanea',
         tone: 3
@@ -257,6 +259,49 @@ function ConfirmationsView() {
             <p className="text-[10px] text-slate-400 font-medium italic pl-1">
               Variáveis obrigatórias: {"{paciente}"}, {"{data}"} e {"{hora}"}.
             </p>
+          </div>
+
+          <div className="pt-2 border-t border-slate-100 space-y-3">
+            <div className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-100">
+              <div>
+                <p className="text-sm font-bold text-slate-900">
+                  Mensagem Pós-Confirmação
+                </p>
+                <p className="text-[10px] font-semibold text-slate-500 uppercase pt-0.5">
+                  Enviada quando o paciente confirma a consulta
+                </p>
+              </div>
+              <button
+                onClick={() => { const v = !localConfig.confirm_post_enabled; setLocalConfig({ ...localConfig, confirm_post_enabled: v }); updateAI({ ...localConfig, confirm_post_enabled: v }); }}
+                className={cn(
+                  "w-12 h-6 rounded-full relative transition-all",
+                  localConfig.confirm_post_enabled ? "bg-teal-600" : "bg-slate-300"
+                )}
+              >
+                <div className={cn(
+                  "w-4 h-4 bg-white rounded-full absolute top-1 transition-all shadow-sm",
+                  localConfig.confirm_post_enabled ? "right-1" : "left-1"
+                )}></div>
+              </button>
+            </div>
+
+            {localConfig.confirm_post_enabled && (
+              <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">
+                  Template da Mensagem Pós-Confirmação
+                </label>
+                <textarea
+                  rows={4}
+                  value={localConfig.confirm_post_message || ""}
+                  onChange={(e) => setConfig({ confirm_post_message: e.target.value })}
+                  className="w-full p-4 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all resize-none text-sm leading-relaxed"
+                  placeholder="Ex: Perfeito, {paciente}! Sua consulta no dia {data} às {hora} está confirmada. Te aguardamos!"
+                />
+                <p className="text-[10px] text-slate-400 font-medium italic pl-1">
+                  Variáveis disponíveis: {"{paciente}"}, {"{data}"}, {"{hora}"}.
+                </p>
+              </div>
+            )}
           </div>
 
           <Button

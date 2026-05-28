@@ -31,7 +31,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { useFunnelStages, useLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useAppointments, useDoctors, usePatients, Conversion, Lead, Ticket } from "../hooks/useSupabase";
+import { useFunnelStages, useLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useAppointments, useDoctors, usePatients, useConsultationTypes, Conversion, Lead, Ticket } from "../hooks/useSupabase";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { format, parseISO, formatDistanceToNow } from "date-fns";
@@ -1012,14 +1012,25 @@ export function LeadKanban() {
   const [submitting, setSubmitting] = useState(false);
   const [chatLead, setChatLead] = useState<{ lead: any; ticketId: string } | null>(null);
   const [scheduleLead, setScheduleLead] = useState<{ lead: Lead; ticketId: string } | null>(null);
-  const [scheduleForm, setScheduleForm] = useState({ doctor_id: '', date: '', time: '', notes: '', modality: 'presencial' as 'presencial' | 'online' });
+  const [scheduleForm, setScheduleForm] = useState({ doctor_id: '', date: '', time: '', notes: '', consultation_type_id: '' as string });
   const [scheduleSubmitting, setScheduleSubmitting] = useState(false);
   const [scheduleSlots, setScheduleSlots] = useState<string[] | null>(null);
   const [scheduleSlotsLoading, setScheduleSlotsLoading] = useState(false);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
 
+  const { data: scheduleTypes } = useConsultationTypes(scheduleForm.doctor_id || null);
+  const scheduleActiveTypes = React.useMemo(() => scheduleTypes.filter(ct => ct.is_active), [scheduleTypes]);
+
   useEffect(() => {
-    if (!scheduleForm.doctor_id || !scheduleForm.date) {
+    if (!scheduleForm.doctor_id) return;
+    if (scheduleActiveTypes.length === 0) return;
+    if (!scheduleActiveTypes.some(ct => ct.id === scheduleForm.consultation_type_id)) {
+      setScheduleForm(p => ({ ...p, consultation_type_id: scheduleActiveTypes[0].id, time: '' }));
+    }
+  }, [scheduleForm.doctor_id, scheduleActiveTypes]);
+
+  useEffect(() => {
+    if (!scheduleForm.doctor_id || !scheduleForm.date || !scheduleForm.consultation_type_id) {
       setScheduleSlots(null);
       return;
     }
@@ -1028,6 +1039,7 @@ export function LeadKanban() {
     supabase.rpc('get_available_slots', {
       p_doctor_id: scheduleForm.doctor_id,
       p_date: scheduleForm.date,
+      p_consultation_type_id: scheduleForm.consultation_type_id,
     }).then(({ data, error }) => {
       if (cancelled) return;
       if (error) { console.error('get_available_slots:', error); setScheduleSlots([]); }
@@ -1035,7 +1047,7 @@ export function LeadKanban() {
       setScheduleSlotsLoading(false);
     });
     return () => { cancelled = true; };
-  }, [scheduleForm.doctor_id, scheduleForm.date]);
+  }, [scheduleForm.doctor_id, scheduleForm.date, scheduleForm.consultation_type_id]);
   const { create: createAppointment } = useAppointments();
   const { data: doctors } = useDoctors();
   const { data: patients, create: createPatient } = usePatients();
@@ -1896,7 +1908,7 @@ export function LeadKanban() {
                               </div>
                               <div className="flex flex-col items-end gap-1.5 shrink-0 ml-2">
                                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <button title="Agendar consulta" onClick={() => { setScheduleLead({ lead, ticketId: ticket.id }); setScheduleForm({ doctor_id: doctors[0]?.id || '', date: '', time: '', notes: '', modality: 'presencial' }); setScheduleError(null); setScheduleSlots(null); }} className="p-0.5 text-slate-400 hover:text-indigo-600 rounded transition-colors"><CalendarPlus className="w-3 h-3" /></button>
+                                  <button title="Agendar consulta" onClick={() => { setScheduleLead({ lead, ticketId: ticket.id }); setScheduleForm({ doctor_id: doctors[0]?.id || '', date: '', time: '', notes: '', consultation_type_id: '' }); setScheduleError(null); setScheduleSlots(null); }} className="p-0.5 text-slate-400 hover:text-indigo-600 rounded transition-colors"><CalendarPlus className="w-3 h-3" /></button>
                                   {!ticket.outcome && !isClosed && (
                                     <div className="relative">
                                       <button
@@ -2539,11 +2551,29 @@ export function LeadKanban() {
                   <input type="date" value={scheduleForm.date} onChange={e => setScheduleForm(p => ({ ...p, date: e.target.value, time: '' }))} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium outline-none focus:ring-2 focus:ring-teal-200" />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Modalidade</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button type="button" onClick={() => setScheduleForm(p => ({ ...p, modality: 'presencial' }))} className={`py-2 rounded-lg border text-xs font-bold transition-all ${scheduleForm.modality === 'presencial' ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-white text-slate-600 border-slate-200 hover:border-emerald-300'}`}>Presencial</button>
-                    <button type="button" onClick={() => setScheduleForm(p => ({ ...p, modality: 'online' }))} className={`py-2 rounded-lg border text-xs font-bold transition-all ${scheduleForm.modality === 'online' ? 'bg-sky-500 text-white border-sky-500' : 'bg-white text-slate-600 border-slate-200 hover:border-sky-300'}`}>Online</button>
-                  </div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Tipo de Consulta</label>
+                  {!scheduleForm.doctor_id ? (
+                    <div className="p-2 bg-slate-50 border border-slate-100 rounded-lg text-slate-400 text-xs font-bold">Selecione um médico primeiro.</div>
+                  ) : scheduleActiveTypes.length === 0 ? (
+                    <div className="p-2 bg-amber-50 border border-amber-100 rounded-lg text-amber-700 text-xs font-bold">Nenhum tipo cadastrado para esse médico.</div>
+                  ) : (
+                    <div className={`grid gap-2 ${scheduleActiveTypes.length === 1 ? 'grid-cols-1' : scheduleActiveTypes.length === 2 ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-3'}`}>
+                      {scheduleActiveTypes.map(ct => (
+                        <button
+                          key={ct.id}
+                          type="button"
+                          onClick={() => setScheduleForm(p => ({ ...p, consultation_type_id: ct.id, time: '' }))}
+                          className={`py-2 rounded-lg border text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                            scheduleForm.consultation_type_id === ct.id
+                              ? (ct.modality === 'online' ? 'bg-sky-500 text-white border-sky-500' : 'bg-emerald-500 text-white border-emerald-500')
+                              : (ct.modality === 'online' ? 'bg-white text-slate-600 border-slate-200 hover:border-sky-300' : 'bg-white text-slate-600 border-slate-200 hover:border-emerald-300')
+                          }`}
+                        >
+                          {ct.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 {scheduleForm.doctor_id && scheduleForm.date && (
                   <div>
@@ -2591,7 +2621,7 @@ export function LeadKanban() {
                       p_doctor_id: scheduleForm.doctor_id,
                       p_date: scheduleForm.date,
                       p_time: scheduleForm.time,
-                      p_modality: scheduleForm.modality,
+                      p_consultation_type_id: scheduleForm.consultation_type_id || null,
                       p_notes: scheduleForm.notes || null,
                       p_ticket_id: scheduleLead.ticketId || null,
                     });

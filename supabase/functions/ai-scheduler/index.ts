@@ -19,10 +19,20 @@ function addDays(dateStr: string, n: number): string {
   return d.toISOString().split("T")[0];
 }
 
-async function fetchSlotsForDoctorDate(supabaseClient: any, doctorId: string, date: string): Promise<string[]> {
-  const { data } = await supabaseClient.rpc("get_available_slots", {
-    p_doctor_id: doctorId, p_date: date,
-  });
+async function fetchSlotsForDoctorDate(
+  supabaseClient: any,
+  doctorId: string,
+  date: string,
+  modality: string = "presencial",
+  consultationTypeId?: string,
+): Promise<string[]> {
+  const params: any = { p_doctor_id: doctorId, p_date: date };
+  if (consultationTypeId) {
+    params.p_consultation_type_id = consultationTypeId;
+  } else {
+    params.p_modality = modality;
+  }
+  const { data } = await supabaseClient.rpc("get_available_slots", params);
   return (data || []).map((s: any) => (s.slot_time || "").toString().substring(0, 5));
 }
 
@@ -63,8 +73,30 @@ serve(async (req) => {
       });
     }
 
-    if (action === "get_availability") {
-      const { date, date_to, days, doctor_id } = payload;
+    if (action === "list_consultation_types") {
+      const { doctor_id } = payload;
+      const { data: types, error: ctError } = await supabaseClient.rpc("list_consultation_types", {
+        p_clinic_id: clinic_id, p_doctor_id: doctor_id || null,
+      });
+      if (ctError) throw ctError;
+      const list = (types || []).map((t: any) => ({
+        id: t.id, doctor_id: t.doctor_id, doctor_name: t.doctor_name,
+        slug: t.slug, name: t.name, modality: t.modality,
+        description: t.description, duration: t.consultation_duration,
+      }));
+      const lines = list.map((t: any) =>
+        `- [${t.id}] ${t.name} (${t.modality}, ${t.duration}min) com ${t.doctor_name}` +
+        (t.description ? `: ${t.description}` : "")
+      );
+      const readable_summary = list.length === 0
+        ? "Nenhum tipo de consulta cadastrado para esta clinica."
+        : `Tipos disponiveis (use o ID em VER_HORARIOS e MARCAR_HORARIO):\n${lines.join("\n")}`;
+      return new Response(JSON.stringify({ success: true, types: list, readable_summary }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+    } else if (action === "get_availability") {
+      const { date, date_to, days, doctor_id, consultation_type_id, modality: modalityRaw } = payload;
+      const modality = (typeof modalityRaw === "string" && modalityRaw.trim()) ? modalityRaw.trim() : "presencial";
+      const ctId = (typeof consultation_type_id === "string" && consultation_type_id.trim()) ? consultation_type_id.trim() : undefined;
       if (!date) {
         return new Response(JSON.stringify({ success: false, error: "date is required" }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200,
@@ -101,7 +133,7 @@ serve(async (req) => {
       for (const d of dateList) {
         const perDoctor = await Promise.all(
           (doctors || []).map(async (doc: any) => {
-            const available_slots = await fetchSlotsForDoctorDate(supabaseClient, doc.id, d);
+            const available_slots = await fetchSlotsForDoctorDate(supabaseClient, doc.id, d, modality, ctId);
             return {
               doctor_id: doc.id,
               doctor_name: doc.name || doc.clinic_users?.full_name || "Médico sem nome",
@@ -124,7 +156,7 @@ serve(async (req) => {
               (doctors || []).map(async (doc: any) => ({
                 doctor_id: doc.id,
                 doctor_name: doc.name || doc.clinic_users?.full_name || "Médico sem nome",
-                available_slots: await fetchSlotsForDoctorDate(supabaseClient, doc.id, tryDate),
+                available_slots: await fetchSlotsForDoctorDate(supabaseClient, doc.id, tryDate, modality, ctId),
               }))
             );
             const probeTotal = probe.reduce((s, a) => s + a.available_slots.length, 0);
@@ -186,26 +218,52 @@ serve(async (req) => {
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
       );
     } else if (action === "book_appointment") {
-      const { doctor_id, date, time, patient_name, patient_phone, request_id, modality, notes } = payload;
+      const { doctor_id, date, time, patient_name, patient_phone, request_id, modality, notes, consultation_type_id } = payload;
       if (!doctor_id || !date || !time || !patient_name || !patient_phone) {
         return new Response(
           JSON.stringify({ success: false, error_code: "missing_fields", error: "Campos obrigatórios faltando: doctor_id, date, time, patient_name, patient_phone." }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
         );
       }
-      const allowedModalities = ["presencial", "online"];
-      const finalModality = allowedModalities.includes(String(modality).toLowerCase())
-        ? String(modality).toLowerCase() : "presencial";
+      const ctId = (typeof consultation_type_id === "string" && consultation_type_id.trim()) ? consultation_type_id.trim() : undefined;
+      const finalModality = (typeof modality === "string" && modality.trim())
+        ? modality.trim().toLowerCase() : "presencial";
+
+      // Pré-validação só pelo slug (modality legado). Se vier id, a RPC valida internamente.
+      if (!ctId) {
+        const { data: ct } = await supabaseClient
+          .from("consultation_types")
+          .select("slug, is_active")
+          .eq("doctor_id", doctor_id)
+          .eq("slug", finalModality)
+          .maybeSingle();
+        if (!ct) {
+          return new Response(
+            JSON.stringify({ success: false, error_code: "consultation_type_not_found", error: `Tipo de consulta "${finalModality}" não está configurado para este médico.` }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
+          );
+        }
+        if (ct.is_active === false) {
+          return new Response(
+            JSON.stringify({ success: false, error_code: "consultation_type_inactive", error: `Tipo de consulta "${finalModality}" está inativo.` }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
+          );
+        }
+      }
+
       const derived = await crypto.subtle.digest("SHA-256",
         new TextEncoder().encode(`${clinic_id}|${doctor_id}|${date}|${time}|${patient_phone}`));
       const hash = Array.from(new Uint8Array(derived)).map((b) => b.toString(16).padStart(2, "0")).join("");
       const computed_request_id = `${hash.substring(0, 8)}-${hash.substring(8, 12)}-${hash.substring(12, 16)}-${hash.substring(16, 20)}-${hash.substring(20, 32)}`;
       const final_request_id = request_id || computed_request_id;
-      const { data, error } = await supabaseClient.rpc("book_appointment", {
+      const rpcParams: Record<string, unknown> = {
         p_clinic_id: clinic_id, p_doctor_id: doctor_id, p_date: date, p_time: time,
         p_patient_name: patient_name, p_patient_phone: patient_phone, p_source: "ia",
-        p_modality: finalModality, p_notes: notes || null, p_request_id: final_request_id,
-      });
+        p_notes: notes || null, p_request_id: final_request_id,
+      };
+      if (ctId) rpcParams.p_consultation_type_id = ctId;
+      else rpcParams.p_modality = finalModality;
+      const { data, error } = await supabaseClient.rpc("book_appointment", rpcParams);
       if (error) throw error;
       const result = data as any;
       if (!result.success) {
@@ -214,6 +272,10 @@ serve(async (req) => {
           doctor_not_found: "Médico não encontrado.",
           doctor_clinic_mismatch: "Médico não pertence à clínica.",
           doctor_inactive: "Médico inativo.",
+          consultation_type_not_found: ctId
+            ? `Tipo de consulta com id "${ctId}" não encontrado para este médico.`
+            : `Tipo de consulta "${finalModality}" não está configurado para este médico.`,
+          consultation_type_inactive: "Tipo de consulta inativo.",
         };
         return new Response(
           JSON.stringify({ success: false, error_code: result.error_code, error: errMessages[result.error_code || ""] || "Erro ao agendar." }),

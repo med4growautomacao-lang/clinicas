@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -29,13 +29,130 @@ export interface Doctor {
   is_active: boolean;
   created_at: string;
   working_hours?: any;
+  /** @deprecated use ConsultationType */
   consultation_duration?: number;
+  /** @deprecated use ConsultationType */
   slot_step?: number | null;
+  /** @deprecated use ConsultationType */
   min_notice_minutes?: number;
+  /** @deprecated use ConsultationType */
   buffer_before_minutes?: number;
+  /** @deprecated use ConsultationType */
   buffer_after_minutes?: number;
   days_off?: string[];
   blocked_times?: { date: string; start: string; end: string }[];
+}
+
+export interface ConsultationType {
+  id: string;
+  clinic_id: string;
+  doctor_id: string;
+  slug: string;
+  name: string;
+  modality: 'presencial' | 'online';
+  description: string | null;
+  is_active: boolean;
+  consultation_duration: number;
+  slot_step: number | null;
+  buffer_before_minutes: number;
+  buffer_after_minutes: number;
+  min_notice_minutes: number;
+  working_hours_override: Record<string, { start: string; end: string }[]> | null;
+  created_at: string;
+}
+
+export function useClinicConsultationTypes(clinicId: string | null | undefined) {
+  const [data, setData] = useState<ConsultationType[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = useCallback(async () => {
+    if (!clinicId) { setData([]); setLoading(false); return; }
+    setLoading(true);
+    const { data: rows } = await supabase
+      .from('consultation_types')
+      .select('*')
+      .eq('clinic_id', clinicId);
+    setData((rows || []) as ConsultationType[]);
+    setLoading(false);
+  }, [clinicId]);
+
+  useEffect(() => {
+    fetch();
+    if (!clinicId) return;
+    const channel = supabase
+      .channel(`consultation_types_${clinicId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'consultation_types', filter: `clinic_id=eq.${clinicId}` }, () => { fetch(); })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [fetch, clinicId]);
+
+  const byDoctor = useMemo(() => {
+    const m = new Map<string, ConsultationType[]>();
+    for (const ct of data) {
+      const arr = m.get(ct.doctor_id) || [];
+      arr.push(ct);
+      m.set(ct.doctor_id, arr);
+    }
+    return m;
+  }, [data]);
+
+  const findType = useCallback((doctorId: string, slug: string): ConsultationType | null => {
+    return byDoctor.get(doctorId)?.find(ct => ct.slug === slug) ?? null;
+  }, [byDoctor]);
+
+  const findTypeById = useCallback((id: string | null | undefined): ConsultationType | null => {
+    if (!id) return null;
+    return data.find(ct => ct.id === id) ?? null;
+  }, [data]);
+
+  return { data, loading, byDoctor, findType, findTypeById };
+}
+
+export function useConsultationTypes(doctorId: string | null | undefined) {
+  const [data, setData] = useState<ConsultationType[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetch = useCallback(async (silent = false) => {
+    if (!doctorId) { setData([]); setLoading(false); return; }
+    if (!silent) setLoading(true);
+    const { data: rows, error: err } = await supabase
+      .from('consultation_types')
+      .select('*')
+      .eq('doctor_id', doctorId)
+      .order('created_at', { ascending: true });
+    if (err) { setError(err.message); setLoading(false); return; }
+    setData((rows || []) as ConsultationType[]);
+    setError(null);
+    if (!silent) setLoading(false);
+  }, [doctorId]);
+
+  useEffect(() => { fetch(); }, [fetch]);
+
+  const create = async (input: Omit<ConsultationType, 'id' | 'created_at'>) => {
+    const { data: row, error: err } = await supabase
+      .from('consultation_types').insert(input).select().single();
+    if (err) { setError(err.message); return null; }
+    setData(prev => [...prev, row as ConsultationType]);
+    return row as ConsultationType;
+  };
+
+  const update = async (id: string, patch: Partial<ConsultationType>) => {
+    const { error: err } = await supabase
+      .from('consultation_types').update(patch).eq('id', id);
+    if (err) { setError(err.message); return false; }
+    setData(prev => prev.map(ct => ct.id === id ? { ...ct, ...patch } as ConsultationType : ct));
+    return true;
+  };
+
+  const remove = async (id: string) => {
+    const { error: err } = await supabase.from('consultation_types').delete().eq('id', id);
+    if (err) { setError(err.message); return false; }
+    setData(prev => prev.filter(ct => ct.id !== id));
+    return true;
+  };
+
+  return { data, loading, error, refetch: fetch, create, update, remove };
 }
 
 export function useDoctors() {
@@ -231,6 +348,8 @@ export interface Appointment {
   status: 'pendente' | 'confirmado' | 'compareceu' | 'realizado' | 'cancelado' | 'faltou';
   source: 'ia' | 'manual' | 'site' | null;
   modality: 'presencial' | 'online';
+  consultation_type_id?: string | null;
+  consultation_type_slug?: string | null;
   duration_minutes?: number;
   notes: string | null;
   created_at: string;

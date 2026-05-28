@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import {
@@ -47,7 +47,7 @@ import {
 } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useAuth } from "../contexts/AuthContext";
-import { useAppointments, useDoctors, usePatients, useLeads, useConversions, useFinancial, useProtocols, Lead } from "../hooks/useSupabase";
+import { useAppointments, useDoctors, usePatients, useLeads, useConversions, useFinancial, useProtocols, useConsultationTypes, useClinicConsultationTypes, Lead } from "../hooks/useSupabase";
 import { supabase } from "../lib/supabase";
 import { DoctorScheduleSettings } from "./DoctorScheduleSettings";
 import { PatientModal } from "./PatientModal";
@@ -103,7 +103,7 @@ export function Appointments() {
   const [showModal, setShowModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
-  const [formData, setFormData] = useState({ patient_id: '', doctor_id: '', date: '', time: '', notes: '', status: 'pendente' as any, modality: 'presencial' as 'presencial' | 'online' });
+  const [formData, setFormData] = useState({ patient_id: '', doctor_id: '', date: '', time: '', notes: '', status: 'pendente' as any, consultation_type_id: '' as string });
   const [submitting, setSubmitting] = useState(false);
   const [showScheduleSettings, setShowScheduleSettings] = useState(false);
   const [doctorToConfigure, setDoctorToConfigure] = useState<any>(null);
@@ -159,8 +159,29 @@ export function Appointments() {
   const [availableSlots, setAvailableSlots] = useState<string[] | null>(null);
   const [loadingSlots, setLoadingSlots] = useState(false);
 
+  const { data: consultationTypes } = useConsultationTypes(formData.doctor_id || null);
+  const activeTypes = useMemo(() => consultationTypes.filter(ct => ct.is_active), [consultationTypes]);
+  const { findType: findClinicType, findTypeById: findClinicTypeById } = useClinicConsultationTypes(activeClinicId);
+
+  const resolveBadge = useCallback((apt: any) => {
+    const byId = apt?.consultation_type_id ? findClinicTypeById(apt.consultation_type_id) : null;
+    const slug = apt?.consultation_type_slug || apt?.modality;
+    const ct = byId ?? (apt?.doctor_id && slug ? findClinicType(apt.doctor_id, slug) : null);
+    const visualOnline = ct ? ct.modality === 'online' : apt?.modality === 'online';
+    const labelText = visualOnline ? 'Online' : 'Presencial';
+    return { labelText, visualOnline, ct };
+  }, [findClinicType, findClinicTypeById]);
+
   useEffect(() => {
-    if (!formData.doctor_id || !formData.date) {
+    if (!formData.doctor_id) return;
+    if (activeTypes.length === 0) return;
+    if (!activeTypes.some(ct => ct.id === formData.consultation_type_id)) {
+      setFormData(p => ({ ...p, consultation_type_id: activeTypes[0].id, time: '' }));
+    }
+  }, [formData.doctor_id, activeTypes]);
+
+  useEffect(() => {
+    if (!formData.doctor_id || !formData.date || !formData.consultation_type_id) {
       setAvailableSlots(null);
       return;
     }
@@ -169,6 +190,7 @@ export function Appointments() {
     supabase.rpc('get_available_slots', {
       p_doctor_id: formData.doctor_id,
       p_date: formData.date,
+      p_consultation_type_id: formData.consultation_type_id,
       p_exclude_appointment_id: selectedAppointment?.id ?? null,
     }).then(({ data, error }) => {
       if (cancelled) return;
@@ -180,7 +202,7 @@ export function Appointments() {
       setLoadingSlots(false);
     });
     return () => { cancelled = true; };
-  }, [formData.doctor_id, formData.date, selectedAppointment, appointments]);
+  }, [formData.doctor_id, formData.date, formData.consultation_type_id, selectedAppointment, appointments]);
 
   const filteredAppointments = useMemo(() => {
     const list = appointments.filter((apt) => {
@@ -507,9 +529,9 @@ export function Appointments() {
         time: formData.time,
         notes: formData.notes || null,
         status: formData.status,
-        modality: formData.modality,
+        consultation_type_id: formData.consultation_type_id || null,
         source: 'manual',
-      });
+      } as any);
 
       if (!result) {
         setError('Erro ao criar agendamento. Verifique se há um ticket/consulta em aberto não resolvido para este paciente no funil.');
@@ -518,7 +540,7 @@ export function Appointments() {
       }
     }
 
-    setFormData({ patient_id: '', doctor_id: '', date: '', time: '', notes: '', status: 'pendente', modality: 'presencial' });
+    setFormData({ patient_id: '', doctor_id: '', date: '', time: '', notes: '', status: 'pendente', consultation_type_id: '' });
     setSelectedAppointment(null);
     setShowModal(false);
     setSubmitting(false);
@@ -561,6 +583,11 @@ export function Appointments() {
 
   const openEditModal = (apt: any) => {
     setSelectedAppointment(apt);
+    const fallbackType = apt.consultation_type_id
+      ? null
+      : (apt.doctor_id && (apt.consultation_type_slug || apt.modality)
+          ? findClinicType(apt.doctor_id, apt.consultation_type_slug || apt.modality)
+          : null);
     setFormData({
       patient_id: apt.patient_id,
       doctor_id: apt.doctor_id,
@@ -568,7 +595,7 @@ export function Appointments() {
       time: apt.time,
       notes: apt.notes || '',
       status: apt.status,
-      modality: (apt.modality as 'presencial' | 'online') || 'presencial'
+      consultation_type_id: apt.consultation_type_id || fallbackType?.id || ''
     });
     setShowModal(true);
   };
@@ -646,7 +673,7 @@ export function Appointments() {
               </AnimatePresence>
             </div>
           )}
-          <Button className="py-5 px-6 group" onClick={() => { setSelectedAppointment(null); setFormData({ patient_id: '', doctor_id: '', date: '', time: '', notes: '', status: 'pendente', modality: 'presencial' }); setShowModal(true); }}>
+          <Button className="py-5 px-6 group" onClick={() => { setSelectedAppointment(null); setFormData({ patient_id: '', doctor_id: '', date: '', time: '', notes: '', status: 'pendente', consultation_type_id: '' }); setShowModal(true); }}>
             <Plus className="w-5 h-5 mr-2 group-hover:rotate-90 transition-transform" />
             Nova Consulta
           </Button>
@@ -717,6 +744,7 @@ export function Appointments() {
                         <th className="px-6 py-3 font-semibold text-slate-600 uppercase tracking-wider text-[10px]">Paciente</th>
                         <th className="px-6 py-3 font-semibold text-slate-600 uppercase tracking-wider text-[10px]">Médico</th>
                         <th className="px-6 py-3 font-semibold text-slate-600 uppercase tracking-wider text-[10px]">Data</th>
+                        <th className="px-6 py-3 font-semibold text-slate-600 uppercase tracking-wider text-[10px]">Modalidade</th>
                         <th className="px-6 py-3 font-semibold text-slate-600 uppercase tracking-wider text-[10px]">Origem</th>
                         <th className="px-6 py-3 font-semibold text-slate-600 uppercase tracking-wider text-[10px]">Status</th>
                         <th className="px-6 py-3 font-semibold text-slate-600 uppercase tracking-wider text-[10px] text-right">Ações</th>
@@ -815,19 +843,35 @@ export function Appointments() {
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-3">
                               <div className="w-10 h-10 rounded-lg bg-slate-50 flex items-center justify-center"><User className="w-5 h-5 text-slate-600" /></div>
-                              <span className="font-semibold text-slate-800">{apt.patient?.name || '—'}</span>
-                              {apt.patient?.phone && (
-                                <div className="relative group/phone">
-                                  <button className="text-slate-300 hover:text-slate-500 transition-colors">
-                                    <Info className="w-3.5 h-3.5" />
-                                  </button>
-                                  <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-1.5 hidden group-hover/phone:flex items-center gap-1.5 bg-slate-800 text-white text-xs rounded-lg px-2.5 py-1.5 whitespace-nowrap shadow-lg z-50 pointer-events-none">
-                                    <Phone className="w-3 h-3 text-slate-300" />
-                                    {apt.patient.phone}
-                                    <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-slate-800" />
-                                  </div>
+                              <div className="flex flex-col gap-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-semibold text-slate-800">{apt.patient?.name || '—'}</span>
+                                  {apt.patient?.phone && (
+                                    <div className="relative group/phone">
+                                      <button className="text-slate-300 hover:text-slate-500 transition-colors">
+                                        <Info className="w-3.5 h-3.5" />
+                                      </button>
+                                      <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-1.5 hidden group-hover/phone:flex items-center gap-1.5 bg-slate-800 text-white text-xs rounded-lg px-2.5 py-1.5 whitespace-nowrap shadow-lg z-50 pointer-events-none">
+                                        <Phone className="w-3 h-3 text-slate-300" />
+                                        {apt.patient.phone}
+                                        <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-slate-800" />
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
-                              )}
+                                {(() => {
+                                  const slug = apt.consultation_type_slug || apt.modality;
+                                  if (!slug) return null;
+                                  const ct = findClinicType(apt.doctor_id, slug);
+                                  if (!ct) return null;
+                                  if (ct.slug === 'presencial' || ct.slug === 'online') return null;
+                                  return (
+                                    <span className="inline-flex items-center self-start text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-violet-50 text-violet-600 border border-violet-100">
+                                      {ct.name}
+                                    </span>
+                                  );
+                                })()}
+                              </div>
                             </div>
                           </td>
                           <td className="px-6 py-4 font-medium">
@@ -848,16 +892,23 @@ export function Appointments() {
                                 {format(parseISO(apt.date), 'dd/MM/yyyy')}
                               </span>
                               <span className="flex items-center text-slate-400 font-medium text-xs mt-0.5"><Clock className="w-3 h-3 mr-1.5" />{apt.time?.substring(0, 5)}</span>
-                              <span className={cn(
-                                "inline-flex items-center gap-1 mt-1 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border self-start",
-                                apt.modality === 'online'
-                                  ? "text-sky-500 bg-sky-50/70 border-sky-100/70"
-                                  : "text-emerald-500 bg-emerald-50/70 border-emerald-100/70"
-                              )}>
-                                {apt.modality === 'online' ? <Video className="w-2.5 h-2.5" /> : <MapPin className="w-2.5 h-2.5" />}
-                                {apt.modality === 'online' ? 'Online' : 'Presencial'}
-                              </span>
                             </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            {(() => {
+                              const badge = resolveBadge(apt);
+                              return (
+                                <span className={cn(
+                                  "inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md border",
+                                  badge.visualOnline
+                                    ? "text-sky-500 bg-sky-50/70 border-sky-100/70"
+                                    : "text-emerald-500 bg-emerald-50/70 border-emerald-100/70"
+                                )}>
+                                  {badge.visualOnline ? <Video className="w-3 h-3" /> : <MapPin className="w-3 h-3" />}
+                                  {badge.labelText}
+                                </span>
+                              );
+                            })()}
                           </td>
                           <td className="px-6 py-4">
                             {apt.source === "ia" ? (
@@ -962,35 +1013,54 @@ export function Appointments() {
                 />
 
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Modalidade</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setFormData(p => ({ ...p, modality: 'presencial' }))}
-                      className={cn(
-                        "flex items-center justify-center gap-2 py-3 rounded-xl border text-xs font-bold transition-all",
-                        formData.modality === 'presencial'
-                          ? "bg-teal-600 text-white border-teal-600 shadow-lg shadow-teal-200"
-                          : "bg-white text-slate-600 border-slate-200 hover:border-teal-400 hover:text-teal-700 hover:bg-teal-50"
-                      )}
-                    >
-                      <MapPin className="w-4 h-4" />
-                      Presencial
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setFormData(p => ({ ...p, modality: 'online' }))}
-                      className={cn(
-                        "flex items-center justify-center gap-2 py-3 rounded-xl border text-xs font-bold transition-all",
-                        formData.modality === 'online'
-                          ? "bg-teal-600 text-white border-teal-600 shadow-lg shadow-teal-200"
-                          : "bg-white text-slate-600 border-slate-200 hover:border-teal-400 hover:text-teal-700 hover:bg-teal-50"
-                      )}
-                    >
-                      <Video className="w-4 h-4" />
-                      Online
-                    </button>
-                  </div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Tipo de Consulta</label>
+                  {!formData.doctor_id ? (
+                    <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl text-slate-400 text-xs font-bold">
+                      Selecione um médico primeiro.
+                    </div>
+                  ) : activeTypes.length === 0 ? (
+                    <div className="p-3 bg-amber-50 border border-amber-100 rounded-xl flex items-start gap-3">
+                      <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-amber-800 text-xs font-bold mb-1.5">Esse médico ainda não tem tipos de consulta cadastrados.</p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const doc = doctors.find(d => d.id === formData.doctor_id);
+                            if (!doc) return;
+                            setShowModal(false);
+                            setDoctorToConfigure(doc);
+                            setShowScheduleSettings(true);
+                          }}
+                          className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-amber-500 text-white hover:bg-amber-600 transition-colors"
+                        >
+                          <Plus className="w-3 h-3" /> Cadastrar tipo de consulta
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className={cn(
+                      "grid gap-2",
+                      activeTypes.length === 1 ? "grid-cols-1" : activeTypes.length === 2 ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-3"
+                    )}>
+                      {activeTypes.map(ct => (
+                        <button
+                          key={ct.id}
+                          type="button"
+                          onClick={() => setFormData(p => ({ ...p, consultation_type_id: ct.id, time: '' }))}
+                          className={cn(
+                            "flex items-center justify-center gap-2 py-3 rounded-xl border text-xs font-bold transition-all",
+                            formData.consultation_type_id === ct.id
+                              ? "bg-teal-600 text-white border-teal-600 shadow-lg shadow-teal-200"
+                              : "bg-white text-slate-600 border-slate-200 hover:border-teal-400 hover:text-teal-700 hover:bg-teal-50"
+                          )}
+                        >
+                          {ct.modality === 'online' ? <Video className="w-4 h-4" /> : <MapPin className="w-4 h-4" />}
+                          {ct.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {formData.doctor_id && formData.date && (
@@ -1177,23 +1247,40 @@ export function Appointments() {
                           <div className={cn("w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm", docColor.bg, docColor.text, "border", docColor.border)}>
                             {apt.time?.substring(0, 5)}
                           </div>
-                          <div>
-                            <p className="text-sm font-bold text-slate-900">{apt.patient?.name}</p>
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-bold text-slate-900">{apt.patient?.name}</p>
+                              {(() => {
+                                const badge = resolveBadge(apt);
+                                if (!badge.ct) return null;
+                                if (badge.ct.slug === 'presencial' || badge.ct.slug === 'online') return null;
+                                return (
+                                  <span className="inline-flex items-center text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-violet-50 text-violet-600 border border-violet-100">
+                                    {badge.ct.name}
+                                  </span>
+                                );
+                              })()}
+                            </div>
                             <p className={cn("text-[10px] font-bold flex items-center gap-1.5 uppercase tracking-wider", docColor.text)}>
                               <Stethoscope className="w-3 h-3" /> {apt.doctor?.name}
                             </p>
                           </div>
                         </div>
                       <div className="flex items-center gap-2">
-                        <span className={cn(
-                          "inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold border uppercase",
-                          apt.modality === 'online'
-                            ? "text-sky-500 bg-sky-50/70 border-sky-100/70"
-                            : "text-emerald-500 bg-emerald-50/70 border-emerald-100/70"
-                        )}>
-                          {apt.modality === 'online' ? <Video className="w-3 h-3" /> : <MapPin className="w-3 h-3" />}
-                          {apt.modality === 'online' ? 'Online' : 'Presencial'}
-                        </span>
+                        {(() => {
+                          const badge = resolveBadge(apt);
+                          return (
+                            <span className={cn(
+                              "inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold border uppercase",
+                              badge.visualOnline
+                                ? "text-sky-500 bg-sky-50/70 border-sky-100/70"
+                                : "text-emerald-500 bg-emerald-50/70 border-emerald-100/70"
+                            )}>
+                              {badge.visualOnline ? <Video className="w-3 h-3" /> : <MapPin className="w-3 h-3" />}
+                              {badge.labelText}
+                            </span>
+                          );
+                        })()}
                         <span className={cn("px-2 py-0.5 rounded text-[10px] font-bold border uppercase", statusColor[apt.status] || statusColor.pendente)}>
                           {statusLabel[apt.status] || apt.status}
                         </span>
@@ -1219,7 +1306,7 @@ export function Appointments() {
                 }}>
                   <Trash2 className="w-4 h-4 mr-2" /> Bloquear
                 </Button>
-                <Button className="col-span-2 py-5 font-bold" onClick={() => { setShowDayModal(false); setSelectedAppointment(null); setFormData({ patient_id: '', doctor_id: '', date: selectedDay!, time: '', notes: '', status: 'pendente', modality: 'presencial' }); setShowModal(true); }}>
+                <Button className="col-span-2 py-5 font-bold" onClick={() => { setShowDayModal(false); setSelectedAppointment(null); setFormData({ patient_id: '', doctor_id: '', date: selectedDay!, time: '', notes: '', status: 'pendente', consultation_type_id: '' }); setShowModal(true); }}>
                   <Plus className="w-5 h-5 mr-2" /> Nova Consulta
                 </Button>
               </div>

@@ -1,8 +1,8 @@
 import React, { useState } from "react";
-import { X, Save, Clock, CalendarDays, Plus, Trash2, Loader2, AlertCircle, SlidersHorizontal } from "lucide-react";
+import { X, Save, Clock, CalendarDays, Plus, Trash2, Loader2, AlertCircle, SlidersHorizontal, Tag, Video, MapPin } from "lucide-react";
 import { Button } from "./ui/button";
 import { motion } from "framer-motion";
-import { Doctor } from "../hooks/useSupabase";
+import { Doctor, ConsultationType, useConsultationTypes } from "../hooks/useSupabase";
 import { supabase } from "../lib/supabase";
 import { cn } from "@/src/lib/utils";
 
@@ -45,27 +45,8 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
       : defaultHours
   );
 
-  const [duration, setDuration] = useState<number>(doctor.consultation_duration || 30);
-  const [slotStep, setSlotStep] = useState<number | null>(doctor.slot_step ?? null);
-  const [bufferBefore, setBufferBefore] = useState<number>(doctor.buffer_before_minutes ?? 0);
-  const [bufferAfter, setBufferAfter] = useState<number>(doctor.buffer_after_minutes ?? 0);
-  const [minNoticeMinutes, setMinNoticeMinutes] = useState<number>(doctor.min_notice_minutes ?? 0);
-  const [minNoticeUnit, setMinNoticeUnit] = useState<'minutos' | 'horas' | 'dias'>(() => {
-    const m = doctor.min_notice_minutes ?? 0;
-    if (m === 0) return 'horas';
-    if (m % 1440 === 0) return 'dias';
-    if (m % 60 === 0) return 'horas';
-    return 'minutos';
-  });
-  const minNoticeValue = (() => {
-    if (minNoticeUnit === 'dias') return Math.floor(minNoticeMinutes / 1440);
-    if (minNoticeUnit === 'horas') return Math.floor(minNoticeMinutes / 60);
-    return minNoticeMinutes;
-  })();
-  const setMinNoticeFromUnit = (val: number, unit: 'minutos' | 'horas' | 'dias') => {
-    const mult = unit === 'dias' ? 1440 : unit === 'horas' ? 60 : 1;
-    setMinNoticeMinutes(Math.max(0, val) * mult);
-  };
+  const { data: consultationTypes, refetch: refetchTypes, create: createType, update: updateType, remove: removeType } = useConsultationTypes(doctor.id);
+  const [editingType, setEditingType] = useState<ConsultationType | 'new' | null>(null);
   const [daysOff, setDaysOff] = useState<string[]>(doctor.days_off || []);
   const [newDayOff, setNewDayOff] = useState('');
 
@@ -122,11 +103,6 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
         .from('doctors')
         .update({
           working_hours: workingHours,
-          consultation_duration: duration,
-          slot_step: slotStep,
-          buffer_before_minutes: bufferBefore,
-          buffer_after_minutes: bufferAfter,
-          min_notice_minutes: minNoticeMinutes,
           days_off: daysOff,
           blocked_times: blockedTimes,
         })
@@ -189,7 +165,7 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
               activeTab === 'limits' ? "border-teal-600 text-teal-800" : "border-transparent text-slate-500 hover:text-slate-700"
             )}
           >
-            <SlidersHorizontal className="w-4 h-4" /> Limites
+            <SlidersHorizontal className="w-4 h-4" /> Tipos de Consultas
           </button>
           <button
             onClick={() => setActiveTab('days')}
@@ -289,138 +265,89 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
             </motion.div>
           )}
 
-          {/* ── Limites (duração, intervalo, buffers, aviso mínimo) ── */}
+          {/* ── Tipos de Consultas: galeria de tipos ── */}
           {activeTab === 'limits' && (
             <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}>
-              <div className="mb-8 p-5 bg-white rounded-xl border border-slate-200 shadow-sm">
-                <label className="block text-sm font-bold text-slate-700 mb-3">Duração Padrão da Consulta</label>
-                <div className="flex flex-wrap gap-3">
-                  {[15, 20, 30, 45, 60].map(min => (
-                    <button
-                      key={min}
-                      onClick={() => setDuration(min)}
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="font-bold text-slate-800 text-sm uppercase tracking-wider">Tipos de Consulta</h4>
+                <button
+                  onClick={() => setEditingType('new')}
+                  className="text-xs font-bold text-teal-600 bg-teal-50 px-3 py-1.5 rounded-md hover:bg-teal-100 transition-colors flex items-center gap-1.5"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Novo Tipo
+                </button>
+              </div>
+              {consultationTypes.length === 0 ? (
+                <div className="text-center py-12 bg-white border border-dashed border-slate-200 rounded-xl">
+                  <Tag className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                  <p className="text-sm font-medium text-slate-400">Nenhum tipo de consulta cadastrado.</p>
+                  <p className="text-xs text-slate-400 mt-1">Clique em "Novo Tipo" para criar.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {consultationTypes.map(ct => (
+                    <div
+                      key={ct.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setEditingType(ct)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditingType(ct); } }}
                       className={cn(
-                        "px-4 py-2 rounded-lg font-semibold text-sm border transition-all",
-                        duration === min
-                          ? "bg-teal-600 border-teal-600 text-white shadow-md shadow-teal-100"
-                          : "bg-white border-slate-200 text-slate-600 hover:border-teal-300 hover:bg-teal-50"
+                        "text-left p-4 rounded-xl border bg-white hover:border-teal-300 hover:shadow-sm transition-all cursor-pointer",
+                        ct.is_active ? "border-slate-200" : "border-slate-200 opacity-60"
                       )}
                     >
-                      {min} minutos
-                    </button>
-                  ))}
-                </div>
-                <p className="text-xs text-slate-400 font-medium mt-3">Essa duração será usada para dividir a agenda em blocos na hora de visualizar vagas.</p>
-              </div>
-
-              <div className="mb-8 p-5 bg-white rounded-xl border border-slate-200 shadow-sm">
-                <label className="block text-sm font-bold text-slate-700 mb-3">Intervalo entre vagas</label>
-                <div className="flex flex-wrap gap-3">
-                  <button
-                    onClick={() => setSlotStep(null)}
-                    className={cn(
-                      "px-4 py-2 rounded-lg font-semibold text-sm border transition-all",
-                      slotStep === null
-                        ? "bg-teal-600 border-teal-600 text-white shadow-md shadow-teal-100"
-                        : "bg-white border-slate-200 text-slate-600 hover:border-teal-300 hover:bg-teal-50"
-                    )}
-                  >
-                    Igual à duração
-                  </button>
-                  {[15, 20, 30, 45, 60, 75, 90].map(min => (
-                    <button
-                      key={min}
-                      onClick={() => setSlotStep(min)}
-                      className={cn(
-                        "px-4 py-2 rounded-lg font-semibold text-sm border transition-all",
-                        slotStep === min
-                          ? "bg-teal-600 border-teal-600 text-white shadow-md shadow-teal-100"
-                          : "bg-white border-slate-200 text-slate-600 hover:border-teal-300 hover:bg-teal-50"
+                      <div className="flex items-center justify-between mb-2 gap-2">
+                        <span className="font-bold text-slate-800 text-sm truncate">{ct.name}</span>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className={cn(
+                            "text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full flex items-center gap-1",
+                            ct.modality === 'online' ? "bg-sky-100 text-sky-700" : "bg-emerald-100 text-emerald-700"
+                          )}>
+                            {ct.modality === 'online' ? <Video className="w-2.5 h-2.5" /> : <MapPin className="w-2.5 h-2.5" />}
+                            {ct.modality}
+                          </span>
+                          <label
+                            className="relative inline-flex items-center cursor-pointer"
+                            onClick={(e) => e.stopPropagation()}
+                            title={ct.is_active ? 'Ativo — clique para desativar' : 'Inativo — clique para ativar'}
+                          >
+                            <input
+                              type="checkbox"
+                              className="sr-only peer"
+                              checked={ct.is_active}
+                              onChange={(e) => { e.stopPropagation(); updateType(ct.id, { is_active: e.target.checked }); }}
+                            />
+                            <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-teal-500"></div>
+                          </label>
+                        </div>
+                      </div>
+                      <ul className="text-xs text-slate-500 font-medium space-y-1 list-disc list-inside marker:text-slate-300">
+                        <li><span className="font-semibold text-slate-600">Duração:</span> {ct.consultation_duration} min</li>
+                        {ct.slot_step != null && ct.slot_step !== ct.consultation_duration && (
+                          <li><span className="font-semibold text-slate-600">Vagas:</span> a cada {ct.slot_step} min</li>
+                        )}
+                        {ct.buffer_before_minutes > 0 && (
+                          <li><span className="font-semibold text-slate-600">Buffer antes:</span> {ct.buffer_before_minutes} min</li>
+                        )}
+                        {ct.buffer_after_minutes > 0 && (
+                          <li><span className="font-semibold text-slate-600">Buffer depois:</span> {ct.buffer_after_minutes} min</li>
+                        )}
+                        {ct.min_notice_minutes > 0 && (
+                          <li><span className="font-semibold text-slate-600">Aviso mínimo:</span> {ct.min_notice_minutes >= 1440 ? Math.floor(ct.min_notice_minutes / 1440) + ' dia(s)' : ct.min_notice_minutes >= 60 ? Math.floor(ct.min_notice_minutes / 60) + ' h' : ct.min_notice_minutes + ' min'}</li>
+                        )}
+                      </ul>
+                      {ct.working_hours_override != null && (
+                        <div className="flex items-center gap-1.5 mt-2">
+                          <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 flex items-center gap-1">
+                            <Clock className="w-2.5 h-2.5" /> Horários próprios
+                          </span>
+                        </div>
                       )}
-                    >
-                      {min} min
-                    </button>
+                    </div>
                   ))}
                 </div>
-                <p className="text-xs text-slate-400 font-medium mt-3">
-                  De quanto em quanto tempo uma nova vaga é oferecida. Ex: duração 60min + intervalo 30min → 09:00, 09:30, 10:00... Cada vaga continua durando {duration} min.
-                </p>
-              </div>
-
-              <div className="mb-8 p-5 bg-white rounded-xl border border-slate-200 shadow-sm">
-                <label className="block text-sm font-bold text-slate-700 mb-3">Buffer antes da consulta</label>
-                <div className="flex flex-wrap gap-3">
-                  {[0, 5, 10, 15, 30].map(min => (
-                    <button
-                      key={min}
-                      onClick={() => setBufferBefore(min)}
-                      className={cn(
-                        "px-4 py-2 rounded-lg font-semibold text-sm border transition-all",
-                        bufferBefore === min
-                          ? "bg-teal-600 border-teal-600 text-white shadow-md shadow-teal-100"
-                          : "bg-white border-slate-200 text-slate-600 hover:border-teal-300 hover:bg-teal-50"
-                      )}
-                    >
-                      {min === 0 ? 'Sem buffer' : `${min} min`}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-xs text-slate-400 font-medium mt-3">
-                  Tempo reservado antes de cada consulta (revisão de prontuário, preparo). Não pode haver outro agendamento dentro desse intervalo.
-                </p>
-              </div>
-
-              <div className="mb-8 p-5 bg-white rounded-xl border border-slate-200 shadow-sm">
-                <label className="block text-sm font-bold text-slate-700 mb-3">Buffer após a consulta</label>
-                <div className="flex flex-wrap gap-3">
-                  {[0, 5, 10, 15, 30].map(min => (
-                    <button
-                      key={min}
-                      onClick={() => setBufferAfter(min)}
-                      className={cn(
-                        "px-4 py-2 rounded-lg font-semibold text-sm border transition-all",
-                        bufferAfter === min
-                          ? "bg-teal-600 border-teal-600 text-white shadow-md shadow-teal-100"
-                          : "bg-white border-slate-200 text-slate-600 hover:border-teal-300 hover:bg-teal-50"
-                      )}
-                    >
-                      {min === 0 ? 'Sem buffer' : `${min} min`}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-xs text-slate-400 font-medium mt-3">
-                  Tempo reservado depois de cada consulta (anotações, próximo paciente). Não pode haver outro agendamento dentro desse intervalo.
-                </p>
-              </div>
-
-              <div className="mb-8 p-5 bg-white rounded-xl border border-slate-200 shadow-sm">
-                <label className="block text-sm font-bold text-slate-700 mb-3">Aviso mínimo</label>
-                <div className="flex flex-wrap items-center gap-3">
-                  <input
-                    type="number"
-                    min={0}
-                    value={minNoticeValue}
-                    onChange={e => setMinNoticeFromUnit(parseInt(e.target.value || '0', 10), minNoticeUnit)}
-                    className="w-28 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-teal-200 focus:outline-none"
-                  />
-                  <select
-                    value={minNoticeUnit}
-                    onChange={e => {
-                      const u = e.target.value as 'minutos' | 'horas' | 'dias';
-                      setMinNoticeUnit(u);
-                      setMinNoticeFromUnit(minNoticeValue, u);
-                    }}
-                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-teal-200 focus:outline-none"
-                  >
-                    <option value="minutos">Minutos</option>
-                    <option value="horas">Horas</option>
-                    <option value="dias">Dias</option>
-                  </select>
-                </div>
-                <p className="text-xs text-slate-400 font-medium mt-3">
-                  Antecedência mínima exigida para um novo agendamento. Slots dentro desse intervalo a partir de agora não são oferecidos. Use 0 para desativar.
-                </p>
-              </div>
+              )}
             </motion.div>
           )}
 
@@ -561,6 +488,425 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
             {submitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
             Salvar Configurações
           </Button>
+        </div>
+      </motion.div>
+
+      {editingType && (
+        <ConsultationTypeEditor
+          doctorId={doctor.id}
+          clinicId={doctor.clinic_id}
+          existing={editingType === 'new' ? null : editingType}
+          hasFutureAppointments={false /* checked async dentro do modal antes de excluir */}
+          doctorWorkingHours={workingHours}
+          onClose={() => setEditingType(null)}
+          onSaved={async (input) => {
+            if (editingType === 'new') {
+              await createType(input as any);
+            } else {
+              await updateType(editingType.id, input);
+            }
+            setEditingType(null);
+            refetchTypes();
+          }}
+          onDeleted={async () => {
+            if (editingType !== 'new' && editingType) {
+              await removeType(editingType.id);
+            }
+            setEditingType(null);
+            refetchTypes();
+          }}
+        />
+      )}
+    </motion.div>
+  );
+}
+
+// ─── Sub-modal: editor de tipo de consulta ───────────────────────────────────
+type CTEditorProps = {
+  doctorId: string;
+  clinicId: string;
+  existing: ConsultationType | null;
+  hasFutureAppointments: boolean;
+  doctorWorkingHours: Record<string, { start: string; end: string }[]>;
+  onClose: () => void;
+  onSaved: (input: Omit<ConsultationType, 'id' | 'created_at'>) => Promise<void> | void;
+  onDeleted: () => Promise<void> | void;
+};
+
+function slugify(s: string): string {
+  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+function ConsultationTypeEditor({ doctorId, clinicId, existing, doctorWorkingHours, onClose, onSaved, onDeleted }: CTEditorProps) {
+  const [name, setName] = useState(existing?.name ?? '');
+  const [slug, setSlug] = useState(existing?.slug ?? '');
+  const [slugTouched, setSlugTouched] = useState(!!existing);
+  const [modality, setModality] = useState<'presencial' | 'online'>(existing?.modality ?? 'presencial');
+  const [description, setDescription] = useState<string>(existing?.description ?? '');
+  const [duration, setDuration] = useState<number>(existing?.consultation_duration ?? 30);
+  const [slotStep, setSlotStep] = useState<number | null>(existing?.slot_step ?? null);
+  const [bufferBefore, setBufferBefore] = useState<number>(existing?.buffer_before_minutes ?? 0);
+  const [bufferAfter, setBufferAfter] = useState<number>(existing?.buffer_after_minutes ?? 0);
+  const [minNoticeMinutes, setMinNoticeMinutes] = useState<number>(existing?.min_notice_minutes ?? 0);
+  const [minNoticeUnit, setMinNoticeUnit] = useState<'minutos' | 'horas' | 'dias'>(() => {
+    const m = existing?.min_notice_minutes ?? 0;
+    if (m === 0) return 'horas';
+    if (m % 1440 === 0) return 'dias';
+    if (m % 60 === 0) return 'horas';
+    return 'minutos';
+  });
+  const [isActive, setIsActive] = useState<boolean>(existing?.is_active ?? true);
+  const [useCustomHours, setUseCustomHours] = useState<boolean>(!!existing?.working_hours_override);
+  const [customHours, setCustomHours] = useState<Record<string, { start: string; end: string }[]>>(() => {
+    if (existing?.working_hours_override) return existing.working_hours_override;
+    // pré-popula com os horários do médico para servir de ponto de partida
+    return JSON.parse(JSON.stringify(doctorWorkingHours || {}));
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showSlug, setShowSlug] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const handleAddCustomShift = (dayId: string) => {
+    setCustomHours(prev => ({ ...prev, [dayId]: [...(prev[dayId] || []), { start: '08:00', end: '12:00' }] }));
+  };
+  const handleRemoveCustomShift = (dayId: string, idx: number) => {
+    setCustomHours(prev => ({ ...prev, [dayId]: (prev[dayId] || []).filter((_, i) => i !== idx) }));
+  };
+  const handleUpdateCustomShift = (dayId: string, idx: number, field: 'start' | 'end', value: string) => {
+    setCustomHours(prev => {
+      const shifts = [...(prev[dayId] || [])];
+      shifts[idx] = { ...shifts[idx], [field]: value };
+      return { ...prev, [dayId]: shifts };
+    });
+  };
+
+  const minNoticeValue = (() => {
+    if (minNoticeUnit === 'dias') return Math.floor(minNoticeMinutes / 1440);
+    if (minNoticeUnit === 'horas') return Math.floor(minNoticeMinutes / 60);
+    return minNoticeMinutes;
+  })();
+  const setMinNoticeFromUnit = (val: number, unit: 'minutos' | 'horas' | 'dias') => {
+    const mult = unit === 'dias' ? 1440 : unit === 'horas' ? 60 : 1;
+    setMinNoticeMinutes(Math.max(0, val) * mult);
+  };
+
+  const handleNameChange = (v: string) => {
+    setName(v);
+    if (!slugTouched) setSlug(slugify(v));
+  };
+
+  const handleSave = async () => {
+    setError(null);
+    if (!name.trim()) { setError('Informe o nome do tipo.'); return; }
+    const finalSlug = (slug.trim() || slugify(name)).toLowerCase();
+    if (!finalSlug) { setError('Slug inválido.'); return; }
+    setSaving(true);
+    try {
+      await onSaved({
+        clinic_id: clinicId,
+        doctor_id: doctorId,
+        slug: finalSlug,
+        name: name.trim(),
+        modality,
+        description: description.trim() || null,
+        is_active: isActive,
+        consultation_duration: duration,
+        slot_step: slotStep,
+        buffer_before_minutes: bufferBefore,
+        buffer_after_minutes: bufferAfter,
+        min_notice_minutes: minNoticeMinutes,
+        working_hours_override: useCustomHours ? customHours : null,
+      });
+    } catch (e: any) {
+      setError(e?.message || 'Erro ao salvar.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!existing) return;
+    if (!confirmDelete) { setConfirmDelete(true); return; }
+    setSaving(true);
+    try {
+      const { count } = await supabase
+        .from('appointments')
+        .select('id', { count: 'exact', head: true })
+        .eq('doctor_id', doctorId)
+        .eq('modality', existing.slug)
+        .in('status', ['pendente', 'confirmado']);
+      if ((count ?? 0) > 0) {
+        setError(`Existem ${count} agendamento(s) futuros desse tipo. Desative em vez de excluir.`);
+        setConfirmDelete(false);
+        setSaving(false);
+        return;
+      }
+      await onDeleted();
+    } catch (e: any) {
+      setError(e?.message || 'Erro ao excluir.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 20 }}
+        className="bg-white rounded-xl shadow-xl w-full max-w-xl max-h-[90vh] overflow-hidden flex flex-col"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between p-6 border-b border-slate-100 bg-slate-50/50">
+          <h3 className="text-lg font-bold text-slate-900">{existing ? 'Editar tipo de consulta' : 'Novo tipo de consulta'}</h3>
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-6 overflow-y-auto custom-scrollbar flex-1 bg-slate-50 space-y-5">
+          {error && (
+            <div className="p-3 bg-rose-50 text-rose-700 rounded-lg flex items-center gap-3 border border-rose-100">
+              <AlertCircle className="w-5 h-5 shrink-0" />
+              <span className="text-sm font-medium">{error}</span>
+            </div>
+          )}
+
+          <div className="p-4 bg-white rounded-xl border border-slate-200">
+            <label className="block text-sm font-bold text-slate-700 mb-2">Nome</label>
+            <input
+              type="text"
+              value={name}
+              onChange={e => handleNameChange(e.target.value)}
+              placeholder="Ex: Presencial, Retorno, Urgência..."
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-teal-200 focus:outline-none"
+            />
+            <button onClick={() => setShowSlug(s => !s)} className="text-[10px] font-bold text-slate-400 hover:text-slate-600 mt-1.5 uppercase tracking-widest">
+              {showSlug ? 'ocultar identificador' : 'identificador técnico'}
+            </button>
+            {showSlug && (
+              <input
+                type="text"
+                value={slug}
+                onChange={e => { setSlug(slugify(e.target.value)); setSlugTouched(true); }}
+                className="mt-2 w-full px-3 py-1.5 bg-slate-100 border border-slate-200 rounded-md text-xs font-mono text-slate-600 focus:ring-2 focus:ring-teal-200 focus:outline-none"
+              />
+            )}
+          </div>
+
+          <div className="p-4 bg-white rounded-xl border border-slate-200">
+            <label className="block text-sm font-bold text-slate-700 mb-3">Modalidade</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setModality('presencial')}
+                className={cn(
+                  "py-2.5 rounded-lg font-semibold text-sm border transition-all flex items-center justify-center gap-2",
+                  modality === 'presencial'
+                    ? "bg-emerald-600 border-emerald-600 text-white shadow-md"
+                    : "bg-white border-slate-200 text-slate-600 hover:border-emerald-300"
+                )}
+              >
+                <MapPin className="w-4 h-4" /> Presencial
+              </button>
+              <button
+                onClick={() => setModality('online')}
+                className={cn(
+                  "py-2.5 rounded-lg font-semibold text-sm border transition-all flex items-center justify-center gap-2",
+                  modality === 'online'
+                    ? "bg-sky-600 border-sky-600 text-white shadow-md"
+                    : "bg-white border-slate-200 text-slate-600 hover:border-sky-300"
+                )}
+              >
+                <Video className="w-4 h-4" /> Online
+              </button>
+            </div>
+          </div>
+
+          <div className="p-4 bg-white rounded-xl border border-slate-200">
+            <label className="block text-sm font-bold text-slate-700 mb-2">Descrição (contexto para a IA)</label>
+            <textarea
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              rows={3}
+              placeholder="Ex: Para pacientes que nunca foram atendidos aqui. Use quando o lead disser 'primeira vez', 'queria conhecer o trabalho'..."
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-teal-200 focus:outline-none resize-none"
+            />
+            <p className="text-xs text-slate-400 font-medium mt-1.5">
+              A IA usa esse texto para decidir quando aplicar esse tipo de consulta. Quanto mais claro, melhor a escolha automática.
+            </p>
+          </div>
+
+          <div className="p-4 bg-white rounded-xl border border-slate-200 space-y-5">
+            <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wider">Limites</h4>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Duração</label>
+              <div className="flex flex-wrap gap-2">
+                {[15, 20, 30, 45, 60].map(min => (
+                  <button key={min} onClick={() => setDuration(min)} className={cn(
+                    "px-3 py-1.5 rounded-md font-semibold text-xs border transition-all",
+                    duration === min ? "bg-teal-600 border-teal-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:border-teal-300"
+                  )}>{min} min</button>
+                ))}
+              </div>
+            </div>
+
+            <div className="border-t border-slate-100 pt-4">
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Intervalo entre vagas</label>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => setSlotStep(null)} className={cn(
+                  "px-3 py-1.5 rounded-md font-semibold text-xs border transition-all",
+                  slotStep === null ? "bg-teal-600 border-teal-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:border-teal-300"
+                )}>Igual à duração</button>
+                {[15, 20, 30, 45, 60, 75, 90].map(min => (
+                  <button key={min} onClick={() => setSlotStep(min)} className={cn(
+                    "px-3 py-1.5 rounded-md font-semibold text-xs border transition-all",
+                    slotStep === min ? "bg-teal-600 border-teal-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:border-teal-300"
+                  )}>{min} min</button>
+                ))}
+              </div>
+            </div>
+
+            <div className="border-t border-slate-100 pt-4">
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Buffer antes</label>
+              <div className="flex flex-wrap gap-2">
+                {[0, 5, 10, 15, 30].map(min => (
+                  <button key={min} onClick={() => setBufferBefore(min)} className={cn(
+                    "px-3 py-1.5 rounded-md font-semibold text-xs border transition-all",
+                    bufferBefore === min ? "bg-teal-600 border-teal-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:border-teal-300"
+                  )}>{min === 0 ? 'Sem buffer' : `${min} min`}</button>
+                ))}
+              </div>
+            </div>
+
+            <div className="border-t border-slate-100 pt-4">
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Buffer depois</label>
+              <div className="flex flex-wrap gap-2">
+                {[0, 5, 10, 15, 30].map(min => (
+                  <button key={min} onClick={() => setBufferAfter(min)} className={cn(
+                    "px-3 py-1.5 rounded-md font-semibold text-xs border transition-all",
+                    bufferAfter === min ? "bg-teal-600 border-teal-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:border-teal-300"
+                  )}>{min === 0 ? 'Sem buffer' : `${min} min`}</button>
+                ))}
+              </div>
+            </div>
+
+            <div className="border-t border-slate-100 pt-4">
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Aviso mínimo</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number" min={0}
+                  value={minNoticeValue}
+                  onChange={e => setMinNoticeFromUnit(parseInt(e.target.value || '0', 10), minNoticeUnit)}
+                  className="w-24 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-teal-200 focus:outline-none"
+                />
+                <select
+                  value={minNoticeUnit}
+                  onChange={e => { const u = e.target.value as any; setMinNoticeUnit(u); setMinNoticeFromUnit(minNoticeValue, u); }}
+                  className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-teal-200 focus:outline-none"
+                >
+                  <option value="minutos">Minutos</option>
+                  <option value="horas">Horas</option>
+                  <option value="dias">Dias</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-4 bg-white rounded-xl border border-slate-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-bold text-slate-700">Disponibilidade</p>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  {useCustomHours ? 'Este tipo usa horários próprios.' : 'Quando inativo utiliza os horários padrão.'}
+                </p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" className="sr-only peer" checked={useCustomHours} onChange={e => setUseCustomHours(e.target.checked)} />
+                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-500"></div>
+              </label>
+            </div>
+            {useCustomHours && (
+              <div className="mt-4 space-y-3 border-t border-slate-100 pt-4">
+                {WEEKDAYS.map(day => {
+                  const shifts = customHours[day.id] || [];
+                  const isActiveDay = shifts.length > 0;
+                  return (
+                    <div key={day.id} className="rounded-lg border border-slate-100 p-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              className="sr-only peer"
+                              checked={isActiveDay}
+                              onChange={e => {
+                                if (e.target.checked) handleAddCustomShift(day.id);
+                                else setCustomHours(prev => ({ ...prev, [day.id]: [] }));
+                              }}
+                            />
+                            <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-teal-500"></div>
+                          </label>
+                          <span className={cn("font-semibold text-xs", isActiveDay ? "text-slate-700" : "text-slate-400")}>{day.label}</span>
+                        </div>
+                        {isActiveDay && (
+                          <button onClick={() => handleAddCustomShift(day.id)} className="text-[10px] font-bold text-teal-600 bg-teal-50 px-2 py-1 rounded hover:bg-teal-100 transition-colors flex items-center gap-1">
+                            <Plus className="w-3 h-3" /> Turno
+                          </button>
+                        )}
+                      </div>
+                      {isActiveDay && shifts.length > 0 && (
+                        <div className="space-y-2 mt-2 pl-12">
+                          {shifts.map((shift, idx) => (
+                            <div key={idx} className="flex items-center gap-2">
+                              <input type="time" value={shift.start} onChange={e => handleUpdateCustomShift(day.id, idx, 'start', e.target.value)} className="px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs font-medium focus:ring-2 focus:ring-teal-200 focus:outline-none" />
+                              <span className="text-slate-400 text-[10px]">até</span>
+                              <input type="time" value={shift.end} onChange={e => handleUpdateCustomShift(day.id, idx, 'end', e.target.value)} className="px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs font-medium focus:ring-2 focus:ring-teal-200 focus:outline-none" />
+                              <button onClick={() => handleRemoveCustomShift(day.id, idx)} className="p-1 text-slate-300 hover:text-rose-500 transition-colors">
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+        </div>
+
+        <div className="p-5 bg-white border-t border-slate-100 flex items-center justify-between gap-3">
+          {existing ? (
+            <button
+              onClick={handleDelete}
+              disabled={saving}
+              className={cn(
+                "text-xs font-bold px-3 py-2 rounded-md border transition-colors",
+                confirmDelete ? "bg-rose-600 border-rose-600 text-white" : "border-rose-200 text-rose-600 hover:bg-rose-50"
+              )}
+            >
+              {confirmDelete ? 'Confirmar exclusão' : 'Excluir'}
+            </button>
+          ) : <span />}
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={onClose} className="font-bold">Cancelar</Button>
+            <Button onClick={handleSave} disabled={saving} className="font-bold text-white shadow-md">
+              {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+              Salvar
+            </Button>
+          </div>
         </div>
       </motion.div>
     </motion.div>

@@ -211,53 +211,37 @@ async function ensureUazapiInstance(
   return { api_id, api_token, row: (updated as InstanceRow) ?? { ...row, api_id, api_token } };
 }
 
-// Configura webhooks na uazapi (modo avancado, dois receivers separados):
-//  - connection -> uazapi-events na propria edge
-//  - messages   -> n8n inbound + tracking (mantem fluxo existente)
+// Configura webhooks na uazapi de forma idempotente: lista os existentes,
+// so cria os que faltam. Evita acumular duplicatas em re-conexoes.
 async function ensureUazapiWebhooks(api_token: string): Promise<void> {
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
   const eventsUrl = `${SUPABASE_URL}/functions/v1/uazapi-events`;
 
-  // 1) Webhook de connection -> uazapi-events
-  await uazapi('/webhook', {
-    method: 'POST',
-    token: api_token,
-    body: {
-      action: 'add',
-      enabled: true,
-      url: eventsUrl,
-      events: ['connection'],
-      excludeMessages: [],
-    },
-  });
-
-  // 2) Webhook de mensagens -> n8n inbound (se configurado)
-  if (N8N_INBOUND_URL) {
-    await uazapi('/webhook', {
-      method: 'POST',
-      token: api_token,
-      body: {
-        action: 'add',
-        enabled: true,
-        url: N8N_INBOUND_URL,
-        events: ['messages'],
-        excludeMessages: ['wasSentByApi'],
-      },
-    });
+  // 1) Lista webhooks atuais (GET /webhook)
+  let existing: any[] = [];
+  try {
+    const list = await uazapi('/webhook', { method: 'GET', token: api_token });
+    if (list.ok && Array.isArray(list.data)) existing = list.data;
+  } catch {
+    // Se falhar, assume vazio e prossegue criando
+    existing = [];
   }
 
-  // 3) Webhook de tracking -> n8n tracking (se configurado)
-  if (N8N_TRACKING_URL) {
+  const existingUrls = new Set(existing.map((w: any) => w?.url).filter(Boolean));
+
+  // Lista do que precisamos garantir
+  const desired = [
+    { url: eventsUrl,        events: ['connection'], excludeMessages: [] as string[] },
+    ...(N8N_INBOUND_URL  ? [{ url: N8N_INBOUND_URL,  events: ['messages'], excludeMessages: ['wasSentByApi'] }] : []),
+    ...(N8N_TRACKING_URL ? [{ url: N8N_TRACKING_URL, events: ['messages'], excludeMessages: ['wasSentByApi'] }] : []),
+  ];
+
+  for (const want of desired) {
+    if (existingUrls.has(want.url)) continue; // ja existe, nao duplica
     await uazapi('/webhook', {
       method: 'POST',
       token: api_token,
-      body: {
-        action: 'add',
-        enabled: true,
-        url: N8N_TRACKING_URL,
-        events: ['messages'],
-        excludeMessages: ['wasSentByApi'],
-      },
+      body: { action: 'add', enabled: true, url: want.url, events: want.events, excludeMessages: want.excludeMessages },
     });
   }
 }

@@ -211,39 +211,65 @@ async function ensureUazapiInstance(
   return { api_id, api_token, row: (updated as InstanceRow) ?? { ...row, api_id, api_token } };
 }
 
-// Configura webhooks na uazapi de forma idempotente: lista os existentes,
-// so cria os que faltam. Evita acumular duplicatas em re-conexoes.
-async function ensureUazapiWebhooks(api_token: string): Promise<void> {
+// Configura webhooks na uazapi de forma idempotente:
+//  - lista os existentes
+//  - se houver duplicatas para um URL esperado, apaga todas exceto a primeira
+//  - se faltar algum URL esperado, cria
+// URLs nao reconhecidos (configs custom do cliente) ficam intactos.
+async function ensureUazapiWebhooks(
+  api_token: string,
+): Promise<{ created: string[]; removed_duplicates: { url: string; ids: string[] }[] }> {
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
   const eventsUrl = `${SUPABASE_URL}/functions/v1/uazapi-events`;
 
-  // 1) Lista webhooks atuais (GET /webhook)
   let existing: any[] = [];
   try {
     const list = await uazapi('/webhook', { method: 'GET', token: api_token });
     if (list.ok && Array.isArray(list.data)) existing = list.data;
   } catch {
-    // Se falhar, assume vazio e prossegue criando
     existing = [];
   }
 
-  const existingUrls = new Set(existing.map((w: any) => w?.url).filter(Boolean));
-
-  // Lista do que precisamos garantir
   const desired = [
-    { url: eventsUrl,        events: ['connection'], excludeMessages: [] as string[] },
+    { url: eventsUrl, events: ['connection'], excludeMessages: [] as string[] },
     ...(N8N_INBOUND_URL  ? [{ url: N8N_INBOUND_URL,  events: ['messages'], excludeMessages: ['wasSentByApi'] }] : []),
     ...(N8N_TRACKING_URL ? [{ url: N8N_TRACKING_URL, events: ['messages'], excludeMessages: ['wasSentByApi'] }] : []),
   ];
 
+  const created: string[] = [];
+  const removed_duplicates: { url: string; ids: string[] }[] = [];
+
   for (const want of desired) {
-    if (existingUrls.has(want.url)) continue; // ja existe, nao duplica
-    await uazapi('/webhook', {
-      method: 'POST',
-      token: api_token,
-      body: { action: 'add', enabled: true, url: want.url, events: want.events, excludeMessages: want.excludeMessages },
-    });
+    const matches = existing.filter((w: any) => w?.url === want.url && w?.id);
+
+    if (matches.length === 0) {
+      // Cria
+      await uazapi('/webhook', {
+        method: 'POST',
+        token: api_token,
+        body: { action: 'add', enabled: true, url: want.url, events: want.events, excludeMessages: want.excludeMessages },
+      });
+      created.push(want.url);
+      continue;
+    }
+
+    if (matches.length > 1) {
+      // Mantem o primeiro, apaga os outros
+      const removedIds: string[] = [];
+      for (let i = 1; i < matches.length; i++) {
+        const res = await uazapi('/webhook', {
+          method: 'POST',
+          token: api_token,
+          body: { action: 'delete', id: matches[i].id },
+        });
+        if (res.ok) removedIds.push(matches[i].id);
+      }
+      if (removedIds.length > 0) removed_duplicates.push({ url: want.url, ids: removedIds });
+    }
+    // matches.length === 1 -> idempotente, nao faz nada
   }
+
+  return { created, removed_duplicates };
 }
 
 function isWithinCooldown(row: InstanceRow): boolean {
@@ -281,9 +307,15 @@ async function handleStart(supa: SupabaseClient, row: InstanceRow, source: strin
   }
   row = ensured.row;
 
-  // Configura webhooks (idempotente; uazapi sobrescreve action=add no modo simples)
+  // Configura webhooks (idempotente: cria os que faltam, dedup os duplicados)
   try {
-    await ensureUazapiWebhooks(ensured.api_token);
+    const whResult = await ensureUazapiWebhooks(ensured.api_token);
+    if (whResult.created.length > 0 || whResult.removed_duplicates.length > 0) {
+      await logEvent(supa, {
+        clinic_id: row.clinic_id, instance_id: row.id, event_type: 'webhook_ensured', source,
+        payload: whResult,
+      });
+    }
   } catch (e) {
     // Falha de webhook nao bloqueia conexao; loga e segue
     await logEvent(supa, {

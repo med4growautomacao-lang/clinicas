@@ -1165,9 +1165,13 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
       .map((id: string) => byId.get(id))
       .filter(Boolean);
 
-    const countByStage = new Map<string, number>(
-      (funnelCohort || []).map((r: any) => [r.stage_id, Number(r.leads) || 0])
-    );
+    // Agrega o coorte por etapa, respeitando o filtro de origem (Todos/Meta/Google/Sem Origem).
+    // O RPC retorna uma linha por (etapa, plataforma); somamos só as plataformas selecionadas.
+    const countByStage = new Map<string, number>();
+    (funnelCohort || []).forEach((r: any) => {
+      if (selectedPlatform !== 'all' && r.platform !== selectedPlatform) return;
+      countByStage.set(r.stage_id, (countByStage.get(r.stage_id) || 0) + (Number(r.leads) || 0));
+    });
 
     const base = visibleStages.map((stage: any, idx: number) => ({
       id: stage.id,
@@ -1182,7 +1186,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
         ? 'Leads no período'
         : `${((stage.value / (arr[idx - 1].value || 1)) * 100).toFixed(1)}% de conversão`,
     }));
-  }, [funnelStages, funnelCohort, funnelOrder, funnelHidden]);
+  }, [funnelStages, funnelCohort, funnelOrder, funnelHidden, selectedPlatform]);
 
   return (
     <div className="space-y-6">

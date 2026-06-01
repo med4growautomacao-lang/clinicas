@@ -75,7 +75,7 @@ function pageHtml(token: string, status: string, qrCode: string | null, phoneNum
       <p class="subtitle">Sua conta foi conectada com sucesso.</p>
       ${phoneNumber ? '<p class="phone">' + phoneNumber + '</p>' : ''}
     `
-    : status === 'qr_pending' && qrCode
+    : status === 'connecting' && qrCode
     ? `
       <div class="logo">
         <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
@@ -142,7 +142,7 @@ function pageHtml(token: string, status: string, qrCode: string | null, phoneNum
           if (d.status === 'connected') {
             clearInterval(interval);
             app.innerHTML = '<div class="success-icon"><svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg></div><h1>WhatsApp Conectado!</h1><p class="subtitle">Sua conta foi conectada com sucesso.</p>' + (d.phone_number ? '<p class="phone">'+d.phone_number+'</p>' : '');
-          } else if (d.status === 'qr_pending' && d.qr_code) {
+          } else if (d.status === 'connecting' && d.qr_code) {
             var src = d.qr_code.startsWith('data:') ? d.qr_code : 'data:image/png;base64,' + d.qr_code;
             var img = document.getElementById('qr-img');
             if (img) {

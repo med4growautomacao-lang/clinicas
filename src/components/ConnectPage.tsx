@@ -2,8 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { Loader2, CheckCircle2, QrCode, Smartphone, Info, RefreshCw, XCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const EDGE_URL = 'https://yzpclhuifquhfqpiwysh.supabase.co/functions/v1/whatsapp-qr-public';
+const SUPABASE_FUNCTIONS_URL = 'https://yzpclhuifquhfqpiwysh.supabase.co/functions/v1';
+const QR_PUBLIC_URL = `${SUPABASE_FUNCTIONS_URL}/whatsapp-qr-public`;
+const ORCHESTRATOR_URL = `${SUPABASE_FUNCTIONS_URL}/whatsapp-orchestrator`;
 const ATTEMPT_TIMEOUT_SECONDS = 120;
+const POLL_INTERVAL_MS = 10000;
 
 interface QRState {
   status: string;
@@ -26,9 +29,8 @@ export function ConnectPage() {
 
   const clearQr = React.useCallback(() => {
     if (!token || connectedRef.current) return;
-    const BRIDGE_URL = EDGE_URL.replace('whatsapp-qr-public', 'whatsapp-bridge');
     // sendBeacon garante envio mesmo quando a aba fecha
-    navigator.sendBeacon(BRIDGE_URL, JSON.stringify({ action: 'cancel', token }));
+    navigator.sendBeacon(ORCHESTRATOR_URL, JSON.stringify({ action: 'cancel', connect_token: token }));
   }, [token]);
 
   // Limpa QR ao fechar/recarregar a aba
@@ -45,15 +47,14 @@ export function ConnectPage() {
     setAttempting(true);
     setSecondsLeft(ATTEMPT_TIMEOUT_SECONDS);
     try {
-      const response = await fetch(`${EDGE_URL.replace('whatsapp-qr-public', 'whatsapp-bridge')}`, {
+      const response = await fetch(ORCHESTRATOR_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'create', token })
+        body: JSON.stringify({ action: 'start', connect_token: token }),
       });
-
       if (!response.ok) {
-        const errorData = await response.json();
-        console.error('Bridge Error Details:', errorData);
+        const errorData = await response.json().catch(() => ({}));
+        console.error('Orchestrator error:', errorData);
       }
     } catch (err) {
       console.error('Error starting connection:', err);
@@ -105,7 +106,7 @@ export function ConnectPage() {
 
     const poll = async () => {
       try {
-        const res = await fetch(`${EDGE_URL}?token=${token}&json=1`);
+        const res = await fetch(`${QR_PUBLIC_URL}?token=${token}&json=1`);
         if (res.status === 404) {
           setInvalid(true);
           setLoadingInitial(false);
@@ -122,31 +123,13 @@ export function ConnectPage() {
     };
 
     poll();
-    intervalRef.current = setInterval(poll, 5000);
+    intervalRef.current = setInterval(poll, POLL_INTERVAL_MS);
     return () => stopPolling();
   }, [token]);
 
-  useEffect(() => {
-    let pulseInterval: any;
-    if (token && attempting && (state.status === 'connecting' || state.status === 'qr_pending')) {
-      const sendSignal = async () => {
-        try {
-          await fetch(`${EDGE_URL.replace('whatsapp-qr-public', 'whatsapp-bridge')}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'connect', token })
-          });
-        } catch (err) {
-          console.error('Pulse error:', err);
-        }
-      };
-
-      pulseInterval = setInterval(sendSignal, 15000);
-    }
-    return () => {
-      if (pulseInterval) clearInterval(pulseInterval);
-    };
-  }, [state.status, token, attempting]);
+  // Pulse de keep-alive eliminado: a uazapi empurra eventos de mudanca de status
+  // via webhook 'connection' direto para uazapi-events. Polling de 10s acima
+  // serve apenas como fallback.
 
   if (loadingInitial) {
     return (
@@ -264,7 +247,7 @@ export function ConnectPage() {
 
         <div className="text-center space-y-8">
           <AnimatePresence mode="wait">
-            {(state.status === 'qr_pending' || state.status === 'connecting' || state.qr_code) ? (
+            {(state.status === 'connecting' || state.qr_code) ? (
               <motion.div 
                 key="qr-section"
                 initial={{ opacity: 0 }}

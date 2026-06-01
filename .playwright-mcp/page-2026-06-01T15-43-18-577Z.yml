@@ -1,0 +1,202 @@
+- generic [ref=e2]:
+  - region "Notifications (F8)":
+    - list
+  - generic [ref=e5]:
+    - generic [ref=e9]:
+      - generic [ref=e10]:
+        - generic [ref=e11]:
+          - img "uazapiGO" [ref=e12]
+          - generic [ref=e13]:
+            - generic [ref=e14]: uazapiGO V2
+            - generic [ref=e15]: Docs & API
+        - button "Alternar tema" [ref=e17] [cursor=pointer]:
+          - img [ref=e18]
+      - generic [ref=e21]:
+        - img [ref=e22]
+        - textbox "Buscar docs, endpoints, descriptions, schemas" [ref=e25]
+      - generic [ref=e27] [cursor=pointer]:
+        - img [ref=e28]
+        - generic [ref=e31]: Overview
+      - generic [ref=e34] [cursor=pointer]:
+        - img [ref=e35]
+        - generic [ref=e41]: Monitor de Eventos
+      - generic [ref=e43] [cursor=pointer]:
+        - generic [ref=e44]: ENDPOINTS
+        - generic [ref=e45]:
+          - generic [ref=e46]: "139"
+          - img [ref=e47]
+      - generic [ref=e49]:
+        - generic [ref=e51] [cursor=pointer]:
+          - generic [ref=e52]:
+            - img [ref=e53]
+            - generic [ref=e55]: Admininstração
+          - generic [ref=e56]: "8"
+        - generic [ref=e58] [cursor=pointer]:
+          - generic [ref=e59]:
+            - img [ref=e60]
+            - generic [ref=e62]: Instancia
+          - generic [ref=e63]: "10"
+        - generic [ref=e65] [cursor=pointer]:
+          - generic [ref=e66]:
+            - img [ref=e67]
+            - generic [ref=e69]: Proxy
+          - generic [ref=e70]: "3"
+        - generic [ref=e72] [cursor=pointer]:
+          - generic [ref=e73]:
+            - img [ref=e74]
+            - generic [ref=e76]: Perfil
+          - generic [ref=e77]: "2"
+        - generic [ref=e79] [cursor=pointer]:
+          - generic [ref=e80]:
+            - img [ref=e81]
+            - generic [ref=e83]: Business
+          - generic [ref=e84]: "8"
+        - generic [ref=e86] [cursor=pointer]:
+          - generic [ref=e87]:
+            - img [ref=e88]
+            - generic [ref=e90]: Chamadas
+          - generic [ref=e91]: "2"
+        - generic [ref=e93] [cursor=pointer]:
+          - generic [ref=e94]:
+            - img [ref=e95]
+            - generic [ref=e97]: Webhooks e SSE
+          - generic [ref=e98]: "4"
+        - generic [ref=e100] [cursor=pointer]:
+          - generic [ref=e101]:
+            - img [ref=e102]
+            - generic [ref=e104]: Enviar Mensagem
+          - generic [ref=e105]: "11"
+        - generic [ref=e107] [cursor=pointer]:
+          - generic [ref=e108]:
+            - img [ref=e109]
+            - generic [ref=e111]: Mensagem Async
+          - generic [ref=e112]: "3"
+        - generic [ref=e114] [cursor=pointer]:
+          - generic [ref=e115]:
+            - img [ref=e116]
+            - generic [ref=e118]: Ações na mensagem e Buscar
+          - generic [ref=e119]: "8"
+        - generic [ref=e121] [cursor=pointer]:
+          - generic [ref=e122]:
+            - img [ref=e123]
+            - generic [ref=e125]: Chats
+          - generic [ref=e126]: "10"
+        - generic [ref=e128] [cursor=pointer]:
+          - generic [ref=e129]:
+            - img [ref=e130]
+            - generic [ref=e132]: Contatos
+          - generic [ref=e133]: "6"
+        - generic [ref=e135] [cursor=pointer]:
+          - generic [ref=e136]:
+            - img [ref=e137]
+            - generic [ref=e139]: Bloqueios
+          - generic [ref=e140]: "2"
+        - generic [ref=e142] [cursor=pointer]:
+          - generic [ref=e143]:
+            - img [ref=e144]
+            - generic [ref=e146]: Etiquetas
+          - generic [ref=e147]: "4"
+        - generic [ref=e149] [cursor=pointer]:
+          - generic [ref=e150]:
+            - img [ref=e151]
+            - generic [ref=e153]: Grupos e Comunidades
+          - generic [ref=e154]: "19"
+        - generic [ref=e156] [cursor=pointer]:
+          - generic [ref=e157]:
+            - img [ref=e158]
+            - generic [ref=e160]: Newsletters e Canais
+          - generic [ref=e161]: "26"
+        - generic [ref=e163] [cursor=pointer]:
+          - generic [ref=e164]:
+            - img [ref=e165]
+            - generic [ref=e167]: Respostas Rápidas
+          - generic [ref=e168]: "2"
+        - generic [ref=e170] [cursor=pointer]:
+          - generic [ref=e171]:
+            - img [ref=e172]
+            - generic [ref=e174]: CRM
+          - generic [ref=e175]: "2"
+        - generic [ref=e177] [cursor=pointer]:
+          - generic [ref=e178]:
+            - img [ref=e179]
+            - generic [ref=e181]: Mensagem em massa
+          - generic [ref=e182]: "7"
+        - generic [ref=e184] [cursor=pointer]:
+          - generic [ref=e185]:
+            - img [ref=e186]
+            - generic [ref=e188]: Integração Chatwoot
+          - generic [ref=e189]: "2"
+      - generic [ref=e192] [cursor=pointer]:
+        - generic [ref=e193]: SCHEMAS
+        - generic [ref=e194]:
+          - generic [ref=e195]: "11"
+          - img [ref=e196]
+      - generic [ref=e200] [cursor=pointer]:
+        - generic [ref=e201]: ATUALIZAÇÕES
+        - generic [ref=e202]:
+          - generic [ref=e203]: "2"
+          - img [ref=e204]
+    - separator [ref=e206]:
+      - img [ref=e208]
+    - generic [ref=e217]:
+      - generic [ref=e218]:
+        - generic [ref=e219]:
+          - heading "uazapiGO - WhatsApp API" [level=1] [ref=e376]
+          - generic [ref=e377]: v2.1.0
+        - generic [ref=e379]:
+          - paragraph [ref=e432]: API para gerenciamento de instâncias do WhatsApp e comunicações.
+          - 'heading "⚠️ Recomendação Importante: WhatsApp Business" [level=2] [ref=e433]'
+          - paragraph [ref=e434]:
+            - strong [ref=e435]: É ALTAMENTE RECOMENDADO usar contas do WhatsApp Business
+            - text: em vez do WhatsApp normal para integração, o WhatsApp normal pode apresentar inconsistências, desconexões, limitações e instabilidades durante o uso com a nossa API.
+          - heading "Autenticação" [level=2] [ref=e436]
+          - list [ref=e437]:
+            - listitem [ref=e438]: Endpoints regulares requerem um header 'token' com o token da instância
+            - listitem [ref=e439]: Endpoints administrativos requerem um header 'admintoken'
+          - heading "Estados da Instância" [level=2] [ref=e440]
+          - paragraph [ref=e441]: "As instâncias podem estar nos seguintes estados:"
+          - list [ref=e442]:
+            - listitem [ref=e443]:
+              - code [ref=e444]: "`disconnected`"
+              - text: ": Desconectado do WhatsApp"
+            - listitem [ref=e445]:
+              - code [ref=e446]: "`connecting`"
+              - text: ": Em processo de conexão"
+            - listitem [ref=e447]:
+              - code [ref=e448]: "`connected`"
+              - text: ": Conectado e autenticado com sucesso"
+          - heading "Limites de Uso" [level=2] [ref=e449]
+          - list [ref=e450]:
+            - listitem [ref=e451]: O servidor possui um limite máximo de instâncias conectadas
+            - listitem [ref=e452]: Quando o limite é atingido, novas tentativas receberão erro 429
+            - listitem [ref=e453]: Servidores gratuitos/demo podem ter restrições adicionais de tempo de vida
+        - generic [ref=e224]:
+          - generic [ref=e402]:
+            - generic [ref=e403]: "139"
+            - generic [ref=e404]: Endpoints
+          - generic [ref=e405]:
+            - generic [ref=e406]: "11"
+            - generic [ref=e407]: Schemas
+          - generic [ref=e408]:
+            - generic [ref=e409]: "2"
+            - generic [ref=e410]: Security
+          - generic [ref=e411]:
+            - generic [ref=e412]: "1"
+            - generic [ref=e413]: Servers
+        - generic [ref=e414]:
+          - heading "Baixar Especificação OpenAPI" [level=3] [ref=e415]
+          - paragraph [ref=e416]: Baixe a especificação OpenAPI completa com todas as referências resolvidas e pronta para uso.
+          - button "Baixar Especificação" [ref=e418] [cursor=pointer]:
+            - img
+            - text: Baixar Especificação
+        - generic [ref=e419]:
+          - heading "API Servers" [level=3] [ref=e420]
+          - generic [ref=e422]:
+            - code [ref=e424]: "https://{subdomain}.uazapi.com"
+            - generic [ref=e425]: Servidor da API uazapiGO
+      - paragraph [ref=e427]: Select an endpoint, webhook, or schema from the sidebar to view documentation
+    - separator [ref=e312]:
+      - img [ref=e314]
+    - generic [ref=e324]:
+      - img [ref=e429]
+      - paragraph [ref=e431]: Select an endpoint to test

@@ -111,64 +111,45 @@ export function Settings() {
         }
     };
 
+    // Timeout total da tentativa. O cron de zombie recovery limpa em 3min;
+    // aqui o frontend so reseta o spinner de "Aguardando QR..." apos 2min.
     const ATTEMPT_TIMEOUT_MS = 120_000;
     const attemptStartRef = useRef<number | null>(null);
 
     useEffect(() => {
-        let interval: any;
         let timeoutId: any;
-
-        if (whatsapp?.status === 'connecting' || whatsapp?.status === 'qr_pending') {
+        if (whatsapp?.status === 'connecting') {
             if (!attemptStartRef.current) attemptStartRef.current = Date.now();
-
-            const sendSignal = async () => {
-                if (!clinic?.id) return;
-                console.log('Enviando sinal de keep-alive para WhatsApp Bridge...');
-                await supabase.functions.invoke('whatsapp-bridge', {
-                    body: { clinic_id: clinic.id }
-                });
-            };
-
-            sendSignal();
-            interval = setInterval(sendSignal, 15000);
-
-            // Aborta após o timeout: marca como disconnected
             const elapsed = Date.now() - attemptStartRef.current;
             const remaining = Math.max(0, ATTEMPT_TIMEOUT_MS - elapsed);
             timeoutId = setTimeout(async () => {
                 attemptStartRef.current = null;
                 try {
-                    await updateWhatsapp({ status: 'disconnected', qr_code: null });
-                    console.log('Tentativa de conexão WhatsApp expirou após 2 min.');
+                    await supabase.functions.invoke('whatsapp-orchestrator', {
+                        body: { action: 'cancel', clinic_id: clinic?.id },
+                    });
                 } catch (err) {
-                    console.error('Erro ao abortar conexão por timeout:', err);
+                    console.error('Erro ao cancelar conexão por timeout:', err);
                 }
             }, remaining);
         } else {
             attemptStartRef.current = null;
         }
-
-        return () => {
-            if (interval) clearInterval(interval);
-            if (timeoutId) clearTimeout(timeoutId);
-        };
-    }, [whatsapp?.status, clinic?.id, updateWhatsapp]);
+        return () => { if (timeoutId) clearTimeout(timeoutId); };
+    }, [whatsapp?.status, clinic?.id]);
 
     const handleWhatsappConnect = async () => {
         if (!clinic?.id) return;
         setConnecting(true);
         try {
-            // Primeiro avisamos o banco que estamos tentando conectar
-            await updateWhatsapp({ status: 'connecting', qr_code: undefined });
-            
-            // O useEffect acima cuidará de chamar a Bridge a cada 15 segundos
-            // Mas chamamos uma vez aqui para ser instantâneo no primeiro clique
-            await supabase.functions.invoke('whatsapp-bridge', {
-                body: { clinic_id: clinic.id }
+            const { data, error } = await supabase.functions.invoke('whatsapp-orchestrator', {
+                body: { action: 'start', clinic_id: clinic.id },
             });
+            if (error) throw error;
+            if (data && data.success === false) throw new Error(data.error || 'Falha ao iniciar conexão');
         } catch (error: any) {
             console.error('Erro ao conectar WhatsApp:', error);
-            showToast('Erro ao iniciar conexão: ' + error.message, 'error');
+            showToast('Erro ao iniciar conexão: ' + (error.message || error), 'error');
         } finally {
             setConnecting(false);
         }
@@ -177,10 +158,22 @@ export function Settings() {
     const handleWhatsappCancel = async () => {
         if (!clinic?.id) return;
         try {
-            await updateWhatsapp({ status: 'disconnected', qr_code: null });
-            console.log('Conexão cancelada pelo usuário.');
+            await supabase.functions.invoke('whatsapp-orchestrator', {
+                body: { action: 'cancel', clinic_id: clinic.id },
+            });
         } catch (error) {
             console.error('Erro ao cancelar conexão:', error);
+        }
+    };
+
+    const handleWhatsappDisconnect = async () => {
+        if (!clinic?.id) return;
+        try {
+            await supabase.functions.invoke('whatsapp-orchestrator', {
+                body: { action: 'disconnect', clinic_id: clinic.id },
+            });
+        } catch (error) {
+            console.error('Erro ao desconectar:', error);
         }
     };
 
@@ -229,6 +222,24 @@ export function Settings() {
             localStorage.setItem('settingsIntTab', 'whatsapp');
         }
     }, [restrictedIntegrations, activeIntTab]);
+
+    // Deep-link vindo do banner global (WhatsApp desconectado): leva direto
+    // para Integracoes > WhatsApp.
+    useEffect(() => {
+        const handler = (e: Event) => {
+            const detail = (e as CustomEvent).detail;
+            if (detail?.tab === 'integrations') {
+                setActiveTab('integrations');
+                localStorage.setItem('settingsTab', 'integrations');
+            }
+            if (detail?.intTab) {
+                setActiveIntTab(detail.intTab);
+                localStorage.setItem('settingsIntTab', detail.intTab);
+            }
+        };
+        window.addEventListener('settings-deeplink', handler);
+        return () => window.removeEventListener('settings-deeplink', handler);
+    }, []);
 
     if (loading) {
         return (
@@ -519,6 +530,7 @@ export function Settings() {
                                 onSaveClinic={updateClinic}
                                 onConnect={handleWhatsappConnect}
                                 onCancel={handleWhatsappCancel}
+                                onDisconnect={handleWhatsappDisconnect}
                                 connecting={connecting}
                                 onCopyLink={handleShowLink}
                                 linkCopied={linkCopied}
@@ -985,7 +997,7 @@ function RedirectLinkCard({ connectToken, redirectMessage, onMessageChange }: {
     );
 }
 
-function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSaveClinic, onConnect, onCancel, connecting, onCopyLink, linkCopied, activeIntTab }: {
+function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSaveClinic, onConnect, onCancel, onDisconnect, connecting, onCopyLink, linkCopied, activeIntTab }: {
     data: Partial<WhatsappInstance>,
     onChange: (updates: Partial<WhatsappInstance>) => void,
     clinicData: Partial<Clinic>,
@@ -993,6 +1005,7 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
     onSaveClinic: (updates: Partial<Clinic>) => Promise<boolean>,
     onConnect: () => void,
     onCancel: () => void,
+    onDisconnect: () => void,
     connecting: boolean,
     onCopyLink: () => void,
     linkCopied: boolean,
@@ -1076,18 +1089,18 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                             <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Status da Conexão</label>
                             <div className="flex items-center gap-2">
                                 <div className={`w-2 h-2 rounded-full animate-pulse ${
-                                    data.status === 'connected' ? 'bg-emerald-500' : 
-                                    data.status === 'connecting' ? 'bg-blue-500' :
-                                    data.status === 'qr_pending' ? 'bg-amber-500' : 'bg-slate-300'
+                                    data.status === 'connected' ? 'bg-emerald-500' :
+                                    (data.status === 'connecting' && data.qr_code) ? 'bg-amber-500' :
+                                    data.status === 'connecting' ? 'bg-blue-500' : 'bg-slate-300'
                                 }`} />
                                 <span className={`text-xs font-bold uppercase ${
-                                    data.status === 'connected' ? 'text-emerald-600' : 
-                                    data.status === 'connecting' ? 'text-blue-600' :
-                                    data.status === 'qr_pending' ? 'text-amber-600' : 'text-slate-500'
+                                    data.status === 'connected' ? 'text-emerald-600' :
+                                    (data.status === 'connecting' && data.qr_code) ? 'text-amber-600' :
+                                    data.status === 'connecting' ? 'text-blue-600' : 'text-slate-500'
                                 }`}>
-                                    {data.status === 'connected' ? 'Conectado' : 
-                                     data.status === 'connecting' ? 'Conectando...' :
-                                     data.status === 'qr_pending' ? 'Aguardando QR' : 'Desconectado'}
+                                    {data.status === 'connected' ? 'Conectado' :
+                                     (data.status === 'connecting' && data.qr_code) ? 'Aguardando QR' :
+                                     data.status === 'connecting' ? 'Conectando...' : 'Desconectado'}
                                 </span>
                             </div>
                         </div>
@@ -1125,7 +1138,7 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                     </div>
 
                     <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-inner">
-                        {(data.status === "disconnected" || data.status === "qr_pending" || data.status === "connecting" || !data.status) && (
+                        {(data.status === "disconnected" || data.status === "connecting" || !data.status) && (
                             <div className="p-10 flex flex-col items-center gap-6 bg-slate-50/50">
                                 {data.qr_code ? (
                                     <div className="relative group">
@@ -1181,7 +1194,7 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                                             </Button>
                                         )}
 
-                                        {(data.status === 'qr_pending' || data.status === 'connecting') && (
+                                        {data.status === 'connecting' && (
                                             <Button
                                                 onClick={onConnect}
                                                 disabled={true}
@@ -1201,7 +1214,7 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                                             {linkCopied ? 'Link copiado!' : 'Copiar Link para Clínica'}
                                         </Button>
 
-                                        {(data.status === 'qr_pending' || data.status === 'connecting') && (
+                                        {data.status === 'connecting' && (
                                             <Button
                                                 variant="ghost"
                                                 onClick={onCancel}
@@ -1234,9 +1247,9 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                                             <p className="text-sm font-medium text-emerald-600">{data.phone_number || 'Sessão ativa'}</p>
                                         </div>
                                     </div>
-                                    <Button 
-                                        variant="outline" 
-                                        onClick={() => onChange({ status: 'disconnected' })}
+                                    <Button
+                                        variant="outline"
+                                        onClick={onDisconnect}
                                         className="text-rose-500 border-rose-200 hover:bg-rose-50 gap-2"
                                     >
                                         <WifiOff className="w-4 h-4" /> Desconectar

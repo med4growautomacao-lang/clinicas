@@ -1,123 +1,87 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+// whatsapp-bridge
+//
+// Apos a refatoracao, esta edge ficou como roteador fino:
+//  - actions de conexao (create/connect/cancel) -> whatsapp-orchestrator
+//  - actions de grupo (create_group/add_participants) -> WHATSAPP_GROUP_WEBHOOK (n8n)
+//
+// Mantemos esta edge por compat com clientes ja em cache. Pode ser removida
+// quando confirmar zero trafego em /functions/v1/whatsapp-bridge nos logs.
 
-const corsHeaders = {
+import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+
+const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+};
+
+const CONNECTION_ACTIONS = new Set(['create', 'connect', 'cancel', 'start', 'disconnect', 'reset', 'status']);
+const GROUP_ACTIONS = new Set(['create_group', 'add_participants']);
 
 serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
-  }
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS_HEADERS });
 
-  try {
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    )
+  let body: any;
+  try { body = await req.json(); } catch { body = {}; }
+  const action: string = body?.action ?? 'start';
 
-    const body = await req.json()
-    const { action } = body
-    const connect_token = body.connect_token || body.token
-    let clinic_id = body.clinic_id
-
-    let api_id = null;
-    let api_token = null;
-    let instance_id = null;
-
-    if (connect_token && !clinic_id) {
-      const { data: instance, error: instanceError } = await supabaseClient
-        .from('whatsapp_instances')
-        .select('id, clinic_id, api_id, api_token')
-        .eq('connect_token', connect_token)
-        .maybeSingle();
-
-      if (instanceError) throw instanceError;
-      
-      if (instance) {
-        clinic_id = instance.clinic_id;
-        api_id = instance.api_id;
-        api_token = instance.api_token;
-        instance_id = instance.id;
-      }
-    } else if (clinic_id) {
-      const { data: instance } = await supabaseClient
-        .from('whatsapp_instances')
-        .select('id, api_id, api_token')
-        .eq('clinic_id', clinic_id)
-        .maybeSingle();
-      
-      if (instance) {
-        api_id = instance.api_id;
-        api_token = instance.api_token;
-        instance_id = instance.id;
-      }
-    }
-
-    if (!clinic_id) {
-      return new Response(JSON.stringify({ success: false, error: 'Clinica nao identificada via token' }), {
-        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      })
-    }
-
-    // Cancelamento: limpa QR e status, sem chamar n8n
-    if (action === 'cancel') {
-      await supabaseClient
-        .from('whatsapp_instances')
-        .update({ qr_code: null, status: 'disconnected' })
-        .eq('clinic_id', clinic_id)
-        .in('status', ['qr_pending', 'connecting']);
-
-      return new Response(JSON.stringify({ success: true }), {
-        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+  // 1) Acoes de grupo seguem para o webhook do n8n
+  if (GROUP_ACTIONS.has(action)) {
+    const groupUrl = Deno.env.get('WHATSAPP_GROUP_WEBHOOK');
+    if (!groupUrl) {
+      return new Response(JSON.stringify({ success: false, error: 'WHATSAPP_GROUP_WEBHOOK nao configurado' }), {
+        status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       });
     }
-
-    const { data: clinicData, error: clinicError } = await supabaseClient
-      .from('clinics')
-      .select('name, organization_id')
-      .eq('id', clinic_id)
-      .single();
-
-    if (clinicError) throw clinicError;
-
-    const webhookUrl = Deno.env.get('WHATSAPP_CONNECTION_WEBHOOK')
-
-    const payload = {
-      event: 'whatsapp_connection_requested',
-      action: action || 'connect',
-      clinic_id,
-      clinic_name: clinicData?.name || 'Clínica Desconhecida',
-      organization_id: clinicData?.organization_id,
-      instance_id,
-      api_id,
-      api_token,
-      timestamp: new Date().toISOString()
+    try {
+      const res = await fetch(groupUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const text = await res.text();
+      return new Response(text, {
+        status: res.status,
+        headers: { ...CORS_HEADERS, 'Content-Type': res.headers.get('content-type') ?? 'application/json' },
+      });
+    } catch (e: any) {
+      return new Response(JSON.stringify({ success: false, error: e?.message ?? 'group_forward_failed' }), {
+        status: 502, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+      });
     }
-
-    console.log(`[WH-BRIDGE] Triggering n8n for clinic: ${clinic_id}, instance: ${instance_id}`);
-
-    const response = await fetch(webhookUrl!, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    })
-
-    const responseText = await response.text();
-
-    return new Response(JSON.stringify({ 
-      success: response.ok, 
-      n8n_response: responseText,
-      sent_payload: payload 
-    }), { 
-      status: response.ok ? 200 : 400,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-    })
-
-  } catch (error) {
-    return new Response(JSON.stringify({ success: false, error: error.message }), { 
-      status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-    })
   }
-})
+
+  // 2) Acoes de conexao seguem para o orchestrator. Traduz aliases legados:
+  //    create/connect -> start
+  if (CONNECTION_ACTIONS.has(action) || !action) {
+    const forwarded = {
+      action: (action === 'create' || action === 'connect') ? 'start' : action,
+      clinic_id: body?.clinic_id,
+      connect_token: body?.connect_token ?? body?.token,
+    };
+    try {
+      const orchestratorUrl = `${Deno.env.get('SUPABASE_URL') ?? ''}/functions/v1/whatsapp-orchestrator`;
+      const res = await fetch(orchestratorUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: req.headers.get('authorization') ?? `Bearer ${Deno.env.get('SUPABASE_ANON_KEY') ?? ''}`,
+        },
+        body: JSON.stringify(forwarded),
+      });
+      const text = await res.text();
+      return new Response(text, {
+        status: res.status,
+        headers: { ...CORS_HEADERS, 'Content-Type': res.headers.get('content-type') ?? 'application/json' },
+      });
+    } catch (e: any) {
+      return new Response(JSON.stringify({ success: false, error: e?.message ?? 'bridge_forward_failed' }), {
+        status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+      });
+    }
+  }
+
+  // 3) Acao desconhecida
+  return new Response(JSON.stringify({ success: false, error: `unknown_action: ${action}` }), {
+    status: 400, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+  });
+});

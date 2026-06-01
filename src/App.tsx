@@ -17,6 +17,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ToastProvider } from './components/ui/toast';
 import { Login } from './components/Login';
 import { ConnectPage } from './components/ConnectPage';
+import { WhatsAppStatusBanner } from './components/WhatsAppStatusBanner';
 import { RedirectPage } from './components/RedirectPage';
 import { LandingPage } from './components/LandingPage';
 import { PrivacyPolicy } from './components/PrivacyPolicy';
@@ -115,6 +116,18 @@ function AppContent() {
 
       <main className="flex-1 overflow-y-auto relative">
         <div className="absolute top-0 right-0 w-full h-full bg-[radial-gradient(circle_at_top_right,rgba(13,148,136,0.03),transparent_50%)] pointer-events-none" />
+
+        <WhatsAppStatusBanner
+          userRole={userRole}
+          onReconnect={() => {
+            localStorage.setItem('settingsTab', 'integrations');
+            localStorage.setItem('settingsIntTab', 'whatsapp');
+            handleSetActiveTab('settings');
+            window.dispatchEvent(new CustomEvent('settings-deeplink', {
+              detail: { tab: 'integrations', intTab: 'whatsapp' },
+            }));
+          }}
+        />
 
         <div className="max-w-7xl mx-auto h-full p-8 relative z-10">
           {tabs.map(({ id, el }) =>

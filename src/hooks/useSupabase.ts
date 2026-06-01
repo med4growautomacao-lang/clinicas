@@ -1268,7 +1268,7 @@ export interface WhatsappInstance {
   api_id?: string;
   api_token: string;
   phone_number: string | null;
-  status: 'connected' | 'disconnected' | 'qr_pending' | 'connecting';
+  status: 'connected' | 'disconnected' | 'connecting';
   connected_at: string | null;
   qr_code?: string | null;
   connect_token?: string | null;
@@ -1335,13 +1335,11 @@ export function useSettings() {
       })
       .subscribe();
 
-    // Polling fallback: busca dados a cada 5 segundos se estiver aguardando conexão
+    // Fallback defensivo: a uazapi empurra evento connection via webhook -> Realtime.
+    // Se o canal Realtime caiu silenciosamente, atualiza a cada 30s enquanto connecting.
     let pollInterval: any;
-    if (whatsapp?.status === 'connecting' || whatsapp?.status === 'qr_pending') {
-      pollInterval = setInterval(() => {
-        console.log('Polling for WhatsApp update...');
-        fetch(true);
-      }, 5000);
+    if (whatsapp?.status === 'connecting') {
+      pollInterval = setInterval(() => { fetch(true); }, 30000);
     }
 
     return () => {

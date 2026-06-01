@@ -21,6 +21,26 @@ const N8N_TRACKING_URL = Deno.env.get('N8N_TRACKING_WEBHOOK_URL') ?? '';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const HTTP_TIMEOUT_MS = 10000;
 
+// Normaliza numero brasileiro: tira non-digits, remove 9 do meio quando 13 digitos.
+function normalizeBrazilianPhone(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  let phone = String(raw).split('@')[0].replace(/\D/g, '');
+  if (!phone) return null;
+  phone = phone.replace(/^0+/, '');
+  const stripExtra9 = (d: string): string => {
+    if (d.length === 13 && d.startsWith('55')) {
+      const c = d.slice(0, 2), ddd = d.slice(2, 4);
+      let rest = d.slice(4);
+      if (rest.startsWith('9')) rest = rest.slice(1);
+      return c + ddd + rest;
+    }
+    return d;
+  };
+  if (phone.startsWith('55')) return stripExtra9(phone);
+  if (phone.length === 10 || phone.length === 11) { phone = '55' + phone; return stripExtra9(phone); }
+  return phone;
+}
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } });
 }
@@ -147,14 +167,27 @@ serve(async (req) => {
       continue;
     }
     const remoteStatus = String(remote.status ?? '').toLowerCase();
+    const remotePhone = normalizeBrazilianPhone(remote.owner);
+
     if (remoteStatus === 'connected' && local.status !== 'connected') {
       if (local.status === 'disconnected') await supa.from('whatsapp_instances').update({ status: 'connecting' }).eq('id', local.id);
-      const { error } = await supa.from('whatsapp_instances').update({ status: 'connected' }).eq('id', local.id);
+      const updates: Record<string, unknown> = { status: 'connected' };
+      if (remotePhone && remotePhone !== local.phone_number) updates.phone_number = remotePhone;
+      const { error } = await supa.from('whatsapp_instances').update(updates).eq('id', local.id);
       if (!error) {
         reconciled.push({ instance_id: local.id, clinic_id: local.clinic_id, from: local.status, to: 'connected', reason: 'uazapi_says_connected' });
-        await supa.from('whatsapp_events').insert({ clinic_id: local.clinic_id, instance_id: local.id, event_type: 'sync_correction', source: 'sync_cron', payload: { from: local.status, to: 'connected', reason: 'uazapi_says_connected' } });
+        await supa.from('whatsapp_events').insert({ clinic_id: local.clinic_id, instance_id: local.id, event_type: 'sync_correction', source: 'sync_cron', payload: { from: local.status, to: 'connected', reason: 'uazapi_says_connected', phone_updated: !!updates.phone_number } });
       }
       continue;
+    }
+
+    // Status iguais mas phone_number faltando localmente: preenche
+    if (remoteStatus === 'connected' && local.status === 'connected' && remotePhone && !local.phone_number) {
+      const { error } = await supa.from('whatsapp_instances').update({ phone_number: remotePhone }).eq('id', local.id);
+      if (!error) {
+        reconciled.push({ instance_id: local.id, clinic_id: local.clinic_id, from: 'connected', to: 'connected', reason: 'phone_filled' });
+        await supa.from('whatsapp_events').insert({ clinic_id: local.clinic_id, instance_id: local.id, event_type: 'sync_correction', source: 'sync_cron', payload: { reason: 'phone_filled', phone_number: remotePhone } });
+      }
     }
     if ((remoteStatus === 'disconnected' || remoteStatus === 'loggedout') && local.status !== 'disconnected') {
       const { error } = await supa.from('whatsapp_instances').update({ status: 'disconnected', last_error: 'sync_cron: uazapi reportou desconectado' }).eq('id', local.id);

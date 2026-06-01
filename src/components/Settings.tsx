@@ -48,6 +48,17 @@ import MetaLogo from "../assets/logos/Logo Metaads.png";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import WhatsappLogo from "../assets/logos/Logo Whatsapp.png";
 
+// Formata um numero +55DDDXXXXXXXX(X) para "+55 (DD) XXXXX-XXXX" exibivel
+function formatBrazilianPhone(raw?: string | null): string {
+    if (!raw) return '';
+    const d = String(raw).replace(/\D/g, '');
+    if (d.length === 13 && d.startsWith('55')) return `+${d.slice(0, 2)} (${d.slice(2, 4)}) ${d.slice(4, 9)}-${d.slice(9)}`;
+    if (d.length === 12 && d.startsWith('55')) return `+${d.slice(0, 2)} (${d.slice(2, 4)}) ${d.slice(4, 8)}-${d.slice(8)}`;
+    if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+    if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+    return raw;
+}
+
 export function Settings() {
     const { userRole } = useAuth();
     const showToast = useToast();
@@ -1107,13 +1118,12 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
 
                         <div className="bg-slate-50 border border-slate-100 rounded-2xl p-5 space-y-4 shadow-sm">
                             <div className="space-y-2">
-                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">ID da API (Instance Name)</label>
+                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Número Conectado</label>
                                 <input
                                     type="text"
-                                    value={data.api_id || ''}
+                                    value={formatBrazilianPhone(data.phone_number)}
                                     readOnly
-                                    onChange={(e) => onChange({ api_id: e.target.value })}
-                                    placeholder="Ex: clinica-whatsapp-01"
+                                    placeholder={data.status === 'connected' ? 'Sem número detectado' : 'Aguardando conexão'}
                                     className="w-full px-4 py-3 border border-slate-200 rounded-xl font-medium text-slate-600 text-sm bg-slate-100/50 cursor-not-allowed outline-none select-all"
                                 />
                             </div>
@@ -1244,7 +1254,7 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                                         </div>
                                         <div>
                                             <p className="text-lg font-bold text-slate-900">WhatsApp Conectado</p>
-                                            <p className="text-sm font-medium text-emerald-600">{data.phone_number || 'Sessão ativa'}</p>
+                                            <p className="text-sm font-medium text-emerald-600">{formatBrazilianPhone(data.phone_number) || 'Sessão ativa'}</p>
                                         </div>
                                     </div>
                                     <Button

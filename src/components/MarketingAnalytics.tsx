@@ -50,7 +50,7 @@ import {
 } from 'recharts';
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { useLeads, useMarketing, MarketingData, Lead, useAppointments, useFunnelStages, useConversions, useFunnelCohort } from "../hooks/useSupabase";
+import { useLeads, useMarketing, MarketingData, Lead, useAppointments, useFunnelStages, useConversions, useFunnelCohort, useConversionStageEntries } from "../hooks/useSupabase";
 import {
   format,
   startOfDay,
@@ -125,7 +125,11 @@ export function MarketingAnalytics() {
     format(dateRange.start, 'yyyy-MM-dd'),
     format(dateRange.end, 'yyyy-MM-dd')
   );
-  const conversionStageId = stages.find(s => s.name.toLowerCase().includes('convers'))?.id || null;
+  // Etapa de conversão configurável por clínica (flag is_conversion). Fallback: 'ganho'.
+  const conversionStage = stages.find(s => s.is_conversion) ?? stages.find(s => s.slug === 'ganho') ?? null;
+  const conversionStageId = conversionStage?.id ?? null;
+  // Entradas na etapa de conversão (por evento, changed_at) — fonte da CONTAGEM de conversões.
+  const conversionEntries = useConversionStageEntries(conversionStageId);
   const [isEditing, setIsEditing] = useState(false);
   const [isComparing, setIsComparing] = useState(false);
   const [compareDateRange, setCompareDateRange] = useState<{ start: Date, end: Date }>({
@@ -431,28 +435,40 @@ export function MarketingAnalytics() {
         }
       });
 
-      // Count conversions from conversions table (primary source)
-      const countedLeadDates = new Set<string>();
+      // VALOR das conversões: fonte = tabela `conversions` por converted_at.
+      // Exclui "Orçamento Enviado" (orçamento não conta como conversão — vale p/ histórico tb).
       conversions.forEach(conv => {
+        if (conv.description === 'Orçamento Enviado') return;
         const convDate = parseISO(conv.converted_at);
         if (convDate >= p.start && convDate <= p.end) {
           const lead = leads.find(l => l.id === conv.lead_id);
           const platform = lead ? getPlatformForLead(lead) : 'no_track';
           const dateStr = format(convDate, 'yyyy-MM-dd');
-          const manualConvs = marketingData.find(d => d.date === dateStr && d.platform === platform)?.manual_conversions_count;
-          if (manualConvs === null || manualConvs === undefined || manualConvs === 0) {
-            stats[pKey][platform].convs += 1;
-            const manualConvValue = marketingData.find(d => d.date === dateStr && d.platform === platform)?.conversions_value;
-            if (!manualConvValue) {
-              stats[pKey][platform].conv_value += Number(conv.value || 0);
-            }
+          const manualConvValue = marketingData.find(d => d.date === dateStr && d.platform === platform)?.conversions_value;
+          if (!manualConvValue) {
+            stats[pKey][platform].conv_value += Number(conv.value || 0);
           }
-          countedLeadDates.add(`${conv.lead_id}`);
         }
       });
 
-      // Fallback removido: lead.stage_id foi deprecado (agora é fonte única em tickets.stage_id).
-      // A tabela `conversions` é a fonte canônica para contagem de conversões.
+      // CONTAGEM de conversões: fonte = ENTRADAS na etapa de conversão configurada
+      // (lead_stage_history.changed_at), modelo por EVENTO (igual ao Comercial).
+      // DISTINCT lead por período; respeita override manual de marketing_data.
+      const countedConvLeads = new Set<string>();
+      conversionEntries.forEach(entry => {
+        if (countedConvLeads.has(entry.lead_id)) return;
+        const entryDate = parseISO(entry.changed_at);
+        if (entryDate >= p.start && entryDate <= p.end) {
+          const lead = leads.find(l => l.id === entry.lead_id);
+          const platform = lead ? getPlatformForLead(lead) : 'no_track';
+          const dateStr = format(entryDate, 'yyyy-MM-dd');
+          const manualConvs = marketingData.find(d => d.date === dateStr && d.platform === platform)?.manual_conversions_count;
+          if (manualConvs === null || manualConvs === undefined || manualConvs === 0) {
+            stats[pKey][platform].convs += 1;
+            countedConvLeads.add(entry.lead_id);
+          }
+        }
+      });
 
       appointments.forEach(apt => {
         // Conta pelo dia da MARCAÇÃO (created_at), não pelo dia da consulta.
@@ -475,7 +491,7 @@ export function MarketingAnalytics() {
     return stats;
   };
 
-  const metricsByPeriod = useMemo(() => calculateStats(periods), [periods, leads, marketingData, appointments, conversions, conversionStageId]);
+  const metricsByPeriod = useMemo(() => calculateStats(periods), [periods, leads, marketingData, appointments, conversions, conversionEntries, conversionStageId]);
 
   const comparisonMetricsByPeriod = useMemo(() => {
     if (!isComparing) return {};
@@ -496,7 +512,7 @@ export function MarketingAnalytics() {
     });
 
     return calculateStats(compPeriods as any);
-  }, [isComparing, periods, dateRange, compareDateRange, leads, marketingData, appointments, conversions, conversionStageId]);
+  }, [isComparing, periods, dateRange, compareDateRange, leads, marketingData, appointments, conversions, conversionEntries, conversionStageId]);
 
   const handleEditData = () => {
     const initial: Record<string, any> = {};
@@ -1183,7 +1199,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
     return base.map((stage, idx, arr) => ({
       ...stage,
       subLabel: idx === 0
-        ? 'Leads no período'
+        ? 'Leads que entraram no período'
         : `${((stage.value / (arr[idx - 1].value || 1)) * 100).toFixed(1)}% de conversão`,
     }));
   }, [funnelStages, funnelCohort, funnelOrder, funnelHidden, selectedPlatform]);
@@ -1302,7 +1318,10 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
                 <div className="w-8 h-8 rounded-lg bg-teal-50 flex items-center justify-center">
                   <TrendingUp className="w-5 h-5 text-teal-600" />
                 </div>
-                <CardTitle className="text-xs font-black text-slate-400 uppercase tracking-widest">Funil de Vendas</CardTitle>
+                <div className="flex flex-col">
+                  <CardTitle className="text-xs font-black text-slate-400 uppercase tracking-widest">Funil de Vendas</CardTitle>
+                  <span className="text-[9px] font-semibold text-slate-300 normal-case tracking-tight">coorte · por entrada do lead no período</span>
+                </div>
               </div>
               <FunnelConfigButton
                 stages={funnelStages}

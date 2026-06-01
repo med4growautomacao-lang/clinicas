@@ -482,6 +482,7 @@ export interface FunnelStage {
   slug: string | null;
   is_system: boolean;
   is_fixed: boolean;
+  is_conversion: boolean;
   color: string | null;
   created_at: string;
 }
@@ -778,6 +779,31 @@ export function useFunnelCohort(start: string | null, end: string | null) {
       });
     return () => { cancelled = true; };
   }, [activeClinicId, start, end]);
+
+  return data;
+}
+
+// Entradas na etapa de conversão (lead_stage_history), por evento (changed_at).
+// Alimenta o card "Conversões" do Marketing no modelo por evento, igual ao módulo
+// Comercial. Carrega todas as entradas da etapa (como useConversions); o
+// calculateStats filtra por período. Volume pequeno (≈ nº de conversões da clínica).
+export function useConversionStageEntries(stageId: string | null) {
+  const { activeClinicId } = useAuth();
+  const [data, setData] = useState<{ lead_id: string; changed_at: string }[]>([]);
+
+  useEffect(() => {
+    if (!activeClinicId || !stageId) { setData([]); return; }
+    let cancelled = false;
+    supabase
+      .from('lead_stage_history')
+      .select('lead_id, changed_at')
+      .eq('clinic_id', activeClinicId)
+      .eq('new_stage_id', stageId)
+      .then(({ data: rows }: any) => {
+        if (!cancelled) setData(Array.isArray(rows) ? rows : []);
+      });
+    return () => { cancelled = true; };
+  }, [activeClinicId, stageId]);
 
   return data;
 }

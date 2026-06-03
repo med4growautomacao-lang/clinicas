@@ -105,7 +105,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
   // Permissions
   const canManageClinics = userRole === 'org_owner' || userRole === 'org_admin';
   const canManageOrgUsers = userRole === 'org_owner' || userRole === 'org_admin';
-  const canManageSettings = userRole === 'org_owner';
+  const canManageSettings = userRole === 'org_owner' || userRole === 'org_admin';
   const canAddClinicUsers = userRole === 'org_owner' || userRole === 'org_admin' || userRole === 'org_team';
   const canSetResponsaveis = userRole === 'org_owner' || userRole === 'org_admin';
 
@@ -974,9 +974,13 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
             <div className="space-y-2">
               {orgUsers.map((u) => {
                 const isSelf = u.user_id === profile?.id;
-                const isOwner = userRole === 'org_owner';
-                // Roles disponíveis: owner só pode ser dado por owner
-                const availableRoles = isOwner
+                // org_owner: acesso total. org_admin: não toca no papel org_owner
+                // (não cria/promove/exclui/edita owner) — só opera em linhas role <> 'org_owner'.
+                const isActorOwner = userRole === 'org_owner';
+                const targetIsOwner = u.role === 'org_owner';
+                const canEditTarget = canManageOrgUsers && (isActorOwner || !targetIsOwner);
+                // Só owner pode oferecer o papel Owner no seletor.
+                const availableRoles = isActorOwner
                   ? ORG_ROLES
                   : ORG_ROLES.filter(r => r.value !== 'org_owner');
                 return (
@@ -991,7 +995,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
 
                   {/* Role selector */}
                   <div className="flex items-center gap-3 shrink-0">
-                    {isSelf ? (
+                    {isSelf || !canEditTarget ? (
                       <span className={cn("text-[9px] font-bold uppercase tracking-widest px-3 py-1.5 rounded-lg border", roleBadgeClass(u.role))}>
                         {roleLabel(u.role)}
                       </span>
@@ -1019,8 +1023,8 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                       </div>
                     )}
 
-                    {/* Delete button — não pode deletar a si mesmo */}
-                    {!isSelf && isOwner && (
+                    {/* Delete button — não pode deletar a si mesmo nem (admin) um owner */}
+                    {!isSelf && canEditTarget && (
                       <button
                         onClick={async () => {
                           if (!confirm(`Remover ${u.full_name || u.email} da organização?`)) return;

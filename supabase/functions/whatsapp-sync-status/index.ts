@@ -141,7 +141,11 @@ serve(async (req) => {
   catch (e: any) { return json({ success: false, error: e?.message ?? 'uazapi_fetch_failed' }, 502); }
 
   const uazById = new Map<string, any>();
-  for (const it of uazapiList) { if (it?.id) uazById.set(it.id, it); }
+  const uazByName = new Map<string, any>();
+  for (const it of uazapiList) {
+    if (it?.id) uazById.set(it.id, it);
+    if (it?.name) uazByName.set(it.name, it);
+  }
 
   const { data: locals, error: localErr } = await supa
     .from('whatsapp_instances')
@@ -154,7 +158,25 @@ serve(async (req) => {
   const notFoundOnUazapi: string[] = [];
 
   for (const local of locals ?? []) {
-    const remote = uazById.get(local.api_id);
+    let remote = uazById.get(local.api_id);
+
+    // Fallback: nao achou por api_id, tenta por name (=clinic_id). Pode ter
+    // sido recriada na uazapi com novo id mas mesmo nome.
+    if (!remote) {
+      const byName = uazByName.get(local.clinic_id);
+      if (byName?.id && byName?.token) {
+        // Remapeia api_id e api_token localmente
+        await supa.from('whatsapp_instances').update({ api_id: byName.id, api_token: byName.token }).eq('id', local.id);
+        await supa.from('whatsapp_events').insert({
+          clinic_id: local.clinic_id, instance_id: local.id, event_type: 'api_id_remapped', source: 'sync_cron',
+          payload: { old_api_id: local.api_id, new_api_id: byName.id, reason: 'matched_by_name' },
+        });
+        // Atualiza variavel local em memoria para o resto do loop usar
+        local.api_id = byName.id;
+        remote = byName;
+      }
+    }
+
     if (!remote) {
       notFoundOnUazapi.push(local.id);
       if (local.status !== 'disconnected') {

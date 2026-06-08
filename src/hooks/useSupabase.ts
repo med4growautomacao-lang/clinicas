@@ -505,6 +505,7 @@ export interface Lead {
   sla_breach_count: number;
   last_message_at: string | null;
   last_outbound_at: string | null;
+  last_activity_at: string | null;
   ctwa_clid: string | null;
   fb_clid: string | null;
   g_clid: string | null;
@@ -767,7 +768,7 @@ export interface Ticket {
 // quantos entraram em cada etapa (lead_stage_history). Chama o RPC marketing_funnel_cohort.
 export function useFunnelCohort(start: string | null, end: string | null) {
   const { activeClinicId } = useAuth();
-  const [data, setData] = useState<{ stage_id: string; platform: string; leads: number }[]>([]);
+  const [data, setData] = useState<{ stage_id: string; platform: string; channel: string; leads: number }[]>([]);
 
   useEffect(() => {
     if (!activeClinicId || !start || !end) { setData([]); return; }

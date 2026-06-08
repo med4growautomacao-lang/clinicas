@@ -30,7 +30,8 @@ import {
   Link2,
   X,
   Activity,
-  CheckCircle2
+  CheckCircle2,
+  FileText
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -74,6 +75,7 @@ import { DayPicker } from "react-day-picker";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import SemOrigemLogo from "../assets/logos/Logo Sem origem.png";
+import WhatsAppLogo from "../assets/logos/Logo Whatsapp.png";
 
 type Period = 'dia' | 'sem' | 'mês';
 type Platform = 'meta_ads' | 'google_ads' | 'no_track';
@@ -388,21 +390,30 @@ export function MarketingAnalytics() {
 
   const calculateStats = (targetPeriods: typeof periods) => {
     const stats: Record<string, Record<Platform, any>> = {};
+    const mkStat = () => ({
+      leads: 0, convs: 0, investment: 0, conv_value: 0, appointments: 0, whatsapp_leads: 0, forms_leads: 0,
+      ch: {
+        forms:    { leads: 0, convs: 0, conv_value: 0, appointments: 0 },
+        whatsapp: { leads: 0, convs: 0, conv_value: 0, appointments: 0 },
+      },
+    });
 
-    // Map patient IDs to platforms
+    // Map patient IDs to platforms / canais
     const patientSourceMap: Record<string, Platform> = {};
+    const patientChannelMap: Record<string, 'forms' | 'whatsapp'> = {};
     leads.forEach(l => {
       if (l.converted_patient_id) {
         patientSourceMap[l.converted_patient_id] = getPlatformForLead(l);
+        patientChannelMap[l.converted_patient_id] = l.capture_channel === 'forms' ? 'forms' : 'whatsapp';
       }
     });
 
     targetPeriods.forEach((p, idx) => {
       const pKey = targetPeriods[idx].label;
       stats[pKey] = {
-        meta_ads: { leads: 0, convs: 0, investment: 0, conv_value: 0, appointments: 0, whatsapp_leads: 0, forms_leads: 0 },
-        google_ads: { leads: 0, convs: 0, investment: 0, conv_value: 0, appointments: 0, whatsapp_leads: 0, forms_leads: 0 },
-        no_track: { leads: 0, convs: 0, investment: 0, conv_value: 0, appointments: 0, whatsapp_leads: 0, forms_leads: 0 }
+        meta_ads: mkStat(),
+        google_ads: mkStat(),
+        no_track: mkStat()
       };
 
       marketingData.forEach(m => {
@@ -428,8 +439,10 @@ export function MarketingAnalytics() {
           const manualLeads = marketingData.find(d => d.date === dateStr && d.platform === platform)?.manual_leads_count;
 
           if (manualLeads === null || manualLeads === undefined || manualLeads === 0) {
+            const ch = lead.capture_channel === 'forms' ? 'forms' : 'whatsapp';
             stats[pKey][platform].leads += 1;
-            if (lead.capture_channel === 'forms') stats[pKey][platform].forms_leads += 1;
+            stats[pKey][platform].ch[ch].leads += 1;
+            if (ch === 'forms') stats[pKey][platform].forms_leads += 1;
             else stats[pKey][platform].whatsapp_leads += 1;
           }
         }
@@ -447,6 +460,10 @@ export function MarketingAnalytics() {
           const manualConvValue = marketingData.find(d => d.date === dateStr && d.platform === platform)?.conversions_value;
           if (!manualConvValue) {
             stats[pKey][platform].conv_value += Number(conv.value || 0);
+            if (lead) {
+              const ch = lead.capture_channel === 'forms' ? 'forms' : 'whatsapp';
+              stats[pKey][platform].ch[ch].conv_value += Number(conv.value || 0);
+            }
           }
         }
       });
@@ -465,6 +482,10 @@ export function MarketingAnalytics() {
           const manualConvs = marketingData.find(d => d.date === dateStr && d.platform === platform)?.manual_conversions_count;
           if (manualConvs === null || manualConvs === undefined || manualConvs === 0) {
             stats[pKey][platform].convs += 1;
+            if (lead) {
+              const ch = lead.capture_channel === 'forms' ? 'forms' : 'whatsapp';
+              stats[pKey][platform].ch[ch].convs += 1;
+            }
             countedConvLeads.add(entry.lead_id);
           }
         }
@@ -483,6 +504,8 @@ export function MarketingAnalytics() {
 
           if (stats[pKey][platform] && (manualApts === null || manualApts === undefined)) {
             stats[pKey][platform].appointments += 1;
+            const ch = patientChannelMap[apt.patient_id];
+            if (ch) stats[pKey][platform].ch[ch].appointments += 1;
           }
         }
       });
@@ -1035,10 +1058,25 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
 
   const [selectedMetric, setSelectedMetric] = useState('leads');
   const [selectedPlatform, setSelectedPlatform] = useState<Platform | 'all'>('all');
+  const [selectedChannel, setSelectedChannel] = useState<'all' | 'forms' | 'whatsapp'>('all');
   const latestPeriod = periods[periods.length - 1]?.label || '';
 
+  // Ajusta uma linha de stats (por plataforma ou já somada) ao canal selecionado.
+  // Investimento não tem canal — fica sempre cheio.
+  const adjChannel = useCallback((s: any) => {
+    if (!s) return { investment: 0, leads: 0, convs: 0, conv_value: 0, appointments: 0 };
+    if (selectedChannel === 'all') {
+      return { investment: s.investment || 0, leads: s.leads || 0, convs: s.convs || 0, conv_value: s.conv_value || 0, appointments: s.appointments || 0 };
+    }
+    const c = s.ch?.[selectedChannel] || {};
+    return { investment: s.investment || 0, leads: c.leads || 0, convs: c.convs || 0, conv_value: c.conv_value || 0, appointments: c.appointments || 0 };
+  }, [selectedChannel]);
+
   const getTotals = useCallback((metricSet: any) => {
-    const res = { investment: 0, leads: 0, convs: 0, conv_value: 0, appointments: 0 };
+    const res: any = {
+      investment: 0, leads: 0, convs: 0, conv_value: 0, appointments: 0,
+      ch: { forms: { leads: 0, convs: 0, conv_value: 0, appointments: 0 }, whatsapp: { leads: 0, convs: 0, conv_value: 0, appointments: 0 } },
+    };
     if (!metricSet) return res;
     Object.values(metricSet).forEach((p: any) => {
       res.investment += p.investment || 0;
@@ -1046,6 +1084,13 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
       res.convs += p.convs || 0;
       res.conv_value += p.conv_value || 0;
       res.appointments += p.appointments || 0;
+      (['forms', 'whatsapp'] as const).forEach((ch) => {
+        const c = p.ch?.[ch] || {};
+        res.ch[ch].leads += c.leads || 0;
+        res.ch[ch].convs += c.convs || 0;
+        res.ch[ch].conv_value += c.conv_value || 0;
+        res.ch[ch].appointments += c.appointments || 0;
+      });
     });
     return res;
   }, []);
@@ -1069,23 +1114,25 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
         const platform = pKey as Platform;
         const s = dayStats[platform];
         
-        res.breakdown[platform].leads += s.leads;
-        res.breakdown[platform].whatsapp += s.whatsapp_leads || 0;
-        res.breakdown[platform].forms += s.forms_leads || 0;
+        // Pizza "Origem dos Leads": respeita o canal selecionado
+        res.breakdown[platform].leads += selectedChannel === 'all' ? (s.leads || 0) : (s.ch?.[selectedChannel]?.leads || 0);
+        res.breakdown[platform].whatsapp += s.ch?.whatsapp?.leads || 0;
+        res.breakdown[platform].forms += s.ch?.forms?.leads || 0;
 
         if (selectedPlatform === 'all' || selectedPlatform === platform) {
-          res.investment += s.investment || 0;
-          res.leads += s.leads || 0;
-          res.convs += s.convs || 0;
-          res.conv_value += s.conv_value || 0;
-          res.appointments += s.appointments || 0;
-          res.whatsapp += s.whatsapp_leads || 0;
-          res.forms += s.forms_leads || 0;
+          const a = adjChannel(s);
+          res.investment += a.investment;
+          res.leads += a.leads;
+          res.convs += a.convs;
+          res.conv_value += a.conv_value;
+          res.appointments += a.appointments;
+          res.whatsapp += s.ch?.whatsapp?.leads || 0;
+          res.forms += s.ch?.forms?.leads || 0;
         }
       });
     });
     return res;
-  }, [periods, metricsByPeriod, selectedPlatform]);
+  }, [periods, metricsByPeriod, selectedPlatform, selectedChannel, adjChannel]);
 
   const prevTotals = useMemo(() => {
     const res = { investment: 0, leads: 0, convs: 0, conv_value: 0, appointments: 0 };
@@ -1099,30 +1146,33 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
         const s = dayStats[platform];
         
         if (selectedPlatform === 'all' || selectedPlatform === platform) {
-          res.investment += s.investment || 0;
-          res.leads += s.leads || 0;
-          res.convs += s.convs || 0;
-          res.conv_value += s.conv_value || 0;
-          res.appointments += s.appointments || 0;
+          const a = adjChannel(s);
+          res.investment += a.investment;
+          res.leads += a.leads;
+          res.convs += a.convs;
+          res.conv_value += a.conv_value;
+          res.appointments += a.appointments;
         }
       });
     });
     return res;
-  }, [periods, comparisonMetricsByPeriod, isComparing, selectedPlatform]);
+  }, [periods, comparisonMetricsByPeriod, isComparing, selectedPlatform, selectedChannel, adjChannel]);
 
   const chartData = useMemo(() => {
     return periods.map((p: any) => {
       const dayStats = metricsByPeriod[p.label];
       const compDayStats = comparisonMetricsByPeriod[p.label];
       
-      let stats, compStats;
+      let rawStats, rawCompStats;
       if (selectedPlatform === 'all') {
-         stats = getTotals(dayStats);
-         compStats = getTotals(compDayStats);
+         rawStats = getTotals(dayStats);
+         rawCompStats = getTotals(compDayStats);
       } else {
-         stats = dayStats?.[selectedPlatform] || { investment: 0, leads: 0, convs: 0, conv_value: 0, appointments: 0 };
-         compStats = compDayStats?.[selectedPlatform] || { investment: 0, leads: 0, convs: 0, conv_value: 0, appointments: 0 };
+         rawStats = dayStats?.[selectedPlatform];
+         rawCompStats = compDayStats?.[selectedPlatform];
       }
+      const stats = adjChannel(rawStats);
+      const compStats = adjChannel(rawCompStats);
 
       return {
         name: p.label,
@@ -1153,7 +1203,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
         roas_prev: compStats.investment > 0 ? compStats.conv_value / compStats.investment : 0,
       };
     });
-  }, [periods, metricsByPeriod, comparisonMetricsByPeriod, getTotals, selectedPlatform]);
+  }, [periods, metricsByPeriod, comparisonMetricsByPeriod, getTotals, selectedPlatform, selectedChannel, adjChannel]);
 
   const activeMetric = METRICS_CONFIG.find(m => m.id === selectedMetric) || METRICS_CONFIG[0];
 
@@ -1186,6 +1236,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
     const countByStage = new Map<string, number>();
     (funnelCohort || []).forEach((r: any) => {
       if (selectedPlatform !== 'all' && r.platform !== selectedPlatform) return;
+      if (selectedChannel !== 'all' && r.channel !== selectedChannel) return;
       countByStage.set(r.stage_id, (countByStage.get(r.stage_id) || 0) + (Number(r.leads) || 0));
     });
 
@@ -1202,7 +1253,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
         ? 'Leads que entraram no período'
         : `${((stage.value / (arr[idx - 1].value || 1)) * 100).toFixed(1)}% de conversão`,
     }));
-  }, [funnelStages, funnelCohort, funnelOrder, funnelHidden, selectedPlatform]);
+  }, [funnelStages, funnelCohort, funnelOrder, funnelHidden, selectedPlatform, selectedChannel]);
 
   return (
     <div className="space-y-6">
@@ -1240,6 +1291,37 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
                 />
               )}
               {plat.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Filtro de canal: Todos / Forms / WhatsApp */}
+        <div className="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
+          {[
+            { id: 'all', label: 'Todos', logo: null, icon: false },
+            { id: 'forms', label: 'Forms', logo: null, icon: true },
+            { id: 'whatsapp', label: 'WhatsApp', logo: WhatsAppLogo, icon: false }
+          ].map((chOpt) => (
+            <button
+              key={chOpt.id}
+              onClick={() => setSelectedChannel(chOpt.id as any)}
+              className={cn(
+                "flex items-center gap-2 px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all",
+                selectedChannel === chOpt.id
+                  ? "bg-slate-900 text-white shadow-md shadow-slate-200"
+                  : "text-slate-400 hover:text-slate-600 hover:bg-slate-50"
+              )}
+              style={selectedChannel === chOpt.id ? { backgroundColor: '#1e293b' } : {}}
+            >
+              {chOpt.icon && <FileText className="w-3 h-3" />}
+              {chOpt.logo && (
+                <img
+                  src={chOpt.logo}
+                  alt={chOpt.label}
+                  className={cn("w-3 h-3 object-contain", selectedChannel === chOpt.id ? "brightness-0 invert" : "")}
+                />
+              )}
+              {chOpt.label}
             </button>
           ))}
         </div>

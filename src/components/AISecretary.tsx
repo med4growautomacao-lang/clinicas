@@ -35,6 +35,7 @@ import {
   Star,
   RotateCcw,
   Repeat,
+  Maximize2,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -1684,6 +1685,7 @@ function ConfigView() {
   const [localConfig, setLocalConfig] = useState<any>(null);
   const [resetting, setResetting] = useState<string | null>(null);
   const [resetConfirm, setResetConfirm] = useState<{ phone: string; mode: 'full' | 'rebook' } | null>(null);
+  const [promptModalOpen, setPromptModalOpen] = useState(false);
 
   const setConfig = (updates: any) => {
     setLocalConfig((p: any) => ({ ...p, ...updates }));
@@ -1791,9 +1793,19 @@ function ConfigView() {
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">
-              Informações da Clínica
-            </label>
+            <div className="flex items-center justify-between pl-1">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                Informações da Clínica
+              </label>
+              <button
+                type="button"
+                onClick={() => setPromptModalOpen(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-teal-600 hover:text-teal-700 hover:bg-teal-50 rounded-lg transition-all"
+              >
+                <Maximize2 className="w-3.5 h-3.5" />
+                Expandir
+              </button>
+            </div>
             <textarea
               rows={8}
               value={localConfig.prompt || ""}
@@ -2024,6 +2036,62 @@ function ConfigView() {
               <Button variant="destructive" className="flex-1" onClick={confirmReset}>
                 {resetConfirm.mode === 'full' ? <RotateCcw className="w-4 h-4 mr-2" /> : <Repeat className="w-4 h-4 mr-2" />}
                 {resetConfirm.mode === 'full' ? 'Zerar' : 'Reagendar'}
+              </Button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+
+    <AnimatePresence>
+      {promptModalOpen && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 md:p-8"
+          onClick={() => setPromptModalOpen(false)}
+        >
+          <motion.div
+            initial={{ scale: 0.96, opacity: 0, y: 20 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            exit={{ scale: 0.96, opacity: 0, y: 20 }}
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden border border-slate-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 px-6 py-4 border-b border-slate-100">
+              <div className="w-10 h-10 rounded-xl bg-teal-50 flex items-center justify-center shrink-0">
+                <Bot className="w-5 h-5 text-teal-600" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-lg font-bold text-slate-900 leading-tight">Informações da Clínica</h3>
+                <p className="text-xs text-slate-500 font-medium truncate">Edite o prompt que orienta a automação comercial.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPromptModalOpen(false)}
+                className="ml-auto p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all shrink-0"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="flex-1 min-h-0 p-6">
+              <textarea
+                autoFocus
+                value={localConfig.prompt || ""}
+                onChange={(e) => setConfig({ prompt: e.target.value })}
+                className="w-full h-full p-4 border border-slate-200 rounded-xl font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all resize-none text-sm leading-relaxed"
+                placeholder="Descreva aqui informações da clínica, especialidades, médicos, horários, localização e instruções para que a IA possa responder aos pacientes de forma correta..."
+              />
+            </div>
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50">
+              <Button variant="outline" onClick={() => setPromptModalOpen(false)}>Fechar</Button>
+              <Button
+                onClick={async () => { await handleSave(); setPromptModalOpen(false); }}
+                disabled={saving || !isDirty}
+                className={cn("min-w-[180px]", isDirty ? "bg-teal-600 hover:bg-teal-700 text-white" : "bg-slate-100 text-slate-400 cursor-default")}
+              >
+                {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : isDirty ? "Salvar Configurações" : "Configurações Salvas ✓"}
               </Button>
             </div>
           </motion.div>

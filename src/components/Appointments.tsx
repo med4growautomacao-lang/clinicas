@@ -84,7 +84,7 @@ function getDoctorColor(doctorId: string) {
   return DOCTOR_COLORS[charSum % DOCTOR_COLORS.length];
 }
 
-export function Appointments() {
+export function Appointments({ isActive = true }: { isActive?: boolean }) {
   const { userRole, profile, activeClinicId } = useAuth();
   const { data: appointments, loading, create, update, remove } = useAppointments();
   const { data: doctors, refetch: refetchDoctors } = useDoctors();
@@ -109,6 +109,9 @@ export function Appointments() {
   const [doctorToConfigure, setDoctorToConfigure] = useState<any>(null);
   const [showDoctorSchedulePicker, setShowDoctorSchedulePicker] = useState(false);
   const doctorPickerRef = useRef<HTMLDivElement>(null);
+  const listScrollRef = useRef<HTMLDivElement>(null);
+  const todayRowRef = useRef<HTMLTableRowElement>(null);
+  const didAutoScrollRef = useRef(false);
 
   useEffect(() => {
     if (!showDoctorSchedulePicker) return;
@@ -279,6 +282,37 @@ export function Appointments() {
       return a.sortTime.localeCompare(b.sortTime);
     });
   }, [filteredAppointments, blockedListItems, showBlocked]);
+
+  // Índice do primeiro item cuja data é hoje ou futura — usado para rolar a lista até o dia atual ao abrir.
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
+  const todayAnchorIndex = useMemo(
+    () => timelineItems.findIndex(t => t.date >= todayStr),
+    [timelineItems, todayStr]
+  );
+
+  // Ao abrir/voltar ao modo lista, rola automaticamente até a data de hoje (ou o próximo dia com agendamento).
+  // Como o módulo não desmonta ao trocar de aba (App apenas alterna display), usamos `isActive` para
+  // re-disparar o scroll sempre que a aba volta a ficar visível.
+  useEffect(() => {
+    if (!isActive || viewMode !== 'list') { didAutoScrollRef.current = false; return; }
+    if (loading || didAutoScrollRef.current || timelineItems.length === 0) return;
+    const container = listScrollRef.current;
+    if (!container) return;
+    const id = requestAnimationFrame(() => {
+      const row = todayRowRef.current;
+      if (row) {
+        const thead = container.querySelector('thead');
+        const headerH = thead ? thead.getBoundingClientRect().height : 0;
+        const delta = row.getBoundingClientRect().top - container.getBoundingClientRect().top;
+        container.scrollTop += delta - headerH - 4;
+      } else if (todayAnchorIndex === -1) {
+        // Todos os agendamentos estão no passado — posiciona no mais recente (fim da lista).
+        container.scrollTop = container.scrollHeight;
+      }
+      didAutoScrollRef.current = true;
+    });
+    return () => cancelAnimationFrame(id);
+  }, [isActive, viewMode, loading, timelineItems.length, todayAnchorIndex]);
 
   const selectedDayBlockedDoctors = useMemo(() => {
     if (!selectedDay) return [];
@@ -730,7 +764,7 @@ export function Appointments() {
         <CardContent className="p-0">
           <AnimatePresence mode="wait">
             {viewMode === "list" ? (
-              <motion.div key="list" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="overflow-auto max-h-[calc(100vh-320px)]">
+              <motion.div ref={listScrollRef} key="list" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="overflow-auto max-h-[calc(100vh-320px)]">
                 {filteredAppointments.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-20 text-slate-400">
                     <CalendarIcon className="w-12 h-12 mb-4 text-slate-300" />
@@ -761,7 +795,7 @@ export function Appointments() {
                         const dayAppts = dayItems.filter(t => t.kind === 'apt').length;
                         const dayBlocks = dayItems.filter(t => t.kind === 'blocked').length;
                         const dayHeader = showDayHeader ? (
-                          <tr className="bg-slate-50/80">
+                          <tr ref={i === todayAnchorIndex ? todayRowRef : undefined} className="bg-slate-50/80">
                             <td colSpan={6} className="px-6 py-2">
                               <div className="flex items-center gap-3">
                                 <span className={cn(

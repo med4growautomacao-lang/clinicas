@@ -99,7 +99,7 @@ function AppContent() {
     { id: 'dashboard',       el: <Dashboard /> },
     { id: 'ai-secretary',    el: <AISecretary /> },
     { id: 'finance',         el: <Finance /> },
-    { id: 'appointments',    el: <Appointments /> },
+    { id: 'appointments',    el: <Appointments isActive={activeTab === 'appointments'} /> },
     { id: 'medical-records', el: <MedicalRecords /> },
     { id: 'doctors',         el: <DoctorsManagement /> },
     { id: 'settings',        el: <Settings /> },

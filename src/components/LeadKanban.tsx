@@ -48,7 +48,7 @@ const SOURCE_LABELS: Record<string, string> = {
   'sincronizacao': 'Sincronização',
   'whatsapp': 'WhatsApp',
   'forms': 'Forms',
-  '': 'Sem Origem',
+  '': 'Orgânico',
 };
 
 function ExportModal({ onClose }: { onClose: () => void }) {
@@ -300,7 +300,7 @@ function ExportModal({ onClose }: { onClose: () => void }) {
                 <button key={s === '' ? '__none__' : s} onClick={() => setSelectedSource(s)}
                   className={cn("px-3 py-1.5 rounded-full text-xs font-bold border transition-all",
                     selectedSource !== null && selectedSource === s ? "bg-teal-600 text-white border-teal-600" : "bg-white text-slate-600 border-slate-200 hover:border-teal-300"
-                  )}>{SOURCE_LABELS[s] || s || 'Sem Origem'}</button>
+                  )}>{SOURCE_LABELS[s] || s || 'Orgânico'}</button>
               ))}
             </div>
           </div>
@@ -967,6 +967,7 @@ export function LeadKanban() {
   const [showAutomationModal, setShowAutomationModal] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<'all' | 'meta' | 'google' | 'sem_origem'>('all');
+  const [channelFilter, setChannelFilter] = useState<'all' | 'forms' | 'whatsapp'>('all');
   const [showResolved, setShowResolved] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [columnPages, setColumnPages] = useState<Record<string, number>>({});
@@ -1122,13 +1123,14 @@ export function LeadKanban() {
 
   const filteredTickets = React.useMemo(() => {
     const hasSourceFilter = sourceFilter !== 'all';
+    const hasChannelFilter = channelFilter !== 'all';
     const hasEntryFilter = entryDateFrom || entryDateTo;
     const hasConvFilter = convDateFrom || convDateTo;
     const hasSearch = searchQuery.trim().length > 0;
     // Ignora tickets órfãos (lead deletado → lead_id virou NULL por SET NULL)
     const base = (showResolved ? tickets : tickets.filter(t => t.status !== 'closed'))
       .filter(t => t.lead);
-    if (!hasSourceFilter && !hasEntryFilter && !hasConvFilter && !hasSearch) return base;
+    if (!hasSourceFilter && !hasChannelFilter && !hasEntryFilter && !hasConvFilter && !hasSearch) return base;
 
     return base.filter(ticket => {
       const lead = ticket.lead;
@@ -1143,6 +1145,7 @@ export function LeadKanban() {
         if (sourceFilter === 'google' && !isGoogle) return false;
         if (sourceFilter === 'sem_origem' && (isMeta || isGoogle)) return false;
       }
+      if (hasChannelFilter && lead.capture_channel !== channelFilter) return false;
       if (hasEntryFilter) {
         const opened = ticket.opened_at.slice(0, 10);
         if (entryDateFrom && opened < entryDateFrom) return false;
@@ -1160,11 +1163,11 @@ export function LeadKanban() {
       }
       return true;
     });
-  }, [tickets, sourceFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo, conversionsByLead, showResolved, searchQuery]);
+  }, [tickets, sourceFilter, channelFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo, conversionsByLead, showResolved, searchQuery]);
 
-  const hasActiveFilters = sourceFilter !== 'all' || entryDateFrom || entryDateTo || convDateFrom || convDateTo || searchQuery.trim().length > 0;
+  const hasActiveFilters = sourceFilter !== 'all' || channelFilter !== 'all' || entryDateFrom || entryDateTo || convDateFrom || convDateTo || searchQuery.trim().length > 0;
 
-  React.useEffect(() => { setColumnPages({}); }, [sourceFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo, searchQuery]);
+  React.useEffect(() => { setColumnPages({}); }, [sourceFilter, channelFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo, searchQuery]);
 
   if (stagesLoading || ticketsLoading) {
     return (
@@ -1552,7 +1555,7 @@ export function LeadKanban() {
             { id: 'all', label: 'Todos', logo: null },
             { id: 'meta', label: 'Meta', logo: MetaLogo },
             { id: 'google', label: 'Google', logo: GoogleLogo },
-            { id: 'sem_origem', label: 'Sem Origem', logo: SemOrigemLogo },
+            { id: 'sem_origem', label: 'Orgânico', logo: SemOrigemLogo },
           ] as const).map(opt => (
             <button
               key={opt.id}
@@ -1565,6 +1568,30 @@ export function LeadKanban() {
               )}
             >
               {opt.logo && <img src={opt.logo} className={cn("w-3 h-3 rounded", opt.id === 'sem_origem' && "opacity-60")} />}
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Filtro de canal (forms / whatsapp) */}
+        <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-xl p-0.5 shadow-sm">
+          {([
+            { id: 'all', label: 'Todos', logo: null },
+            { id: 'forms', label: 'Forms', logo: null },
+            { id: 'whatsapp', label: 'WhatsApp', logo: WhatsAppLogo },
+          ] as const).map(opt => (
+            <button
+              key={opt.id}
+              onClick={() => setChannelFilter(opt.id)}
+              className={cn(
+                "flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold transition-all",
+                channelFilter === opt.id
+                  ? "bg-slate-900 text-white shadow-sm"
+                  : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+              )}
+            >
+              {opt.id === 'forms' && <FileText className="w-3 h-3" />}
+              {opt.logo && <img src={opt.logo} className="w-3 h-3 rounded" />}
               {opt.label}
             </button>
           ))}
@@ -1599,7 +1626,7 @@ export function LeadKanban() {
 
         {hasActiveFilters && (
           <button
-            onClick={() => { setSourceFilter('all'); setEntryDateFrom(''); setEntryDateTo(''); setConvDateFrom(''); setConvDateTo(''); setSearchQuery(''); }}
+            onClick={() => { setSourceFilter('all'); setChannelFilter('all'); setEntryDateFrom(''); setEntryDateTo(''); setConvDateFrom(''); setConvDateTo(''); setSearchQuery(''); }}
             className="text-[10px] font-bold text-rose-500 hover:text-rose-700 uppercase tracking-wider flex items-center gap-1 shrink-0"
             title="Limpar Filtros"
           >
@@ -1751,13 +1778,13 @@ export function LeadKanban() {
                                     <img src={GoogleLogo} alt="Google" className="w-3.5 h-3.5 rounded shrink-0" />
                                   )}
                                   {!isMeta && !isGoogle && (
-                                    <img src={SemOrigemLogo} alt="Sem Origem" className="w-3.5 h-3.5 rounded shrink-0 opacity-40" />
+                                    <img src={SemOrigemLogo} alt="Orgânico" className="w-3.5 h-3.5 rounded shrink-0 opacity-40" />
                                   )}
                                   <span className={cn(
                                     "text-[9px] font-black uppercase tracking-[0.1em] truncate",
                                     isMeta ? "text-blue-500" : isGoogle ? "text-emerald-500" : isSync ? "text-violet-500" : "text-slate-400"
                                   )}>
-                                    {isMeta ? 'Meta Ads' : isGoogle ? 'Google Ads' : isSync ? 'Sincronização' : 'Sem Origem'}
+                                    {isMeta ? 'Meta Ads' : isGoogle ? 'Google Ads' : isSync ? 'Sincronização' : 'Orgânico'}
                                   </span>
 
                                   {hasUtms && (
@@ -1785,6 +1812,26 @@ export function LeadKanban() {
                                     </div>
                                   )}
                                 </div>
+
+                                {/* Canal de captacao (forms / whatsapp) + data de entrada do lead */}
+                                {(lead.capture_channel === 'forms' || lead.capture_channel === 'whatsapp') && (
+                                  <div className="inline-flex items-center gap-1.5 w-max">
+                                    {lead.capture_channel === 'forms' ? (
+                                      <span title="Preencheu o formulário" className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 text-[8px] font-black uppercase tracking-[0.1em]">
+                                        <FileText className="w-2.5 h-2.5 shrink-0" /> Forms
+                                      </span>
+                                    ) : (
+                                      <span title="Veio pelo WhatsApp (chamou direto ou importado da sincronização)" className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-green-50 text-green-600 text-[8px] font-black uppercase tracking-[0.1em]">
+                                        <img src={WhatsAppLogo} alt="WhatsApp" className="w-2.5 h-2.5 shrink-0" /> WhatsApp
+                                      </span>
+                                    )}
+                                    {lead.created_at && (
+                                      <span className="text-[9px] font-medium text-slate-400 whitespace-nowrap" title="Data de entrada do lead">
+                                        {format(parseISO(lead.created_at), 'dd/MM/yyyy')}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
 
                                 {/* UTMs expostas */}
                                 {(lead.fb_campaign_name || lead.g_campaign_name || lead.fb_adset_name || lead.g_adset_name || lead.g_term_name) && (
@@ -2036,7 +2083,7 @@ export function LeadKanban() {
                   <div>
                     <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Plataforma</label>
                     <select value={formData.source} onChange={e => setFormData(p => ({ ...p, source: e.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 font-medium text-sm">
-                      <option value="">Sem Origem</option>
+                      <option value="">Orgânico</option>
                       <option value="sincronizacao">Sincronização</option>
                       <option value="meta_ads">Meta Ads</option>
                       <option value="google_ads">Google Ads</option>

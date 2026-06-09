@@ -1442,7 +1442,8 @@ export function LeadKanban() {
               </Button>
             </div>
           ) : (
-            <div className="grid gap-4">
+            <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+              <div className="grid gap-4 max-h-[calc(100vh-320px)] overflow-y-auto custom-scrollbar p-4">
               {transitionRules.map((rule, idx) => (
                 editingRuleId === rule.id ? (
                   /* Inline Edit Form */
@@ -1844,6 +1845,12 @@ export function LeadKanban() {
                   </div>
                 </motion.div>
               )}
+              </div>
+              <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-200">
+                <p className="text-sm font-medium text-slate-400">
+                  Mostrando {transitionRules.length} {transitionRules.length === 1 ? 'regra' : 'regras'}.
+                </p>
+              </div>
             </div>
           )}
         </div>

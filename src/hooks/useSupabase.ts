@@ -1917,7 +1917,7 @@ export function useTransitionRules() {
     if (!phone) return { ok: false as const, error: 'invalid_phone' as const };
 
     const [{ data: instance }, { data: settingsRows }] = await Promise.all([
-      supabase.from('whatsapp_instances').select('api_token').eq('clinic_id', activeClinicId).maybeSingle(),
+      supabase.from('whatsapp_instances').select('api_token, phone_number').eq('clinic_id', activeClinicId).maybeSingle(),
       supabase.from('system_settings').select('id, value').eq('id', 'test_gatilho_webhook_url'),
     ]);
     const targetUrl = settingsRows?.[0]?.value || TEST_GATILHO_WEBHOOK_FALLBACK;
@@ -1928,6 +1928,7 @@ export function useTransitionRules() {
         payload: {
           event: 'test_transition_rule',
           clinic_id: activeClinicId,
+          clinic_phone: instance?.phone_number || null,
           lead_phone: phone,
           keywords: rule.keywords,
           message_to_send: rule.message_to_send,

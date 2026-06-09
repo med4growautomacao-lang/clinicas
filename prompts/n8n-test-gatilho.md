@@ -17,6 +17,7 @@ O app chama a edge function `webhook-proxy`, que repassa o `payload` para o `tar
 {
   "event": "test_transition_rule",
   "clinic_id": "<uuid da clínica>",
+  "clinic_phone": "<número WhatsApp da clínica (whatsapp_instances.phone_number)>",
   "lead_phone": "<somente dígitos, ex: 5511999998888>",
   "keywords": "<o Gatilho da regra, ex: [QUALIFICADO]>",
   "message_to_send": "<a Mensagem a Enviar da regra>",
@@ -25,6 +26,8 @@ O app chama a edge function `webhook-proxy`, que repassa o `payload` para o `tar
   "token": "<api_token da uazapi da clínica (whatsapp_instances.api_token)>"
 }
 ```
+
+> `clinic_phone` é o número conectado da clínica (`whatsapp_instances.phone_number`). Serve para montar a chave de sessão/memória do n8n (`clinic_phone + lead_phone`), igual ao fluxo de produção.
 
 ## O que o fluxo de teste no n8n deve fazer
 

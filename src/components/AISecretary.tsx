@@ -1411,14 +1411,42 @@ export function AISecretary() {
 }
 
 function ChatsView() {
+  const { activeClinicId } = useAuth();
   const { data: leads, loading: leadsLoading, loadingMore, hasMore, loadMore, update: updateLead } = useLeads({ pageSize: 20 });
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [leadSearch, setLeadSearch] = useState('');
+
+  // Busca server-side: o pageSize=20 carrega só os leads mais recentes, então
+  // filtrar no cliente não encontra a maioria. Com termo, consulta o banco
+  // inteiro usando o MESMO filtro do Kanban (leadSearchOrFilter).
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searching, setSearching] = useState(false);
+  useEffect(() => {
+    const orFilter = leadSearchOrFilter(leadSearch);
+    if (!orFilter || !activeClinicId) { setSearchResults([]); setSearching(false); return; }
+    let cancelled = false;
+    setSearching(true);
+    const handle = setTimeout(async () => {
+      const { data } = await supabase
+        .from('leads')
+        .select('*')
+        .eq('clinic_id', activeClinicId)
+        .or(orFilter)
+        .order('last_activity_at', { ascending: false, nullsFirst: false })
+        .limit(50);
+      if (cancelled) return;
+      setSearchResults(data || []);
+      setSearching(false);
+    }, 250);
+    return () => { cancelled = true; clearTimeout(handle); };
+  }, [leadSearch, activeClinicId]);
+
   const filteredLeads = useMemo(() => {
     if (!leadSearch.trim()) return leads;
-    return leads.filter(l => matchesSearch(leadSearch, { name: l.name, email: l.email, phone: l.phone }, ['phone']));
-  }, [leads, leadSearch]);
-  const selectedLead = leads.find(l => l.id === selectedLeadId);
+    // Refina os resultados do servidor com a lógica multi-termo do matchesSearch.
+    return searchResults.filter(l => matchesSearch(leadSearch, { name: l.name, email: l.email, phone: l.phone }, ['phone']));
+  }, [leads, leadSearch, searchResults]);
+  const selectedLead = leads.find(l => l.id === selectedLeadId) || searchResults.find(l => l.id === selectedLeadId);
   const { data: messages, loading: messagesLoading } = useChatMessages(selectedLeadId || undefined, selectedLead?.phone);
 
   // Auto-select first lead if none selected
@@ -1470,12 +1498,16 @@ function ChatsView() {
           className="flex-1 overflow-y-auto p-2 space-y-1 mt-2 custom-scrollbar"
           onScroll={(e) => {
             const el = e.currentTarget;
-            if (el.scrollTop + el.clientHeight >= el.scrollHeight - 80 && hasMore && !loadingMore) {
+            if (!leadSearch.trim() && el.scrollTop + el.clientHeight >= el.scrollHeight - 80 && hasMore && !loadingMore) {
               loadMore();
             }
           }}
         >
-          {leads.length === 0 ? (
+          {leadSearch.trim() && searching ? (
+            <div className="p-8 text-center text-slate-400">
+              <Loader2 className="w-5 h-5 animate-spin mx-auto" />
+            </div>
+          ) : !leadSearch.trim() && leads.length === 0 ? (
             <div className="p-8 text-center text-slate-400">
               <p className="text-sm font-medium">Nenhum atendimento ativo no momento.</p>
             </div>

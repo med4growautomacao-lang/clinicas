@@ -1305,10 +1305,11 @@ export function LeadKanban() {
     'bg-orange-500': 'bg-orange-500',
   };
 
-  // Busca server-side: useTickets carrega só os ~5000 tickets mais recentes (de
-  // ~15k abertos), então filtrar no cliente não acha leads fora dessa janela.
+  // Busca server-side: o useTickets só traz tickets abertos + fechados nos
+  // últimos 90 dias, e o board oculta resolvidos quando showResolved=off. Logo a
+  // busca client-side não acha um lead já ganho/perdido ou fechado há mais tempo.
   // Quando há termo, busca os tickets dos leads que casam (aberto OU fechado),
-  // ignorando a janela de 90 dias / 5000. Mesmo filtro das Conversas.
+  // sem janela de tempo. Mesmo filtro das Conversas (leadSearchOrFilter).
   React.useEffect(() => {
     const orFilter = leadSearchOrFilter(searchQuery);
     if (!orFilter || !activeClinicId) { setSearchTickets([]); return; }
@@ -1333,7 +1334,8 @@ export function LeadKanban() {
     const hasConvFilter = convDateFrom || convDateTo;
     const hasSearch = searchQuery.trim().length > 0;
     // Ao buscar, une os tickets carregados com os do servidor (dedup por id),
-    // cobrindo leads fora da janela 5000/90d. A busca também revela resolvidos.
+    // cobrindo resolvidos e fechados fora da janela de 90d. A busca também
+    // revela resolvidos mesmo com showResolved desligado.
     const source = hasSearch
       ? (() => {
           const seen = new Set(tickets.map(t => t.id));

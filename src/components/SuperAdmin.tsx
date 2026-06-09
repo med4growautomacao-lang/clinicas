@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import {
   useClinics, useOrganizations, useSuperAdminData, useGlobalSystemSettings,
+  usePromptTemplates, PromptTemplate,
   Clinic, Organization, ClinicUser, OrgUser,
 } from '../hooks/useSupabase';
 import {
   Building2, Plus, Search, ShieldCheck, Loader2, X, Network, User, Mail, Lock,
   ChevronDown, ChevronRight, Trash2, Users, Edit3, Settings as SettingsIcon,
-  Eye, EyeOff, Save, KeyRound, Power
+  Eye, EyeOff, Save, KeyRound, Power, Sparkles
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { useToast } from './ui/toast';
@@ -813,8 +814,267 @@ function EditOrgModal({
   );
 }
 
-// ─── SystemSettingsTab ────────────────────────────────────────────────────────
+// ─── Prompts Fixos (biblioteca de IA) ─────────────────────────────────────────
+const FOCUS_OPTIONS = [
+  { value: 'sdr', label: 'SDR' },
+  { value: 'agendamento', label: 'Agendamento' },
+  { value: 'suporte', label: 'Suporte' },
+  { value: 'teste', label: 'Teste' },
+  { value: 'clinica', label: 'Clínica' },
+  { value: 'varejo', label: 'Varejo' },
+];
+
+const focusLabel = (focus: string) => FOCUS_OPTIONS.find(f => f.value === focus)?.label || focus;
+
+const focusBadge = (focus: string) => {
+  const map: Record<string, string> = {
+    sdr: 'bg-blue-100 text-blue-700',
+    agendamento: 'bg-teal-100 text-teal-700',
+    suporte: 'bg-amber-100 text-amber-700',
+    teste: 'bg-rose-100 text-rose-700',
+    clinica: 'bg-violet-100 text-violet-700',
+    varejo: 'bg-emerald-100 text-emerald-700',
+  };
+  return cn('text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full', map[focus] || 'bg-slate-100 text-slate-500');
+};
+
+function PromptTemplateModal({ template, onSubmit, onClose }: {
+  template?: PromptTemplate;
+  onSubmit: (data: { name: string; focus: string; content: string; is_active: boolean }) => Promise<boolean>;
+  onClose: () => void;
+}) {
+  const isEditing = !!template;
+  const presetFocus = template ? FOCUS_OPTIONS.some(f => f.value === template.focus) : true;
+  const [form, setForm] = useState({
+    name: template?.name || '',
+    focus: template?.focus || 'clinica',
+    content: template?.content || '',
+    is_active: template?.is_active ?? true,
+  });
+  const [customFocus, setCustomFocus] = useState(!presetFocus);
+  const [saving, setSaving] = useState(false);
+
+  const handle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    const ok = await onSubmit({ ...form, focus: form.focus.trim() || 'clinica' });
+    setSaving(false);
+    if (ok) onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto custom-scrollbar">
+        <div className="flex items-center justify-between p-6 border-b border-slate-100 sticky top-0 bg-white z-10">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-teal-50 flex items-center justify-center">
+              <Sparkles className="w-5 h-5 text-teal-600" />
+            </div>
+            <h3 className="text-base font-black text-slate-900">{isEditing ? 'Editar Prompt Fixo' : 'Novo Prompt Fixo'}</h3>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1"><X className="w-5 h-5" /></button>
+        </div>
+        <form onSubmit={handle} className="p-6 space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1.5">Nome</label>
+              <input required type="text" value={form.name} placeholder="Ex: SDR Consultivo"
+                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1.5">Tipo</label>
+              {customFocus ? (
+                <div className="flex gap-2">
+                  <input type="text" value={form.focus} placeholder="tipo-personalizado"
+                    onChange={e => setForm(f => ({ ...f, focus: e.target.value }))}
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-sm"
+                  />
+                  <button type="button" onClick={() => { setCustomFocus(false); setForm(f => ({ ...f, focus: 'clinica' })); }}
+                    className="px-3 text-xs font-bold text-slate-500 hover:text-slate-700 shrink-0">Lista</button>
+                </div>
+              ) : (
+                <select value={form.focus}
+                  onChange={e => { if (e.target.value === '__custom__') { setCustomFocus(true); setForm(f => ({ ...f, focus: '' })); } else setForm(f => ({ ...f, focus: e.target.value })); }}
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 bg-white text-sm">
+                  {FOCUS_OPTIONS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                  <option value="__custom__">Outro (personalizado)…</option>
+                </select>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-600 mb-1.5">Conteúdo do Prompt (comportamento do agente)</label>
+            <textarea required rows={12} value={form.content}
+              onChange={e => setForm(f => ({ ...f, content: e.target.value }))}
+              placeholder="Descreva o papel e o comportamento do agente para este tipo de atendimento..."
+              className="w-full p-4 font-mono text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 leading-relaxed resize-y"
+            />
+            <p className="mt-1.5 text-[10px] text-slate-400 italic">As Informações da Clínica de cada cliente serão combinadas com este conteúdo.</p>
+          </div>
+
+          <div className="flex items-center justify-between py-2 px-3 rounded-xl bg-slate-50 border border-slate-100">
+            <div>
+              <p className="text-xs font-bold text-slate-700">Ativo</p>
+              <p className="text-[10px] text-slate-400">Aparece para as clínicas escolherem</p>
+            </div>
+            <button type="button" onClick={() => setForm(f => ({ ...f, is_active: !f.is_active }))}
+              className={cn("w-10 h-5 rounded-full relative transition-all flex-shrink-0", form.is_active ? "bg-teal-600" : "bg-slate-300")}>
+              <div className={cn("w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all shadow-sm", form.is_active ? "right-0.5" : "left-0.5")} />
+            </button>
+          </div>
+
+          <div className="flex gap-3 pt-4 border-t border-slate-100">
+            <button type="button" onClick={onClose}
+              className="flex-1 py-2.5 border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 text-sm font-bold">Cancelar</button>
+            <button type="submit" disabled={saving}
+              className="flex-1 py-2.5 bg-teal-600 text-white rounded-xl hover:bg-teal-700 text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-60">
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              {isEditing ? 'Salvar Alterações' : 'Criar Prompt'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function PromptTemplatesManager() {
+  const showToast = useToast();
+  const { templates, loading, create, update, remove } = usePromptTemplates();
+  const [modal, setModal] = useState<{ type: 'new' } | { type: 'edit'; template: PromptTemplate } | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
+
+  if (loading) {
+    return <div className="flex items-center justify-center min-h-[300px]"><Loader2 className="w-8 h-8 text-teal-600 animate-spin" /></div>;
+  }
+
+  const handleCreate = async (data: any) => {
+    const ok = await create(data);
+    if (!ok) showToast('Erro ao criar prompt. Verifique se você é super-admin.', 'error');
+    return ok;
+  };
+  const handleEdit = async (id: string, data: any) => {
+    const ok = await update(id, data);
+    if (!ok) showToast('Erro ao salvar prompt.', 'error');
+    return ok;
+  };
+  const handleDelete = async (id: string) => {
+    const ok = await remove(id);
+    if (!ok) showToast('Erro ao excluir prompt.', 'error');
+    setConfirmingDelete(null);
+  };
+  const handleToggleActive = async (t: PromptTemplate) => {
+    const ok = await update(t.id, { is_active: !t.is_active });
+    if (!ok) showToast('Erro ao alterar status.', 'error');
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-teal-600" />
+              Prompts Fixos (Biblioteca de IA)
+            </h2>
+            <p className="text-sm text-slate-500 mt-1">
+              Modelos de comportamento do agente por tipo de negócio. Cada clínica escolhe qual usar na aba Configurações IA; as informações da empresa do cliente são combinadas automaticamente.
+            </p>
+          </div>
+          <button onClick={() => setModal({ type: 'new' })}
+            className="shrink-0 inline-flex items-center gap-2 px-4 py-2.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-bold text-sm transition-colors shadow-sm">
+            <Plus className="w-4 h-4" /> Novo Prompt Fixo
+          </button>
+        </div>
+
+        {templates.length === 0 ? (
+          <div className="text-center py-16 text-slate-400">
+            <Sparkles className="w-10 h-10 mx-auto mb-3 opacity-30" />
+            <p className="font-medium">Nenhum prompt fixo cadastrado</p>
+            <p className="text-sm mt-1">Clique em "Novo Prompt Fixo" para começar</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-100">
+            {templates.map(t => (
+              <div key={t.id} className={cn("p-5 hover:bg-slate-50/50 transition-colors", !t.is_active && "opacity-60")}>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={focusBadge(t.focus)}>{focusLabel(t.focus)}</span>
+                      <p className="font-bold text-slate-900 text-sm truncate">{t.name}</p>
+                      {!t.is_active && <span className="px-1.5 py-0.5 bg-slate-200 text-slate-600 text-[8px] font-black uppercase rounded">Inativo</span>}
+                    </div>
+                    <p className="text-xs text-slate-500 truncate">
+                      {t.content?.trim() ? t.content.replace(/\s+/g, ' ').slice(0, 180) : <span className="italic text-slate-300">Sem conteúdo</span>}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button onClick={() => handleToggleActive(t)} title={t.is_active ? 'Desativar' : 'Ativar'}
+                      className={cn("p-1.5 rounded-lg transition-colors", t.is_active ? "text-green-500 hover:bg-green-50" : "text-slate-400 hover:bg-slate-100")}>
+                      <Power className="w-4 h-4" />
+                    </button>
+                    <button onClick={() => setModal({ type: 'edit', template: t })} title="Editar"
+                      className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                      <Edit3 className="w-4 h-4" />
+                    </button>
+                    {confirmingDelete === t.id ? (
+                      <button onClick={() => handleDelete(t.id)} onBlur={() => setConfirmingDelete(null)} autoFocus
+                        className="flex items-center gap-1 px-2 py-1 bg-red-500 hover:bg-red-600 text-white rounded-lg text-xs font-bold">
+                        <Trash2 className="w-3 h-3" /> Excluir
+                      </button>
+                    ) : (
+                      <button onClick={() => setConfirmingDelete(t.id)} title="Excluir"
+                        className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {modal?.type === 'new' && (
+        <PromptTemplateModal onSubmit={handleCreate} onClose={() => setModal(null)} />
+      )}
+      {modal?.type === 'edit' && (
+        <PromptTemplateModal template={modal.template}
+          onSubmit={async (data) => handleEdit(modal.template.id, data)}
+          onClose={() => setModal(null)} />
+      )}
+    </div>
+  );
+}
+
+// ─── SystemSettingsTab (wrapper com sub-abas) ─────────────────────────────────
 function SystemSettingsTab() {
+  const [subTab, setSubTab] = useState<'prompts' | 'vars'>('prompts');
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl w-fit">
+        {[
+          { id: 'prompts', label: 'Prompts Fixos' },
+          { id: 'vars', label: 'Variáveis de Sistema' },
+        ].map(t => (
+          <button key={t.id} onClick={() => setSubTab(t.id as any)}
+            className={cn("px-4 py-2 rounded-lg text-sm font-bold transition-all",
+              subTab === t.id ? "bg-white text-teal-700 shadow-sm" : "text-slate-500 hover:text-slate-700")}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {subTab === 'prompts' ? <PromptTemplatesManager /> : <SystemVariablesSection />}
+    </div>
+  );
+}
+
+// ─── SystemVariablesSection (chaves de sistema chave/valor) ────────────────────
+function SystemVariablesSection() {
   const showToast = useToast();
   const { settings, loading, updateSetting } = useGlobalSystemSettings();
   const [editingKey, setEditingKey] = useState<string | null>(null);

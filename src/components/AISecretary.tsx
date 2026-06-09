@@ -45,11 +45,17 @@ import { motion, AnimatePresence } from "framer-motion";
 import { LeadKanban } from "./LeadKanban";
 import { ServiceDashboard } from "./ServiceDashboard";
 import { ChatThread } from "./ChatThread";
-import { useLeads, useChatMessages, useSettings, useFunnelStages, FunnelStage } from "../hooks/useSupabase";
+import { useLeads, useChatMessages, useSettings, useFunnelStages, usePromptTemplates, FunnelStage } from "../hooks/useSupabase";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
 import SemOrigemLogo from "../assets/logos/Logo Sem origem.png";
 import { format, parseISO } from "date-fns";
+
+const FOCUS_LABELS_AI: Record<string, string> = {
+  sdr: 'SDR', agendamento: 'Agendamento', suporte: 'Suporte',
+  teste: 'Teste', clinica: 'Clínica', varejo: 'Varejo',
+};
+const focusLabelAI = (f: string) => FOCUS_LABELS_AI[f] || f;
 
 function ValidationModal({ isOpen, onClose, missingTags }: { isOpen: boolean, onClose: () => void, missingTags: string[] }) {
   if (!isOpen) return null;
@@ -1724,6 +1730,8 @@ function ChatsView() {
 
 function ConfigView() {
   const { aiConfig, updateAI, loading } = useSettings();
+  const { templates: promptTemplates } = usePromptTemplates();
+  const activeTemplates = useMemo(() => promptTemplates.filter(t => t.is_active), [promptTemplates]);
   const showToast = useToast();
   const [subTab, setSubTab] = useState<"config" | "handoff">("config");
   const [saving, setSaving] = useState(false);
@@ -1803,6 +1811,12 @@ function ConfigView() {
     setIsDirty(false);
   };
 
+  const selectedTemplate = promptTemplates.find(t => t.id === localConfig.prompt_template_id) || null;
+  // Mantém no dropdown o template já selecionado mesmo que tenha sido desativado depois.
+  const selectableTemplates = selectedTemplate && !selectedTemplate.is_active
+    ? [...activeTemplates, selectedTemplate]
+    : activeTemplates;
+
   return (
     <div className="space-y-6 h-full flex flex-col">
       <div className="flex bg-white p-1 rounded-xl border border-slate-200 gap-1 w-fit">
@@ -1827,6 +1841,58 @@ function ConfigView() {
       {subTab === "handoff" && <div className="flex-1 min-h-0"><HandoffView /></div>}
       <div className={cn("grid grid-cols-1 md:grid-cols-2 gap-8 flex-1", subTab !== "config" && "hidden")}>
       <div className="space-y-8">
+      <Card className="border border-slate-200 shadow-sm">
+        <CardHeader className="pb-4">
+          <CardTitle className="text-xl font-bold text-slate-900 flex items-center gap-3">
+            <Sparkles className="w-6 h-6 text-teal-600" />
+            Modelo de Atendimento
+          </CardTitle>
+          <CardDescription className="text-slate-500 font-medium">
+            Escolha o tipo que melhor se encaixa no seu negócio. As Informações da Clínica (abaixo) serão combinadas com este modelo.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Tipo de Atendimento</label>
+            <div className="relative">
+              <select
+                value={localConfig.prompt_template_id || ""}
+                onChange={(e) => {
+                  const v = e.target.value || null;
+                  const updated = { ...localConfig, prompt_template_id: v };
+                  setLocalConfig(updated);
+                  updateAI(updated);
+                }}
+                className="w-full px-4 py-3 border border-slate-200 rounded-lg font-medium text-sm bg-white focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all appearance-none pr-10"
+              >
+                <option value="">Padrão (somente Informações da Clínica)</option>
+                {selectableTemplates.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name} · {focusLabelAI(t.focus)}{t.is_active ? "" : " (inativo)"}</option>
+                ))}
+              </select>
+              <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            </div>
+          </div>
+
+          {selectedTemplate && (
+            <details className="group rounded-lg border border-slate-200 bg-slate-50/50">
+              <summary className="flex items-center gap-1.5 cursor-pointer list-none [&::-webkit-details-marker]:hidden px-4 py-2.5 text-teal-700 hover:text-teal-800">
+                <Bot className="w-3.5 h-3.5 shrink-0" />
+                <span className="text-[10px] font-bold uppercase tracking-wider">Ver comportamento deste modelo</span>
+                <ChevronDown className="w-3 h-3 transition-transform group-open:rotate-180 ml-auto" />
+              </summary>
+              <p className="px-4 pb-4 text-xs text-slate-600 leading-relaxed whitespace-pre-wrap max-h-60 overflow-y-auto custom-scrollbar">{selectedTemplate.content}</p>
+            </details>
+          )}
+
+          {activeTemplates.length === 0 && (
+            <p className="text-[11px] text-slate-400 italic pl-1">
+              Nenhum modelo disponível ainda. Peça ao administrador para cadastrar em System Settings › Prompts Fixos.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
       <Card className="border border-slate-200 shadow-sm">
         <CardHeader className="pb-4">
           <CardTitle className="text-xl font-bold text-slate-900 flex items-center gap-3">

@@ -1260,6 +1260,7 @@ export interface AIConfig {
   response_speed: 'instantanea' | 'cadenciada';
   bio_text: string | null;
   prompt: string | null;
+  prompt_template_id: string | null;
   phone: string | null;
   auto_schedule: boolean;
   confirm_enabled: boolean;
@@ -2090,6 +2091,61 @@ export function useGlobalSystemSettings() {
   };
 
   return { settings, loading, updateSetting, refetch: fetch };
+}
+
+// ==========================================
+// PROMPT TEMPLATES (biblioteca global de "prompts fixos")
+// ==========================================
+export interface PromptTemplate {
+  id: string;
+  name: string;
+  focus: string; // sdr | agendamento | suporte | teste | clinica | varejo (livre)
+  content: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export function usePromptTemplates() {
+  const [templates, setTemplates] = useState<PromptTemplate[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from('prompt_templates')
+      .select('*')
+      .order('focus', { ascending: true })
+      .order('name', { ascending: true });
+    setTemplates(data || []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { fetch(); }, [fetch]);
+
+  // Criação/edição/remoção exigem super-admin (RLS via is_admin()).
+  const create = async (template: Pick<PromptTemplate, 'name' | 'focus' | 'content' | 'is_active'>) => {
+    const { error } = await supabase.from('prompt_templates').insert(template);
+    if (!error) await fetch();
+    return !error;
+  };
+
+  const update = async (id: string, patch: Partial<Omit<PromptTemplate, 'id' | 'created_at'>>) => {
+    const { error } = await supabase
+      .from('prompt_templates')
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq('id', id);
+    if (!error) await fetch();
+    return !error;
+  };
+
+  const remove = async (id: string) => {
+    const { error } = await supabase.from('prompt_templates').delete().eq('id', id);
+    if (!error) await fetch();
+    return !error;
+  };
+
+  return { templates, loading, create, update, remove, refetch: fetch };
 }
 
 export function useSuperAdminData() {

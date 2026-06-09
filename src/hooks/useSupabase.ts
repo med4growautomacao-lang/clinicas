@@ -499,6 +499,8 @@ export interface Lead {
   stage_id: string | null;
   estimated_value: number | null;
   notes: string | null;
+  ai_summary: string | null;
+  session_id: string | null;
   ai_enabled: boolean;
   followup_enabled: boolean;
   converted_patient_id: string | null;

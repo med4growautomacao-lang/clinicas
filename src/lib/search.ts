@@ -70,3 +70,33 @@ export function matchesSearch(
     return matchText || matchNumeric;
   });
 }
+
+/**
+ * Monta o filtro `or` do PostgREST para buscar leads por nome, email ou telefone
+ * direto no banco. Usado pela busca server-side das Conversas e do Kanban, para
+ * que as duas telas pesquisem o MESMO escopo (todos os leads, não só os já
+ * carregados). Retorna null quando não há nada pesquisável.
+ *
+ * - Texto (name/email): ilike contíguo (wildcard `*` na sintaxe do `.or()`).
+ * - Telefone: só dígitos — no banco o phone é dígito puro (ex: 555193631535).
+ *
+ * Observação: o resultado deve ser refinado no cliente com matchesSearch() para
+ * aplicar a lógica multi-termo (cada palavra precisa bater em algum campo).
+ */
+export function leadSearchOrFilter(query: string): string | null {
+  // Remove caracteres que quebram a sintaxe do `or` do PostgREST (vírgula,
+  // parênteses, % e *) antes de interpolar o termo do usuário.
+  const cleaned = (query || "").replace(/[,()%*]/g, " ").replace(/\s+/g, " ").trim();
+  const digits = digitsOnly(query);
+  if (!cleaned && digits.length < 3) return null;
+
+  const conds: string[] = [];
+  if (cleaned) {
+    conds.push(`name.ilike.*${cleaned}*`);
+    conds.push(`email.ilike.*${cleaned}*`);
+  }
+  if (digits.length >= 3) {
+    conds.push(`phone.ilike.*${digits}*`);
+  }
+  return conds.length ? conds.join(",") : null;
+}

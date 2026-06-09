@@ -1817,6 +1817,18 @@ export interface TransitionRule {
   created_at: string;
 }
 
+// Webhook de teste isolado no n8n (Opcao B): cria lead se preciso, roda a
+// deteccao do gatilho, envia message_to_send e move a etapa destino. A URL pode
+// ser sobrescrita em system_settings (id = 'test_gatilho_webhook_url').
+const TEST_GATILHO_WEBHOOK_FALLBACK = 'https://webhook.med4growautomacao.com.br/webhook/meddesk/test-gatilho';
+export const TEST_GATILHO_SEED_MESSAGE = 'Esta mensagem é um teste de Gatilhos do sistema MedDesk';
+
+export interface RuleTestStageResult {
+  leadId: string;
+  ticketId: string | null;
+  stageId: string | null;
+}
+
 export function useTransitionRules() {
   const { profile, activeClinicId } = useAuth();
   const [data, setData] = useState<TransitionRule[]>([]);
@@ -1896,7 +1908,73 @@ export function useTransitionRules() {
     );
   };
 
-  return { data, loading, error, refetch: fetch, create, remove, update, reorder };
+  // Aciona o webhook de teste no n8n para a regra/numero informados.
+  // O app so dispara; quem cria o lead, envia a mensagem e move a etapa e o n8n.
+  const testRule = async (rule: TransitionRule, leadPhone: string) => {
+    if (!activeClinicId) return { ok: false as const, error: 'no_clinic' as const };
+    const phone = (leadPhone || '').replace(/\D/g, '');
+    if (!phone) return { ok: false as const, error: 'invalid_phone' as const };
+
+    const [{ data: instance }, { data: settingsRows }] = await Promise.all([
+      supabase.from('whatsapp_instances').select('api_token').eq('clinic_id', activeClinicId).maybeSingle(),
+      supabase.from('system_settings').select('id, value').eq('id', 'test_gatilho_webhook_url'),
+    ]);
+    const targetUrl = settingsRows?.[0]?.value || TEST_GATILHO_WEBHOOK_FALLBACK;
+
+    const { error } = await supabase.functions.invoke('webhook-proxy', {
+      body: {
+        target_url: targetUrl,
+        payload: {
+          event: 'test_transition_rule',
+          clinic_id: activeClinicId,
+          lead_phone: phone,
+          keywords: rule.keywords,
+          message_to_send: rule.message_to_send,
+          target_stage_id: rule.target_stage_id,
+          seed_message: TEST_GATILHO_SEED_MESSAGE,
+          token: instance?.api_token || null,
+        },
+      },
+    });
+    if (error) return { ok: false as const, error: 'webhook_failed' as const };
+    return { ok: true as const };
+  };
+
+  // Busca a etapa atual do lead pelo telefone, com match tolerante por sufixo
+  // (o numero e normalizado pelo n8n upstream - 9o digito/formatacao podem diferir).
+  const lookupActiveStageByPhone = async (leadPhone: string): Promise<RuleTestStageResult | null> => {
+    if (!activeClinicId) return null;
+    const digits = (leadPhone || '').replace(/\D/g, '');
+    if (digits.length < 8) return null;
+    const suffix = digits.slice(-8);
+
+    const { data: leadsFound } = await supabase
+      .from('leads')
+      .select('id')
+      .eq('clinic_id', activeClinicId)
+      .ilike('phone', `%${suffix}`)
+      .order('last_activity_at', { ascending: false })
+      .limit(1);
+    const leadId = leadsFound?.[0]?.id;
+    if (!leadId) return null;
+
+    const { data: ticketRows } = await supabase
+      .from('tickets')
+      .select('id, stage_id')
+      .eq('clinic_id', activeClinicId)
+      .eq('lead_id', leadId)
+      .eq('status', 'open')
+      .order('opened_at', { ascending: false })
+      .limit(1);
+    const ticket = ticketRows?.[0];
+    return {
+      leadId,
+      ticketId: ticket?.id ?? null,
+      stageId: ticket?.stage_id ?? null,
+    };
+  };
+
+  return { data, loading, error, refetch: fetch, create, remove, update, reorder, testRule, lookupActiveStageByPhone };
 }
 
 // ==========================================

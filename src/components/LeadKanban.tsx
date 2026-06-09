@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
-import { matchesSearch } from "../lib/search";
+import { matchesSearch, leadSearchOrFilter } from "../lib/search";
 import {
   Settings,
   GripVertical,
@@ -31,7 +31,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { useFunnelStages, useLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useAppointments, useDoctors, usePatients, useConsultationTypes, Conversion, Lead, Ticket } from "../hooks/useSupabase";
+import { useFunnelStages, useLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useAppointments, useDoctors, usePatients, useConsultationTypes, Conversion, Lead, Ticket, TransitionRule } from "../hooks/useSupabase";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { format, parseISO, formatDistanceToNow } from "date-fns";
@@ -992,7 +992,7 @@ export function LeadKanban() {
   const [ganhoLead, setGanhoLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
   const [lossLead, setLossLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
   const [orcamentoLead, setOrcamentoLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
-  const { data: transitionRules, create: createRule, remove: removeRule, update: updateRule, reorder: reorderRules } = useTransitionRules();
+  const { data: transitionRules, create: createRule, remove: removeRule, update: updateRule, reorder: reorderRules, testRule, lookupActiveStageByPhone } = useTransitionRules();
   const [showModal, setShowModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -1051,6 +1051,8 @@ export function LeadKanban() {
   const [channelFilter, setChannelFilter] = useState<'all' | 'forms' | 'whatsapp'>('all');
   const [showResolved, setShowResolved] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const { activeClinicId } = useAuth();
+  const [searchTickets, setSearchTickets] = useState<Ticket[]>([]);
   const [columnPages, setColumnPages] = useState<Record<string, number>>({});
   const COLUMN_PAGE_SIZE = 20;
   const [entryDateFrom, setEntryDateFrom] = useState('');
@@ -1071,6 +1073,90 @@ export function LeadKanban() {
   }, [statusDropdownTicketId, confirmingResolveId]);
   const [isAddingRule, setIsAddingRule] = useState(false);
   const [newRule, setNewRule] = useState({ keywords: '', target_stage_id: '', context: '', lead_response: '', message_to_send: '' });
+
+  // --- Teste de gatilho (regra de funil) ---
+  const [testingRuleId, setTestingRuleId] = useState<string | null>(null);
+  const [testPhone, setTestPhone] = useState('');
+  const [testStatus, setTestStatus] = useState<'idle' | 'sending' | 'waiting' | 'moved' | 'timeout' | 'error'>('idle');
+  const [testResultLeadId, setTestResultLeadId] = useState<string | null>(null);
+  const [highlightLeadId, setHighlightLeadId] = useState<string | null>(null);
+  const testPollRef = useRef<{ cancelled: boolean } | null>(null);
+
+  const openTestPanel = (ruleId: string) => {
+    if (testPollRef.current) testPollRef.current.cancelled = true;
+    setTestingRuleId(ruleId);
+    setTestPhone('');
+    setTestStatus('idle');
+    setTestResultLeadId(null);
+  };
+  const closeTestPanel = () => {
+    if (testPollRef.current) testPollRef.current.cancelled = true;
+    setTestingRuleId(null);
+    setTestStatus('idle');
+    setTestResultLeadId(null);
+  };
+  const runRuleTest = async (rule: TransitionRule) => {
+    const phone = testPhone.replace(/\D/g, '');
+    if (phone.length < 8) return;
+    if (testPollRef.current) testPollRef.current.cancelled = true;
+    setTestResultLeadId(null);
+    setTestStatus('sending');
+    const res = await testRule(rule, phone);
+    if (!res.ok) { setTestStatus('error'); return; }
+    setTestStatus('waiting');
+    // Polling: aguarda o n8n detectar o gatilho e mover o card (ate ~60s).
+    const token = { cancelled: false };
+    testPollRef.current = token;
+    const startedAt = Date.now();
+    const TIMEOUT_MS = 60000;
+    const INTERVAL_MS = 3000;
+    const poll = async () => {
+      if (token.cancelled) return;
+      const found = await lookupActiveStageByPhone(phone);
+      if (token.cancelled) return;
+      if (found && found.stageId === rule.target_stage_id) {
+        setTestResultLeadId(found.leadId);
+        setTestStatus('moved');
+        return;
+      }
+      if (Date.now() - startedAt >= TIMEOUT_MS) {
+        if (found?.leadId) setTestResultLeadId(found.leadId);
+        setTestStatus('timeout');
+        return;
+      }
+      setTimeout(poll, INTERVAL_MS);
+    };
+    setTimeout(poll, INTERVAL_MS);
+  };
+  const viewCardInFunnel = (leadId: string) => {
+    closeTestPanel();
+    setShowAutomationModal(false);
+    setEditingRuleId(null);
+    setIsAddingRule(false);
+    setHighlightLeadId(leadId);
+  };
+
+  // Cancela qualquer polling de teste em andamento ao desmontar.
+  useEffect(() => () => { if (testPollRef.current) testPollRef.current.cancelled = true; }, []);
+
+  // Ao destacar um card, rola ate ele no quadro e tira o realce depois de uns segundos.
+  useEffect(() => {
+    if (!highlightLeadId) return;
+    let tries = 0;
+    let clearTimer: ReturnType<typeof setTimeout> | undefined;
+    const tryScroll = () => {
+      const el = document.getElementById(`funnel-card-${highlightLeadId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        clearTimer = setTimeout(() => setHighlightLeadId(null), 4000);
+        return;
+      }
+      if (tries++ < 12) { clearTimer = setTimeout(tryScroll, 300); }
+      else { clearTimer = setTimeout(() => setHighlightLeadId(null), 4000); }
+    };
+    tryScroll();
+    return () => { if (clearTimer) clearTimeout(clearTimer); };
+  }, [highlightLeadId]);
 
   const [draggedLead, setDraggedLead] = useState<any>(null);
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
@@ -1219,14 +1305,43 @@ export function LeadKanban() {
     'bg-orange-500': 'bg-orange-500',
   };
 
+  // Busca server-side: useTickets carrega só os ~5000 tickets mais recentes (de
+  // ~15k abertos), então filtrar no cliente não acha leads fora dessa janela.
+  // Quando há termo, busca os tickets dos leads que casam (aberto OU fechado),
+  // ignorando a janela de 90 dias / 5000. Mesmo filtro das Conversas.
+  React.useEffect(() => {
+    const orFilter = leadSearchOrFilter(searchQuery);
+    if (!orFilter || !activeClinicId) { setSearchTickets([]); return; }
+    let cancelled = false;
+    const handle = setTimeout(async () => {
+      const { data } = await supabase
+        .from('tickets')
+        .select('*, lead:leads!inner(*)')
+        .eq('clinic_id', activeClinicId)
+        .or(orFilter, { referencedTable: 'leads' })
+        .order('opened_at', { ascending: false })
+        .limit(500);
+      if (!cancelled) setSearchTickets((data as Ticket[]) || []);
+    }, 250);
+    return () => { cancelled = true; clearTimeout(handle); };
+  }, [searchQuery, activeClinicId]);
+
   const filteredTickets = React.useMemo(() => {
     const hasSourceFilter = sourceFilter !== 'all';
     const hasChannelFilter = channelFilter !== 'all';
     const hasEntryFilter = entryDateFrom || entryDateTo;
     const hasConvFilter = convDateFrom || convDateTo;
     const hasSearch = searchQuery.trim().length > 0;
+    // Ao buscar, une os tickets carregados com os do servidor (dedup por id),
+    // cobrindo leads fora da janela 5000/90d. A busca também revela resolvidos.
+    const source = hasSearch
+      ? (() => {
+          const seen = new Set(tickets.map(t => t.id));
+          return [...tickets, ...searchTickets.filter(t => !seen.has(t.id))];
+        })()
+      : tickets;
     // Ignora tickets órfãos (lead deletado → lead_id virou NULL por SET NULL)
-    const base = (showResolved ? tickets : tickets.filter(t => t.status !== 'closed'))
+    const base = ((showResolved || hasSearch) ? source : source.filter(t => t.status !== 'closed'))
       .filter(t => t.lead);
     if (!hasSourceFilter && !hasChannelFilter && !hasEntryFilter && !hasConvFilter && !hasSearch) return base;
 
@@ -1261,7 +1376,7 @@ export function LeadKanban() {
       }
       return true;
     });
-  }, [tickets, sourceFilter, channelFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo, conversionsByLead, showResolved, searchQuery]);
+  }, [tickets, searchTickets, sourceFilter, channelFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo, conversionsByLead, showResolved, searchQuery]);
 
   const hasActiveFilters = sourceFilter !== 'all' || channelFilter !== 'all' || entryDateFrom || entryDateTo || convDateFrom || convDateTo || searchQuery.trim().length > 0;
 
@@ -1468,28 +1583,44 @@ export function LeadKanban() {
                           </span>
                         </div>
                       </div>
-                      <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center gap-2">
                         <button
-                          onClick={() => {
-                            setEditingRuleId(rule.id);
-                            setNewRule({
-                              keywords: rule.keywords || '',
-                              target_stage_id: rule.target_stage_id || '',
-                              context: rule.context || '',
-                              lead_response: rule.lead_response || '',
-                              message_to_send: rule.message_to_send || ''
-                            });
-                          }}
-                          className="p-2 rounded-lg text-slate-400 hover:text-teal-600 hover:bg-teal-50 transition-all"
+                          onClick={() => (testingRuleId === rule.id ? closeTestPanel() : openTestPanel(rule.id))}
+                          disabled={!rule.message_to_send || !rule.target_stage_id}
+                          title={!rule.message_to_send ? 'Adicione uma Mensagem a Enviar para poder testar' : 'Disparar a mensagem e ver o card mudar de etapa'}
+                          className={cn(
+                            "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-all disabled:opacity-40 disabled:cursor-not-allowed",
+                            testingRuleId === rule.id
+                              ? "text-white bg-teal-600 border-teal-600 hover:bg-teal-700"
+                              : "text-teal-700 bg-teal-50 border-teal-200 hover:bg-teal-100"
+                          )}
                         >
-                          <Pencil className="w-4 h-4" />
+                          <Send className="w-3.5 h-3.5" />
+                          Realizar Teste
                         </button>
-                        <button
-                          onClick={() => removeRule(rule.id)}
-                          className="p-2 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-all"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => {
+                              setEditingRuleId(rule.id);
+                              setNewRule({
+                                keywords: rule.keywords || '',
+                                target_stage_id: rule.target_stage_id || '',
+                                context: rule.context || '',
+                                lead_response: rule.lead_response || '',
+                                message_to_send: rule.message_to_send || ''
+                              });
+                            }}
+                            className="p-2 rounded-lg text-slate-400 hover:text-teal-600 hover:bg-teal-50 transition-all"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => removeRule(rule.id)}
+                            className="p-2 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-all"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                     <div className="px-6 py-4 grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1536,6 +1667,81 @@ export function LeadKanban() {
                         </div>
                       </div>
                     </div>
+
+                    {/* Painel de teste do gatilho */}
+                    {testingRuleId === rule.id && (
+                      <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/60">
+                        <div className="flex items-center justify-between mb-2.5">
+                          <p className="text-xs font-bold text-slate-600 flex items-center gap-1.5">
+                            <Send className="w-3.5 h-3.5 text-teal-600" />
+                            Testar gatilho
+                          </p>
+                          <button onClick={closeTestPanel} className="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                        <p className="text-[11px] text-slate-400 mb-3 leading-relaxed">
+                          Informe o número que vai receber a <span className="font-semibold text-slate-500">Mensagem a Enviar</span>. Se ainda não for um lead, enviamos antes uma mensagem padrão para criá-lo. O card só muda de etapa quando o n8n detecta o gatilho.
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="tel"
+                            value={testPhone}
+                            onChange={e => setTestPhone(e.target.value)}
+                            disabled={testStatus === 'sending' || testStatus === 'waiting'}
+                            placeholder="Ex: 11 99999-9999"
+                            className="flex-1 px-3 py-2.5 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 font-medium transition-all disabled:opacity-60"
+                          />
+                          <Button
+                            onClick={() => runRuleTest(rule)}
+                            disabled={testPhone.replace(/\D/g, '').length < 8 || testStatus === 'sending' || testStatus === 'waiting'}
+                            className="bg-teal-600 hover:bg-teal-700 px-5 whitespace-nowrap"
+                          >
+                            {(testStatus === 'sending' || testStatus === 'waiting') ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <Send className="w-4 h-4 mr-1.5" />}
+                            Disparar teste
+                          </Button>
+                        </div>
+
+                        {testStatus === 'sending' && (
+                          <p className="mt-3 text-xs font-medium text-slate-500 flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Enviando mensagem…</p>
+                        )}
+                        {testStatus === 'waiting' && (
+                          <p className="mt-3 text-xs font-medium text-amber-600 flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Mensagem enviada. Aguardando o n8n mover o card…</p>
+                        )}
+                        {testStatus === 'moved' && (
+                          <div className="mt-3 flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl bg-emerald-50 border border-emerald-200">
+                            <p className="text-xs font-bold text-emerald-700 flex items-center gap-1.5">
+                              <Check className="w-4 h-4" />
+                              Card movido para «{stages.find(s => s.id === rule.target_stage_id)?.name || '—'}»
+                            </p>
+                            {testResultLeadId && (
+                              <button onClick={() => viewCardInFunnel(testResultLeadId)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 transition-all whitespace-nowrap">
+                                <Eye className="w-3.5 h-3.5" />
+                                Ver card no funil
+                              </button>
+                            )}
+                          </div>
+                        )}
+                        {testStatus === 'timeout' && (
+                          <div className="mt-3 px-3 py-2.5 rounded-xl bg-amber-50 border border-amber-200">
+                            <p className="text-xs font-semibold text-amber-700 flex items-center gap-1.5">
+                              <AlertCircle className="w-4 h-4" />
+                              Mensagem enviada, mas o card ainda não mudou de etapa.
+                            </p>
+                            <p className="text-[11px] text-amber-600 mt-1">Verifique a configuração do gatilho no n8n.</p>
+                            <div className="flex items-center gap-3 mt-2">
+                              <button onClick={() => runRuleTest(rule)} className="text-xs font-bold text-amber-700 hover:underline">Tentar de novo</button>
+                              {testResultLeadId && (
+                                <button onClick={() => viewCardInFunnel(testResultLeadId)} className="flex items-center gap-1 text-xs font-bold text-amber-700 hover:underline"><Eye className="w-3.5 h-3.5" /> Ver card no funil</button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        {testStatus === 'error' && (
+                          <p className="mt-3 text-xs font-bold text-rose-600 flex items-center gap-1.5"><AlertCircle className="w-4 h-4" /> Não foi possível disparar o teste. Tente novamente.</p>
+                        )}
+                      </div>
+                    )}
                   </motion.div>
                 )
               ))}
@@ -1833,11 +2039,13 @@ export function LeadKanban() {
                     return (
                       <motion.div
                         key={ticket.id}
+                        id={`funnel-card-${lead.id}`}
                         draggable={!isClosed && !lead.converted_patient_id}
                         onDragStart={!isClosed && !lead.converted_patient_id ? (e) => handleDragStart(e as unknown as React.DragEvent<Element>, ticket) : undefined}
                         whileHover={{ y: isClosed ? 0 : -1 }}
                         className={cn(
                           "px-3 py-2.5 rounded-lg border shadow-sm transition-all group",
+                          highlightLeadId === lead.id && "ring-2 ring-teal-400 ring-offset-2 shadow-lg",
                           !frozen && !isClosed ? "cursor-pointer active:cursor-move hover:shadow-md" : "cursor-default",
                           isClosed && "opacity-50 grayscale-[0.5] hover:opacity-75",
                           draggedLead?.id === ticket.id && "opacity-50",

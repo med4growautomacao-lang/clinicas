@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { matchesSearch } from "../lib/search";
+import { matchesSearch, leadSearchOrFilter } from "../lib/search";
 import { supabase } from "../lib/supabase";
+import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "./ui/toast";
 import {
   Card,
@@ -1317,7 +1318,7 @@ function FinishServiceView() {
 
 export function AISecretary() {
   const [activeTab, setActiveTab] = useState<"chats" | "leads" | "dashboard" | "config" | "followups">(
-    () => (localStorage.getItem('aiSecretaryTab') as any) || "chats"
+    () => { const s = localStorage.getItem('aiSecretaryTab'); return (s && s !== 'dashboard' ? s : 'chats') as any; }
   );
   const { aiConfig, updateAI, clinic } = useSettings();
   const features = clinic?.features;
@@ -1368,7 +1369,7 @@ export function AISecretary() {
           {[
             { id: "chats", label: "Conversas", show: true },
             { id: "leads", label: "Funil de Oportunidades", show: true },
-            { id: "dashboard", label: "Dashboard", show: true },
+            { id: "dashboard", label: "Dashboard", show: false }, // OCULTO TEMPORARIAMENTE
             { id: "followups", label: "Follow-up", show: hasFollowup },
             { id: "config", label: "Configurações IA", show: hasIA },
           ].filter(t => t.show).map((tab) => (

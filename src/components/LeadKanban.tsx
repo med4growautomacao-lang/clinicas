@@ -1011,6 +1011,21 @@ export function LeadKanban() {
 
     if (draggedLead && draggedLead.stage_id !== targetStageId) {
       const targetStage = stages.find(s => s.id === targetStageId);
+
+      // "Agendado" exige um agendamento real: em vez de só mover a etapa, abre o modal
+      // de agenda (mesmo do módulo Agendamentos). O ticket só vai para "Agendado" quando
+      // o appointment é criado (trigger fn_auto_move_lead_to_agendado). Se cancelar, não move.
+      if (targetStage?.slug === 'agendado') {
+        if (draggedLead.lead) {
+          setScheduleLead({ lead: draggedLead.lead, ticketId: draggedLead.id });
+          setScheduleForm({ doctor_id: doctors[0]?.id || '', date: '', time: '', notes: '', consultation_type_id: '' });
+          setScheduleError(null);
+          setScheduleSlots(null);
+        }
+        setDraggedLead(null);
+        return;
+      }
+
       await moveTicket(draggedLead.id, targetStageId);
 
       if (targetStage?.slug === 'ganho') {

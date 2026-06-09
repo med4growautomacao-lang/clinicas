@@ -1217,8 +1217,9 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
 
   const platformTitle = "Origem dos Leads";
 
-  // Funil de Vendas: coorte por data (padrão de mercado). Dos leads CRIADOS no período,
-  // cada etapa mostra quantos ENTRARAM nela (via lead_stage_history). Respeita o filtro de data.
+  // Funil de Vendas: contagem POR TICKET (ciclo). Cada etapa conta tickets distintos cuja
+  // ÚLTIMA entrada na etapa caiu no período (via RPC marketing_funnel_cohort). Respeita os
+  // filtros de origem e canal. Ticket novo (após fechar) conta de novo.
   const funnelData = useMemo(() => {
     const byId = new Map<string, any>((funnelStages || []).map((s: any) => [s.id, s]));
     const savedOrder = (funnelOrder || []).filter((id: string) => byId.has(id));
@@ -1250,7 +1251,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
     return base.map((stage, idx, arr) => ({
       ...stage,
       subLabel: idx === 0
-        ? 'Leads que entraram no período'
+        ? 'Tickets que passaram pela etapa no período'
         : `${((stage.value / (arr[idx - 1].value || 1)) * 100).toFixed(1)}% de conversão`,
     }));
   }, [funnelStages, funnelCohort, funnelOrder, funnelHidden, selectedPlatform, selectedChannel]);
@@ -1402,7 +1403,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
                 </div>
                 <div className="flex flex-col">
                   <CardTitle className="text-xs font-black text-slate-400 uppercase tracking-widest">Funil de Vendas</CardTitle>
-                  <span className="text-[9px] font-semibold text-slate-300 normal-case tracking-tight">coorte · por entrada do lead no período</span>
+                  <span className="text-[9px] font-semibold text-slate-300 normal-case tracking-tight">por ticket · última entrada na etapa</span>
                 </div>
               </div>
               <FunnelConfigButton

@@ -763,6 +763,7 @@ export interface Ticket {
   loss_reason: string | null;
   notes: string | null;
   created_at: string;
+  lead_phone: string | null;
   lead?: Lead;
 }
 

@@ -903,6 +903,86 @@ function GanhoModal({ lead, onClose, onCancel, onCreate }: {
   );
 }
 
+// Modal ao mover para "Orçamento Enviado": registra valor + produto/serviço.
+// NÃO gera conversão — só grava metadados no lead (estimated_value) e no ticket (notes).
+function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
+  lead: { id: string; name: string };
+  onClose: () => void;
+  onCancel: () => void;
+  onConfirm: (value: number, description: string) => Promise<boolean>;
+}) {
+  const [value, setValue] = useState('');
+  const [description, setDescription] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const handleSave = async () => {
+    if (!value || Number(value) <= 0) return;
+    setSaving(true);
+    const ok = await onConfirm(Number(value), description.trim());
+    if (ok) { setDone(true); setTimeout(onClose, 900); }
+    setSaving(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onCancel}>
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="h-1.5 bg-blue-500" />
+        <div className="p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-black text-slate-900">Registrar Orçamento</h3>
+              <p className="text-xs text-slate-500 font-medium mt-0.5">{lead.name}</p>
+            </div>
+            <button onClick={onCancel} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4 text-slate-400" /></button>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Valor do Orçamento (R$)</label>
+            <CurrencyInput autoFocus value={value} onChange={setValue} className="focus:ring-blue-500/20 focus:border-blue-500" />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Produto / Serviço</label>
+            <textarea
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              rows={2}
+              placeholder="Descreva o produto ou serviço orçado..."
+              className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none"
+            />
+          </div>
+
+          <div className="flex gap-2 pt-1">
+            <button onClick={onCancel} className="flex-1 py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-500 hover:bg-slate-50 transition-all">
+              Cancelar
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving || !value || Number(value) <= 0}
+              className={cn(
+                "flex-1 py-2.5 rounded-xl text-sm font-black transition-all flex items-center justify-center gap-2",
+                done ? "bg-emerald-500 text-white" :
+                  saving ? "bg-slate-100 text-slate-400" :
+                    "bg-blue-600 hover:bg-blue-700 text-white"
+              )}
+            >
+              {done ? <><Check className="w-4 h-4" /> Registrado!</> :
+                saving ? <Loader2 className="w-4 h-4 animate-spin" /> :
+                  'Confirmar Orçamento'}
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 export function LeadKanban() {
   const { data: stages, loading: stagesLoading, reorder: reorderStages, update: updateStage, create: createStage, remove: removeStage } = useFunnelStages();
   const { data: leads, create, createWithTicket, update, remove } = useLeads({ pageSize: 150 });
@@ -911,6 +991,7 @@ export function LeadKanban() {
   const { aiConfig, updateAI } = useSettings();
   const [ganhoLead, setGanhoLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
   const [lossLead, setLossLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
+  const [orcamentoLead, setOrcamentoLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
   const { data: transitionRules, create: createRule, remove: removeRule, update: updateRule, reorder: reorderRules } = useTransitionRules();
   const [showModal, setShowModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -1032,8 +1113,10 @@ export function LeadKanban() {
         setGanhoLead({ id: draggedLead.lead_id, name: draggedLead.lead?.name ?? '', prevStageId: draggedLead.stage_id, ticketId: draggedLead.id });
       } else if (targetStage?.slug === 'perdido') {
         setLossLead({ id: draggedLead.lead_id, name: draggedLead.lead?.name ?? '', prevStageId: draggedLead.stage_id, ticketId: draggedLead.id });
+      } else if (targetStage?.slug === 'orcamento') {
+        // Registra valor + produto/serviço (NÃO gera conversão; só metadados no lead/ticket).
+        setOrcamentoLead({ id: draggedLead.lead_id, name: draggedLead.lead?.name ?? '', prevStageId: draggedLead.stage_id, ticketId: draggedLead.id });
       }
-      // Orçamento deixou de gerar conversão: é só uma movimentação de etapa (moveTicket acima).
     }
     setDraggedLead(null);
   };
@@ -2447,6 +2530,26 @@ export function LeadKanban() {
             const perdidoStage = stages.find(s => s.slug === 'perdido');
             if (perdidoStage) await moveTicket(lossLead.ticketId, perdidoStage.id);
             await closeTicket(lossLead.ticketId, 'perdido', reason || undefined);
+          }}
+        />
+      )}
+
+      {/* Orçamento Modal (valor + produto/serviço; NÃO é conversão) */}
+      {orcamentoLead && (
+        <OrcamentoModal
+          lead={orcamentoLead}
+          onClose={() => setOrcamentoLead(null)}
+          onCancel={() => {
+            const { ticketId, prevStageId } = orcamentoLead;
+            setOrcamentoLead(null);
+            if (prevStageId) moveTicket(ticketId, prevStageId);
+          }}
+          onConfirm={async (value, description) => {
+            await update(orcamentoLead.id, { estimated_value: value });
+            if (description) {
+              await supabase.from('tickets').update({ notes: description }).eq('id', orcamentoLead.ticketId);
+            }
+            return true;
           }}
         />
       )}

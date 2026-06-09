@@ -464,9 +464,15 @@ serve(async (req) => {
       const willNotify = matchedAction === "notify_human" || matchedAction === "transfer";
       const willFarewell = matchedAction === "transfer" && (matched.farewell_enabled !== false) && !!matched.farewell_message;
 
-      // 1. Pausa IA
+      // 1. Pausa IA + marca handoff
+      // handoff_triggered_at é o sinal que impede o follow-up de reengajamento durante
+      // atendimento humano (a query de follow-up filtra por handoff_triggered_at IS NULL).
+      // A coluna é timestamp SEM timezone, armazenada em horário de São Paulo (UTC-3).
       if (willPauseIA) {
-        await supabaseClient.from("leads").update({ ai_enabled: false }).eq("id", lead.id);
+        const nowSP = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString().replace("Z", "");
+        await supabaseClient.from("leads")
+          .update({ ai_enabled: false, handoff_triggered_at: nowSP })
+          .eq("id", lead.id);
         actionsTaken.push("ai_paused");
       }
 

@@ -132,12 +132,20 @@ export function MarketingAnalytics() {
   const conversionStageId = conversionStage?.id ?? null;
   // Entradas na etapa de conversão (por evento, changed_at) — fonte da CONTAGEM de conversões.
   const conversionEntries = useConversionStageEntries(conversionStageId);
+  // Etapa "Agendado" (para alinhar o card "Agendamentos" ao funil, por ticket).
+  const agendadoStageId = stages.find(s => s.slug === 'agendado')?.id ?? null;
   const [isEditing, setIsEditing] = useState(false);
   const [isComparing, setIsComparing] = useState(false);
   const [compareDateRange, setCompareDateRange] = useState<{ start: Date, end: Date }>({
     start: subDays(new Date(), 14),
     end: subDays(new Date(), 8)
   });
+
+  // Cohort do funil para o período de comparação (mesma fonte do funil principal).
+  const funnelCohortCompare = useFunnelCohort(
+    isComparing ? format(compareDateRange.start, 'yyyy-MM-dd') : null,
+    isComparing ? format(compareDateRange.end, 'yyyy-MM-dd') : null
+  );
 
   const [dashboardVisibleMetrics, setDashboardVisibleMetrics] = useState<string[]>(() => {
     const saved = localStorage.getItem('mkt_dash_visible_metrics');
@@ -388,7 +396,32 @@ export function MarketingAnalytics() {
     return 'no_track';
   };
 
-  const calculateStats = (targetPeriods: typeof periods) => {
+  // Bucketiza as linhas do RPC do funil (marketing_funnel_cohort, por ticket/última entrada)
+  // em Agendamentos (etapa 'agendado') e Conversões (etapa de conversão), por período/plataforma/canal.
+  // É a MESMA fonte do Funil de Vendas — garante que cards, gráfico, tabela e funil batam.
+  const bucketStages = (cohort: any[], targetPeriods: typeof periods) => {
+    const mk = () => ({ appointments: 0, convs: 0, ch: { forms: { appointments: 0, convs: 0 }, whatsapp: { appointments: 0, convs: 0 } } });
+    const out: Record<string, Record<Platform, any>> = {};
+    targetPeriods.forEach(p => { out[p.label] = { meta_ads: mk(), google_ads: mk(), no_track: mk() }; });
+    (cohort || []).forEach((r: any) => {
+      const isAgend = agendadoStageId && r.stage_id === agendadoStageId;
+      const isConv = conversionStageId && r.stage_id === conversionStageId;
+      if (!isAgend && !isConv) return;
+      const d: string = r.entry_date;
+      const period = targetPeriods.find(p => d >= format(p.start, 'yyyy-MM-dd') && d <= format(p.end, 'yyyy-MM-dd'));
+      if (!period) return;
+      const bucket = out[period.label]?.[r.platform as Platform];
+      if (!bucket) return;
+      const key = isAgend ? 'appointments' : 'convs';
+      const n = Number(r.leads) || 0;
+      const ch = r.channel === 'forms' ? 'forms' : 'whatsapp';
+      bucket[key] += n;
+      bucket.ch[ch][key] += n;
+    });
+    return out;
+  };
+
+  const calculateStats = (targetPeriods: typeof periods, stageBucket?: Record<string, Record<Platform, any>>) => {
     const stats: Record<string, Record<Platform, any>> = {};
     const mkStat = () => ({
       leads: 0, convs: 0, investment: 0, conv_value: 0, appointments: 0, whatsapp_leads: 0, forms_leads: 0,
@@ -396,16 +429,6 @@ export function MarketingAnalytics() {
         forms:    { leads: 0, convs: 0, conv_value: 0, appointments: 0 },
         whatsapp: { leads: 0, convs: 0, conv_value: 0, appointments: 0 },
       },
-    });
-
-    // Map patient IDs to platforms / canais
-    const patientSourceMap: Record<string, Platform> = {};
-    const patientChannelMap: Record<string, 'forms' | 'whatsapp'> = {};
-    leads.forEach(l => {
-      if (l.converted_patient_id) {
-        patientSourceMap[l.converted_patient_id] = getPlatformForLead(l);
-        patientChannelMap[l.converted_patient_id] = l.capture_channel === 'forms' ? 'forms' : 'whatsapp';
-      }
     });
 
     targetPeriods.forEach((p, idx) => {
@@ -423,8 +446,7 @@ export function MarketingAnalytics() {
           if (stats[pKey][platform]) {
             stats[pKey][platform].investment += m.investment;
             if (m.manual_leads_count !== null) stats[pKey][platform].leads += m.manual_leads_count;
-            if (m.manual_appointments_count !== null) stats[pKey][platform].appointments += (m as any).manual_appointments_count;
-            if (m.manual_conversions_count !== null) stats[pKey][platform].convs += m.manual_conversions_count;
+            // Agendamentos e Conversões vêm do funil (stageBucket), não de override manual.
             if (m.conversions_value) stats[pKey][platform].conv_value += m.conversions_value;
           }
         }
@@ -468,53 +490,26 @@ export function MarketingAnalytics() {
         }
       });
 
-      // CONTAGEM de conversões: fonte = ENTRADAS na etapa de conversão configurada
-      // (lead_stage_history.changed_at), modelo por EVENTO (igual ao Comercial).
-      // DISTINCT lead por período; respeita override manual de marketing_data.
-      const countedConvLeads = new Set<string>();
-      conversionEntries.forEach(entry => {
-        if (countedConvLeads.has(entry.lead_id)) return;
-        const entryDate = parseISO(entry.changed_at);
-        if (entryDate >= p.start && entryDate <= p.end) {
-          const lead = leads.find(l => l.id === entry.lead_id);
-          const platform = lead ? getPlatformForLead(lead) : 'no_track';
-          const dateStr = format(entryDate, 'yyyy-MM-dd');
-          const manualConvs = marketingData.find(d => d.date === dateStr && d.platform === platform)?.manual_conversions_count;
-          if (manualConvs === null || manualConvs === undefined || manualConvs === 0) {
-            stats[pKey][platform].convs += 1;
-            if (lead) {
-              const ch = lead.capture_channel === 'forms' ? 'forms' : 'whatsapp';
-              stats[pKey][platform].ch[ch].convs += 1;
-            }
-            countedConvLeads.add(entry.lead_id);
-          }
-        }
-      });
-
-      appointments.forEach(apt => {
-        // Conta pelo dia da MARCAÇÃO (created_at), não pelo dia da consulta.
-        // Marketing mede atividade comercial, não agenda operacional.
-        // Compara só por DATA (yyyy-mm-dd), ignorando hora — senão appointment criado às 15h em 13/05 fica fora se p.end vier como 13/05 00:00.
-        const aptDateStr = ((apt as any).created_at || apt.date).slice(0, 10);
-        const pStartStr = format(p.start, 'yyyy-MM-dd');
-        const pEndStr = format(p.end, 'yyyy-MM-dd');
-        if (aptDateStr >= pStartStr && aptDateStr <= pEndStr) {
-          const platform = patientSourceMap[apt.patient_id] || 'no_track';
-          const manualApts = marketingData.find(d => d.date === aptDateStr && d.platform === platform)?.manual_appointments_count;
-
-          if (stats[pKey][platform] && (manualApts === null || manualApts === undefined)) {
-            stats[pKey][platform].appointments += 1;
-            const ch = patientChannelMap[apt.patient_id];
-            if (ch) stats[pKey][platform].ch[ch].appointments += 1;
-          }
-        }
+      // Agendamentos (etapa 'agendado') e Conversões (etapa de conversão): MESMA fonte do
+      // Funil de Vendas (RPC marketing_funnel_cohort, por ticket / última entrada),
+      // pré-bucketizada por período em stageBucket. Garante cards = gráfico = tabela = funil.
+      const sb = stageBucket?.[pKey];
+      (['meta_ads', 'google_ads', 'no_track'] as Platform[]).forEach((platform) => {
+        const b = sb?.[platform];
+        if (!b) return;
+        stats[pKey][platform].appointments = b.appointments || 0;
+        stats[pKey][platform].convs = b.convs || 0;
+        stats[pKey][platform].ch.forms.appointments = b.ch?.forms?.appointments || 0;
+        stats[pKey][platform].ch.whatsapp.appointments = b.ch?.whatsapp?.appointments || 0;
+        stats[pKey][platform].ch.forms.convs = b.ch?.forms?.convs || 0;
+        stats[pKey][platform].ch.whatsapp.convs = b.ch?.whatsapp?.convs || 0;
       });
     });
 
     return stats;
   };
 
-  const metricsByPeriod = useMemo(() => calculateStats(periods), [periods, leads, marketingData, appointments, conversions, conversionEntries, conversionStageId]);
+  const metricsByPeriod = useMemo(() => calculateStats(periods, bucketStages(funnelCohort, periods)), [periods, leads, marketingData, conversions, conversionStageId, agendadoStageId, funnelCohort]);
 
   const comparisonMetricsByPeriod = useMemo(() => {
     if (!isComparing) return {};
@@ -534,8 +529,8 @@ export function MarketingAnalytics() {
       };
     });
 
-    return calculateStats(compPeriods as any);
-  }, [isComparing, periods, dateRange, compareDateRange, leads, marketingData, appointments, conversions, conversionEntries, conversionStageId]);
+    return calculateStats(compPeriods as any, bucketStages(funnelCohortCompare, compPeriods as any));
+  }, [isComparing, periods, dateRange, compareDateRange, leads, marketingData, conversions, conversionStageId, agendadoStageId, funnelCohortCompare]);
 
   const handleEditData = () => {
     const initial: Record<string, any> = {};

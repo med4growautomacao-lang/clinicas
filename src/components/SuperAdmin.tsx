@@ -7,7 +7,7 @@ import {
 import {
   Building2, Plus, Search, ShieldCheck, Loader2, X, Network, User, Mail, Lock,
   ChevronDown, ChevronRight, Trash2, Users, Edit3, Settings as SettingsIcon,
-  Eye, EyeOff, Save, KeyRound, Power, Sparkles
+  Eye, EyeOff, Save, KeyRound, Power, Sparkles, Maximize2
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { useToast } from './ui/toast';
@@ -853,6 +853,7 @@ function PromptTemplateModal({ template, onSubmit, onClose }: {
   });
   const [customFocus, setCustomFocus] = useState(!presetFocus);
   const [saving, setSaving] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   const handle = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -863,6 +864,7 @@ function PromptTemplateModal({ template, onSubmit, onClose }: {
   };
 
   return (
+    <>
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto custom-scrollbar">
         <div className="flex items-center justify-between p-6 border-b border-slate-100 sticky top-0 bg-white z-10">
@@ -906,7 +908,13 @@ function PromptTemplateModal({ template, onSubmit, onClose }: {
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1.5">Conteúdo do Prompt (comportamento do agente)</label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-xs font-bold text-slate-600">Conteúdo do Prompt (comportamento do agente)</label>
+              <button type="button" onClick={() => setExpanded(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold text-teal-600 hover:text-teal-700 hover:bg-teal-50 rounded-lg transition-all">
+                <Maximize2 className="w-3.5 h-3.5" /> Expandir
+              </button>
+            </div>
             <textarea required rows={12} value={form.content}
               onChange={e => setForm(f => ({ ...f, content: e.target.value }))}
               placeholder="Descreva o papel e o comportamento do agente para este tipo de atendimento..."
@@ -938,6 +946,40 @@ function PromptTemplateModal({ template, onSubmit, onClose }: {
         </form>
       </div>
     </div>
+
+    {expanded && (
+      <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 md:p-8" onClick={() => setExpanded(false)}>
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden border border-slate-200" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center gap-3 px-6 py-4 border-b border-slate-100">
+            <div className="w-9 h-9 rounded-xl bg-teal-50 flex items-center justify-center shrink-0">
+              <Sparkles className="w-5 h-5 text-teal-600" />
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-base font-black text-slate-900 leading-tight">Conteúdo do Prompt</h3>
+              <p className="text-xs text-slate-500 truncate">{form.name || 'Novo prompt fixo'}</p>
+            </div>
+            <button type="button" onClick={() => setExpanded(false)}
+              className="ml-auto p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all shrink-0">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="flex-1 min-h-0 p-6">
+            <textarea autoFocus value={form.content}
+              onChange={e => setForm(f => ({ ...f, content: e.target.value }))}
+              placeholder="Descreva o papel e o comportamento do agente para este tipo de atendimento..."
+              className="w-full h-full p-4 font-mono text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 leading-relaxed resize-none"
+            />
+          </div>
+          <div className="flex items-center justify-end px-6 py-4 border-t border-slate-100 bg-slate-50">
+            <button type="button" onClick={() => setExpanded(false)}
+              className="px-5 py-2.5 bg-teal-600 text-white rounded-xl hover:bg-teal-700 text-sm font-bold">
+              Concluir
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 

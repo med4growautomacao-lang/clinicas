@@ -1791,7 +1791,21 @@ function ConfigView() {
 
   useEffect(() => {
     if (aiConfig) {
-      setLocalConfig({ ...aiConfig });
+      const cfg: any = { ...aiConfig };
+      // Garante ao menos um "prompt do cliente". Migra o prompt legado para um item "Padrão".
+      if (!Array.isArray(cfg.company_prompts) || cfg.company_prompts.length === 0) {
+        if (cfg.prompt && cfg.prompt.trim()) {
+          const id = crypto.randomUUID();
+          cfg.company_prompts = [{ id, name: 'Padrão', content: cfg.prompt }];
+          cfg.company_prompt_id = id;
+        } else {
+          cfg.company_prompts = [];
+        }
+      }
+      if (!cfg.company_prompt_id && cfg.company_prompts.length > 0) {
+        cfg.company_prompt_id = cfg.company_prompts[0].id;
+      }
+      setLocalConfig(cfg);
       setIsDirty(false);
     }
   }, [aiConfig]);
@@ -1816,6 +1830,36 @@ function ConfigView() {
   const selectableTemplates = selectedTemplate && !selectedTemplate.is_active
     ? [...activeTemplates, selectedTemplate]
     : activeTemplates;
+
+  // ── Prompts do cliente (biblioteca em company_prompts; o ativo espelha em `prompt`) ──
+  const companyPrompts: { id: string; name: string; content: string }[] = localConfig.company_prompts || [];
+  const selectedCompanyId: string | null = localConfig.company_prompt_id || (companyPrompts[0]?.id ?? null);
+  const selectedCompany = companyPrompts.find(p => p.id === selectedCompanyId) || null;
+
+  const updateSelectedCompany = (patch: Partial<{ name: string; content: string }>) => {
+    const next = companyPrompts.map(p => (p.id === selectedCompanyId ? { ...p, ...patch } : p));
+    const sel = next.find(p => p.id === selectedCompanyId);
+    // Espelha o conteúdo do ativo em `prompt` (= company_prompt lido pela view/n8n).
+    setConfig({ company_prompts: next, ...(patch.content !== undefined ? { prompt: sel?.content ?? '' } : {}) });
+  };
+
+  const selectCompany = (id: string) => {
+    const sel = companyPrompts.find(p => p.id === id);
+    setConfig({ company_prompt_id: id, prompt: sel?.content ?? '' });
+  };
+
+  const addCompanyPrompt = () => {
+    const id = crypto.randomUUID();
+    const item = { id, name: `Prompt ${companyPrompts.length + 1}`, content: '' };
+    setConfig({ company_prompts: [...companyPrompts, item], company_prompt_id: id, prompt: '' });
+  };
+
+  const removeCompanyPrompt = (id: string) => {
+    const next = companyPrompts.filter(p => p.id !== id);
+    const newSel = id === selectedCompanyId ? (next[0]?.id ?? null) : selectedCompanyId;
+    const selItem = next.find(p => p.id === newSel);
+    setConfig({ company_prompts: next, company_prompt_id: newSel, prompt: selItem?.content ?? '' });
+  };
 
   return (
     <div className="space-y-6 h-full flex flex-col">
@@ -1904,28 +1948,88 @@ function ConfigView() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
+          {/* Seletor de prompts do cliente */}
           <div className="space-y-2">
             <div className="flex items-center justify-between pl-1">
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                Informações da Clínica
+                Prompt do Cliente (ativo)
               </label>
-              <button
-                type="button"
-                onClick={() => setPromptModalOpen(true)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-teal-600 hover:text-teal-700 hover:bg-teal-50 rounded-lg transition-all"
-              >
-                <Maximize2 className="w-3.5 h-3.5" />
-                Expandir
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={addCompanyPrompt}
+                  className="flex items-center gap-1 px-2 py-1.5 text-xs font-bold text-teal-600 hover:text-teal-700 hover:bg-teal-50 rounded-lg transition-all"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Novo
+                </button>
+                {companyPrompts.length > 1 && selectedCompany && (
+                  <button
+                    type="button"
+                    onClick={() => removeCompanyPrompt(selectedCompany.id)}
+                    title="Excluir este prompt"
+                    className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
-            <textarea
-              rows={8}
-              value={localConfig.prompt || ""}
-              onChange={(e) => setConfig({ prompt: e.target.value })}
-              className="w-full p-4 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all resize-none text-sm leading-relaxed"
-              placeholder="Descreva aqui informações da clínica, especialidades, médicos, horários, localização e instruções para que a IA possa responder aos pacientes de forma correta..."
-            />
+            <div className="relative">
+              <select
+                value={selectedCompanyId || ""}
+                onChange={(e) => selectCompany(e.target.value)}
+                disabled={companyPrompts.length === 0}
+                className="w-full px-4 py-3 border border-slate-200 rounded-lg font-medium text-sm bg-white focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all appearance-none pr-10 disabled:bg-slate-50 disabled:text-slate-400"
+              >
+                {companyPrompts.length === 0 && <option value="">Nenhum prompt — clique em "Novo"</option>}
+                {companyPrompts.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name || "Sem nome"}</option>
+                ))}
+              </select>
+              <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            </div>
+            <p className="text-[11px] text-slate-400 pl-1">
+              O prompt selecionado é combinado com o Modelo de Atendimento e enviado ao agente.
+            </p>
           </div>
+
+          {selectedCompany && (
+            <>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Nome do Prompt</label>
+                <input
+                  type="text"
+                  value={selectedCompany.name}
+                  onChange={(e) => updateSelectedCompany({ name: e.target.value })}
+                  placeholder="Ex: Padrão, Campanha Verão..."
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-lg font-medium text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between pl-1">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                    Informações da Clínica
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setPromptModalOpen(true)}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-teal-600 hover:text-teal-700 hover:bg-teal-50 rounded-lg transition-all"
+                  >
+                    <Maximize2 className="w-3.5 h-3.5" />
+                    Expandir
+                  </button>
+                </div>
+                <textarea
+                  rows={8}
+                  value={selectedCompany.content || ""}
+                  onChange={(e) => updateSelectedCompany({ content: e.target.value })}
+                  className="w-full p-4 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all resize-none text-sm leading-relaxed"
+                  placeholder="Descreva aqui informações da clínica, especialidades, médicos, horários, localização e instruções para que a IA possa responder aos pacientes de forma correta..."
+                />
+              </div>
+            </>
+          )}
           <Button
             onClick={handleSave}
             disabled={saving || !isDirty}
@@ -2190,8 +2294,8 @@ function ConfigView() {
             <div className="flex-1 min-h-0 p-6">
               <textarea
                 autoFocus
-                value={localConfig.prompt || ""}
-                onChange={(e) => setConfig({ prompt: e.target.value })}
+                value={selectedCompany?.content || ""}
+                onChange={(e) => updateSelectedCompany({ content: e.target.value })}
                 className="w-full h-full p-4 border border-slate-200 rounded-xl font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all resize-none text-sm leading-relaxed"
                 placeholder="Descreva aqui informações da clínica, especialidades, médicos, horários, localização e instruções para que a IA possa responder aos pacientes de forma correta..."
               />

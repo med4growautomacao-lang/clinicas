@@ -1251,6 +1251,12 @@ export interface Clinic {
   forms_status?: 'none' | 'inactive' | 'active';
 }
 
+export interface CompanyPrompt {
+  id: string;
+  name: string;
+  content: string;
+}
+
 export interface AIConfig {
   id: string;
   clinic_id: string;
@@ -1261,6 +1267,8 @@ export interface AIConfig {
   bio_text: string | null;
   prompt: string | null;
   prompt_template_id: string | null;
+  company_prompts: CompanyPrompt[];
+  company_prompt_id: string | null;
   phone: string | null;
   auto_schedule: boolean;
   confirm_enabled: boolean;

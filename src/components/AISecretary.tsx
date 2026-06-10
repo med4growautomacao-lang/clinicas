@@ -1994,18 +1994,6 @@ function ConfigView() {
           </div>
 
           {selectedCompany && (
-            <>
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Nome do Prompt</label>
-                <input
-                  type="text"
-                  value={selectedCompany.name}
-                  onChange={(e) => updateSelectedCompany({ name: e.target.value })}
-                  placeholder="Ex: Padrão, Campanha Verão..."
-                  className="w-full px-4 py-2.5 border border-slate-200 rounded-lg font-medium text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all"
-                />
-              </div>
-
               <div className="space-y-2">
                 <div className="flex items-center justify-between pl-1">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
@@ -2028,7 +2016,6 @@ function ConfigView() {
                   placeholder="Descreva aqui informações da clínica, especialidades, médicos, horários, localização e instruções para que a IA possa responder aos pacientes de forma correta..."
                 />
               </div>
-            </>
           )}
           <Button
             onClick={handleSave}

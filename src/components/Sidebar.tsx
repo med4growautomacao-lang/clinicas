@@ -95,7 +95,6 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
   ];
 
   const navItems = allNavItems
-    .filter(item => item.id !== 'dashboard') // OCULTO TEMPORARIAMENTE: "Visão Geral"
     .filter(item => item.roles.includes(effectiveRole) || (item.id === 'org-admin' && isOrgUser))
     .filter(item => !(isOutro && item.clinicOnly));
 

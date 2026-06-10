@@ -25,16 +25,11 @@ import { TermsOfUse } from './components/TermsOfUse';
 import { Loader2 } from 'lucide-react';
 
 function AppContent() {
-  // "Visão Geral" (dashboard) está OCULTA TEMPORARIAMENTE — landing padrão vai pra Comercial
-  const [activeTab, setActiveTab] = useState(() => {
-    const s = localStorage.getItem('activeTab');
-    return s && s !== 'dashboard' ? s : 'ai-secretary';
-  });
+  const [activeTab, setActiveTab] = useState(() => localStorage.getItem('activeTab') || 'dashboard');
   // Abas já visitadas — componentes ficam montados em memória após a primeira visita
   const [visitedTabs, setVisitedTabs] = useState<Set<string>>(() => {
     const saved = localStorage.getItem('activeTab');
-    const initial = saved && saved !== 'dashboard' ? saved : 'ai-secretary';
-    return new Set([initial]);
+    return new Set(saved ? ['dashboard', saved] : ['dashboard']);
   });
   const { user, loading, userRole, activeClinicId } = useAuth();
   const prevClinicRef = useRef(activeClinicId);
@@ -42,9 +37,9 @@ function AppContent() {
   // Reseta abas visitadas ao trocar de clínica
   useEffect(() => {
     if (prevClinicRef.current && prevClinicRef.current !== activeClinicId) {
-      setVisitedTabs(new Set(['ai-secretary']));
-      setActiveTab('ai-secretary');
-      localStorage.setItem('activeTab', 'ai-secretary');
+      setVisitedTabs(new Set(['dashboard']));
+      setActiveTab('dashboard');
+      localStorage.setItem('activeTab', 'dashboard');
     }
     prevClinicRef.current = activeClinicId;
   }, [activeClinicId]);
@@ -79,18 +74,13 @@ function AppContent() {
     if (loading) return;
     const ROLE_ALLOWED_TABS: Record<string, string[]> = {
       medico: ['appointments', 'medical-records', 'profile'],
-      vendedor: ['marketing', 'ai-secretary', 'finance', 'settings', 'profile'],
+      vendedor: ['dashboard', 'marketing', 'ai-secretary', 'finance', 'settings', 'profile'],
     };
     const allowed = ROLE_ALLOWED_TABS[userRole];
     if (allowed && !allowed.includes(activeTab)) {
       handleSetActiveTab(allowed[0]);
     }
   }, [loading, userRole, activeTab, handleSetActiveTab]);
-
-  // "Visão Geral" (dashboard) oculta temporariamente — bounce de quem cair nela
-  useEffect(() => {
-    if (!loading && activeTab === 'dashboard') handleSetActiveTab('ai-secretary');
-  }, [loading, activeTab, handleSetActiveTab]);
 
   if (loading) {
     return (
@@ -115,7 +105,7 @@ function AppContent() {
     { id: 'settings',        el: <Settings /> },
     { id: 'marketing',       el: <MarketingAnalytics /> },
     { id: 'super-admin',     el: <SuperAdmin /> },
-    { id: 'org-admin',       el: <OrgAdmin onEnterClinic={() => handleSetActiveTab('ai-secretary')} /> },
+    { id: 'org-admin',       el: <OrgAdmin onEnterClinic={() => handleSetActiveTab('dashboard')} /> },
     { id: 'profile',         el: <UserProfile /> },
     { id: 'team',            el: <TeamManagement /> },
   ];

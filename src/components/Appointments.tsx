@@ -207,6 +207,24 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
     return () => { cancelled = true; };
   }, [formData.doctor_id, formData.date, formData.consultation_type_id, selectedAppointment, appointments]);
 
+  // Horário em que a consulta em edição está atualmente agendada (HH:MM).
+  // Só vale como "horário atual" quando a data/médico do form ainda batem com o agendamento original.
+  const currentEditTime = useMemo(() => {
+    if (!selectedAppointment?.time) return null;
+    if (formData.date !== selectedAppointment.date) return null;
+    if (formData.doctor_id !== selectedAppointment.doctor_id) return null;
+    return selectedAppointment.time.toString().substring(0, 5);
+  }, [selectedAppointment, formData.date, formData.doctor_id]);
+
+  // Garante que o horário atual sempre apareça na lista (mesmo fora da grade) e fique visível ao editar.
+  const displayedSlots = useMemo(() => {
+    if (!availableSlots) return availableSlots;
+    if (currentEditTime && !availableSlots.includes(currentEditTime)) {
+      return [...availableSlots, currentEditTime].sort((a, b) => a.localeCompare(b));
+    }
+    return availableSlots;
+  }, [availableSlots, currentEditTime]);
+
   const filteredAppointments = useMemo(() => {
     const list = appointments.filter((apt) => {
       const doctorName = apt.doctor?.name || '';
@@ -626,7 +644,7 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
       patient_id: apt.patient_id,
       doctor_id: apt.doctor_id,
       date: apt.date,
-      time: apt.time,
+      time: apt.time ? apt.time.toString().substring(0, 5) : '',
       notes: apt.notes || '',
       status: apt.status,
       consultation_type_id: apt.consultation_type_id || fallbackType?.id || ''
@@ -1099,34 +1117,48 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
 
                 {formData.doctor_id && formData.date && (
                   <div className="animate-in fade-in slide-in-from-top-2 duration-300">
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Horário *</label>
+                    <label className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">
+                      Horário *
+                      {currentEditTime && (
+                        <span className="inline-flex items-center gap-1 normal-case tracking-normal text-[11px] font-bold text-teal-700 bg-teal-50 border border-teal-100 rounded-full px-2 py-0.5">
+                          <Clock className="w-3 h-3" />
+                          Atual: {currentEditTime}
+                        </span>
+                      )}
+                    </label>
                     {loadingSlots ? (
                       <div className="p-4 bg-slate-50 border border-slate-100 rounded-xl text-slate-400 text-sm font-bold flex items-center">
                         <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                         Carregando horários disponíveis...
                       </div>
-                    ) : !availableSlots || availableSlots.length === 0 ? (
+                    ) : !displayedSlots || displayedSlots.length === 0 ? (
                       <div className="p-4 bg-rose-50 border border-rose-100 rounded-xl text-rose-600 text-sm font-bold flex items-center">
                         <AlertCircle className="w-4 h-4 mr-2" />
                         Sem horários disponíveis nesta data.
                       </div>
                     ) : (
                       <div className="grid grid-cols-4 sm:grid-cols-5 gap-2 mt-1">
-                        {availableSlots.map(slot => (
-                          <button
-                            key={slot}
-                            type="button"
-                            onClick={() => setFormData(p => ({ ...p, time: slot }))}
-                            className={cn(
-                              "py-2.5 text-xs font-bold rounded-lg transition-all border",
-                              formData.time === slot
-                                ? "bg-teal-600 text-white border-teal-600 shadow-lg shadow-teal-200"
-                                : "bg-white text-slate-600 border-slate-200 hover:border-teal-400 hover:text-teal-700 hover:bg-teal-50 active:scale-95"
-                            )}
-                          >
-                            {slot}
-                          </button>
-                        ))}
+                        {displayedSlots.map(slot => {
+                          const isSelected = formData.time === slot;
+                          const isCurrent = currentEditTime === slot;
+                          return (
+                            <button
+                              key={slot}
+                              type="button"
+                              onClick={() => setFormData(p => ({ ...p, time: slot }))}
+                              className={cn(
+                                "relative py-2.5 text-xs font-bold rounded-lg transition-all border",
+                                isSelected
+                                  ? "bg-teal-600 text-white border-teal-600 shadow-lg shadow-teal-200"
+                                  : isCurrent
+                                    ? "bg-teal-50 text-teal-700 border-teal-300 ring-1 ring-teal-200"
+                                    : "bg-white text-slate-600 border-slate-200 hover:border-teal-400 hover:text-teal-700 hover:bg-teal-50 active:scale-95"
+                              )}
+                            >
+                              {slot}
+                            </button>
+                          );
+                        })}
                       </div>
                     )}
                   </div>

@@ -2291,12 +2291,22 @@ function ConfigView() {
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="flex-1 min-h-0 p-6">
+            <div className="flex-1 min-h-0 p-6 flex flex-col gap-4">
+              <div className="space-y-1.5 shrink-0">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Nome do Prompt</label>
+                <input
+                  type="text"
+                  value={selectedCompany?.name || ""}
+                  onChange={(e) => updateSelectedCompany({ name: e.target.value })}
+                  placeholder="Ex: Padrão, Campanha Verão..."
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl font-medium text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all"
+                />
+              </div>
               <textarea
                 autoFocus
                 value={selectedCompany?.content || ""}
                 onChange={(e) => updateSelectedCompany({ content: e.target.value })}
-                className="w-full h-full p-4 border border-slate-200 rounded-xl font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all resize-none text-sm leading-relaxed"
+                className="w-full flex-1 min-h-0 p-4 border border-slate-200 rounded-xl font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all resize-none text-sm leading-relaxed"
                 placeholder="Descreva aqui informações da clínica, especialidades, médicos, horários, localização e instruções para que a IA possa responder aos pacientes de forma correta..."
               />
             </div>

@@ -1093,24 +1093,50 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
                   ) : (
                     <div className={cn(
                       "grid gap-2",
-                      activeTypes.length === 1 ? "grid-cols-1" : activeTypes.length === 2 ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-3"
+                      activeTypes.length === 1 ? "grid-cols-1" : "grid-cols-2"
                     )}>
-                      {activeTypes.map(ct => (
-                        <button
-                          key={ct.id}
-                          type="button"
-                          onClick={() => setFormData(p => ({ ...p, consultation_type_id: ct.id, time: '' }))}
-                          className={cn(
-                            "flex items-center justify-center gap-2 py-3 rounded-xl border text-xs font-bold transition-all",
-                            formData.consultation_type_id === ct.id
-                              ? "bg-teal-600 text-white border-teal-600 shadow-lg shadow-teal-200"
-                              : "bg-white text-slate-600 border-slate-200 hover:border-teal-400 hover:text-teal-700 hover:bg-teal-50"
-                          )}
-                        >
-                          {ct.modality === 'online' ? <Video className="w-4 h-4" /> : <MapPin className="w-4 h-4" />}
-                          {ct.name}
-                        </button>
-                      ))}
+                      {activeTypes.map(ct => {
+                        const selected = formData.consultation_type_id === ct.id;
+                        const isOnline = ct.modality === 'online';
+                        const Icon = isOnline ? Video : MapPin;
+                        return (
+                          <button
+                            key={ct.id}
+                            type="button"
+                            onClick={() => setFormData(p => ({ ...p, consultation_type_id: ct.id, time: '' }))}
+                            className={cn(
+                              "group relative flex items-center gap-2.5 p-2.5 min-h-[3.25rem] rounded-xl border text-left transition-all",
+                              selected
+                                ? "bg-teal-600 border-teal-600 shadow-lg shadow-teal-200/60"
+                                : "bg-white border-slate-200 hover:border-teal-300 hover:bg-teal-50/40 active:scale-[0.98]"
+                            )}
+                          >
+                            <span className={cn(
+                              "flex items-center justify-center w-8 h-8 rounded-lg shrink-0 transition-colors",
+                              selected
+                                ? "bg-white/20 text-white"
+                                : "bg-slate-100 text-slate-500 group-hover:bg-teal-100 group-hover:text-teal-600"
+                            )}>
+                              <Icon className="w-4 h-4" />
+                            </span>
+                            <span className="flex-1 min-w-0">
+                              <span className={cn(
+                                "block text-xs font-bold leading-tight",
+                                selected ? "text-white" : "text-slate-700"
+                              )}>
+                                {ct.name}
+                              </span>
+                              <span className={cn(
+                                "block text-[10px] font-semibold mt-0.5",
+                                selected ? "text-teal-50/80" : "text-slate-400"
+                              )}>
+                                {isOnline ? 'Online' : 'Presencial'}
+                              </span>
+                            </span>
+                            {selected && <Check className="w-4 h-4 text-white shrink-0" />}
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>

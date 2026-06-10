@@ -3,15 +3,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import {
     Palette,
-    Bot,
     Building2,
     Bell,
     Lock,
     Globe,
     Camera,
     Check,
-    Info,
-    Volume2,
     Trash2,
     CloudUpload,
     Plug,
@@ -718,140 +715,6 @@ function BrandingSettings({ data, onChange }: { data: Partial<Clinic>, onChange:
             </Card>
 
         </div>
-    );
-}
-
-function AISettings({ data, onChange }: { data: Partial<AIConfig>, onChange: (updates: Partial<AIConfig>) => void }) {
-    const getStyleLabel = (style: string) => {
-        switch(style) {
-            case 'tecnica': return 'Técnica & Precisa';
-            case 'objetiva': return 'Objetiva';
-            case 'cordial': return 'Cordial & Informativa';
-            default: return style;
-        }
-    };
-
-    const getSpeedLabel = (speed: string) => {
-        switch(speed) {
-            case 'instantanea': return 'Instantânea';
-            case 'cadenciada': return 'Cadenciada (Natural)';
-            default: return speed;
-        }
-    };
-
-    return (
-        <Card className="border border-slate-200 shadow-sm max-w-3xl mx-auto">
-            <CardHeader className="bg-slate-50 border-b border-slate-200 pb-6 px-8">
-                <div className="flex items-center gap-6">
-                    <div className="w-16 h-16 bg-teal-600 rounded-xl flex items-center justify-center shadow-sm">
-                        <Bot className="w-8 h-8 text-white" />
-                    </div>
-                    <div>
-                        <CardTitle className="text-2xl font-bold text-slate-900">Configuracoes do Comercial</CardTitle>
-                        <p className="text-slate-500 font-medium">Configure o comportamento da automacao comercial.</p>
-                    </div>
-                </div>
-            </CardHeader>
-            <CardContent className="p-8 space-y-8">
-                <div className="space-y-4">
-                    <div className="flex justify-between items-end">
-                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
-                            <Volume2 className="w-4 h-4" /> Tom de Voz
-                        </label>
-                        <span className="text-teal-600 font-semibold">{data.tone && data.tone > 50 ? 'Casual' : 'Formal'} (Nível: {data.tone})</span>
-                    </div>
-                    <input 
-                        type="range" 
-                        className="w-full accent-teal-600 h-2 rounded-full bg-slate-100" 
-                        min="0" max="100" 
-                        value={data.tone || 70}
-                        onChange={(e) => onChange({ tone: parseInt(e.target.value) })}
-                    />
-                    <div className="flex justify-between text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-                        <span>Formal</span>
-                        <span>Casual</span>
-                    </div>
-                </div>
-
-                <div className="grid gap-6 md:grid-cols-2">
-                    <div className="space-y-3">
-                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Estilo de Resposta</label>
-                        <select 
-                            className="w-full px-4 py-2 border border-slate-200 rounded-lg font-medium text-slate-700 bg-white"
-                            value={data.response_style || 'cordial'}
-                            onChange={(e) => onChange({ response_style: e.target.value as any })}
-                        >
-                            <option value="tecnica">Técnica & Precisa</option>
-                            <option value="objetiva">Objetiva</option>
-                            <option value="cordial">Cordial & Informativa</option>
-                        </select>
-                    </div>
-                    <div className="space-y-3">
-                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Velocidade de Resposta</label>
-                        <select 
-                            className="w-full px-4 py-2 border border-slate-200 rounded-lg font-medium text-slate-700 bg-white"
-                            value={data.response_speed || 'instantanea'}
-                            onChange={(e) => onChange({ response_speed: e.target.value as any })}
-                        >
-                            <option value="instantanea">Instantânea</option>
-                            <option value="cadenciada">Cadenciada (Natural)</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div className="space-y-3">
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
-                        <Info className="w-4 h-4 text-teal-600" />
-                        Instrucoes do Comercial
-                    </label>
-                    <textarea 
-                        className="w-full px-4 py-3 border border-slate-200 rounded-lg font-medium text-slate-700 h-48 text-sm bg-slate-50/30 focus:bg-white focus:ring-2 focus:ring-teal-100 transition-all"
-                        value={data.prompt || ''}
-                        onChange={(e) => onChange({ prompt: e.target.value })}
-                        placeholder="Instrucoes avancadas para o comportamento do Comercial..."
-                    />
-                    <p className="text-[10px] text-slate-400 font-medium leading-relaxed">
-                        Este é o prompt base que define a personalidade e as regras principais do seu agente Comercial. 
-                        Use para definir como ele deve se comportar, o que pode ou não falar.
-                    </p>
-                </div>
-
-                <div className="space-y-3">
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Bio / Apresentação Curta</label>
-                    <textarea 
-                        className="w-full px-4 py-2 border border-slate-200 rounded-lg font-medium text-slate-700 h-24"
-                        value={data.bio_text || ''}
-                        onChange={(e) => onChange({ bio_text: e.target.value })}
-                        placeholder="Ex: Olá! Sou o Comercial da clínica..."
-                    />
-                </div>
-
-
-                <div className="flex items-center justify-between p-5 bg-slate-50 rounded-2xl border border-slate-200 transition-all hover:bg-slate-100/50">
-                    <div className="flex gap-4">
-                        <div className={cn(
-                            "w-10 h-10 rounded-xl flex items-center justify-center transition-all",
-                            data.auto_schedule ? "bg-teal-600 shadow-md" : "bg-slate-200"
-                        )}>
-                            <Bot className={cn("w-5 h-5", data.auto_schedule ? "text-white" : "text-slate-500")} />
-                        </div>
-                        <div>
-                            <p className="font-bold text-slate-900 text-sm">Agendamento Automático</p>
-                            <p className="text-slate-500 font-medium text-xs mt-0.5">Permitir que a IA agende consultas diretamente.</p>
-                        </div>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                        <input 
-                            type="checkbox" 
-                            className="sr-only peer"
-                            checked={data.auto_schedule || false}
-                            onChange={(e) => onChange({ auto_schedule: e.target.checked })}
-                        />
-                        <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-teal-100 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-600"></div>
-                    </label>
-                </div>
-            </CardContent>
-        </Card>
     );
 }
 

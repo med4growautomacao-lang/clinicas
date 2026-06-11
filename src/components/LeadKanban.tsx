@@ -1029,6 +1029,8 @@ export function LeadKanban() {
       p_doctor_id: scheduleForm.doctor_id,
       p_date: scheduleForm.date,
       p_consultation_type_id: scheduleForm.consultation_type_id,
+      // Agendamento manual pelo Kanban ignora o aviso mínimo (libera qualquer horário do expediente)
+      p_ignore_min_notice: true,
     }).then(({ data, error }) => {
       if (cancelled) return;
       if (error) { console.error('get_available_slots:', error); setScheduleSlots([]); }

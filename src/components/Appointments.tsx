@@ -102,6 +102,8 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [blockToDelete, setBlockToDelete] = useState<{ doctorId: string; doctorName: string; type: 'day' | 'time'; date: string; start?: string; end?: string; name?: string } | null>(null);
+  const [deletingBlock, setDeletingBlock] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
   const [formData, setFormData] = useState({ patient_id: '', doctor_id: '', date: '', time: '', notes: '', status: 'pendente' as any, consultation_type_id: '' as string });
   const [submitting, setSubmitting] = useState(false);
@@ -195,6 +197,8 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
       p_date: formData.date,
       p_consultation_type_id: formData.consultation_type_id,
       p_exclude_appointment_id: selectedAppointment?.id ?? null,
+      // Agendamento manual pelo modal ignora o aviso mínimo (libera qualquer horário do expediente)
+      p_ignore_min_notice: true,
     }).then(({ data, error }) => {
       if (cancelled) return;
       if (error) { console.error('get_available_slots:', error); setAvailableSlots([]); }
@@ -534,24 +538,33 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
     }
   };
 
-  const handleDeleteBlock = async (doctorId: string, type: 'day' | 'time', date: string, start?: string, end?: string) => {
+  const confirmDeleteBlock = async () => {
+    if (!blockToDelete) return;
+    const { doctorId, type, date, start, end } = blockToDelete;
     const doctor = doctors.find(d => d.id === doctorId);
-    if (!doctor) return;
+    if (!doctor) { setBlockToDelete(null); return; }
+    setDeletingBlock(true);
+    setError(null);
     try {
       if (type === 'day') {
         const newDaysOff = (doctor.days_off || []).filter((d: string) => d !== date);
-        const { error } = await supabase.from('doctors').update({ days_off: newDaysOff }).eq('id', doctor.id);
+        const { data, error } = await supabase.from('doctors').update({ days_off: newDaysOff }).eq('id', doctor.id).select('id');
         if (error) throw error;
+        if (!data || data.length === 0) throw new Error('Sem permissão para remover o bloqueio. Atualize a página e tente novamente.');
       } else {
         const newBlockedTimes = (doctor.blocked_times || []).filter((bt: any) =>
           !(bt.date === date && bt.start === start && bt.end === end)
         );
-        const { error } = await supabase.from('doctors').update({ blocked_times: newBlockedTimes }).eq('id', doctor.id);
+        const { data, error } = await supabase.from('doctors').update({ blocked_times: newBlockedTimes }).eq('id', doctor.id).select('id');
         if (error) throw error;
+        if (!data || data.length === 0) throw new Error('Sem permissão para remover o bloqueio. Atualize a página e tente novamente.');
       }
       await refetchDoctors(true, true);
+      setBlockToDelete(null);
     } catch (e: any) {
       setError(e.message || 'Erro ao remover bloqueio.');
+    } finally {
+      setDeletingBlock(false);
     }
   };
 
@@ -875,8 +888,8 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
                                 </td>
                                 <td className="px-6 py-4 text-right">
                                   <button
-                                    onClick={() => handleDeleteBlock(bl.doctorId, bl.type, bl.date, bl.start, bl.end)}
-                                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors opacity-0 group-hover:opacity-100"
+                                    onClick={() => setBlockToDelete({ doctorId: bl.doctorId, doctorName: bl.doctorName, type: bl.type, date: bl.date, start: bl.start, end: bl.end, name: bl.name })}
+                                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100"
                                     title="Remover bloqueio"
                                   >
                                     <Trash2 className="w-4 h-4" />
@@ -985,7 +998,7 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
                             </div>
                           </td>
                           <td className="px-6 py-4 text-right">
-                            <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="flex items-center justify-end gap-2 opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 transition-opacity">
                               <button onClick={() => openEditModal(apt)} className="p-1.5 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded-md transition-colors"><Edit2 className="w-4 h-4" /></button>
                               <button onClick={() => openDeleteConfirm(apt)} className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors"><Trash2 className="w-4 h-4" /></button>
                             </div>
@@ -1246,6 +1259,41 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
         )}
       </AnimatePresence>
 
+      {/* Confirmação de remoção de bloqueio */}
+      <AnimatePresence>
+        {blockToDelete && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4" onClick={() => { if (!deletingBlock) { setBlockToDelete(null); setError(null); } }}>
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
+              <div className="p-6 text-center">
+                <div className="w-12 h-12 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-4"><AlertCircle className="w-6 h-6 text-rose-600" /></div>
+                <h3 className="text-xl font-bold text-slate-900 mb-2">Remover Bloqueio</h3>
+                <p className="text-slate-500">Tem certeza que deseja remover este bloqueio? O horário voltará a ficar disponível para agendamento.</p>
+                <div className="mt-4 p-3 bg-slate-50 rounded-lg text-sm text-left border border-slate-100">
+                  <p className="font-semibold text-slate-700">{blockToDelete.name || (blockToDelete.type === 'day' ? 'Dia todo' : 'Bloqueio')} — {blockToDelete.doctorName}</p>
+                  <p className="text-slate-500 text-xs">
+                    {format(parseISO(blockToDelete.date), 'dd/MM/yyyy')}
+                    {blockToDelete.type === 'time' ? ` · ${blockToDelete.start} – ${blockToDelete.end}` : ' · Dia todo'}
+                  </p>
+                </div>
+                {error && (
+                  <div className="mt-3 p-3 bg-rose-50 border border-rose-100 rounded-lg text-rose-600 text-xs font-medium flex items-center justify-center text-left">
+                    <AlertCircle className="w-3.5 h-3.5 mr-2 shrink-0" />
+                    {error}
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-3 p-6 border-t border-slate-100 bg-slate-50">
+                <Button variant="outline" className="flex-1" onClick={() => { setBlockToDelete(null); setError(null); }} disabled={deletingBlock}>Cancelar</Button>
+                <Button variant="destructive" className="flex-1" onClick={confirmDeleteBlock} disabled={deletingBlock}>
+                  {deletingBlock ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Trash2 className="w-4 h-4 mr-2" />}
+                  Remover
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {showScheduleSettings && doctorToConfigure && (
           <DoctorScheduleSettings
@@ -1290,8 +1338,8 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
                           <p className="text-sm font-bold text-rose-700">Dia todo — {d.name}</p>
                         </div>
                         <button
-                          onClick={() => handleDeleteBlock(d.id, 'day', selectedDay!)}
-                          className="p-1.5 text-rose-300 hover:text-rose-600 hover:bg-rose-100 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                          onClick={() => setBlockToDelete({ doctorId: d.id, doctorName: d.name, type: 'day', date: selectedDay! })}
+                          className="p-1.5 text-rose-300 hover:text-rose-600 hover:bg-rose-100 rounded-lg transition-all opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100"
                           title="Remover bloqueio"
                         >
                           <X className="w-4 h-4" />
@@ -1306,8 +1354,8 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
                           <p className="text-xs text-rose-400 font-medium">{bt.start} – {bt.end}</p>
                         </div>
                         <button
-                          onClick={() => handleDeleteBlock(bt.doctorId, 'time', bt.date, bt.start, bt.end)}
-                          className="p-1.5 text-rose-300 hover:text-rose-600 hover:bg-rose-100 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                          onClick={() => setBlockToDelete({ doctorId: bt.doctorId, doctorName: bt.doctorName, type: 'time', date: bt.date, start: bt.start, end: bt.end, name: bt.name })}
+                          className="p-1.5 text-rose-300 hover:text-rose-600 hover:bg-rose-100 rounded-lg transition-all opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100"
                           title="Remover bloqueio"
                         >
                           <X className="w-4 h-4" />
@@ -1376,7 +1424,7 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
                         <span className={cn("px-2 py-0.5 rounded text-[10px] font-bold border uppercase", statusColor[apt.status] || statusColor.pendente)}>
                           {statusLabel[apt.status] || apt.status}
                         </span>
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center gap-1 opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 transition-opacity">
                           <button onClick={() => { setShowDayModal(false); openEditModal(apt); }} className="p-1.5 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded-lg transition-all"><Edit2 className="w-4 h-4" /></button>
                           <button onClick={() => { setShowDayModal(false); openDeleteConfirm(apt); }} className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
                         </div>

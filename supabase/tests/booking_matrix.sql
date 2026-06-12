@@ -155,3 +155,106 @@ BEGIN
   RAISE NOTICE 'BOOKING MATRIX: todos os casos passaram.';
 END $$;
 ROLLBACK;
+
+-- ============================================================================
+-- MATRIZ ESTENDIDA (cenarios adversariais / integracao / regressoes de 13/06)
+-- ============================================================================
+BEGIN;
+DO $$
+DECLARE
+  v_cA uuid; v_doc uuid; v_doc2 uuid; v_ctP uuid; v_ctO uuid; v_ct2 uuid;
+  v_wa uuid; v_perdido uuid;
+  v_res jsonb; v_cnt int; v_elig boolean; v_fu boolean; v_dur int; v_mod text; v_slug text;
+  v_d date := current_date + 120;
+  v_base text := '7'||lpad((floor(random()*10000000))::int::text,7,'0');
+  v_v13 text; v_v12 text;
+  v_L uuid; v_TW uuid; v_PF uuid; v_apt uuid; v_Tclosed uuid;
+  v_ph2 text := '5582'||lpad((floor(random()*100000000))::int::text,8,'0');
+  v_phF text := '5583'||lpad((floor(random()*100000000))::int::text,8,'0');
+  v_ph13a text := '5584'||lpad((floor(random()*100000000))::int::text,8,'0');
+  v_ph13b text := '5585'||lpad((floor(random()*100000000))::int::text,8,'0');
+  v_phR text := '5586'||lpad((floor(random()*100000000))::int::text,8,'0');
+  v_wh jsonb := '{"0":[{"start":"09:00","end":"17:00"}],"1":[{"start":"09:00","end":"17:00"}],"2":[{"start":"09:00","end":"17:00"}],"3":[{"start":"09:00","end":"17:00"}],"4":[{"start":"09:00","end":"17:00"}],"5":[{"start":"09:00","end":"17:00"}],"6":[{"start":"09:00","end":"17:00"}]}'::jsonb;
+BEGIN
+  v_v13 := '55219'||v_base; v_v12 := '5521'||v_base;
+  SELECT fs.clinic_id INTO v_cA FROM funnel_stages fs JOIN clinics c ON c.id=fs.clinic_id
+   WHERE fs.slug='agendado' AND EXISTS(SELECT 1 FROM funnel_stages w WHERE w.clinic_id=fs.clinic_id AND w.slug='whatsapp') ORDER BY c.created_at LIMIT 1;
+  SELECT id INTO v_wa FROM funnel_stages WHERE clinic_id=v_cA AND slug='whatsapp' LIMIT 1;
+  SELECT id INTO v_perdido FROM funnel_stages WHERE clinic_id=v_cA AND slug='perdido' LIMIT 1;
+  INSERT INTO doctors (clinic_id,name,is_active,consultation_duration,slot_step,working_hours) VALUES (v_cA,'ZZ DocX',true,30,30,v_wh) RETURNING id INTO v_doc;
+  INSERT INTO doctors (clinic_id,name,is_active,consultation_duration,slot_step,working_hours,days_off,blocked_times)
+    VALUES (v_cA,'ZZ DocX2',true,60,30,v_wh, jsonb_build_array((v_d+2)::text), jsonb_build_array(jsonb_build_object('date',(v_d+3)::text,'start','09:00','end','12:00','name','Bloq')))
+    RETURNING id INTO v_doc2;
+  INSERT INTO consultation_types (clinic_id,doctor_id,slug,name,modality,is_active,consultation_duration) VALUES (v_cA,v_doc,'presencial','P','presencial',true,30) RETURNING id INTO v_ctP;
+  INSERT INTO consultation_types (clinic_id,doctor_id,slug,name,modality,is_active,consultation_duration) VALUES (v_cA,v_doc,'online','O','online',true,60) RETURNING id INTO v_ctO;
+  INSERT INTO consultation_types (clinic_id,doctor_id,slug,name,modality,is_active,consultation_duration) VALUES (v_cA,v_doc2,'presencial','P2','presencial',true,60) RETURNING id INTO v_ct2;
+
+  -- X1: reuso por 9o digito + sem duplicar lead (regressao do trigger auto_create_lead normalizado)
+  INSERT INTO leads (clinic_id,name,phone,source,capture_channel,ai_enabled) VALUES (v_cA,'L9',v_v13,'whatsapp','whatsapp',true) RETURNING id INTO v_L;
+  INSERT INTO tickets (clinic_id,lead_id,stage_id,status,opened_at) VALUES (v_cA,v_L,v_wa,'open',now()) RETURNING id INTO v_TW;
+  v_res := book_appointment(v_cA,v_doc,v_d,'09:00','L9',v_v12, p_source=>'ia', p_consultation_type_id=>v_ctP, p_validate_availability=>false);
+  ASSERT (v_res->>'ticket_id')::uuid=v_TW, 'X1 nao reusou ticket por 9digito';
+  SELECT count(*) INTO v_cnt FROM leads WHERE clinic_id=v_cA AND normalize_br_phone(phone)=normalize_br_phone(v_v12);
+  ASSERT v_cnt=1, 'X1 duplicou lead='||v_cnt;
+
+  -- X2: criar paciente nao duplica lead existente (normalize no trigger de patients)
+  INSERT INTO leads (clinic_id,name,phone,source,capture_channel,ai_enabled) VALUES (v_cA,'L2','55219'||substr(v_ph2,5),'whatsapp','whatsapp',true) RETURNING id INTO v_L;
+  INSERT INTO patients (clinic_id,name,phone) VALUES (v_cA,'P2',v_ph2);
+  SELECT count(*) INTO v_cnt FROM leads WHERE clinic_id=v_cA AND normalize_br_phone(phone)=normalize_br_phone(v_ph2);
+  ASSERT v_cnt=1, 'X2 patient trigger duplicou lead='||v_cnt;
+
+  -- X3: cancelar libera slot
+  v_res := book_appointment(v_cA,v_doc,v_d,'10:00','C3a','5587'||lpad((floor(random()*100000000))::int::text,8,'0'), p_source=>'ia', p_consultation_type_id=>v_ctP, p_validate_availability=>false);
+  UPDATE appointments SET status='cancelado' WHERE id=(v_res->>'appointment_id')::uuid;
+  v_res := book_appointment(v_cA,v_doc,v_d,'10:00','C3b','5588'||lpad((floor(random()*100000000))::int::text,8,'0'), p_source=>'ia', p_consultation_type_id=>v_ctP, p_validate_availability=>false);
+  ASSERT (v_res->>'success')::boolean, 'X3 cancelar nao liberou slot';
+
+  -- X4: cancelar libera ticket (1 ativo/ticket)
+  INSERT INTO patients (clinic_id,name,phone) VALUES (v_cA,'PF',v_phF) RETURNING id INTO v_PF;
+  v_res := book_appointment(v_cA,v_doc,v_d,'11:00',NULL,NULL, p_source=>'manual', p_consultation_type_id=>v_ctP, p_patient_id=>v_PF, p_validate_availability=>false);
+  UPDATE appointments SET status='cancelado' WHERE id=(v_res->>'appointment_id')::uuid;
+  v_res := book_appointment(v_cA,v_doc,v_d,'11:30',NULL,NULL, p_source=>'manual', p_consultation_type_id=>v_ctP, p_patient_id=>v_PF, p_validate_availability=>false);
+  ASSERT (v_res->>'success')::boolean, 'X4 cancelar nao liberou ticket';
+
+  -- X5: sobreposicao de duracoes (online 60 vs presencial 30)
+  v_res := book_appointment(v_cA,v_doc,v_d+1,'09:00','O5',v_ph13a, p_source=>'ia', p_consultation_type_id=>v_ctO, p_validate_availability=>false);
+  ASSERT (v_res->>'success')::boolean, 'X5 online: '||v_res::text;
+  v_res := book_appointment(v_cA,v_doc,v_d+1,'09:30','P5',v_ph13b, p_source=>'ia', p_consultation_type_id=>v_ctP, p_validate_availability=>false);
+  ASSERT v_res->>'error_code'='slot_conflict', 'X5 nao detectou sobreposicao: '||v_res::text;
+
+  -- X6: days_off e blocked_times respeitados (validate)
+  v_res := book_appointment(v_cA,v_doc2,v_d+2,'09:00','Off','5589'||lpad((floor(random()*100000000))::int::text,8,'0'), p_source=>'ia', p_consultation_type_id=>v_ct2, p_validate_availability=>true);
+  ASSERT v_res->>'error_code'='slot_unavailable', 'X6 days_off: '||v_res::text;
+  v_res := book_appointment(v_cA,v_doc2,v_d+3,'09:00','Blk','5590'||lpad((floor(random()*100000000))::int::text,8,'0'), p_source=>'ia', p_consultation_type_id=>v_ct2, p_validate_availability=>true);
+  ASSERT v_res->>'error_code'='slot_unavailable', 'X6 blocked: '||v_res::text;
+
+  -- X7: reschedule trocando medico recalcula duracao (30 -> 60)
+  v_res := book_appointment(v_cA,v_doc,v_d+4,'09:00','R7',v_phR, p_source=>'ia', p_consultation_type_id=>v_ctP, p_validate_availability=>false);
+  v_apt := (v_res->>'appointment_id')::uuid;
+  v_res := reschedule_appointment(v_apt, v_doc2, v_d+4, '14:00', p_consultation_type_id=>v_ct2, p_force=>true);
+  ASSERT (v_res->>'success')::boolean, 'X7 reschedule: '||v_res::text;
+  SELECT duration_minutes INTO v_dur FROM appointments WHERE id=v_apt;
+  ASSERT v_dur=60, 'X7 duracao nao recalculada='||v_dur;
+
+  -- X8: ticket so FECHADO -> cria novo aberto em agendado
+  INSERT INTO leads (clinic_id,name,phone,source,capture_channel,ai_enabled) VALUES (v_cA,'LC','5591'||lpad((floor(random()*100000000))::int::text,8,'0'),'whatsapp','whatsapp',true) RETURNING id INTO v_L;
+  INSERT INTO tickets (clinic_id,lead_id,stage_id,status,opened_at,closed_at) VALUES (v_cA,v_L,v_perdido,'closed',now(),now()) RETURNING id INTO v_Tclosed;
+  v_res := convert_lead_to_appointment(v_cA,v_L,v_doc,v_d,'12:00', p_consultation_type_id=>v_ctP);
+  ASSERT (v_res->>'ticket_id')::uuid <> v_Tclosed, 'X8 reusou ticket fechado';
+
+  -- X9 (REGRESSAO DO BUG ORIGINAL): lead com agendamento futuro NAO e elegivel ao reengajamento
+  INSERT INTO leads (clinic_id,name,phone,source,capture_channel,ai_enabled,followup_enabled) VALUES (v_cA,'LR','5592'||lpad((floor(random()*100000000))::int::text,8,'0'),'whatsapp','whatsapp',true,false) RETURNING id INTO v_L;
+  INSERT INTO tickets (clinic_id,lead_id,stage_id,status,opened_at) VALUES (v_cA,v_L,v_wa,'open',now()) RETURNING id INTO v_TW;
+  SELECT phone INTO v_slug FROM leads WHERE id=v_L;
+  v_res := book_appointment(v_cA,v_doc,v_d,'13:00','LR',v_slug, p_source=>'ia', p_consultation_type_id=>v_ctP, p_validate_availability=>false);
+  ASSERT (v_res->>'ticket_id')::uuid=v_TW, 'X9 nao reusou ticket do lead';
+  SELECT EXISTS (SELECT 1 FROM tickets t JOIN funnel_stages fs ON fs.id=t.stage_id
+     WHERE t.lead_id=v_L AND t.status='open' AND COALESCE(fs.slug,'') NOT IN ('agendado','compareceu','ganho','perdido')) INTO v_elig;
+  ASSERT v_elig IS FALSE, 'X9 BUG: lead agendado ainda elegivel ao reengajamento';
+  -- e o follow-up foi habilitado pelo trigger de appointment
+  SELECT followup_enabled INTO v_fu FROM leads WHERE id=v_L;
+  ASSERT v_fu IS TRUE, 'X9 followup nao habilitado';
+
+  RAISE NOTICE 'MATRIZ ESTENDIDA: todos os casos passaram.';
+END $$;
+ROLLBACK;

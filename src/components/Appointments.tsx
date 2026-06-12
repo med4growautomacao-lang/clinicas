@@ -47,7 +47,7 @@ import {
 } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useAuth } from "../contexts/AuthContext";
-import { useAppointments, useDoctors, usePatients, useLeads, useConversions, useFinancial, useProtocols, useConsultationTypes, useClinicConsultationTypes, Lead } from "../hooks/useSupabase";
+import { useAppointments, useDoctors, usePatients, useLeads, useConversions, useFinancial, useProtocols, useConsultationTypes, useClinicConsultationTypes, Lead, BOOKING_ERROR_MESSAGES } from "../hooks/useSupabase";
 import { supabase } from "../lib/supabase";
 import { DoctorScheduleSettings } from "./DoctorScheduleSettings";
 import { PatientModal } from "./PatientModal";
@@ -574,9 +574,35 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
     setError(null);
 
     if (selectedAppointment) {
-      const becomingRealizado = selectedAppointment.status !== 'realizado' && formData.status === 'realizado';
-      const ok = await update(selectedAppointment.id, formData);
+      const sa = selectedAppointment;
+      const curTime = sa.time ? sa.time.toString().substring(0, 5) : '';
+      const scheduleChanged =
+        sa.doctor_id !== formData.doctor_id ||
+        sa.date !== formData.date ||
+        curTime !== formData.time ||
+        (sa.consultation_type_id || '') !== (formData.consultation_type_id || '');
 
+      if (scheduleChanged) {
+        // Reagenda pela RPC validada: recalcula duracao/slot_range e revalida conflito.
+        // force = true: encaixe da recepcao (mantem a flexibilidade manual de hoje).
+        const { data: rres, error: rerr } = await supabase.rpc('reschedule_appointment', {
+          p_appointment_id: sa.id,
+          p_doctor_id: formData.doctor_id,
+          p_date: formData.date,
+          p_time: formData.time,
+          p_consultation_type_id: formData.consultation_type_id || null,
+          p_force: true,
+        });
+        const rr = rres as any;
+        if (rerr || !rr?.success) {
+          setError(rerr?.message || BOOKING_ERROR_MESSAGES[rr?.error_code] || 'Não foi possível reagendar.');
+          setSubmitting(false);
+          return;
+        }
+      }
+
+      const becomingRealizado = sa.status !== 'realizado' && formData.status === 'realizado';
+      const ok = await update(sa.id, { patient_id: formData.patient_id, status: formData.status, notes: formData.notes || null } as any);
       if (!ok) {
         setError('Erro ao atualizar agendamento. Tente novamente.');
         setSubmitting(false);
@@ -584,7 +610,7 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
       }
 
       if (becomingRealizado) {
-        await onAppointmentRealizado(formData.patient_id, selectedAppointment.id, formData.date, formData.time, 0, null, 'pago', '', [], selectedAppointment.ticket_id);
+        await onAppointmentRealizado(formData.patient_id, sa.id, formData.date, formData.time, 0, null, 'pago', '', [], sa.ticket_id);
       }
     } else {
       const result = await create({
@@ -598,8 +624,8 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
         source: 'manual',
       } as any);
 
-      if (!result) {
-        setError('Erro ao criar agendamento. Verifique se há um ticket/consulta em aberto não resolvido para este paciente no funil.');
+      if (result.error) {
+        setError(result.error);
         setSubmitting(false);
         return;
       }

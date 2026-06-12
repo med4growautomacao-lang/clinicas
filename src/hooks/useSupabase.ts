@@ -358,6 +358,25 @@ export interface Appointment {
   doctor?: { name: string };
 }
 
+// Mensagens amigaveis para os error_code das RPCs de agendamento (book/convert/reschedule).
+export const BOOKING_ERROR_MESSAGES: Record<string, string> = {
+  slot_conflict: 'Esse horário já foi reservado. Atualize a lista e escolha outro.',
+  slot_unavailable: 'Horário fora da disponibilidade do médico. Escolha um horário válido.',
+  invalid_phone: 'Telefone do paciente inválido. Use o número do WhatsApp (apenas dígitos, com DDD).',
+  doctor_not_found: 'Médico não encontrado.',
+  doctor_inactive: 'Médico inativo.',
+  doctor_clinic_mismatch: 'Médico não pertence à clínica.',
+  consultation_type_not_found: 'Tipo de consulta não configurado para este médico.',
+  consultation_type_inactive: 'Tipo de consulta inativo.',
+  lead_not_found: 'Lead não encontrado.',
+  patient_not_found: 'Paciente não encontrado.',
+  ticket_has_active_appointment: 'Este paciente já tem um agendamento ativo nesta jornada. Finalize ou cancele o atual antes.',
+  appointment_not_found: 'Agendamento não encontrado.',
+  appointment_not_reschedulable: 'Este agendamento não pode ser reagendado (já finalizado/cancelado).',
+};
+
+export type BookingResult = { row: any | null; error: string | null; error_code?: string };
+
 export function useAppointments(options?: { daysBack?: number; daysForward?: number }) {
   const DAYS_BACK = options?.daysBack ?? 365;
   const DAYS_FORWARD = options?.daysForward ?? 180;
@@ -428,23 +447,39 @@ export function useAppointments(options?: { daysBack?: number; daysForward?: num
     };
   }, [fetch, activeClinicId]);
 
-  const create = async (apt: Partial<Appointment>) => {
-    if (!activeClinicId) return null;
-    const { data, error } = await supabase
-      .from('appointments')
-      .insert({ ...apt, clinic_id: activeClinicId })
-      .select('*, patient:patients(name, cpf, phone), doctor:doctors(name, user_id)')
-      .single();
-    if (error) {
-      const msg = error.code === '23P01'
-        ? 'Esse horário foi reservado por outra pessoa. Atualize a lista e escolha outro.'
-        : error.message;
-      setError(msg);
-      if (error.code === '23P01') fetch(true);
-      return null;
+  // Cria via RPC canonica book_appointment (mesma usada por IA e Kanban): valida medico/tipo,
+  // resolve paciente+lead+ticket e protege contra conflito/duplicidade. NUNCA mais INSERT cru.
+  const create = async (apt: Partial<Appointment> & { source?: string }): Promise<BookingResult> => {
+    if (!activeClinicId) return { row: null, error: 'Sem clínica ativa.' };
+    const { data: res, error } = await supabase.rpc('book_appointment', {
+      p_clinic_id: activeClinicId,
+      p_doctor_id: apt.doctor_id,
+      p_date: apt.date,
+      p_time: apt.time,
+      p_patient_name: null,
+      p_patient_phone: null,
+      p_patient_id: apt.patient_id ?? null,
+      p_consultation_type_id: apt.consultation_type_id ?? null,
+      p_notes: apt.notes ?? null,
+      p_source: apt.source ?? 'manual',
+      p_request_id: globalThis.crypto?.randomUUID?.() ?? null,
+    });
+    if (error) { return { row: null, error: error.message }; }
+    const r = res as any;
+    if (!r?.success) {
+      if (r?.error_code === 'slot_conflict') fetch(true);
+      return { row: null, error_code: r?.error_code, error: BOOKING_ERROR_MESSAGES[r?.error_code] || 'Não foi possível agendar.' };
     }
-    setData(prev => [data, ...prev]);
-    return data;
+    // book_appointment cria como 'pendente'; aplica outro status escolhido no modal, se houver
+    if (apt.status && apt.status !== 'pendente') {
+      await supabase.from('appointments').update({ status: apt.status }).eq('id', r.appointment_id);
+    }
+    const { data: row } = await supabase
+      .from('appointments')
+      .select('*, patient:patients(name, cpf, phone), doctor:doctors(name, user_id)')
+      .eq('id', r.appointment_id).single();
+    if (row) setData(prev => [row, ...prev.filter(a => a.id !== row.id)]);
+    return { row, error: null };
   };
 
   const update = async (id: string, updates: Partial<Appointment>) => {

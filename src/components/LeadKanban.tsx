@@ -2915,6 +2915,7 @@ export function LeadKanban() {
                       p_consultation_type_id: scheduleForm.consultation_type_id || null,
                       p_notes: scheduleForm.notes || null,
                       p_ticket_id: scheduleLead.ticketId || null,
+                      p_request_id: globalThis.crypto?.randomUUID?.() ?? null,
                     });
                     setScheduleSubmitting(false);
                     if (error) {
@@ -2925,10 +2926,15 @@ export function LeadKanban() {
                     if (!result?.success) {
                       const msgs: Record<string, string> = {
                         slot_conflict: 'Esse horário acabou de ser reservado. Escolha outro.',
+                        slot_unavailable: 'Horário fora da disponibilidade do médico. Escolha um horário válido.',
                         lead_not_found: 'Lead não encontrado.',
+                        patient_not_found: 'Paciente não encontrado.',
                         doctor_not_found: 'Médico não encontrado.',
                         doctor_clinic_mismatch: 'Médico não pertence à clínica.',
                         doctor_inactive: 'Médico inativo.',
+                        consultation_type_not_found: 'Tipo de consulta não configurado para este médico.',
+                        consultation_type_inactive: 'Tipo de consulta inativo.',
+                        ticket_has_active_appointment: 'Este paciente já tem um agendamento ativo nesta jornada.',
                       };
                       setScheduleError(msgs[result?.error_code || ''] || 'Não foi possível agendar.');
                       if (result?.error_code === 'slot_conflict') {

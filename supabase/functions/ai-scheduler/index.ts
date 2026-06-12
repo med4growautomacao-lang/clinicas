@@ -269,6 +269,7 @@ serve(async (req) => {
       if (!result.success) {
         const errMessages: Record<string, string> = {
           slot_conflict: "Horário já foi reservado. Escolha outro.",
+          invalid_phone: "Telefone do paciente inválido. Use o número do WhatsApp da conversa (apenas dígitos, com DDD).",
           doctor_not_found: "Médico não encontrado.",
           doctor_clinic_mismatch: "Médico não pertence à clínica.",
           doctor_inactive: "Médico inativo.",

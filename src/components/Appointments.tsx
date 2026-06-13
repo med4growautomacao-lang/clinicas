@@ -432,7 +432,9 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
     if (!realizadoDialog) return;
     const { apt, value, paymentMethod, status, description, protocolIds } = realizadoDialog;
     setRealizadoDialog(null);
-    await update(apt.id, { status: 'realizado' });
+    // NÃO pré-marcar status='realizado' aqui: finalize_appointment tem trava de idempotência
+    // (se já está 'realizado' ela aborta sem gravar valor/conversão). A RPC seta o status,
+    // cria receita + conversão e marca o ticket como ganho — tudo atômico.
     await onAppointmentRealizado(
       apt.patient_id, apt.id, apt.date, apt.time,
       parseFloat(value.replace(',', '.')) || 0,

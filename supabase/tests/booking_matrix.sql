@@ -258,3 +258,49 @@ BEGIN
   RAISE NOTICE 'MATRIZ ESTENDIDA: todos os casos passaram.';
 END $$;
 ROLLBACK;
+
+-- ============================================================================
+-- CICLO DE VIDA / RETORNO (migrations 20260613000008/9)
+-- ============================================================================
+BEGIN;
+DO $$
+DECLARE
+  v_cA uuid; v_doc uuid; v_ct uuid; v_res jsonb; v_p uuid; v_T1 uuid; v_T2 uuid; v_A uuid;
+  v_ph text := '5521'||lpad((floor(random()*100000000))::int::text,8,'0');
+  v_d date := current_date + 160;
+  v_wh jsonb := '{"0":[{"start":"09:00","end":"17:00"}],"1":[{"start":"09:00","end":"17:00"}],"2":[{"start":"09:00","end":"17:00"}],"3":[{"start":"09:00","end":"17:00"}],"4":[{"start":"09:00","end":"17:00"}],"5":[{"start":"09:00","end":"17:00"}],"6":[{"start":"09:00","end":"17:00"}]}'::jsonb;
+BEGIN
+  SELECT fs.clinic_id INTO v_cA FROM funnel_stages fs JOIN clinics c ON c.id=fs.clinic_id
+   WHERE fs.slug='agendado' AND EXISTS(SELECT 1 FROM funnel_stages w WHERE w.clinic_id=fs.clinic_id AND w.slug='ganho') ORDER BY c.created_at LIMIT 1;
+  INSERT INTO doctors (clinic_id,name,is_active,consultation_duration,slot_step,working_hours) VALUES (v_cA,'ZZ DocLC',true,30,30,v_wh) RETURNING id INTO v_doc;
+  INSERT INTO consultation_types (clinic_id,doctor_id,slug,name,modality,is_active,consultation_duration) VALUES (v_cA,v_doc,'presencial','P','presencial',true,30) RETURNING id INTO v_ct;
+  INSERT INTO patients (clinic_id,name,phone) VALUES (v_cA,'Ciclo',v_ph) RETURNING id INTO v_p;
+
+  -- LC1: finalize com valor > 0 funciona (regressao do bug ON CONFLICT x indice parcial de conversions)
+  v_res := book_appointment(v_cA,v_doc,v_d,'09:00',NULL,NULL, p_source=>'manual', p_consultation_type_id=>v_ct, p_patient_id=>v_p, p_validate_availability=>false);
+  v_T1 := (v_res->>'ticket_id')::uuid; v_A := (v_res->>'appointment_id')::uuid;
+  v_res := finalize_appointment(v_A, 150, 'pix', 'pago', 'Consulta', ARRAY[]::uuid[], v_T1);
+  ASSERT (v_res->>'success')::boolean AND (v_res->>'transaction_id') IS NOT NULL AND (v_res->>'conversion_id') IS NOT NULL, 'LC1 finalize pago: '||v_res::text;
+  v_res := finalize_appointment(v_A, 150, 'pix', 'pago', 'Consulta', ARRAY[]::uuid[], v_T1);
+  ASSERT (v_res->>'idempotent')::boolean IS TRUE, 'LC1 idempotente';
+
+  -- LC2: RETORNO com ticket em ganho/aberto -> auto-resolve (fecha) + jornada nova em agendado
+  v_res := book_appointment(v_cA,v_doc,v_d+7,'09:00',NULL,NULL, p_source=>'manual', p_consultation_type_id=>v_ct, p_patient_id=>v_p, p_validate_availability=>false);
+  ASSERT (v_res->>'success')::boolean, 'LC2 retorno: '||v_res::text;
+  v_T2 := (v_res->>'ticket_id')::uuid;
+  ASSERT v_T2 <> v_T1, 'LC2 reusou ticket ganho';
+  ASSERT (SELECT status FROM tickets WHERE id=v_T1)='closed', 'LC2 antigo nao fechou';
+
+  -- LC3: agendamento PENDENTE continua bloqueando o 2o (invariante correto)
+  v_res := book_appointment(v_cA,v_doc,v_d+8,'09:00',NULL,NULL, p_source=>'manual', p_consultation_type_id=>v_ct, p_patient_id=>v_p, p_validate_availability=>false);
+  ASSERT v_res->>'error_code'='ticket_has_active_appointment', 'LC3: '||v_res::text;
+
+  -- LC4: compareceu tambem conta como concluido -> retorno abre jornada nova
+  UPDATE appointments SET status='compareceu' WHERE ticket_id=v_T2 AND status='pendente';
+  v_res := book_appointment(v_cA,v_doc,v_d+9,'09:00',NULL,NULL, p_source=>'manual', p_consultation_type_id=>v_ct, p_patient_id=>v_p, p_validate_availability=>false);
+  ASSERT (v_res->>'success')::boolean AND (v_res->>'ticket_id')::uuid <> v_T2, 'LC4: '||v_res::text;
+  ASSERT (SELECT status FROM tickets WHERE id=v_T2)='closed', 'LC4 compareceu nao fechou';
+
+  RAISE NOTICE 'CICLO DE VIDA: todos os casos passaram.';
+END $$;
+ROLLBACK;

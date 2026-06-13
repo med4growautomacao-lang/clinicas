@@ -43,7 +43,7 @@ import {
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { LeadKanban } from "./LeadKanban";
-import { ServiceDashboard } from "./ServiceDashboard";
+import { ComercialDashboard } from "./ComercialDashboard";
 import { ChatThread } from "./ChatThread";
 import { useLeads, useChatMessages, useSettings, useFunnelStages, usePromptTemplates, FunnelStage } from "../hooks/useSupabase";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
@@ -1406,7 +1406,7 @@ export function AISecretary() {
         >
           {activeTab === "chats" && <ChatsView />}
           {activeTab === "leads" && <LeadKanban />}
-          {activeTab === "dashboard" && <ServiceDashboard />}
+          {activeTab === "dashboard" && <ComercialDashboard />}
           {activeTab === "followups" && <AllFollowupsView />}
 
           {activeTab === "config" && <ConfigView />}

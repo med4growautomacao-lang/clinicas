@@ -973,11 +973,16 @@ export function useTickets() {
 
   const closeTicket = async (ticketId: string, outcome: 'ganho' | 'perdido', lossReason?: string) => {
     const now = new Date().toISOString();
-    const updates: Record<string, any> = { outcome, outcome_at: now };
-    if (lossReason) updates.loss_reason = lossReason;
-    
-    setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, ...updates } : t));
-    await supabase.from('tickets').update(updates).eq('id', ticketId);
+    // Marca o RESULTADO via RPC canônica (atômica: outcome + outcome_at + estágio terminal).
+    // p_resolve:false mantém o card aberto no Kanban (encerrar é o botão "Resolver"/finalizeTicket).
+    setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, outcome, outcome_at: now, ...(lossReason ? { loss_reason: lossReason } : {}) } : t));
+    const { error } = await supabase.rpc('finalize_ticket', {
+      p_ticket_id: ticketId,
+      p_outcome: outcome,
+      p_loss_reason: lossReason ?? null,
+      p_resolve: false,
+    });
+    if (error) { fetch(true); }
 
     // Dispara o webhook imediatamente ao marcar como Ganho ou Perdido
     await triggerTicketWebhook(ticketId, outcome);

@@ -89,6 +89,8 @@ BEGIN
       OR (p_origin = 'google' AND l.source = 'google_ads')
       OR (p_origin = 'sem_origem' AND (l.source IS NULL OR l.source NOT IN ('meta_ads', 'google_ads'))));
 
+  -- byStatus ancorado na DATA DA CONSULTA (a.date): "Consultas Realizadas"/no-show contam quando a
+  -- consulta acontece, não quando o agendamento foi criado (modelo "misto").
   SELECT COALESCE(jsonb_object_agg(status, cnt), '{}'::jsonb) INTO v_appt_status
   FROM (
     SELECT COALESCE(a.status, 'indefinido') AS status, COUNT(*) AS cnt
@@ -96,7 +98,7 @@ BEGIN
     LEFT JOIN tickets t ON t.id = a.ticket_id
     LEFT JOIN leads l ON l.id = t.lead_id
     WHERE a.clinic_id = p_clinic_id
-      AND a.created_at::date BETWEEN p_date_from AND p_date_to
+      AND a.date BETWEEN p_date_from AND p_date_to
       AND (p_agent = 'todos' OR (p_agent = 'ia' AND a.source = 'ia') OR (p_agent = 'humano' AND a.source = 'manual'))
       AND (p_origin = 'todos'
         OR (p_origin = 'meta' AND l.source = 'meta_ads')
@@ -200,9 +202,10 @@ BEGIN
       OR (p_origin = 'google' AND l.source = 'google_ads')
       OR (p_origin = 'sem_origem' AND (l.source IS NULL OR l.source NOT IN ('meta_ads', 'google_ads'))));
 
+  -- consultas realizadas GERAL (denominador do ticket médio): por DATA DA CONSULTA
   SELECT COUNT(*) INTO v_attended_consults FROM appointments
   WHERE clinic_id = p_clinic_id
-    AND created_at::date BETWEEN p_date_from AND p_date_to
+    AND date BETWEEN p_date_from AND p_date_to
     AND status IN ('realizado', 'compareceu');
 
   -- valor convertido (conversions): GERAL, base do ticket medio

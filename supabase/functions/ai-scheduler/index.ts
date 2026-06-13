@@ -310,8 +310,10 @@ serve(async (req) => {
             errorMsg = `Este paciente JÁ TEM uma consulta marcada: ${when} (status: ${ex?.status || "?"}).`;
             next_step = `NÃO marque uma nova consulta. Informe ao paciente a consulta existente (${when}). Se ele quiser MUDAR data/horário, use REAGENDAR_HORARIO com appointment_id="${ex?.appointment_id || ""}". Se quiser DESMARCAR, confirme com ele e use CANCELAR_HORARIO com o mesmo appointment_id. Se ele só quer confirmar a consulta, repita os dados acima.`;
           } else {
-            errorMsg = `O paciente tem um atendimento anterior (${when}, status: ${ex?.status || "?"}) que ainda não foi concluído pela recepção.`;
-            next_step = "Não é possível marcar pelo sistema agora. Explique com gentileza que a recepção precisa finalizar o atendimento anterior e acione o atendimento humano (ACIONAR_HANDOFF) para a equipe concluir e efetivar o novo agendamento.";
+            // awaiting_finalization = consulta pendente/confirmada cuja DATA JA PASSOU sem
+            // desfecho (compareceu/realizado auto-resolvem antes de chegar aqui).
+            errorMsg = `O paciente tem uma consulta antiga (${when}, status: ${ex?.status || "?"}) que já passou da data e não foi atualizada pela recepção.`;
+            next_step = `Pergunte ao paciente se ele chegou a COMPARECER a essa consulta de ${ex?.date || "data passada"}. Se NÃO compareceu e quer remarcar: use REAGENDAR_HORARIO com appointment_id="${ex?.appointment_id || ""}" para mover essa mesma consulta para a nova data/horário (NÃO use MARCAR_HORARIO de novo). Se ele COMPARECEU: acione o atendimento humano (ACIONAR_HANDOFF) para a recepção finalizar o atendimento anterior.`;
           }
         } else if (code === "invalid_phone") {
           errorMsg = "Telefone do paciente inválido para vincular o agendamento.";

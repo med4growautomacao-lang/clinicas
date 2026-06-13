@@ -36,6 +36,22 @@ async function fetchSlotsForDoctorDate(
   return (data || []).map((s: any) => (s.slot_time || "").toString().substring(0, 5));
 }
 
+// Busca alternativas de horario para a IA oferecer: tenta a data pedida e os 14 dias seguintes.
+async function findAlternativeSlots(
+  supabaseClient: any,
+  doctorId: string,
+  fromDate: string,
+  modality: string,
+  consultationTypeId?: string,
+): Promise<{ date: string; slots: string[] } | null> {
+  for (let i = 0; i <= 14; i++) {
+    const d = addDays(fromDate, i);
+    const slots = await fetchSlotsForDoctorDate(supabaseClient, doctorId, d, modality, consultationTypeId);
+    if (slots.length > 0) return { date: d, slots: slots.slice(0, 8) };
+  }
+  return null;
+}
+
 async function sendWhatsAppText(token: string, number: string, text: string): Promise<boolean> {
   if (!token || !number || !text) return false;
   try {
@@ -267,25 +283,161 @@ serve(async (req) => {
       if (error) throw error;
       const result = data as any;
       if (!result.success) {
-        const errMessages: Record<string, string> = {
-          slot_conflict: "Horário já foi reservado. Escolha outro.",
-          invalid_phone: "Telefone do paciente inválido. Use o número do WhatsApp da conversa (apenas dígitos, com DDD).",
-          doctor_not_found: "Médico não encontrado.",
-          doctor_clinic_mismatch: "Médico não pertence à clínica.",
-          doctor_inactive: "Médico inativo.",
-          consultation_type_not_found: ctId
-            ? `Tipo de consulta com id "${ctId}" não encontrado para este médico.`
-            : `Tipo de consulta "${finalModality}" não está configurado para este médico.`,
-          consultation_type_inactive: "Tipo de consulta inativo.",
-        };
+        // Erros com CONTEXTO RICO: alem da mensagem, devolve next_step instruindo o LLM
+        // sobre a melhor proxima acao (e alternativas de horario quando fizer sentido).
+        const code: string = result.error_code || "unknown";
+        let errorMsg = "Erro ao agendar.";
+        let next_step = "Peça desculpas ao paciente pelo imprevisto e acione o atendimento humano (ACIONAR_HANDOFF) se o problema persistir.";
+        const extra: Record<string, unknown> = {};
+
+        if (code === "slot_conflict" || code === "slot_unavailable") {
+          errorMsg = code === "slot_conflict"
+            ? `O horário ${time} de ${date} acabou de ser reservado por outra pessoa.`
+            : `O horário ${time} de ${date} está fora da agenda do médico (expediente, bloqueio ou antecedência mínima).`;
+          const alt = await findAlternativeSlots(supabaseClient, doctor_id, date, finalModality, ctId);
+          if (alt) {
+            extra.alternatives = alt;
+            next_step = `NÃO repita o mesmo horário. Ofereça ao paciente estes horários disponíveis em ${alt.date}: ${alt.slots.join(", ")}. Quando ele escolher, chame MARCAR_HORARIO novamente com o horário escolhido.`;
+          } else {
+            next_step = "Sem horários disponíveis nos próximos 14 dias para este médico. Consulte VER_HORARIOS em datas mais distantes ou ofereça outro profissional (LISTAR_TIPOS_CONSULTA).";
+          }
+        } else if (code === "ticket_has_active_appointment") {
+          const ex = result.existing_appointment || null;
+          const when = ex ? `${ex.date} às ${ex.time} com ${ex.doctor_name}` : "em data já registrada";
+          extra.existing_appointment = ex;
+          extra.reason = result.reason;
+          if (result.reason === "upcoming_appointment") {
+            errorMsg = `Este paciente JÁ TEM uma consulta marcada: ${when} (status: ${ex?.status || "?"}).`;
+            next_step = `NÃO marque uma nova consulta. Informe ao paciente a consulta existente (${when}). Se ele quiser MUDAR data/horário, use REAGENDAR_HORARIO com appointment_id="${ex?.appointment_id || ""}". Se quiser DESMARCAR, confirme com ele e use CANCELAR_HORARIO com o mesmo appointment_id. Se ele só quer confirmar a consulta, repita os dados acima.`;
+          } else {
+            errorMsg = `O paciente tem um atendimento anterior (${when}, status: ${ex?.status || "?"}) que ainda não foi concluído pela recepção.`;
+            next_step = "Não é possível marcar pelo sistema agora. Explique com gentileza que a recepção precisa finalizar o atendimento anterior e acione o atendimento humano (ACIONAR_HANDOFF) para a equipe concluir e efetivar o novo agendamento.";
+          }
+        } else if (code === "invalid_phone") {
+          errorMsg = "Telefone do paciente inválido para vincular o agendamento.";
+          next_step = "Use SEMPRE o número de WhatsApp da própria conversa (lead_phone da sessão) no campo patient_phone — nunca um número ditado pelo paciente.";
+        } else if (code === "consultation_type_not_found" || code === "consultation_type_inactive") {
+          errorMsg = ctId
+            ? `Tipo de consulta com id "${ctId}" não está disponível para este médico.`
+            : `Tipo de consulta "${finalModality}" não está configurado para este médico.`;
+          next_step = "Chame LISTAR_TIPOS_CONSULTA, escolha um consultation_type_id válido deste médico e tente novamente.";
+        } else if (code === "doctor_not_found" || code === "doctor_inactive" || code === "doctor_clinic_mismatch") {
+          errorMsg = "Médico inválido ou indisponível nesta clínica.";
+          next_step = "Chame LISTAR_TIPOS_CONSULTA para obter os médicos válidos e use o doctor_id correto.";
+        }
+
         return new Response(
-          JSON.stringify({ success: false, error_code: result.error_code, error: errMessages[result.error_code || ""] || "Erro ao agendar." }),
+          JSON.stringify({ success: false, error_code: code, error: errorMsg, next_step, ...extra }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
         );
       }
       const { data: apt } = await supabaseClient.from("appointments").select("*").eq("id", result.appointment_id).maybeSingle();
       return new Response(
         JSON.stringify({ success: true, idempotent: result.idempotent || false, appointment: apt }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
+      );
+    } else if (action === "reschedule_appointment") {
+      // Reagenda uma consulta DO PROPRIO paciente da conversa (titularidade validada na RPC
+      // via p_requester_phone). appointment_id vem de CONSULTAR_AGENDAMENTOS ou do erro
+      // ticket_has_active_appointment de MARCAR_HORARIO.
+      const { appointment_id, patient_phone, doctor_id, date, time, consultation_type_id } = payload;
+      if (!appointment_id || !patient_phone || !date || !time) {
+        return new Response(
+          JSON.stringify({ success: false, error_code: "missing_fields", error: "Campos obrigatórios: appointment_id, patient_phone, date, time.", next_step: "Obtenha o appointment_id em CONSULTAR_AGENDAMENTOS e tente novamente." }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
+        );
+      }
+      const { data: curApt } = await supabaseClient.from("appointments")
+        .select("doctor_id, consultation_type_id, modality").eq("id", appointment_id).maybeSingle();
+      if (!curApt) {
+        return new Response(
+          JSON.stringify({ success: false, error_code: "appointment_not_found", error: "Agendamento não encontrado.", next_step: "Use CONSULTAR_AGENDAMENTOS para obter um appointment_id válido deste paciente." }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
+        );
+      }
+      const targetDoctor = doctor_id || curApt.doctor_id;
+      const rctId = (typeof consultation_type_id === "string" && consultation_type_id.trim())
+        ? consultation_type_id.trim() : (curApt.consultation_type_id || undefined);
+      const { data: rres, error: rerr } = await supabaseClient.rpc("reschedule_appointment", {
+        p_appointment_id: appointment_id,
+        p_doctor_id: targetDoctor,
+        p_date: date,
+        p_time: time,
+        p_consultation_type_id: rctId || null,
+        p_force: false,
+        p_requester_phone: patient_phone,
+      });
+      if (rerr) throw rerr;
+      const rr = rres as any;
+      if (!rr.success) {
+        const code: string = rr.error_code || "unknown";
+        let errorMsg = "Não foi possível reagendar.";
+        let next_step = "Acione o atendimento humano (ACIONAR_HANDOFF) para resolver com a recepção.";
+        const extra: Record<string, unknown> = {};
+        if (code === "not_your_appointment") {
+          errorMsg = "Este agendamento não pertence ao paciente desta conversa.";
+          next_step = "Use CONSULTAR_AGENDAMENTOS com o telefone da sessão e escolha um appointment_id que pertença a este paciente.";
+        } else if (code === "appointment_not_reschedulable") {
+          errorMsg = "Esta consulta não pode mais ser alterada (já aconteceu ou foi cancelada).";
+          next_step = "Se o paciente quer uma NOVA consulta, use MARCAR_HORARIO normalmente.";
+        } else if (code === "slot_unavailable" || code === "slot_conflict") {
+          errorMsg = `O horário ${time} de ${date} não está disponível para reagendamento.`;
+          const alt = await findAlternativeSlots(supabaseClient, targetDoctor, date, curApt.modality || "presencial", rctId);
+          if (alt) {
+            extra.alternatives = alt;
+            next_step = `Ofereça ao paciente os horários disponíveis em ${alt.date}: ${alt.slots.join(", ")} e chame REAGENDAR_HORARIO novamente com o escolhido.`;
+          } else {
+            next_step = "Sem horários próximos disponíveis. Consulte VER_HORARIOS em outras datas ou outro médico.";
+          }
+        }
+        return new Response(
+          JSON.stringify({ success: false, error_code: code, error: errorMsg, next_step, ...extra }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
+        );
+      }
+      return new Response(
+        JSON.stringify({ success: true, appointment_id, date: rr.date, time: rr.time, doctor_name: rr.doctor_name, readable_summary: `Consulta reagendada para ${rr.date} às ${rr.time} com ${rr.doctor_name}. Confirme os novos dados ao paciente.` }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
+      );
+    } else if (action === "cancel_appointment") {
+      // Cancela uma consulta DO PROPRIO paciente (titularidade na RPC). So consultas
+      // futuras/pendentes podem ser canceladas pelo WhatsApp.
+      const { appointment_id, patient_phone, reason } = payload;
+      if (!appointment_id || !patient_phone) {
+        return new Response(
+          JSON.stringify({ success: false, error_code: "missing_fields", error: "Campos obrigatórios: appointment_id, patient_phone.", next_step: "Obtenha o appointment_id em CONSULTAR_AGENDAMENTOS e confirme o cancelamento com o paciente antes de chamar esta tool." }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
+        );
+      }
+      const { data: cres, error: cerr } = await supabaseClient.rpc("cancel_appointment", {
+        p_appointment_id: appointment_id,
+        p_reason: reason || "Cancelado pelo paciente via WhatsApp",
+        p_revert_transaction: true,
+        p_requester_phone: patient_phone,
+      });
+      if (cerr) throw cerr;
+      const cr = cres as any;
+      if (!cr.success) {
+        const code: string = cr.error_code || "unknown";
+        let errorMsg = "Não foi possível cancelar.";
+        let next_step = "Acione o atendimento humano (ACIONAR_HANDOFF) para resolver com a recepção.";
+        if (code === "not_your_appointment") {
+          errorMsg = "Este agendamento não pertence ao paciente desta conversa.";
+          next_step = "Use CONSULTAR_AGENDAMENTOS com o telefone da sessão e escolha um appointment_id que pertença a este paciente.";
+        } else if (code === "appointment_not_cancellable") {
+          errorMsg = "Esta consulta não pode ser cancelada pelo WhatsApp (já foi realizada ou finalizada).";
+          next_step = "Explique ao paciente e, se necessário, acione o atendimento humano (ACIONAR_HANDOFF).";
+        } else if (code === "appointment_not_found") {
+          errorMsg = "Agendamento não encontrado.";
+          next_step = "Use CONSULTAR_AGENDAMENTOS para obter um appointment_id válido.";
+        }
+        return new Response(
+          JSON.stringify({ success: false, error_code: code, error: errorMsg, next_step }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
+        );
+      }
+      return new Response(
+        JSON.stringify({ success: true, idempotent: cr.idempotent || false, readable_summary: "Consulta cancelada com sucesso. Confirme o cancelamento ao paciente e pergunte se deseja marcar um novo horário." }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
       );
     } else if (action === "get_patient_appointments") {
@@ -298,8 +450,10 @@ serve(async (req) => {
       const includeFuture = include_future !== false;
       const lim = Math.min(Number(limit) || 10, 50);
       const today = new Date().toISOString().split("T")[0];
-      const { data: patient } = await supabaseClient.from("patients")
-        .select("id, name, cpf").eq("clinic_id", clinic_id).eq("phone", patient_phone).maybeSingle();
+      // Lookup por telefone NORMALIZADO (o n8n manda o numero da sessao com 9o digito;
+      // o paciente esta gravado na forma canonica sem o 9)
+      const { data: aptLookup } = await supabaseClient.rpc("find_patient_by_phone", { p_clinic_id: clinic_id, p_phone: patient_phone });
+      const patient = (aptLookup as any)?.patient || null;
       if (!patient) {
         return new Response(
           JSON.stringify({ success: true, patient_found: false, appointments: [], readable_summary: "Paciente não encontrado nesta clínica (primeiro contato)." }),
@@ -321,10 +475,11 @@ serve(async (req) => {
       }));
       const past = formatted.filter((a) => !a.is_future);
       const future = formatted.filter((a) => a.is_future);
-      const summarize = (arr: any[]) => arr.map((a) => `${a.date} ${a.time} — ${a.doctor_name} (${a.status_label}, ${a.modality})`).join("; ");
+      const summarize = (arr: any[]) => arr.map((a) => `${a.date} ${a.time} — ${a.doctor_name} (${a.status_label}, ${a.modality}) [id: ${a.id}]`).join("; ");
       const readable_summary = `Paciente ${patient.name} encontrado. ` +
         (future.length ? `${future.length} agendamento(s) futuro(s): ${summarize(future)}. ` : "Sem agendamentos futuros. ") +
-        (past.length ? `${past.length} agendamento(s) passado(s): ${summarize(past.slice(0, 5))}.` : "Sem histórico passado.");
+        (past.length ? `${past.length} agendamento(s) passado(s): ${summarize(past.slice(0, 5))}.` : "Sem histórico passado.") +
+        " Use o id do agendamento como appointment_id em REAGENDAR_HORARIO/CANCELAR_HORARIO.";
       return new Response(
         JSON.stringify({ success: true, patient_found: true, patient: { id: patient.id, name: patient.name, cpf: patient.cpf }, appointments: formatted, counts: { total: formatted.length, past: past.length, future: future.length }, readable_summary }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
@@ -337,11 +492,13 @@ serve(async (req) => {
       }
       const lim = Math.min(Number(limit) || 5, 20);
 
-      const { data: patient } = await supabaseClient.from("patients")
-        .select("id, name, cpf, created_at").eq("clinic_id", clinic_id).eq("phone", patient_phone).maybeSingle();
+      // Lookup por telefone NORMALIZADO (paciente e leads estao na forma canonica)
+      const { data: histLookup } = await supabaseClient.rpc("find_patient_by_phone", { p_clinic_id: clinic_id, p_phone: patient_phone });
+      const patient = (histLookup as any)?.patient || null;
+      const canonicalPhone = (histLookup as any)?.canonical_phone || patient_phone;
 
       const { data: oldLeads } = await supabaseClient.from("leads")
-        .select("id, created_at").eq("clinic_id", clinic_id).eq("phone", patient_phone).order("created_at", { ascending: false });
+        .select("id, created_at").eq("clinic_id", clinic_id).eq("phone", canonicalPhone).order("created_at", { ascending: false });
       const oldLeadIds = (oldLeads || []).map((l: any) => l.id);
 
       let ticketIds: string[] = [];
@@ -452,8 +609,11 @@ serve(async (req) => {
           { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
       }
 
+      // Lookup do lead por telefone NORMALIZADO (sessao pode vir com 9o digito)
+      const { data: hLookup } = await supabaseClient.rpc("find_patient_by_phone", { p_clinic_id: clinic_id, p_phone: lead_phone });
+      const canonicalLeadPhone = (hLookup as any)?.canonical_phone || lead_phone;
       const { data: lead } = await supabaseClient.from("leads")
-        .select("id, name, phone, stage_id").eq("clinic_id", clinic_id).eq("phone", lead_phone).maybeSingle();
+        .select("id, name, phone, stage_id").eq("clinic_id", clinic_id).eq("phone", canonicalLeadPhone).maybeSingle();
       if (!lead) {
         return new Response(JSON.stringify({ success: false, error_code: "lead_not_found", error: "Lead não encontrado para esse telefone" }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });

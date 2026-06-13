@@ -295,12 +295,14 @@ BEGIN
   v_res := book_appointment(v_cA,v_doc,v_d+8,'09:00',NULL,NULL, p_source=>'manual', p_consultation_type_id=>v_ct, p_patient_id=>v_p, p_validate_availability=>false);
   ASSERT v_res->>'error_code'='ticket_has_active_appointment', 'LC3: '||v_res::text;
 
-  -- LC4 (regra 13/06: auto-resolve SO p/ outcome ganho): COMPARECEU sem finalizar BLOQUEIA
-  --      com reason awaiting_finalization (secretaria precisa lancar valores)
+  -- LC4 (regra final 13/06, migration 0015): consulta ACONTECIDA (realizado OU compareceu)
+  --      destrava o reagendamento: jornada antiga fecha, nova abre; a pendencia de
+  --      finalizacao do compareceu fica INTACTA (consulta segue 'compareceu' p/ a secretaria)
   UPDATE appointments SET status='compareceu' WHERE ticket_id=v_T2 AND status='pendente';
   v_res := book_appointment(v_cA,v_doc,v_d+9,'09:00',NULL,NULL, p_source=>'manual', p_consultation_type_id=>v_ct, p_patient_id=>v_p, p_validate_availability=>false);
-  ASSERT v_res->>'error_code'='ticket_has_active_appointment' AND v_res->>'reason'='awaiting_finalization', 'LC4: '||v_res::text;
-  ASSERT (v_res->'existing_appointment'->>'status')='compareceu', 'LC4 sem dados da consulta: '||v_res::text;
+  ASSERT (v_res->>'success')::boolean AND (v_res->>'ticket_id')::uuid <> v_T2, 'LC4: '||v_res::text;
+  ASSERT (SELECT status FROM tickets WHERE id=v_T2)='closed', 'LC4 antiga nao fechou';
+  ASSERT (SELECT count(*) FROM appointments WHERE ticket_id=v_T2 AND status='compareceu')=1, 'LC4 pendencia compareceu sumiu';
 
   -- LC5 (regra 13/06): consulta ATRASADA (ontem, pendente, sem desfecho) tambem BLOQUEIA
   --      com awaiting_finalization (a secretaria da o desfecho antes de reagendar)

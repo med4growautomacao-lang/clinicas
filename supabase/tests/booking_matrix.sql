@@ -301,6 +301,32 @@ BEGIN
   ASSERT (v_res->>'success')::boolean AND (v_res->>'ticket_id')::uuid <> v_T2, 'LC4: '||v_res::text;
   ASSERT (SELECT status FROM tickets WHERE id=v_T2)='closed', 'LC4 compareceu nao fechou';
 
+  -- LC5: consulta ATRASADA (ontem, pendente, sem desfecho) -> reagendar DESTRAVA
+  --      (jornada antiga fecha; a atrasada fica PENDENTE para desfecho manual)
+  DECLARE v_pS uuid; v_TS uuid; v_AS uuid; v_st text;
+    v_phS text := '5524'||lpad((floor(random()*100000000))::int::text,8,'0');
+  BEGIN
+    INSERT INTO patients (clinic_id,name,phone) VALUES (v_cA,'Atrasado',v_phS) RETURNING id INTO v_pS;
+    v_res := book_appointment(v_cA,v_doc,current_date-1,'09:00',NULL,NULL, p_source=>'manual', p_consultation_type_id=>v_ct, p_patient_id=>v_pS, p_validate_availability=>false);
+    v_TS := (v_res->>'ticket_id')::uuid; v_AS := (v_res->>'appointment_id')::uuid;
+    v_res := book_appointment(v_cA,v_doc,v_d+14,'09:00',NULL,NULL, p_source=>'manual', p_consultation_type_id=>v_ct, p_patient_id=>v_pS, p_validate_availability=>false);
+    ASSERT (v_res->>'success')::boolean AND (v_res->>'ticket_id')::uuid <> v_TS, 'LC5: '||v_res::text;
+    ASSERT (SELECT status FROM tickets WHERE id=v_TS)='closed', 'LC5 antiga nao fechou';
+    SELECT status INTO v_st FROM appointments WHERE id=v_AS;
+    ASSERT v_st='pendente', 'LC5 mexeu no desfecho da atrasada: '||v_st;
+  END;
+
+  -- LC6: consulta de HOJE pendente -> continua bloqueando
+  DECLARE v_pH uuid;
+    v_phH text := '5525'||lpad((floor(random()*100000000))::int::text,8,'0');
+  BEGIN
+    INSERT INTO patients (clinic_id,name,phone) VALUES (v_cA,'Hoje',v_phH) RETURNING id INTO v_pH;
+    v_res := book_appointment(v_cA,v_doc,current_date,'16:45',NULL,NULL, p_source=>'manual', p_consultation_type_id=>v_ct, p_patient_id=>v_pH, p_validate_availability=>false);
+    ASSERT (v_res->>'success')::boolean, 'LC6 book hoje: '||v_res::text;
+    v_res := book_appointment(v_cA,v_doc,v_d+15,'09:00',NULL,NULL, p_source=>'manual', p_consultation_type_id=>v_ct, p_patient_id=>v_pH, p_validate_availability=>false);
+    ASSERT v_res->>'error_code'='ticket_has_active_appointment', 'LC6: '||v_res::text;
+  END;
+
   RAISE NOTICE 'CICLO DE VIDA: todos os casos passaram.';
 END $$;
 ROLLBACK;

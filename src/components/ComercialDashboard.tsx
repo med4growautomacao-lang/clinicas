@@ -90,6 +90,25 @@ const METRICS_CONFIG: { id: string; label: string }[] = [
 ];
 const DEFAULT_METRIC_IDS = METRICS_CONFIG.map((m) => m.id);
 
+// presets de período — "últimos N dias" INCLUEM hoje (fim = hoje)
+function computeRange(id: string): { start: Date; end: Date; label: string } {
+  const today = new Date();
+  let start = today, end = today, label = "";
+  switch (id) {
+    case "today": label = "HOJE"; break;
+    case "yesterday": start = subDays(today, 1); end = subDays(today, 1); label = "ONTEM"; break;
+    case "week": start = startOfWeek(today, { weekStartsOn: 0 }); label = "ESTA SEMANA"; break;
+    case "last_week": { const lw = subWeeks(today, 1); start = startOfWeek(lw, { weekStartsOn: 0 }); end = endOfWeek(lw, { weekStartsOn: 0 }); label = "SEMANA PASSADA"; break; }
+    case "7days": start = subDays(today, 6); end = today; label = "ÚLTIMOS 7 DIAS"; break;
+    case "14days": start = subDays(today, 13); end = today; label = "ÚLTIMOS 14 DIAS"; break;
+    case "28days": start = subDays(today, 27); end = today; label = "ÚLTIMOS 28 DIAS"; break;
+    case "30days": start = subDays(today, 29); end = today; label = "ÚLTIMOS 30 DIAS"; break;
+    case "month": start = startOfMonth(today); label = "ESTE MÊS"; break;
+    case "last_month": { const lm = subMonths(today, 1); start = startOfMonth(lm); end = endOfMonth(lm); label = "MÊS PASSADO"; break; }
+  }
+  return { start, end, label };
+}
+
 const RANGE_PRESETS = [
   { id: "today", label: "Hoje" },
   { id: "yesterday", label: "Ontem" },
@@ -174,11 +193,18 @@ export function ComercialDashboard() {
   const [data, setData] = useState<CommercialData | null>(null);
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<Period>("dia");
-  const [range, setRange] = useState<{ start: Date; end: Date }>(() => ({ start: subDays(new Date(), 7), end: subDays(new Date(), 1) }));
-  const [activeRangeLabel, setActiveRangeLabel] = useState("ÚLTIMOS 7 DIAS");
-  const [isPeriodOpen, setIsPeriodOpen] = useState(false);
-  const [calMonth1, setCalMonth1] = useState<Date>(() => subDays(new Date(), 7));
-  const [calMonth2, setCalMonth2] = useState<Date>(() => addMonths(subDays(new Date(), 7), 1));
+  // Conversão (evento) — janela principal; presets INCLUEM hoje
+  const [convRange, setConvRange] = useState<{ start: Date; end: Date }>(() => ({ start: subDays(new Date(), 6), end: new Date() }));
+  const [convLabel, setConvLabel] = useState("ÚLTIMOS 7 DIAS");
+  const [isConvOpen, setIsConvOpen] = useState(false);
+  const [convCal1, setConvCal1] = useState<Date>(() => subDays(new Date(), 6));
+  const [convCal2, setConvCal2] = useState<Date>(() => addMonths(subDays(new Date(), 6), 1));
+  // Entrada (coorte) — null = "Todos"
+  const [entryRange, setEntryRange] = useState<{ start: Date; end: Date } | null>(null);
+  const [entryLabel, setEntryLabel] = useState("TODOS");
+  const [isEntryOpen, setIsEntryOpen] = useState(false);
+  const [entryCal1, setEntryCal1] = useState<Date>(() => subDays(new Date(), 6));
+  const [entryCal2, setEntryCal2] = useState<Date>(() => addMonths(subDays(new Date(), 6), 1));
   const [audience, setAudience] = useState<Audience>(() => (localStorage.getItem("comercialAudience") as Audience) || "dono");
   const [agent, setAgent] = useState<AgentFilter>(() => (localStorage.getItem("comercialAgent") as AgentFilter) || "todos");
   const [origin, setOrigin] = useState<OriginFilter>(() => (localStorage.getItem("comercialOrigin") as OriginFilter) || "todos");
@@ -196,33 +222,25 @@ export function ComercialDashboard() {
   });
   const dropdownRef = React.useRef<HTMLDivElement>(null);
 
-  const setRangeById = (id: string) => {
-    const today = new Date();
-    let start = today;
-    let end = today;
-    let label = "";
-    switch (id) {
-      case "today": label = "HOJE"; break;
-      case "yesterday": start = subDays(today, 1); end = subDays(today, 1); label = "ONTEM"; break;
-      case "week": start = startOfWeek(today, { weekStartsOn: 0 }); label = "ESTA SEMANA"; break;
-      case "last_week": { const lw = subWeeks(today, 1); start = startOfWeek(lw, { weekStartsOn: 0 }); end = endOfWeek(lw, { weekStartsOn: 0 }); label = "SEMANA PASSADA"; break; }
-      case "7days": start = subDays(today, 7); end = subDays(today, 1); label = "ÚLTIMOS 7 DIAS"; break;
-      case "14days": start = subDays(today, 14); end = subDays(today, 1); label = "ÚLTIMOS 14 DIAS"; break;
-      case "28days": start = subDays(today, 28); end = subDays(today, 1); label = "ÚLTIMOS 28 DIAS"; break;
-      case "30days": start = subDays(today, 30); end = subDays(today, 1); label = "ÚLTIMOS 30 DIAS"; break;
-      case "month": start = startOfMonth(today); label = "ESTE MÊS"; break;
-      case "last_month": { const lm = subMonths(today, 1); start = startOfMonth(lm); end = endOfMonth(lm); label = "MÊS PASSADO"; break; }
-    }
-    setRange({ start, end });
-    setActiveRangeLabel(label);
-    setCalMonth1(start);
-    setCalMonth2(addMonths(start, 1));
-    setIsPeriodOpen(false);
+  const setConvById = (id: string) => {
+    const r = computeRange(id);
+    setConvRange({ start: r.start, end: r.end }); setConvLabel(r.label);
+    setConvCal1(r.start); setConvCal2(addMonths(r.start, 1)); setIsConvOpen(false);
   };
-
-  const onRangeSelect = (r: { from?: Date; to?: Date } | undefined) => {
-    if (r?.from) { setRange((d) => ({ ...d, start: r.from! })); setActiveRangeLabel("PERSONALIZADO"); }
-    if (r?.to) { setRange((d) => ({ ...d, end: r.to! })); }
+  const onConvSelect = (r: { from?: Date; to?: Date } | undefined) => {
+    if (r?.from) { setConvRange((d) => ({ ...d, start: r.from! })); setConvLabel("PERSONALIZADO"); }
+    if (r?.to) { setConvRange((d) => ({ ...d, end: r.to! })); }
+  };
+  const setEntryById = (id: string) => {
+    if (id === "todos") { setEntryRange(null); setEntryLabel("TODOS"); setIsEntryOpen(false); return; }
+    const r = computeRange(id);
+    setEntryRange({ start: r.start, end: r.end }); setEntryLabel(r.label);
+    setEntryCal1(r.start); setEntryCal2(addMonths(r.start, 1)); setIsEntryOpen(false);
+  };
+  const onEntrySelect = (r: { from?: Date; to?: Date } | undefined) => {
+    if (!r) return;
+    setEntryRange((d) => ({ start: r.from ?? d?.start ?? r.to!, end: r.to ?? d?.end ?? r.from! }));
+    setEntryLabel("PERSONALIZADO");
   };
 
   const toggleMetric = (id: string) => setVisibleMetrics((prev) => {
@@ -252,13 +270,13 @@ export function ComercialDashboard() {
     const clinicId = activeClinicId || profile?.clinic_id;
     if (!clinicId) return;
     if (!silent) setLoading(true);
-    const from = format(range.start, "yyyy-MM-dd");
-    const to = format(range.end, "yyyy-MM-dd");
     try {
       const { data: res, error } = await supabase.rpc("get_commercial_dashboard", {
         p_clinic_id: clinicId,
-        p_date_from: from,
-        p_date_to: to,
+        p_entry_from: entryRange ? format(entryRange.start, "yyyy-MM-dd") : null,
+        p_entry_to: entryRange ? format(entryRange.end, "yyyy-MM-dd") : null,
+        p_conv_from: format(convRange.start, "yyyy-MM-dd"),
+        p_conv_to: format(convRange.end, "yyyy-MM-dd"),
         p_agent: agent,
         p_origin: origin,
       });
@@ -269,7 +287,7 @@ export function ComercialDashboard() {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [activeClinicId, profile?.clinic_id, range, agent, origin]);
+  }, [activeClinicId, profile?.clinic_id, convRange, entryRange, agent, origin]);
 
   useEffect(() => {
     const clinicId = activeClinicId || profile?.clinic_id;
@@ -637,73 +655,33 @@ export function ComercialDashboard() {
     <div className="space-y-6 h-full overflow-y-auto pr-1 custom-scrollbar pb-8">
       {/* Cabeçalho fixo: período + público + filtros globais */}
       <div className="sticky top-0 z-20 -mx-1 px-1 pt-1 pb-3 space-y-3 bg-slate-50/95 backdrop-blur-sm border-b border-slate-100">
-      {/* Controles: período (DIA/SEM/MÊS + calendário) + público + métricas */}
+      {/* Controles: granularidade do gráfico + datas (Entrada/Conversão) + público + métricas */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        {/* Date Pill (igual Marketing) */}
-        <div className="flex items-center gap-3 bg-white p-1.5 rounded-2xl border border-slate-200 shadow-sm">
-          <div className="flex bg-slate-50 rounded-xl p-1">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Granularidade do gráfico de tendências */}
+          <div className="flex bg-slate-50 rounded-xl p-1 border border-slate-200" title="Granularidade do gráfico de Tendências">
             {(["dia", "sem", "mês"] as Period[]).map((p) => (
-              <button
-                key={p}
-                onClick={() => setPeriod(p)}
-                className={cn(
-                  "px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all",
-                  period === p ? "bg-white text-teal-600 shadow-sm border border-slate-200" : "text-slate-400 hover:text-slate-600"
-                )}
-              >
-                {p}
-              </button>
+              <button key={p} onClick={() => setPeriod(p)} className={cn("px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all", period === p ? "bg-white text-teal-600 shadow-sm border border-slate-200" : "text-slate-400 hover:text-slate-600")}>{p}</button>
             ))}
           </div>
-          <div className="h-6 w-px bg-slate-200 mx-1" />
-          <div className="relative">
-            <div
-              onClick={() => setIsPeriodOpen(!isPeriodOpen)}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-slate-50 cursor-pointer transition-all border border-transparent hover:border-slate-200 group"
-            >
-              <Calendar className={cn("w-4 h-4 transition-colors", isPeriodOpen ? "text-teal-600" : "text-slate-400 group-hover:text-teal-600")} />
-              <span className="text-xs font-bold text-slate-600 uppercase tracking-tight">{activeRangeLabel}</span>
-              <span className="text-[10px] font-medium text-slate-400">{format(range.start, "dd/MM")} - {format(range.end, "dd/MM")}</span>
-              <ChevronRight className={cn("w-3.5 h-3.5 text-slate-300 transition-transform", isPeriodOpen ? "rotate-90 text-teal-600" : "")} />
-            </div>
-            <AnimatePresence>
-              {isPeriodOpen && (
-                <>
-                  <div className="fixed inset-0 z-[105]" onClick={() => setIsPeriodOpen(false)} />
-                  <motion.div
-                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                    className="absolute top-full left-0 mt-3 bg-white rounded-2xl border border-slate-200 shadow-2xl z-[110] overflow-hidden rdp-custom flex"
-                  >
-                    <div className="w-44 border-r border-slate-100 p-2 flex flex-col gap-0.5 shrink-0">
-                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-[2px] px-3 pt-1 pb-1.5">Período</span>
-                      {RANGE_PRESETS.map((opt) => (
-                        <button
-                          key={opt.id}
-                          onClick={() => setRangeById(opt.id)}
-                          className={cn(
-                            "text-left px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors",
-                            activeRangeLabel === opt.label.toUpperCase() ? "bg-teal-50 text-teal-700" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                          )}
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="flex flex-col divide-y divide-slate-100">
-                      <div className="p-3">
-                        <DayPicker mode="range" selected={{ from: range.start, to: range.end }} onSelect={onRangeSelect} month={calMonth1} onMonthChange={setCalMonth1} numberOfMonths={1} locale={ptBR} weekStartsOn={0} />
-                      </div>
-                      <div className="p-3">
-                        <DayPicker mode="range" selected={{ from: range.start, to: range.end }} onSelect={onRangeSelect} month={calMonth2} onMonthChange={setCalMonth2} numberOfMonths={1} locale={ptBR} weekStartsOn={0} />
-                      </div>
-                    </div>
-                  </motion.div>
-                </>
-              )}
-            </AnimatePresence>
-          </div>
+          {/* Entrada (coorte de leads) */}
+          <DatePill
+            label="Entrada" valueLabel={entryLabel}
+            rangeText={entryRange ? `${format(entryRange.start, "dd/MM")} - ${format(entryRange.end, "dd/MM")}` : "todos os leads"}
+            open={isEntryOpen} setOpen={setIsEntryOpen}
+            presets={[{ id: "todos", label: "Todos" }, ...RANGE_PRESETS]} activeLabel={entryLabel} onPreset={setEntryById}
+            selected={entryRange ? { from: entryRange.start, to: entryRange.end } : undefined} onSelect={onEntrySelect}
+            cal1={entryCal1} setCal1={setEntryCal1} cal2={entryCal2} setCal2={setEntryCal2}
+          />
+          {/* Conversão (data do evento/resultado) */}
+          <DatePill
+            label="Conversão" valueLabel={convLabel}
+            rangeText={`${format(convRange.start, "dd/MM")} - ${format(convRange.end, "dd/MM")}`}
+            open={isConvOpen} setOpen={setIsConvOpen}
+            presets={RANGE_PRESETS} activeLabel={convLabel} onPreset={setConvById}
+            selected={{ from: convRange.start, to: convRange.end }} onSelect={onConvSelect}
+            cal1={convCal1} setCal1={setConvCal1} cal2={convCal2} setCal2={setConvCal2}
+          />
         </div>
         {/* Público + Métricas */}
         <div className="flex items-center gap-2">
@@ -789,6 +767,49 @@ export function ComercialDashboard() {
 
       {/* Seções ordenadas por público */}
       {orderedSections}
+    </div>
+  );
+}
+
+// ==========================================
+// Subcomponente: pill de data (Entrada / Conversão) com presets + calendário
+// ==========================================
+function DatePill({ label, valueLabel, rangeText, open, setOpen, presets, activeLabel, onPreset, selected, onSelect, cal1, setCal1, cal2, setCal2 }: {
+  label: string; valueLabel: string; rangeText: string; open: boolean; setOpen: (v: boolean) => void;
+  presets: { id: string; label: string }[]; activeLabel: string; onPreset: (id: string) => void;
+  selected: { from?: Date; to?: Date } | undefined; onSelect: (r: { from?: Date; to?: Date } | undefined) => void;
+  cal1: Date; setCal1: (d: Date) => void; cal2: Date; setCal2: (d: Date) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 bg-white p-1.5 rounded-2xl border border-slate-200 shadow-sm">
+      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1.5">{label}</span>
+      <div className="relative">
+        <div onClick={() => setOpen(!open)} className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-slate-50 cursor-pointer transition-all border border-transparent hover:border-slate-200 group">
+          <Calendar className={cn("w-4 h-4 transition-colors", open ? "text-teal-600" : "text-slate-400 group-hover:text-teal-600")} />
+          <span className="text-xs font-bold text-slate-600 uppercase tracking-tight">{valueLabel}</span>
+          <span className="text-[10px] font-medium text-slate-400">{rangeText}</span>
+          <ChevronRight className={cn("w-3.5 h-3.5 text-slate-300 transition-transform", open ? "rotate-90 text-teal-600" : "")} />
+        </div>
+        <AnimatePresence>
+          {open && (
+            <>
+              <div className="fixed inset-0 z-[105]" onClick={() => setOpen(false)} />
+              <motion.div initial={{ opacity: 0, y: 10, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 10, scale: 0.95 }} className="absolute top-full left-0 mt-3 bg-white rounded-2xl border border-slate-200 shadow-2xl z-[110] overflow-hidden rdp-custom flex">
+                <div className="w-44 border-r border-slate-100 p-2 flex flex-col gap-0.5 shrink-0">
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-[2px] px-3 pt-1 pb-1.5">{label}</span>
+                  {presets.map((opt) => (
+                    <button key={opt.id} onClick={() => onPreset(opt.id)} className={cn("text-left px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors", activeLabel === opt.label.toUpperCase() ? "bg-teal-50 text-teal-700" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900")}>{opt.label}</button>
+                  ))}
+                </div>
+                <div className="flex flex-col divide-y divide-slate-100">
+                  <div className="p-3"><DayPicker mode="range" selected={selected as any} onSelect={onSelect} month={cal1} onMonthChange={setCal1} numberOfMonths={1} locale={ptBR} weekStartsOn={0} /></div>
+                  <div className="p-3"><DayPicker mode="range" selected={selected as any} onSelect={onSelect} month={cal2} onMonthChange={setCal2} numberOfMonths={1} locale={ptBR} weekStartsOn={0} /></div>
+                </div>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
+      </div>
     </div>
   );
 }

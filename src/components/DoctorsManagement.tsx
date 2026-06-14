@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Card, CardContent } from "./ui/card";
 import { Button } from "./ui/button";
 import {
@@ -9,6 +9,7 @@ import {
     Loader2,
     AlertCircle,
     Clock,
+    ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -29,20 +30,51 @@ export function DoctorsManagement() {
         specialty: '',
         crm: '',
         email: '',
+        isManager: false,
     });
     const [submitting, setSubmitting] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
+    // doctor.id -> tem acesso de gestor (clinic_users/pending com role 'medico_gestor')
+    const [managerMap, setManagerMap] = useState<Record<string, boolean>>({});
+
+    // Descobre quais médicos têm acesso de gestor para exibir o selo e pré-marcar o checkbox.
+    useEffect(() => {
+        if (!activeClinicId || doctors.length === 0) { setManagerMap({}); return; }
+        let cancelled = false;
+        (async () => {
+            const userIds = doctors.map(d => d.user_id).filter(Boolean) as string[];
+            const [cuRes, pendRes] = await Promise.all([
+                userIds.length
+                    ? supabase.from('clinic_users').select('id, role').in('id', userIds)
+                    : Promise.resolve({ data: [] as any[] }),
+                supabase.from('pending_clinic_users').select('full_name, role')
+                    .eq('clinic_id', activeClinicId).in('role', ['medico', 'medico_gestor']),
+            ]);
+            if (cancelled) return;
+            const cuRole: Record<string, string> = {};
+            (cuRes.data || []).forEach((u: any) => { cuRole[u.id] = u.role; });
+            const pendRole: Record<string, string> = {};
+            (pendRes.data || []).forEach((p: any) => { pendRole[(p.full_name || '').toLowerCase()] = p.role; });
+            const map: Record<string, boolean> = {};
+            doctors.forEach(d => {
+                const role = d.user_id ? cuRole[d.user_id] : pendRole[d.name.toLowerCase()];
+                map[d.id] = role === 'medico_gestor';
+            });
+            setManagerMap(map);
+        })();
+        return () => { cancelled = true; };
+    }, [doctors, activeClinicId]);
 
     const openCreateModal = () => {
         setModalMode('create');
-        setFormData({ name: '', specialty: '', crm: '', email: '' });
+        setFormData({ name: '', specialty: '', crm: '', email: '', isManager: false });
         setSelectedDoctorId(null);
         setShowModal(true);
     };
 
     const openEditModal = (doc: Doctor) => {
         setModalMode('edit');
-        setFormData({ name: doc.name, specialty: doc.specialty || '', crm: doc.crm || '', email: '' });
+        setFormData({ name: doc.name, specialty: doc.specialty || '', crm: doc.crm || '', email: '', isManager: managerMap[doc.id] || false });
         setSelectedDoctorId(doc.id);
         setShowModal(true);
     };
@@ -68,7 +100,7 @@ export function DoctorsManagement() {
                         clinic_id: activeClinicId,
                         email: formData.email.trim().toLowerCase(),
                         full_name: formData.name.trim(),
-                        role: 'medico',
+                        role: formData.isManager ? 'medico_gestor' : 'medico',
                         crm: formData.crm.trim(),
                         specialty: formData.specialty.trim() || null,
                     }, { onConflict: 'email,clinic_id' });
@@ -94,9 +126,19 @@ export function DoctorsManagement() {
                     specialty: formData.specialty || null,
                     crm: formData.crm || null,
                 });
+                // Sincroniza o acesso de gestor (médico ↔ médico gestor) na conta/pré-cadastro
+                const editedDoc = doctors.find(d => d.id === selectedDoctorId);
+                const newRole = formData.isManager ? 'medico_gestor' : 'medico';
+                if (editedDoc?.user_id) {
+                    await supabase.from('clinic_users').update({ role: newRole }).eq('id', editedDoc.user_id);
+                } else if (activeClinicId) {
+                    await supabase.from('pending_clinic_users').update({ role: newRole })
+                        .eq('clinic_id', activeClinicId).ilike('full_name', formData.name.trim());
+                }
+                setManagerMap(prev => ({ ...prev, [selectedDoctorId]: formData.isManager }));
             }
 
-            setFormData({ name: '', specialty: '', crm: '', email: '' });
+            setFormData({ name: '', specialty: '', crm: '', email: '', isManager: false });
             setShowModal(false);
         } catch (err: any) {
             showToast("Erro ao salvar: " + err.message, "error");
@@ -206,9 +248,17 @@ export function DoctorsManagement() {
                                 </div>
 
                                 <div className="space-y-1 mb-6">
-                                    <h3 className="text-lg font-bold text-slate-900 group-hover:text-teal-700 transition-colors truncate">
-                                        {doc.name}
-                                    </h3>
+                                    <div className="flex items-center gap-2 min-w-0">
+                                        <h3 className="text-lg font-bold text-slate-900 group-hover:text-teal-700 transition-colors truncate min-w-0">
+                                            {doc.name}
+                                        </h3>
+                                        {managerMap[doc.id] && (
+                                            <span className="shrink-0 flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider bg-teal-50 text-teal-700 border border-teal-100 px-1.5 py-0.5 rounded-md">
+                                                <ShieldCheck className="w-3 h-3" />
+                                                Gestor
+                                            </span>
+                                        )}
+                                    </div>
                                     {doc.specialty && (
                                         <div className="flex items-center gap-2 text-slate-500 font-medium text-sm">
                                             <Stethoscope className="w-3.5 h-3.5 text-teal-600" />
@@ -370,6 +420,25 @@ export function DoctorsManagement() {
                                         <p className="text-[11px] text-slate-400 mt-1.5">O médico deverá criar a conta em "Criar conta" na tela de login usando este e-mail.</p>
                                     </div>
                                 )}
+
+                                <div className="flex items-start gap-3 p-3 rounded-lg border border-slate-200 bg-slate-50">
+                                    <input
+                                        id="doctor-is-manager"
+                                        type="checkbox"
+                                        checked={formData.isManager}
+                                        onChange={e => setFormData(p => ({ ...p, isManager: e.target.checked }))}
+                                        className="mt-0.5 w-4 h-4 accent-teal-600 cursor-pointer"
+                                    />
+                                    <label htmlFor="doctor-is-manager" className="cursor-pointer">
+                                        <span className="flex items-center gap-1.5 text-sm font-bold text-slate-700">
+                                            <ShieldCheck className="w-4 h-4 text-teal-600" />
+                                            Acesso de gestor (médico gestor)
+                                        </span>
+                                        <span className="block text-[11px] text-slate-400 mt-0.5">
+                                            Além de atender, terá acesso de gestão (Equipe, Corpo Clínico, Financeiro etc.).
+                                        </span>
+                                    </label>
+                                </div>
                             </div>
 
                             <div className="flex gap-3 p-6 border-t border-slate-100 bg-slate-50">

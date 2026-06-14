@@ -39,6 +39,17 @@ const TEAM_ROLES: { value: UserRole; label: string; color: string }[] = [
 
 const TEAM_ROLE_VALUES: UserRole[] = TEAM_ROLES.map((r) => r.value);
 
+// Médicos são criados no Corpo Clínico, mas devem aparecer aqui na Equipe — e ter o
+// acesso de gestor (médico ↔ médico gestor) ajustável.
+const MEDICO_ROLES: { value: UserRole; label: string; color: string }[] = [
+  { value: "medico", label: "Médico", color: "bg-sky-50 text-sky-700 border-sky-100" },
+  { value: "medico_gestor", label: "Médico Gestor", color: "bg-teal-50 text-teal-700 border-teal-100" },
+];
+
+const ALL_ROLES = [...TEAM_ROLES, ...MEDICO_ROLES];
+const DISPLAY_ROLE_VALUES: UserRole[] = ALL_ROLES.map((r) => r.value);
+const MEDICO_ROLE_VALUES: UserRole[] = MEDICO_ROLES.map((r) => r.value);
+
 export function TeamManagement() {
   const { activeClinicId, activeClinicName, clinicName, profile } = useAuth();
   const clinicLabel = activeClinicName || clinicName;
@@ -66,13 +77,13 @@ export function TeamManagement() {
         .from("clinic_users")
         .select("id, clinic_id, role, full_name, email, created_at")
         .eq("clinic_id", activeClinicId)
-        .in("role", TEAM_ROLE_VALUES)
+        .in("role", DISPLAY_ROLE_VALUES)
         .order("full_name"),
       supabase
         .from("pending_clinic_users")
         .select("id, clinic_id, role, full_name, email, created_at")
         .eq("clinic_id", activeClinicId)
-        .in("role", TEAM_ROLE_VALUES)
+        .in("role", DISPLAY_ROLE_VALUES)
         .order("full_name"),
     ]);
 
@@ -216,7 +227,7 @@ export function TeamManagement() {
   };
 
   const roleInfo = (role: UserRole) =>
-    TEAM_ROLES.find((r) => r.value === role) || { label: role, color: "bg-slate-50 text-slate-600 border-slate-200" };
+    ALL_ROLES.find((r) => r.value === role) || { label: role, color: "bg-slate-50 text-slate-600 border-slate-200" };
 
   return (
     <div className="space-y-6">
@@ -382,23 +393,31 @@ export function TeamManagement() {
 
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Função</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {TEAM_ROLES.map((r) => (
-                      <button
-                        key={r.value}
-                        type="button"
-                        onClick={() => setFormData((p) => ({ ...p, role: r.value }))}
-                        className={cn(
-                          "py-3 rounded-xl border text-xs font-bold transition-all",
-                          formData.role === r.value
-                            ? "bg-teal-600 text-white border-teal-600 shadow-lg shadow-teal-200"
-                            : "bg-white text-slate-600 border-slate-200 hover:border-teal-400 hover:text-teal-700 hover:bg-teal-50"
-                        )}
-                      >
-                        {r.label}
-                      </button>
-                    ))}
-                  </div>
+                  {(() => {
+                    // Médicos são criados no Corpo Clínico; aqui só permitimos alternar
+                    // entre Médico e Médico Gestor. Demais funções usam as opções de equipe.
+                    const isMedico = !!editing && MEDICO_ROLE_VALUES.includes(editing.role);
+                    const roleOptions = isMedico ? MEDICO_ROLES : TEAM_ROLES;
+                    return (
+                      <div className={cn("grid gap-2", roleOptions.length === 2 ? "grid-cols-2" : "grid-cols-3")}>
+                        {roleOptions.map((r) => (
+                          <button
+                            key={r.value}
+                            type="button"
+                            onClick={() => setFormData((p) => ({ ...p, role: r.value }))}
+                            className={cn(
+                              "py-3 rounded-xl border text-xs font-bold transition-all",
+                              formData.role === r.value
+                                ? "bg-teal-600 text-white border-teal-600 shadow-lg shadow-teal-200"
+                                : "bg-white text-slate-600 border-slate-200 hover:border-teal-400 hover:text-teal-700 hover:bg-teal-50"
+                            )}
+                          >
+                            {r.label}
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {!editing && (

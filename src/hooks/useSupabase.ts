@@ -1324,6 +1324,12 @@ export interface AIConfig {
   transition_rules: any[] | null;
   finish_service_enabled: boolean;
   finish_service_message: string;
+  pos_followup_ganho_enabled: boolean;
+  pos_followup_ganho_message: string | null;
+  pos_followup_ganho_days: number;
+  pos_followup_perdido_enabled: boolean;
+  pos_followup_perdido_message: string | null;
+  pos_followup_perdido_days: number;
   csat_enabled: boolean;
   csat_type: 'csat' | 'nps' | 'both';
   csat_message: string | null;

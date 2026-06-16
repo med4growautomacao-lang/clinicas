@@ -109,19 +109,21 @@ const METRICS_CONFIG: { id: string; label: string }[] = [
 ];
 const DEFAULT_METRIC_IDS = METRICS_CONFIG.map((m) => m.id);
 
-// presets de período — "últimos N dias" INCLUEM hoje (fim = hoje)
+// presets de período — "últimos N dias" são os N dias completos ANTERIORES (terminam ontem;
+// o dia atual, em andamento, não entra). Para o dia atual use o preset "Hoje".
 function computeRange(id: string): { start: Date; end: Date; label: string } {
   const today = new Date();
+  const yesterday = subDays(today, 1);
   let start = today, end = today, label = "";
   switch (id) {
     case "today": label = "HOJE"; break;
     case "yesterday": start = subDays(today, 1); end = subDays(today, 1); label = "ONTEM"; break;
     case "week": start = startOfWeek(today, { weekStartsOn: 0 }); label = "ESTA SEMANA"; break;
     case "last_week": { const lw = subWeeks(today, 1); start = startOfWeek(lw, { weekStartsOn: 0 }); end = endOfWeek(lw, { weekStartsOn: 0 }); label = "SEMANA PASSADA"; break; }
-    case "7days": start = subDays(today, 6); end = today; label = "ÚLTIMOS 7 DIAS"; break;
-    case "14days": start = subDays(today, 13); end = today; label = "ÚLTIMOS 14 DIAS"; break;
-    case "28days": start = subDays(today, 27); end = today; label = "ÚLTIMOS 28 DIAS"; break;
-    case "30days": start = subDays(today, 29); end = today; label = "ÚLTIMOS 30 DIAS"; break;
+    case "7days": start = subDays(today, 7); end = yesterday; label = "ÚLTIMOS 7 DIAS"; break;
+    case "14days": start = subDays(today, 14); end = yesterday; label = "ÚLTIMOS 14 DIAS"; break;
+    case "28days": start = subDays(today, 28); end = yesterday; label = "ÚLTIMOS 28 DIAS"; break;
+    case "30days": start = subDays(today, 30); end = yesterday; label = "ÚLTIMOS 30 DIAS"; break;
     case "month": start = startOfMonth(today); label = "ESTE MÊS"; break;
     case "last_month": { const lm = subMonths(today, 1); start = startOfMonth(lm); end = endOfMonth(lm); label = "MÊS PASSADO"; break; }
   }
@@ -235,7 +237,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<Period>("dia");
   // Conversão (evento) — janela principal; presets INCLUEM hoje
-  const [convRange, setConvRange] = useState<{ start: Date; end: Date }>(() => ({ start: subDays(new Date(), 6), end: new Date() }));
+  const [convRange, setConvRange] = useState<{ start: Date; end: Date }>(() => ({ start: subDays(new Date(), 7), end: subDays(new Date(), 1) }));
   const [convLabel, setConvLabel] = useState("ÚLTIMOS 7 DIAS");
   const [isConvOpen, setIsConvOpen] = useState(false);
   const [convCal1, setConvCal1] = useState<Date>(() => subDays(new Date(), 6));

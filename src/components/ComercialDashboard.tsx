@@ -30,6 +30,9 @@ import {
   ChevronRight,
   ChevronLeft,
   Settings as SettingsIcon,
+  Phone,
+  ExternalLink,
+  Inbox,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { format, subDays, addMonths, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subMonths, subWeeks, parseISO } from "date-fns";
@@ -63,6 +66,22 @@ interface CommercialData {
   daily: { date: string; aiMessages: number; humanMessages: number; leads: number; appointments: number; handoffs: number; followups: number }[];
   totalLeads: number;
   newLeads: number;
+}
+
+// Linha da lista de leads do drill-down (RPC get_commercial_leads)
+interface LeadRow {
+  id: string;
+  name: string | null;
+  phone: string | null;
+  source: string | null;
+  estimatedValue: number | null;
+  createdAt: string;
+  lastMessageAt: string | null;
+  aiEnabled: boolean | null;
+  stageName: string | null;
+  stageColor: string | null;
+  isConversion: boolean | null;
+  outcome: "ganho" | "perdido" | null;
 }
 
 type Period = "dia" | "sem" | "mês";
@@ -159,6 +178,28 @@ function fmtBRL(v: number): string {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 2 });
 }
 
+// Rótulo amigável da origem do lead (source -> label)
+function originLabel(source: string | null): string {
+  if (source === "meta_ads") return "Meta";
+  if (source === "google_ads") return "Google";
+  if (!source) return "Orgânico";
+  return "Orgânico";
+}
+
+// Badge de status do lead a partir do outcome do ticket mais recente
+function leadStatusBadge(outcome: "ganho" | "perdido" | null): { label: string; cls: string } {
+  if (outcome === "ganho") return { label: "Ganho", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+  if (outcome === "perdido") return { label: "Perdido", cls: "bg-rose-50 text-rose-600 border-rose-200" };
+  return { label: "Em aberto", cls: "bg-slate-50 text-slate-500 border-slate-200" };
+}
+
+function fmtDateShort(iso: string | null): string {
+  if (!iso) return "—";
+  try { return format(parseISO(iso), "dd/MM/yy"); } catch { return "—"; }
+}
+
+const LEADS_PAGE_SIZE = 20;
+
 const AUTOMATION_LABELS: Record<string, string> = {
   followup: "Follow-ups",
   forms_welcome: "Boas-vindas (Forms)",
@@ -188,7 +229,7 @@ const CHART_METRICS: { label: string; value: ChartMetric; icon: any }[] = [
 // ==========================================
 // Componente principal
 // ==========================================
-export function ComercialDashboard() {
+export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: string) => void } = {}) {
   const { profile, activeClinicId } = useAuth();
   const [data, setData] = useState<CommercialData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -301,6 +342,44 @@ export function ComercialDashboard() {
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [fetchData, activeClinicId, profile?.clinic_id]);
+
+  // ===== Lista de leads do filtro (drill-down) =====
+  const [leadsList, setLeadsList] = useState<LeadRow[]>([]);
+  const [leadsTotal, setLeadsTotal] = useState(0);
+  const [leadsPage, setLeadsPage] = useState(0);
+  const [leadsLoading, setLeadsLoading] = useState(true);
+
+  // Volta para a 1ª página sempre que um filtro muda
+  useEffect(() => { setLeadsPage(0); }, [convRange, entryRange, agent, origin]);
+
+  const fetchLeads = useCallback(async () => {
+    const clinicId = activeClinicId || profile?.clinic_id;
+    if (!clinicId) return;
+    setLeadsLoading(true);
+    try {
+      const { data: res, error } = await supabase.rpc("get_commercial_leads", {
+        p_clinic_id: clinicId,
+        p_entry_from: entryRange ? format(entryRange.start, "yyyy-MM-dd") : null,
+        p_entry_to: entryRange ? format(entryRange.end, "yyyy-MM-dd") : null,
+        p_conv_from: format(convRange.start, "yyyy-MM-dd"),
+        p_conv_to: format(convRange.end, "yyyy-MM-dd"),
+        p_agent: agent,
+        p_origin: origin,
+        p_limit: LEADS_PAGE_SIZE,
+        p_offset: leadsPage * LEADS_PAGE_SIZE,
+      });
+      if (error) throw error;
+      const r = res as { total: number; rows: LeadRow[] } | null;
+      setLeadsList(r?.rows || []);
+      setLeadsTotal(r?.total || 0);
+    } catch (err) {
+      console.error("ComercialDashboard leads fetch error:", err);
+    } finally {
+      setLeadsLoading(false);
+    }
+  }, [activeClinicId, profile?.clinic_id, convRange, entryRange, agent, origin, leadsPage]);
+
+  useEffect(() => { fetchLeads(); }, [fetchLeads]);
 
   const setAudiencePersist = (a: Audience) => { setAudience(a); localStorage.setItem("comercialAudience", a); };
   const setAgentPersist = (v: AgentFilter) => { setAgent(v); localStorage.setItem("comercialAgent", v); };
@@ -646,9 +725,125 @@ export function ComercialDashboard() {
     </Card>
   );
 
+  // ===== Seção: Leads do filtro (drill-down da população do KPI "Leads") =====
+  const leadsTotalPages = Math.max(1, Math.ceil(leadsTotal / LEADS_PAGE_SIZE));
+  const leadsScopeLabel = agent === "ia" ? "atendidos pela IA" : agent === "humano" ? "atendidos por humano" : "na coorte de entrada";
+  const sectionLeads = (
+    <Card key="leads" className="border border-slate-200 shadow-sm overflow-hidden">
+      <CardHeader className="bg-slate-50 border-b border-slate-100 py-3 flex flex-row items-center justify-between">
+        <CardTitle className="text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+          <Users className="w-4 h-4 text-cyan-600" />
+          Leads do filtro
+        </CardTitle>
+        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          {leadsTotal} {leadsTotal === 1 ? "lead" : "leads"} · {leadsScopeLabel}
+        </span>
+      </CardHeader>
+      <CardContent className="p-0">
+        {leadsLoading ? (
+          <div className="flex items-center justify-center py-12"><Loader2 className="w-6 h-6 text-teal-600 animate-spin" /></div>
+        ) : leadsList.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 gap-2 text-slate-400 text-center">
+            <Inbox className="w-9 h-9 text-slate-200" />
+            <p className="text-sm font-semibold text-slate-500">Nenhum lead para os filtros atuais</p>
+            <p className="text-xs">Ajuste Entrada, Conversão, Agente ou Origem.</p>
+          </div>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100 bg-slate-50/50 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    <th className="text-left font-bold px-4 py-2.5">Lead</th>
+                    <th className="text-left font-bold px-3 py-2.5">Origem</th>
+                    <th className="text-left font-bold px-3 py-2.5">Etapa</th>
+                    <th className="text-left font-bold px-3 py-2.5">Status</th>
+                    <th className="text-left font-bold px-3 py-2.5">Entrada</th>
+                    <th className="text-left font-bold px-3 py-2.5">Última msg</th>
+                    <th className="text-right font-bold px-3 py-2.5">Valor</th>
+                    {onOpenLead && <th className="px-3 py-2.5 w-8" />}
+                  </tr>
+                </thead>
+                <tbody>
+                  {leadsList.map((lead) => {
+                    const badge = leadStatusBadge(lead.outcome);
+                    const clickable = !!onOpenLead;
+                    return (
+                      <tr
+                        key={lead.id}
+                        onClick={clickable ? () => onOpenLead!(lead.id) : undefined}
+                        className={cn(
+                          "border-b border-slate-50 transition-colors",
+                          clickable ? "cursor-pointer hover:bg-teal-50/40" : ""
+                        )}
+                      >
+                        <td className="px-4 py-2.5">
+                          <p className="font-semibold text-slate-700 truncate max-w-[180px]">{lead.name || "Sem nome"}</p>
+                          {lead.phone && (
+                            <span className="flex items-center gap-1 text-[11px] text-slate-400 font-medium">
+                              <Phone className="w-3 h-3" />{lead.phone}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5 text-slate-500">{originLabel(lead.source)}</td>
+                        <td className="px-3 py-2.5">
+                          {lead.stageName ? (
+                            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600">
+                              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: lead.stageColor || "#94a3b8" }} />
+                              {lead.stageName}
+                            </span>
+                          ) : <span className="text-slate-300">—</span>}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <span className={cn("inline-block text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border", badge.cls)}>{badge.label}</span>
+                        </td>
+                        <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">{fmtDateShort(lead.createdAt)}</td>
+                        <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">{fmtDateShort(lead.lastMessageAt)}</td>
+                        <td className="px-3 py-2.5 text-right font-semibold text-slate-700 whitespace-nowrap">
+                          {lead.estimatedValue ? fmtBRL(Number(lead.estimatedValue)) : "—"}
+                        </td>
+                        {onOpenLead && (
+                          <td className="px-3 py-2.5 text-slate-300"><ExternalLink className="w-3.5 h-3.5" /></td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {leadsTotal > LEADS_PAGE_SIZE && (
+              <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100">
+                <span className="text-[11px] font-medium text-slate-400">
+                  {leadsPage * LEADS_PAGE_SIZE + 1}–{Math.min((leadsPage + 1) * LEADS_PAGE_SIZE, leadsTotal)} de {leadsTotal}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => setLeadsPage((p) => Math.max(0, p - 1))}
+                    disabled={leadsPage === 0}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-slate-600 border border-slate-200 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />Anterior
+                  </button>
+                  <span className="text-[11px] font-bold text-slate-500 px-1">{leadsPage + 1}/{leadsTotalPages}</span>
+                  <button
+                    onClick={() => setLeadsPage((p) => Math.min(leadsTotalPages - 1, p + 1))}
+                    disabled={leadsPage >= leadsTotalPages - 1}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-slate-600 border border-slate-200 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                  >
+                    Próximo<ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+
   // Ordem das seções por público
-  const ownerOrder = [sectionAgents, sectionSla, sectionAppointments, sectionSistema, sectionFunnel, sectionTrend, sectionCsat];
-  const agencyOrder = [sectionFunnel, sectionAgents, sectionAppointments, sectionSistema, sectionTrend, sectionSla, sectionCsat];
+  const ownerOrder = [sectionAgents, sectionSla, sectionAppointments, sectionSistema, sectionFunnel, sectionLeads, sectionTrend, sectionCsat];
+  const agencyOrder = [sectionFunnel, sectionLeads, sectionAgents, sectionAppointments, sectionSistema, sectionTrend, sectionSla, sectionCsat];
   const orderedSections = audience === "dono" ? ownerOrder : agencyOrder;
 
   return (

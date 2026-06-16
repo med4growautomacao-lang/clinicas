@@ -1590,7 +1590,15 @@ export function AISecretary() {
         >
           {activeTab === "chats" && <ChatsView />}
           {activeTab === "leads" && <LeadKanban />}
-          {activeTab === "dashboard" && <ComercialDashboard />}
+          {activeTab === "dashboard" && (
+            <ComercialDashboard
+              onOpenLead={(leadId) => {
+                sessionStorage.setItem("open_lead_id", leadId);
+                setActiveTab("chats");
+                localStorage.setItem("aiSecretaryTab", "chats");
+              }}
+            />
+          )}
           {activeTab === "followups" && <AllFollowupsView />}
 
           {activeTab === "config" && <ConfigView />}
@@ -1646,15 +1654,31 @@ function ChatsView() {
     }
   }, [leads, selectedLeadId]);
 
-  // Atalho de outros módulos: se sessionStorage tiver open_lead_id, abre esse lead
+  // Atalho de outros módulos (ex.: Dashboard Comercial): abre o lead de open_lead_id.
+  // O lead pode não estar na 1ª página carregada — nesse caso busca por id e injeta.
   useEffect(() => {
-    if (leads.length === 0) return;
     const pendingId = sessionStorage.getItem('open_lead_id');
-    if (pendingId && leads.some(l => l.id === pendingId)) {
+    if (!pendingId || !activeClinicId) return;
+    if (leads.some(l => l.id === pendingId) || searchResults.some(l => l.id === pendingId)) {
       setSelectedLeadId(pendingId);
       sessionStorage.removeItem('open_lead_id');
+      return;
     }
-  }, [leads]);
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('leads')
+        .select('*')
+        .eq('id', pendingId)
+        .eq('clinic_id', activeClinicId)
+        .maybeSingle();
+      if (cancelled || !data) return;
+      setSearchResults(prev => (prev.some(l => l.id === data.id) ? prev : [data, ...prev]));
+      setSelectedLeadId(data.id);
+      sessionStorage.removeItem('open_lead_id');
+    })();
+    return () => { cancelled = true; };
+  }, [leads, searchResults, activeClinicId]);
 
   if (leadsLoading) {
     return (

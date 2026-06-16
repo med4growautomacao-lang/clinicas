@@ -404,19 +404,22 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
   // Escopados pelo filtro de agente: conversão, consultas, preço/consulta, tempo de resposta.
   // "geral" (não atribuível a agente): faturamento, ticket médio, ROAS, ciclo de vendas.
   const fin = data.finance;
-  const convAgendRate = data.newLeads > 0 ? (appointments.total / data.newLeads) * 100 : 0;
-  const convConsultaRate = data.newLeads > 0 ? (attended / data.newLeads) * 100 : 0;
+  const agentNoun = agent === "ia" ? "da IA" : agent === "humano" ? "do humano" : "no total";
+  // Denominador das taxas acompanha o filtro de agente: leads atendidos pela IA/humano
+  // (= leadsTouched) ou a coorte inteira quando "Todos". Mantém coerência com o card "Leads".
+  const leadsValue = agent === "ia" ? agents.ia.leadsTouched : agent === "humano" ? agents.humano.leadsTouched : data.newLeads;
+  const convAgendRate = leadsValue > 0 ? (appointments.total / leadsValue) * 100 : 0;
+  const convConsultaRate = leadsValue > 0 ? (attended / leadsValue) * 100 : 0;
   const costPerAppt = appointments.total > 0 && fin.investment > 0 ? fin.investment / appointments.total : null;
   const avgTicket = fin.attendedConsults > 0 && fin.convertedValue > 0 ? fin.convertedValue / fin.attendedConsults : null;
   const roas = fin.investmentTotal > 0 ? fin.revenue / fin.investmentTotal : null;
-  const agentNoun = agent === "ia" ? "da IA" : agent === "humano" ? "do humano" : "no total";
-  const leadsValue = agent === "ia" ? agents.ia.leadsTouched : agent === "humano" ? agents.humano.leadsTouched : data.newLeads;
+  const leadsDenomLabel = agent === "todos" ? "leads" : "leads atendidos";
 
   type Kpi = { id: string; title: string; value: React.ReactNode; icon: any; color: string; bg: string; sub?: string; agentScoped: boolean; originScoped: boolean };
   const allKpis: Kpi[] = [
     { id: "leads", title: "Leads", value: leadsValue, icon: Users, color: "text-cyan-600", bg: "bg-cyan-50", sub: agent === "todos" ? "entraram no período" : `atendidos ${agentNoun}`, agentScoped: true, originScoped: true },
-    { id: "conversao_agend", title: "Conversão Lead → Agendamento", value: `${convAgendRate.toFixed(1)}%`, icon: Percent, color: "text-emerald-600", bg: "bg-emerald-50", sub: `${appointments.total} agend. ${agentNoun} ÷ ${data.newLeads} leads`, agentScoped: true, originScoped: true },
-    { id: "conversao_consulta", title: "Conversão Lead → Consulta", value: `${convConsultaRate.toFixed(1)}%`, icon: CheckCircle2, color: "text-green-600", bg: "bg-green-50", sub: `${attended} realizadas ÷ ${data.newLeads} leads`, agentScoped: true, originScoped: true },
+    { id: "conversao_agend", title: "Conversão Lead → Agendamento", value: `${convAgendRate.toFixed(1)}%`, icon: Percent, color: "text-emerald-600", bg: "bg-emerald-50", sub: `${appointments.total} agend. ${agentNoun} ÷ ${leadsValue} ${leadsDenomLabel}`, agentScoped: true, originScoped: true },
+    { id: "conversao_consulta", title: "Conversão Lead → Consulta", value: `${convConsultaRate.toFixed(1)}%`, icon: CheckCircle2, color: "text-green-600", bg: "bg-green-50", sub: `${attended} realizadas ÷ ${leadsValue} ${leadsDenomLabel}`, agentScoped: true, originScoped: true },
     { id: "consultas", title: "Agendamentos Gerados", value: appointments.total, icon: CalendarCheck, color: "text-teal-600", bg: "bg-teal-50", sub: agent === "todos" ? `${appointments.ia} IA · ${appointments.manual} manual` : `via ${agentNoun}`, agentScoped: true, originScoped: true },
     { id: "consultas_realizadas", title: "Consultas Realizadas", value: attended, icon: CheckCircle2, color: "text-emerald-600", bg: "bg-emerald-50", sub: `${pct(attended, appointments.total)} dos agendamentos`, agentScoped: true, originScoped: true },
     { id: "custo_agendamento", title: "Custo por Agendamento", value: costPerAppt != null ? fmtBRL(costPerAppt) : "—", icon: Target, color: "text-rose-600", bg: "bg-rose-50", sub: "investimento ÷ agendamentos", agentScoped: true, originScoped: true },

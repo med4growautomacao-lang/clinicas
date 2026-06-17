@@ -1558,7 +1558,7 @@ export function AISecretary() {
         <div className="flex bg-slate-50 p-1.5 rounded-2xl border border-slate-200 overflow-x-auto scrollbar-hide gap-1 w-full min-w-0">
           {[
             { id: "leads", label: "CRM", show: true },
-            { id: "dashboard", label: "Dashboard", show: true },
+            { id: "dashboard", label: "Resultados", show: true },
             { id: "chats", label: "Conversas", show: true },
             { id: "followups", label: "Follow-up", show: hasFollowup },
             { id: "config", label: "Configurações IA", show: hasIA },

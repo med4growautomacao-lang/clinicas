@@ -58,7 +58,7 @@ interface CommercialData {
   messages: { inbound: number; total: number };
   appointments: { total: number; ia: number; manual: number; byStatus: Record<string, number> };
   sla: { breaches: number; firstResponseMin: number; responseMin: number; overBreachMin: number; responseCycles: number; slaMinutes: number };
-  finance: { revenue: number; investment: number; investmentTotal: number; convertedValue: number; salesCycleDays: number; attendedConsults: number; defaultTicket: number };
+  finance: { revenue: number; investment: number; investmentTotal: number; convertedValue: number; salesCycleDays: number; attendedConsults: number; defaultTicket: number; apptTicketAvg: number };
   outcomes: { won: number; lost: number };
   agent: AgentFilter;
   csat: { type: string; answered: number; avg: number | null; distribution: { score: number; count: number }[] };
@@ -422,9 +422,9 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
   const convConsultaRate = leadsValue > 0 ? (attended / leadsValue) * 100 : 0;
   const costPerAppt = appointments.total > 0 && fin.investment > 0 ? fin.investment / appointments.total : null;
   const avgTicket = fin.attendedConsults > 0 && fin.convertedValue > 0 ? fin.convertedValue / fin.attendedConsults : null;
-  // Receita projetada dos agendamentos JÁ criados no período, valorados pelo ticket médio
-  // configurado em Dados da Clínica (ai_config.default_ticket_value).
-  const projectedApptValue = fin.defaultTicket > 0 ? appointments.total * fin.defaultTicket : null;
+  // Ticket médio dos agendamentos JÁ criados no período = média do valor estimado por agendamento
+  // (estimated_value do lead). Comparável ao ticket configurado em Dados da Clínica (defaultTicket).
+  const apptTicketAvg = fin.apptTicketAvg > 0 ? fin.apptTicketAvg : null;
   const roas = fin.investmentTotal > 0 ? fin.revenue / fin.investmentTotal : null;
   const leadsDenomLabel = agent === "todos" ? "leads" : "leads atendidos";
 
@@ -437,7 +437,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
     { id: "consultas_realizadas", title: "Consultas Realizadas", value: attended, icon: CheckCircle2, color: "text-emerald-600", bg: "bg-emerald-50", sub: `${pct(attended, appointments.total)} dos agendamentos`, agentScoped: true, originScoped: true },
     { id: "custo_agendamento", title: "Custo por Agendamento", value: costPerAppt != null ? fmtBRL(costPerAppt) : "—", icon: Target, color: "text-rose-600", bg: "bg-rose-50", sub: "investimento ÷ agendamentos", agentScoped: true, originScoped: true },
     { id: "ticket_medio", title: "Ticket Médio das Consultas", value: avgTicket != null ? fmtBRL(avgTicket) : "—", icon: DollarSign, color: "text-blue-600", bg: "bg-blue-50", sub: fin.attendedConsults > 0 ? `valor convertido ÷ ${fin.attendedConsults} realizadas` : "sem consultas realizadas", agentScoped: false, originScoped: false },
-    { id: "ticket_agendado", title: "Ticket Médio (Agendamentos)", value: projectedApptValue != null ? fmtBRL(projectedApptValue) : "—", icon: Wallet, color: "text-violet-600", bg: "bg-violet-50", sub: fin.defaultTicket > 0 ? `${appointments.total} agend. × ${fmtBRL(fin.defaultTicket)} (ticket configurado)` : "configure o ticket médio em Dados da Clínica", agentScoped: true, originScoped: true },
+    { id: "ticket_agendado", title: "Ticket Médio (Agendamentos)", value: apptTicketAvg != null ? fmtBRL(apptTicketAvg) : "—", icon: DollarSign, color: "text-violet-600", bg: "bg-violet-50", sub: apptTicketAvg != null ? `média de ${appointments.total} agend.${fin.defaultTicket > 0 ? ` · config. ${fmtBRL(fin.defaultTicket)}` : ""}` : "sem valor estimado nos agendamentos", agentScoped: true, originScoped: true },
     { id: "faturamento", title: "Faturamento Gerado", value: fmtBRL(fin.revenue), icon: Wallet, color: "text-emerald-700", bg: "bg-emerald-50", agentScoped: false, originScoped: false },
     { id: "tempo_resposta", title: "Tempo de Resposta", value: fmtResponseTime(sla.responseMin, sla.responseCycles), icon: Clock, color: "text-amber-600", bg: "bg-amber-50", sub: sla.slaMinutes > 0 ? `meta: ${fmtDuration(sla.slaMinutes)}` : undefined, agentScoped: true, originScoped: true },
     { id: "ciclo_vendas", title: "Ciclo Médio de Vendas", value: fin.salesCycleDays > 0 ? `${fin.salesCycleDays} dias` : "—", icon: Timer, color: "text-indigo-600", bg: "bg-indigo-50", agentScoped: false, originScoped: true },
@@ -871,7 +871,6 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
     <div className="space-y-6 h-full overflow-y-auto pr-1 custom-scrollbar pb-8">
       {/* Cabeçalho fixo: período + público + filtros globais */}
       <div className="sticky top-0 z-20 -mx-1 px-1 pt-1 pb-3 space-y-3 bg-slate-50/95 backdrop-blur-sm border-b border-slate-100">
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Visão por coorte (entrada / conversão) — pode diferir da Visão Geral, que conta por período (data do evento).</p>
       {/* Controles: granularidade do gráfico + datas (Entrada/Conversão) + público + métricas */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">

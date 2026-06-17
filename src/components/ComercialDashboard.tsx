@@ -57,7 +57,7 @@ interface CommercialData {
   };
   messages: { inbound: number; total: number };
   appointments: { total: number; ia: number; manual: number; byStatus: Record<string, number> };
-  sla: { breaches: number; firstResponseMin: number; responseMin: number; overBreachMin: number; slaMinutes: number };
+  sla: { breaches: number; firstResponseMin: number; responseMin: number; overBreachMin: number; responseCycles: number; slaMinutes: number };
   finance: { revenue: number; investment: number; investmentTotal: number; convertedValue: number; salesCycleDays: number; attendedConsults: number };
   outcomes: { won: number; lost: number };
   agent: AgentFilter;
@@ -165,10 +165,19 @@ function bucketDaily(daily: DailyPoint[], period: Period): (Omit<DailyPoint, "da
 // Formata duração em minutos de forma legível (min / h / dias)
 function fmtDuration(min: number): string {
   if (!min || min <= 0) return "—";
+  if (min < 1) return `${Math.round(min * 60)} s`;
   if (min < 60) return `${min < 10 ? min.toFixed(1) : Math.round(min)} min`;
   const h = min / 60;
   if (h < 48) return `${h.toFixed(1)} h`;
   return `${(h / 24).toFixed(1)} dias`;
+}
+
+// Tempo de resposta: distingue "sem respostas no período" (—) de resposta quase
+// instantânea (tempo ~0, comum na IA, em que os timestamps quase coincidem).
+function fmtResponseTime(min: number, cycles: number): string {
+  if (!cycles || cycles <= 0) return "—";
+  if (min < 0.1) return "Instantâneo";
+  return fmtDuration(min);
 }
 
 function pct(num: number, den: number): string {
@@ -425,7 +434,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
     { id: "custo_agendamento", title: "Custo por Agendamento", value: costPerAppt != null ? fmtBRL(costPerAppt) : "—", icon: Target, color: "text-rose-600", bg: "bg-rose-50", sub: "investimento ÷ agendamentos", agentScoped: true, originScoped: true },
     { id: "ticket_medio", title: "Ticket Médio das Consultas", value: avgTicket != null ? fmtBRL(avgTicket) : "—", icon: DollarSign, color: "text-blue-600", bg: "bg-blue-50", sub: fin.attendedConsults > 0 ? `valor convertido ÷ ${fin.attendedConsults} realizadas` : "sem consultas realizadas", agentScoped: false, originScoped: false },
     { id: "faturamento", title: "Faturamento Gerado", value: fmtBRL(fin.revenue), icon: Wallet, color: "text-emerald-700", bg: "bg-emerald-50", agentScoped: false, originScoped: false },
-    { id: "tempo_resposta", title: "Tempo de Resposta", value: fmtDuration(sla.responseMin), icon: Clock, color: "text-amber-600", bg: "bg-amber-50", sub: sla.slaMinutes > 0 ? `meta: ${fmtDuration(sla.slaMinutes)}` : undefined, agentScoped: true, originScoped: true },
+    { id: "tempo_resposta", title: "Tempo de Resposta", value: fmtResponseTime(sla.responseMin, sla.responseCycles), icon: Clock, color: "text-amber-600", bg: "bg-amber-50", sub: sla.slaMinutes > 0 ? `meta: ${fmtDuration(sla.slaMinutes)}` : undefined, agentScoped: true, originScoped: true },
     { id: "ciclo_vendas", title: "Ciclo Médio de Vendas", value: fin.salesCycleDays > 0 ? `${fin.salesCycleDays} dias` : "—", icon: Timer, color: "text-indigo-600", bg: "bg-indigo-50", agentScoped: false, originScoped: true },
     { id: "roas", title: "ROAS", value: roas != null ? `${roas.toFixed(1)}x` : "—", icon: TrendingUp, color: "text-violet-600", bg: "bg-violet-50", sub: fin.investmentTotal > 0 ? `${fmtBRL(fin.revenue)} ÷ ${fmtBRL(fin.investmentTotal)}` : "sem investimento", agentScoped: false, originScoped: false },
   ];
@@ -567,13 +576,13 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-emerald-50 border border-emerald-100 text-center">
             <Hourglass className="w-5 h-5 text-emerald-500 mb-1" />
-            <p className="text-2xl font-bold text-emerald-700">{fmtDuration(sla.firstResponseMin)}</p>
+            <p className="text-2xl font-bold text-emerald-700">{fmtResponseTime(sla.firstResponseMin, sla.responseCycles)}</p>
             <p className="text-[10px] font-bold text-emerald-500/80 uppercase tracking-wider mt-1">Tempo da 1ª resposta</p>
             {sla.slaMinutes > 0 && <p className="text-[10px] text-slate-400 font-medium mt-0.5">meta: {fmtDuration(sla.slaMinutes)}</p>}
           </div>
           <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-slate-50 border border-slate-100 text-center">
             <Clock className="w-5 h-5 text-slate-400 mb-1" />
-            <p className="text-2xl font-bold text-slate-700">{fmtDuration(sla.responseMin)}</p>
+            <p className="text-2xl font-bold text-slate-700">{fmtResponseTime(sla.responseMin, sla.responseCycles)}</p>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">Tempo de resposta</p>
             <p className="text-[10px] text-slate-400 font-medium mt-0.5">todas as respostas</p>
           </div>

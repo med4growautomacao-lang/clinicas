@@ -142,11 +142,6 @@ export function Dashboard() {
     { id: 'leads', label: 'LEADS', type: 'number', color: '#4f46e5' },
     { id: 'agendamentos', label: 'AGENDAMENTOS', type: 'number', color: '#0ea5e9' },
     { id: 'vendas', label: 'VENDAS', type: 'number', color: '#10b981' },
-    { id: 'cpl', label: 'CPL', type: 'currency', color: '#f43f5e' },
-    { id: 'cac', label: 'CAC', type: 'currency', color: '#ec4899' },
-    { id: 'cpApt', label: 'CUSTO P/ AGEND.', type: 'currency', color: '#8b5cf6' },
-    { id: 'convRate', label: 'TAXA CONV.', type: 'percent', color: '#06b6d4' },
-    { id: 'ticketMed', label: 'TICKET MÉDIO', type: 'currency', color: '#0d9488' },
   ];
 
   const processedChartData = useMemo(() => {
@@ -169,16 +164,8 @@ export function Dashboard() {
   }, [stats.chartData]);
 
   // Métricas de conversão derivadas
-  const cpl = stats.totalInvestment > 0 && stats.totalLeads > 0
-    ? (stats.totalInvestment / stats.totalLeads)
-    : 0;
-  
   const cac = stats.totalInvestment > 0 && stats.totalSales > 0
     ? (stats.totalInvestment / stats.totalSales)
-    : 0;
-
-  const cpApt = stats.totalInvestment > 0 && stats.totalAppointments > 0
-    ? (stats.totalInvestment / stats.totalAppointments)
     : 0;
 
   const conversionRate = stats.totalLeads > 0 && stats.totalSales > 0
@@ -222,7 +209,7 @@ export function Dashboard() {
             Painel <span className="text-teal-600">Administrativo</span>
           </h2>
           <p className="text-slate-500 font-medium text-base">
-            Visão geral do desempenho clínico e conversas.
+            Resumo do período selecionado (por data do evento). Detalhe por coorte fica em Comercial e Marketing.
           </p>
         </motion.div>
 
@@ -350,24 +337,16 @@ export function Dashboard() {
         {/* Lado Esquerdo: Grid de Cards Principais (3 colunas) */}
         <div className="lg:col-span-3 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {[
-            // Primeira Linha: Recebido, A Receber, Investimento
+            // Dinheiro
             { title: "Recebido", value: `R$ ${stats.totalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: "Pago no caixa", icon: TrendingUp, color: "bg-emerald-50 text-emerald-600" },
             { title: "A Receber", value: `R$ ${stats.pendingRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: "Transações pendentes", icon: Clock, color: "bg-amber-50 text-amber-600" },
             { title: "Investimento", value: `R$ ${stats.totalInvestment.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: "Em mídia paga", icon: DollarSign, color: "bg-sky-50 text-sky-600" },
-
-            // Segunda Linha: ROAS, Convertido, Vendas
             { title: "ROAS", value: roas > 0 ? `${roas.toFixed(2).replace('.', ',')}x` : "—", trend: "Recebido ÷ Investimento", icon: Activity, color: "bg-teal-50 text-teal-600" },
-            { title: "Convertido (Marketing)", value: `R$ ${stats.totalConversionsValue.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: "Valor de leads fechados", icon: ShoppingCart, color: "bg-violet-50 text-violet-600" },
-            
-            // Terceira Linha: Novos Leads, Agendamentos, Vendas
-            { title: "Novos Leads", value: `+${stats.totalLeads}`, trend: "Interações no período", icon: MessageSquare, color: "bg-indigo-50 text-indigo-600" },
-            { title: "Agendamentos", value: stats.totalAppointments.toString(), trend: trendLabel, icon: CalendarCheck, color: "bg-teal-50 text-teal-600" },
-            { title: "Vendas (Leads)", value: stats.totalSales.toString(), trend: "Convertidos no período", icon: ShoppingCart, color: "bg-rose-50 text-rose-600" },
 
-            // Terceira Linha: Atendimento (SLA, Tempo Resposta, Ciclo Vendas)
-            { title: "Estouros de SLA", value: stats.totalSlaBreaches.toString(), trend: "Atrasos no atendimento", icon: AlertCircle, color: "bg-red-50 text-red-600" },
-            { title: "Tempo de Resposta", value: stats.avgResponseTime > 0 ? `${stats.avgResponseTime.toFixed(0)} min` : "—", trend: "Média p/ primeiro handoff", icon: Timer, color: "bg-blue-50 text-blue-600" },
-            { title: "Ciclo de Vendas", value: stats.avgSalesCycle > 0 ? `${stats.avgSalesCycle.toFixed(1)} dias` : "—", trend: "Lead → Conversão", icon: Clock, color: "bg-purple-50 text-purple-600" },
+            // Comercial
+            { title: "Novos Leads", value: `+${stats.totalLeads}`, trend: "Interações no período", icon: MessageSquare, color: "bg-indigo-50 text-indigo-600" },
+            { title: "Agendamentos", value: stats.totalAppointments.toString(), trend: "Consultas com data no período", icon: CalendarCheck, color: "bg-teal-50 text-teal-600" },
+            { title: "Vendas (Leads)", value: stats.totalSales.toString(), trend: "Convertidos no período", icon: ShoppingCart, color: "bg-rose-50 text-rose-600" },
           ].map((stat, i) => (
             <motion.div key={stat.title} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }}>
               <Card className="overflow-hidden border border-slate-100 shadow-sm h-full">
@@ -399,11 +378,9 @@ export function Dashboard() {
           <CardContent className="flex-1">
             <div className="space-y-3">
               {[
-                { label: "CPL (Custo p/ Lead)", value: cpl > 0 ? `R$ ${cpl.toFixed(2).replace('.', ',')}` : "—", description: "Investimento ÷ Leads", icon: Target, color: "text-amber-600 bg-amber-50" },
-                { label: "CAC (Custo p/ Venda)", value: cac > 0 ? `R$ ${cac.toFixed(2).replace('.', ',')}` : "—", description: "Investimento ÷ Vendas", icon: Users, color: "text-indigo-600 bg-indigo-50" },
-                { label: "Custo p/ Agend.", value: cpApt > 0 ? `R$ ${cpApt.toFixed(2).replace('.', ',')}` : "—", description: "Investimento ÷ Agend.", icon: Calendar, color: "text-violet-600 bg-violet-50" },
                 { label: "Taxa de Conversão", value: conversionRate > 0 ? `${conversionRate.toFixed(1).replace('.', ',')}%` : "—", description: "Vendas ÷ Leads", icon: TrendingUp, color: "text-emerald-600 bg-emerald-50" },
                 { label: "Ticket Médio", value: averageTicket > 0 ? `R$ ${averageTicket.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}` : "—", description: "Receita ÷ Vendas", icon: DollarSign, color: "text-teal-600 bg-teal-50" },
+                { label: "CAC (Custo p/ Venda)", value: cac > 0 ? `R$ ${cac.toFixed(2).replace('.', ',')}` : "—", description: "Investimento ÷ Vendas", icon: Users, color: "text-indigo-600 bg-indigo-50" },
               ].map((metric) => (
                 <div key={metric.label} className="flex items-center gap-3 p-2 rounded-xl bg-slate-50/80 border border-slate-100">
                   <div className={cn("p-2 rounded-lg", metric.color)}>
@@ -553,6 +530,31 @@ export function Dashboard() {
           />
         </CardContent>
       </Card>
+
+      {/* Rodapé: métricas de atendimento (secundário) */}
+      <div className="pt-2">
+        <h3 className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-3 px-1">Atendimento</h3>
+        <div className="grid gap-4 sm:grid-cols-3">
+          {[
+            { title: "Estouros de SLA", value: stats.totalSlaBreaches.toString(), trend: "Atrasos no atendimento", icon: AlertCircle, color: "bg-red-50 text-red-600" },
+            { title: "Tempo de Resposta", value: stats.avgResponseTime > 0 ? `${stats.avgResponseTime.toFixed(0)} min` : "—", trend: "Média até a 1ª resposta", icon: Timer, color: "bg-blue-50 text-blue-600" },
+            { title: "Ciclo de Vendas", value: stats.avgSalesCycle > 0 ? `${stats.avgSalesCycle.toFixed(1)} dias` : "—", trend: "Lead → Conversão", icon: Clock, color: "bg-purple-50 text-purple-600" },
+          ].map((stat) => (
+            <Card key={stat.title} className="border border-slate-100 shadow-sm bg-slate-50/40">
+              <CardContent className="flex items-center gap-3 py-4">
+                <div className={cn("p-2 rounded-lg shrink-0", stat.color)}>
+                  <stat.icon className="h-4 w-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">{stat.title}</p>
+                  <p className="text-lg font-bold text-slate-900 leading-tight">{stat.value}</p>
+                  <p className="text-[9px] font-medium text-slate-400">{stat.trend}</p>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

@@ -577,13 +577,13 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
           <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-emerald-50 border border-emerald-100 text-center">
             <Hourglass className="w-5 h-5 text-emerald-500 mb-1" />
             <p className="text-2xl font-bold text-emerald-700">{fmtResponseTime(sla.firstResponseMin, sla.responseCycles)}</p>
-            <p className="text-[10px] font-bold text-emerald-500/80 uppercase tracking-wider mt-1">Tempo da 1ª resposta</p>
+            <p className="text-[10px] font-bold text-emerald-500/80 uppercase tracking-wider mt-1">Tempo médio da 1ª resposta</p>
             {sla.slaMinutes > 0 && <p className="text-[10px] text-slate-400 font-medium mt-0.5">meta: {fmtDuration(sla.slaMinutes)}</p>}
           </div>
           <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-slate-50 border border-slate-100 text-center">
             <Clock className="w-5 h-5 text-slate-400 mb-1" />
             <p className="text-2xl font-bold text-slate-700">{fmtResponseTime(sla.responseMin, sla.responseCycles)}</p>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">Tempo de resposta</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">Tempo médio de respostas</p>
             <p className="text-[10px] text-slate-400 font-medium mt-0.5">todas as respostas</p>
           </div>
           <div className={`flex flex-col items-center justify-center p-4 rounded-xl border text-center ${sla.breaches > 0 ? "bg-rose-50/60 border-rose-200" : "bg-emerald-50/60 border-emerald-200"}`}>
@@ -594,7 +594,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
           <div className={`flex flex-col items-center justify-center p-4 rounded-xl border text-center ${sla.overBreachMin > 0 ? "bg-amber-50/60 border-amber-200" : "bg-emerald-50/60 border-emerald-200"}`}>
             <Timer className={`w-5 h-5 mb-1 ${sla.overBreachMin > 0 ? "text-amber-500" : "text-emerald-500"}`} />
             <p className={`text-2xl font-bold ${sla.overBreachMin > 0 ? "text-amber-700" : "text-emerald-700"}`}>{sla.breaches > 0 ? fmtDuration(sla.overBreachMin) : "—"}</p>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">Tempo estourado</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">Tempo médio de estouro de SLA</p>
             <p className="text-[10px] text-slate-400 font-medium mt-0.5">além da meta</p>
           </div>
         </div>

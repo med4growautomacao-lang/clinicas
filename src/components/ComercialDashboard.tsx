@@ -57,7 +57,7 @@ interface CommercialData {
   };
   messages: { inbound: number; total: number };
   appointments: { total: number; ia: number; manual: number; byStatus: Record<string, number> };
-  sla: { breaches: number; pending: number; avgFirstResponseMin: number; medianFirstResponseMin: number; slaMinutes: number };
+  sla: { breaches: number; firstResponseMin: number; responseMin: number; overBreachMin: number; slaMinutes: number };
   finance: { revenue: number; investment: number; investmentTotal: number; convertedValue: number; salesCycleDays: number; attendedConsults: number };
   outcomes: { won: number; lost: number };
   agent: AgentFilter;
@@ -425,7 +425,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
     { id: "custo_agendamento", title: "Custo por Agendamento", value: costPerAppt != null ? fmtBRL(costPerAppt) : "—", icon: Target, color: "text-rose-600", bg: "bg-rose-50", sub: "investimento ÷ agendamentos", agentScoped: true, originScoped: true },
     { id: "ticket_medio", title: "Ticket Médio das Consultas", value: avgTicket != null ? fmtBRL(avgTicket) : "—", icon: DollarSign, color: "text-blue-600", bg: "bg-blue-50", sub: fin.attendedConsults > 0 ? `valor convertido ÷ ${fin.attendedConsults} realizadas` : "sem consultas realizadas", agentScoped: false, originScoped: false },
     { id: "faturamento", title: "Faturamento Gerado", value: fmtBRL(fin.revenue), icon: Wallet, color: "text-emerald-700", bg: "bg-emerald-50", agentScoped: false, originScoped: false },
-    { id: "tempo_resposta", title: "Tempo Médio de Resposta", value: fmtDuration(sla.medianFirstResponseMin), icon: Clock, color: "text-amber-600", bg: "bg-amber-50", sub: sla.slaMinutes > 0 ? `meta: ${fmtDuration(sla.slaMinutes)}` : undefined, agentScoped: true, originScoped: true },
+    { id: "tempo_resposta", title: "Tempo de Resposta", value: fmtDuration(sla.responseMin), icon: Clock, color: "text-amber-600", bg: "bg-amber-50", sub: sla.slaMinutes > 0 ? `meta: ${fmtDuration(sla.slaMinutes)}` : undefined, agentScoped: true, originScoped: true },
     { id: "ciclo_vendas", title: "Ciclo Médio de Vendas", value: fin.salesCycleDays > 0 ? `${fin.salesCycleDays} dias` : "—", icon: Timer, color: "text-indigo-600", bg: "bg-indigo-50", agentScoped: false, originScoped: true },
     { id: "roas", title: "ROAS", value: roas != null ? `${roas.toFixed(1)}x` : "—", icon: TrendingUp, color: "text-violet-600", bg: "bg-violet-50", sub: fin.investmentTotal > 0 ? `${fmtBRL(fin.revenue)} ÷ ${fmtBRL(fin.investmentTotal)}` : "sem investimento", agentScoped: false, originScoped: false },
   ];
@@ -437,7 +437,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
   const agentTiles =
     agent === "ia"
       ? [
-          { icon: MessageSquare, label: "Mensagens enviadas", value: agents.ia.messagesOut, color: "text-teal-600", bg: "bg-teal-50" },
+          { icon: MessageSquare, label: "Mensagens respondidas", value: agents.ia.messagesOut, color: "text-teal-600", bg: "bg-teal-50" },
           { icon: Users, label: "Leads atendidos", value: agents.ia.leadsTouched, color: "text-teal-600", bg: "bg-teal-50" },
           { icon: CalendarCheck, label: "Agendamentos", value: agents.ia.appointments, color: "text-emerald-600", bg: "bg-emerald-50" },
           { icon: CheckCircle2, label: "Resolvidos sem humano", value: agents.ia.autonomous, color: "text-blue-600", bg: "bg-blue-50" },
@@ -445,7 +445,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
         ]
       : agent === "humano"
       ? [
-          { icon: MessageSquare, label: "Mensagens enviadas", value: agents.humano.messagesOut, color: "text-blue-600", bg: "bg-blue-50" },
+          { icon: MessageSquare, label: "Mensagens respondidas", value: agents.humano.messagesOut, color: "text-blue-600", bg: "bg-blue-50" },
           { icon: CalendarCheck, label: "Agendamentos manuais", value: agents.humano.appointments, color: "text-emerald-600", bg: "bg-emerald-50" },
           { icon: ArrowRightLeft, label: "Conversas assumidas", value: agents.humano.handoffsReceived, color: "text-orange-600", bg: "bg-orange-50" },
           { icon: MessageSquare, label: "Mensagens recebidas (leads)", value: data.messages.inbound, color: "text-slate-500", bg: "bg-slate-100" },
@@ -567,24 +567,26 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-emerald-50 border border-emerald-100 text-center">
             <Hourglass className="w-5 h-5 text-emerald-500 mb-1" />
-            <p className="text-2xl font-bold text-emerald-700">{fmtDuration(sla.medianFirstResponseMin)}</p>
-            <p className="text-[10px] font-bold text-emerald-500/80 uppercase tracking-wider mt-1">1ª resposta (mediana)</p>
+            <p className="text-2xl font-bold text-emerald-700">{fmtDuration(sla.firstResponseMin)}</p>
+            <p className="text-[10px] font-bold text-emerald-500/80 uppercase tracking-wider mt-1">Tempo da 1ª resposta</p>
             {sla.slaMinutes > 0 && <p className="text-[10px] text-slate-400 font-medium mt-0.5">meta: {fmtDuration(sla.slaMinutes)}</p>}
           </div>
           <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-slate-50 border border-slate-100 text-center">
             <Clock className="w-5 h-5 text-slate-400 mb-1" />
-            <p className="text-2xl font-bold text-slate-700">{fmtDuration(sla.avgFirstResponseMin)}</p>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">1ª resposta (média)</p>
+            <p className="text-2xl font-bold text-slate-700">{fmtDuration(sla.responseMin)}</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">Tempo de resposta</p>
+            <p className="text-[10px] text-slate-400 font-medium mt-0.5">todas as respostas</p>
           </div>
           <div className={`flex flex-col items-center justify-center p-4 rounded-xl border text-center ${sla.breaches > 0 ? "bg-rose-50/60 border-rose-200" : "bg-emerald-50/60 border-emerald-200"}`}>
             <AlertTriangle className={`w-5 h-5 mb-1 ${sla.breaches > 0 ? "text-rose-500" : "text-emerald-500"}`} />
             <p className={`text-2xl font-bold ${sla.breaches > 0 ? "text-rose-700" : "text-emerald-700"}`}>{sla.breaches}</p>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">SLA violados</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">Estouros de SLA</p>
           </div>
-          <div className={`flex flex-col items-center justify-center p-4 rounded-xl border text-center ${sla.pending > 0 ? "bg-amber-50/60 border-amber-200" : "bg-emerald-50/60 border-emerald-200"}`}>
-            <MessageSquare className={`w-5 h-5 mb-1 ${sla.pending > 0 ? "text-amber-500" : "text-emerald-500"}`} />
-            <p className={`text-2xl font-bold ${sla.pending > 0 ? "text-amber-700" : "text-emerald-700"}`}>{sla.pending}</p>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">Aguardando resposta</p>
+          <div className={`flex flex-col items-center justify-center p-4 rounded-xl border text-center ${sla.overBreachMin > 0 ? "bg-amber-50/60 border-amber-200" : "bg-emerald-50/60 border-emerald-200"}`}>
+            <Timer className={`w-5 h-5 mb-1 ${sla.overBreachMin > 0 ? "text-amber-500" : "text-emerald-500"}`} />
+            <p className={`text-2xl font-bold ${sla.overBreachMin > 0 ? "text-amber-700" : "text-emerald-700"}`}>{sla.breaches > 0 ? fmtDuration(sla.overBreachMin) : "—"}</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">Tempo estourado</p>
+            <p className="text-[10px] text-slate-400 font-medium mt-0.5">além da meta</p>
           </div>
         </div>
       </CardContent>

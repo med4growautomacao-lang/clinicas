@@ -1,7 +1,7 @@
--- Painel Comercial — card "Ticket Médio (Agendamentos)": valor MÉDIO por agendamento JÁ CRIADO
--- no período = AVG(estimated_value do lead) sobre os agendamentos (mesmo escopo agente+origem do
--- contador de agendamentos). Expõe também o ticket configurado (ai_config.default_ticket_value)
--- para comparação no subtítulo. Mudanças vs. 20260617000004: finance.apptTicketAvg + finance.defaultTicket.
+-- Painel Comercial — expõe o TICKET MÉDIO configurado da clínica (ai_config.default_ticket_value)
+-- em finance.defaultTicket, para dois cards: "Ticket Médio (configurado)" = espelho do valor, e
+-- "Faturamento (Agendamentos)" = nº de agendamentos criados × ticket configurado (calculado no front).
+-- Única mudança vs. 20260617000004: lê default_ticket_value de ai_config e devolve finance.defaultTicket.
 CREATE OR REPLACE FUNCTION public.get_commercial_dashboard(
   p_clinic_id uuid,
   p_entry_from date, p_entry_to date,
@@ -25,7 +25,7 @@ DECLARE
   v_won int; v_lost int;
   v_revenue numeric; v_investment numeric; v_investment_total numeric;
   v_sales_cycle numeric; v_attended_consults int; v_converted_value numeric;
-  v_default_ticket numeric; v_appt_est_avg numeric;
+  v_default_ticket numeric;
   v_csat_type text; v_csat_answered int; v_csat_avg numeric; v_csat_dist jsonb;
   v_funnel jsonb; v_daily jsonb;
   v_total_leads int; v_new_leads int;
@@ -171,9 +171,8 @@ BEGIN
   SELECT
     COUNT(*) FILTER (WHERE a.source = 'ia'),
     COUNT(*) FILTER (WHERE a.source = 'manual'),
-    COUNT(*) FILTER (WHERE p_agent = 'todos' OR (p_agent = 'ia' AND a.source = 'ia') OR (p_agent = 'humano' AND a.source = 'manual')),
-    AVG(l.estimated_value) FILTER (WHERE (p_agent = 'todos' OR (p_agent = 'ia' AND a.source = 'ia') OR (p_agent = 'humano' AND a.source = 'manual')) AND l.estimated_value IS NOT NULL)
-  INTO v_appt_ia, v_appt_manual, v_appt_total, v_appt_est_avg
+    COUNT(*) FILTER (WHERE p_agent = 'todos' OR (p_agent = 'ia' AND a.source = 'ia') OR (p_agent = 'humano' AND a.source = 'manual'))
+  INTO v_appt_ia, v_appt_manual, v_appt_total
   FROM appointments a
   LEFT JOIN tickets t ON t.id = a.ticket_id
   LEFT JOIN leads l ON l.id = t.lead_id
@@ -411,7 +410,7 @@ BEGIN
     'finance', jsonb_build_object('revenue', COALESCE(v_revenue,0), 'investment', COALESCE(v_investment,0),
       'investmentTotal', COALESCE(v_investment_total,0), 'convertedValue', COALESCE(v_converted_value,0),
       'salesCycleDays', ROUND(COALESCE(v_sales_cycle,0),1), 'attendedConsults', COALESCE(v_attended_consults,0),
-      'defaultTicket', COALESCE(v_default_ticket,0), 'apptTicketAvg', COALESCE(v_appt_est_avg,0)),
+      'defaultTicket', COALESCE(v_default_ticket,0)),
     'outcomes', jsonb_build_object('won', COALESCE(v_won,0), 'lost', COALESCE(v_lost,0)),
     'csat', jsonb_build_object('type', COALESCE(v_csat_type,'csat'), 'answered', COALESCE(v_csat_answered,0),
       'avg', v_csat_avg, 'distribution', COALESCE(v_csat_dist,'[]'::jsonb)),

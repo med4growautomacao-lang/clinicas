@@ -15,14 +15,15 @@ import {
   BarChart3,
   Calendar,
   ChevronRight,
-  Clock,
-  Timer,
-  AlertCircle
+  Clock
 } from "lucide-react";
 import { TrendBarChart, fmtByType } from "./TrendBarChart";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { useDashboardStats, useAppointments, useDoctors } from "../hooks/useSupabase";
+import GoogleLogo from "../assets/logos/Logo Googleads.png";
+import MetaLogo from "../assets/logos/Logo Metaads.png";
+import SemOrigemLogo from "../assets/logos/Logo Sem origem.png";
 import { CalendarView } from "./CalendarView";
 import {
   format,
@@ -43,6 +44,7 @@ type Period = 'dia' | 'sem' | 'mês';
 export function Dashboard() {
   const [period, setPeriod] = useState<Period>('mês');
   const [isPeriodOpen, setIsPeriodOpen] = useState(false);
+  const [origin, setOrigin] = useState<'todos' | 'meta' | 'google' | 'sem_origem'>('todos');
   const [activeRangeLabel, setActiveRangeLabel] = useState("ESTE MÊS");
   const [dateRange, setDateRange] = useState({
     start: startOfMonth(new Date()),
@@ -54,7 +56,7 @@ export function Dashboard() {
     end: format(dateRange.end, 'yyyy-MM-dd')
   }), [dateRange]);
 
-  const { data: stats, loading } = useDashboardStats(statsDateRange);
+  const { data: stats, loading } = useDashboardStats(statsDateRange, origin);
   const { data: appointments } = useAppointments();
   const { data: doctors } = useDoctors();
   const [calendarMonth, setCalendarMonth] = useState(new Date());
@@ -163,9 +165,8 @@ export function Dashboard() {
     ? ((stats.totalSales / stats.totalLeads) * 100)
     : 0;
 
-  const averageTicket = stats.totalSales > 0 && stats.totalRevenue > 0
-    ? (stats.totalRevenue / stats.totalSales)
-    : 0;
+  const configuredTicket = stats.defaultTicket > 0 ? stats.defaultTicket : 0;
+  const convLeadAppt = stats.totalLeads > 0 ? (stats.totalAppointments / stats.totalLeads) * 100 : 0;
 
   const roas = stats.totalInvestment > 0 && stats.totalRevenue > 0
     ? (stats.totalRevenue / stats.totalInvestment)
@@ -311,6 +312,29 @@ export function Dashboard() {
               </AnimatePresence>
             </div>
           </div>
+
+          {/* Filtro de origem (Todos / Meta / Google / Orgânico) */}
+          <div className="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
+            {[
+              { id: 'todos', label: 'Todos', logo: null as string | null },
+              { id: 'meta', label: 'Meta', logo: MetaLogo },
+              { id: 'google', label: 'Google', logo: GoogleLogo },
+              { id: 'sem_origem', label: 'Orgânico', logo: SemOrigemLogo },
+            ].map((o) => (
+              <button
+                key={o.id}
+                onClick={() => setOrigin(o.id as 'todos' | 'meta' | 'google' | 'sem_origem')}
+                className={cn(
+                  "flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all",
+                  origin === o.id ? "text-white shadow-sm" : "text-slate-400 hover:text-slate-600 hover:bg-slate-50"
+                )}
+                style={origin === o.id ? { backgroundColor: '#1e293b' } : {}}
+              >
+                {o.logo && <img src={o.logo} alt={o.label} className={cn("w-3 h-3 object-contain", origin === o.id ? "brightness-0 invert" : "")} />}
+                {o.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -341,9 +365,6 @@ export function Dashboard() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold text-slate-900">{stat.value}</div>
-                  <div className="flex items-center gap-1 mt-1">
-                    <p className="text-[10px] font-medium text-slate-400 capitalize">{stat.trend}</p>
-                  </div>
                 </CardContent>
               </Card>
             </motion.div>
@@ -355,14 +376,15 @@ export function Dashboard() {
           <CardHeader className="pb-3">
             <CardTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
               <BarChart3 className="w-5 h-5 text-teal-600" />
-              Conversão
+              Métricas Secundárias
             </CardTitle>
           </CardHeader>
           <CardContent className="flex-1">
             <div className="space-y-3">
               {[
-                { label: "Taxa de Conversão", value: conversionRate > 0 ? `${conversionRate.toFixed(1).replace('.', ',')}%` : "—", description: "Vendas ÷ Leads", icon: TrendingUp, color: "text-emerald-600 bg-emerald-50" },
-                { label: "Ticket Médio", value: averageTicket > 0 ? `R$ ${averageTicket.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}` : "—", description: "Receita ÷ Vendas", icon: DollarSign, color: "text-teal-600 bg-teal-50" },
+                { label: "Conversão Lead → Venda", value: conversionRate > 0 ? `${conversionRate.toFixed(1).replace('.', ',')}%` : "—", description: "Vendas ÷ Leads", icon: TrendingUp, color: "text-emerald-600 bg-emerald-50" },
+                { label: "Conversão Lead → Agendamento", value: convLeadAppt > 0 ? `${convLeadAppt.toFixed(1).replace('.', ',')}%` : "—", description: "Agendamentos ÷ Leads", icon: CalendarCheck, color: "text-cyan-600 bg-cyan-50" },
+                { label: "Ticket Médio", value: configuredTicket > 0 ? `R$ ${configuredTicket.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—", description: "Definido em Dados da Clínica", icon: DollarSign, color: "text-teal-600 bg-teal-50" },
                 { label: "CAC (Custo p/ Venda)", value: cac > 0 ? `R$ ${cac.toFixed(2).replace('.', ',')}` : "—", description: "Investimento ÷ Vendas", icon: Users, color: "text-indigo-600 bg-indigo-50" },
               ].map((metric) => (
                 <div key={metric.label} className="flex items-center gap-3 p-2 rounded-xl bg-slate-50/80 border border-slate-100">
@@ -371,7 +393,6 @@ export function Dashboard() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-[10px] font-bold text-slate-900 leading-tight">{metric.label}</p>
-                    <p className="text-[8px] text-slate-400 font-medium">{metric.description}</p>
                   </div>
                   <span className="text-xs font-bold text-slate-900 tabular-nums">{metric.value}</span>
                 </div>
@@ -439,31 +460,6 @@ export function Dashboard() {
           />
         </CardContent>
       </Card>
-
-      {/* Rodapé: métricas de atendimento (secundário) */}
-      <div className="pt-2">
-        <h3 className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-3 px-1">Atendimento</h3>
-        <div className="grid gap-4 sm:grid-cols-3">
-          {[
-            { title: "Estouros de SLA", value: stats.totalSlaBreaches.toString(), trend: "Atrasos no atendimento", icon: AlertCircle, color: "bg-red-50 text-red-600" },
-            { title: "Tempo de Resposta", value: stats.avgResponseTime > 0 ? `${stats.avgResponseTime.toFixed(0)} min` : "—", trend: "Média até a 1ª resposta", icon: Timer, color: "bg-blue-50 text-blue-600" },
-            { title: "Ciclo de Vendas", value: stats.avgSalesCycle > 0 ? `${stats.avgSalesCycle.toFixed(1)} dias` : "—", trend: "Lead → Conversão", icon: Clock, color: "bg-purple-50 text-purple-600" },
-          ].map((stat) => (
-            <Card key={stat.title} className="border border-slate-100 shadow-sm bg-slate-50/40">
-              <CardContent className="flex items-center gap-3 py-4">
-                <div className={cn("p-2 rounded-lg shrink-0", stat.color)}>
-                  <stat.icon className="h-4 w-4" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">{stat.title}</p>
-                  <p className="text-lg font-bold text-slate-900 leading-tight">{stat.value}</p>
-                  <p className="text-[9px] font-medium text-slate-400">{stat.trend}</p>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }

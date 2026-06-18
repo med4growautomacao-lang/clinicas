@@ -1019,6 +1019,7 @@ export interface DashboardStats {
   totalSlaBreaches: number;
   avgResponseTime: number; // minutes
   avgSalesCycle: number; // days
+  defaultTicket: number; // ticket configurado (ai_config.default_ticket_value)
   chartData: {
     date: string;
     agendamentos: number;
@@ -1029,7 +1030,7 @@ export interface DashboardStats {
   }[];
 }
 
-export function useDashboardStats(dateRange?: { start: string; end: string }) {
+export function useDashboardStats(dateRange?: { start: string; end: string }, origin: string = 'todos') {
   const { profile, activeClinicId } = useAuth();
   const [data, setData] = useState<DashboardStats>({
     totalAppointments: 0,
@@ -1043,6 +1044,7 @@ export function useDashboardStats(dateRange?: { start: string; end: string }) {
     totalSlaBreaches: 0,
     avgResponseTime: 0,
     avgSalesCycle: 0,
+    defaultTicket: 0,
     chartData: []
   });
   const [loading, setLoading] = useState(true);
@@ -1059,6 +1061,7 @@ export function useDashboardStats(dateRange?: { start: string; end: string }) {
         p_clinic_id: activeClinicId,
         p_date_from: startOfMonth,
         p_date_to: endOfMonth,
+        p_origin: origin,
       });
       if (error) throw error;
       const r = data as any;
@@ -1074,6 +1077,7 @@ export function useDashboardStats(dateRange?: { start: string; end: string }) {
         totalSlaBreaches: r?.totalSlaBreaches || 0,
         avgResponseTime: Number(r?.avgResponseTime || 0),
         avgSalesCycle: Number(r?.avgSalesCycle || 0),
+        defaultTicket: Number(r?.defaultTicket || 0),
         chartData: (r?.chartData || []) as any,
       });
     } catch (error) {
@@ -1081,7 +1085,7 @@ export function useDashboardStats(dateRange?: { start: string; end: string }) {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [activeClinicId, dateRange?.start, dateRange?.end]);
+  }, [activeClinicId, dateRange?.start, dateRange?.end, origin]);
 
   useEffect(() => {
     load();

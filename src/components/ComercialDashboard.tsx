@@ -20,6 +20,7 @@ import {
   Hourglass,
   BellRing,
   TrendingUp,
+  Trophy,
   DollarSign,
   Wallet,
   Timer,
@@ -38,7 +39,7 @@ import { DayPicker } from "react-day-picker";
 import { useAuth } from "../contexts/AuthContext";
 import { supabase } from "../lib/supabase";
 import { cn } from "../lib/utils";
-import { TrendBarChart } from "./TrendBarChart";
+import { TrendBarChart, fmtByType } from "./TrendBarChart";
 import { Button } from "./ui/button";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
@@ -61,9 +62,10 @@ interface CommercialData {
   agent: AgentFilter;
   csat: { type: string; answered: number; avg: number | null; distribution: { score: number; count: number }[] };
   funnel: { stage_id: string; name: string; slug: string | null; position: number; is_conversion: boolean; color: string | null; leads: number }[];
-  daily: { date: string; aiMessages: number; humanMessages: number; leads: number; appointments: number; handoffs: number; followups: number }[];
+  daily: { date: string; aiMessages: number; humanMessages: number; leads: number; appointments: number; realizadas: number; ganhos: number; faturamento: number; faturamentoProjetado: number; investment: number; handoffs: number; followups: number }[];
   totalLeads: number;
   newLeads: number;
+  agendaViaFunil?: boolean;
 }
 
 // Linha da lista de leads do drill-down (RPC get_commercial_leads)
@@ -85,7 +87,7 @@ interface LeadRow {
 type Period = "dia" | "sem" | "mês";
 type AgentFilter = "todos" | "ia" | "humano";
 type OriginFilter = "todos" | "meta" | "google" | "sem_origem";
-type ChartMetric = "humanMessages" | "aiMessages" | "leads" | "appointments" | "handoffs" | "followups";
+type ChartMetric = "humanMessages" | "aiMessages" | "leads" | "appointments" | "realizadas" | "ganhos" | "faturamento" | "faturamentoProjetado" | "handoffs" | "followups" | "convAgend" | "convConsulta" | "custoAgend" | "cac" | "roasReal" | "roasProj" | "ticketMedio";
 
 // ==========================================
 // Helpers
@@ -141,7 +143,8 @@ const RANGE_PRESETS = [
   { id: "last_month", label: "Mês Passado" },
 ];
 
-type DailyPoint = { date: string; aiMessages: number; humanMessages: number; leads: number; appointments: number; handoffs: number; followups: number };
+type DailyPoint = { date: string; aiMessages: number; humanMessages: number; leads: number; appointments: number; realizadas: number; ganhos: number; faturamento: number; faturamentoProjetado: number; investment: number; handoffs: number; followups: number };
+type DailyBucket = Omit<DailyPoint, "date"> & { label: string };
 
 // Agrupa a série diária por dia / semana / mês para o gráfico de tendência
 function bucketDaily(daily: DailyPoint[], period: Period): (Omit<DailyPoint, "date"> & { label: string })[] {
@@ -152,9 +155,10 @@ function bucketDaily(daily: DailyPoint[], period: Period): (Omit<DailyPoint, "da
     const anchor = period === "sem" ? startOfWeek(dt, { weekStartsOn: 0 }) : startOfMonth(dt);
     const key = format(anchor, period === "sem" ? "yyyy-ww" : "yyyy-MM");
     const label = period === "sem" ? format(anchor, "dd/MM") : format(anchor, "MMM", { locale: ptBR });
-    const b = map.get(key) || { label, aiMessages: 0, humanMessages: 0, leads: 0, appointments: 0, handoffs: 0, followups: 0 };
+    const b = map.get(key) || { label, aiMessages: 0, humanMessages: 0, leads: 0, appointments: 0, realizadas: 0, ganhos: 0, faturamento: 0, faturamentoProjetado: 0, investment: 0, handoffs: 0, followups: 0 };
     b.aiMessages += d.aiMessages; b.humanMessages += d.humanMessages; b.leads += d.leads;
     b.appointments += d.appointments; b.handoffs += d.handoffs; b.followups += d.followups;
+    b.realizadas += d.realizadas; b.ganhos += d.ganhos; b.faturamento += d.faturamento; b.faturamentoProjetado += d.faturamentoProjetado; b.investment += d.investment;
     map.set(key, b);
   }
   return Array.from(map.values());
@@ -216,14 +220,40 @@ const AUTOMATION_LABELS: Record<string, string> = {
   handoff: "Handoffs",
 };
 
-const CHART_METRICS: { label: string; value: ChartMetric; icon: any }[] = [
-  { label: "Msgs Humano", value: "humanMessages", icon: UserCheck },
-  { label: "Msgs IA", value: "aiMessages", icon: Bot },
+const CHART_METRICS: { label: string; value: ChartMetric; icon: any; type?: string }[] = [
   { label: "Novos Leads", value: "leads", icon: Users },
   { label: "Agendamentos", value: "appointments", icon: CalendarCheck },
+  { label: "Consultas Realizadas", value: "realizadas", icon: CheckCircle2 },
+  { label: "Vendas (ganhos)", value: "ganhos", icon: Trophy },
+  { label: "Conversão Lead → Agend.", value: "convAgend", icon: Percent, type: "percent" },
+  { label: "Conversão Lead → Consulta", value: "convConsulta", icon: Percent, type: "percent" },
+  { label: "Custo por Agendamento", value: "custoAgend", icon: Target, type: "currency" },
+  { label: "CAC", value: "cac", icon: UserCheck, type: "currency" },
+  { label: "Faturamento Real", value: "faturamento", icon: Wallet, type: "currency" },
+  { label: "Faturamento Projetado", value: "faturamentoProjetado", icon: Wallet, type: "currency" },
+  { label: "ROAS Real", value: "roasReal", icon: TrendingUp, type: "ratio" },
+  { label: "ROAS Projetado", value: "roasProj", icon: TrendingUp, type: "ratio" },
+  { label: "Ticket Médio", value: "ticketMedio", icon: DollarSign, type: "currency" },
+  { label: "Msgs IA", value: "aiMessages", icon: Bot },
+  { label: "Msgs Humano", value: "humanMessages", icon: UserCheck },
   { label: "Handoffs", value: "handoffs", icon: ArrowRightLeft },
   { label: "Follow-ups", value: "followups", icon: BellRing },
 ];
+
+// Calcula o valor da métrica selecionada num bucket (dia/semana/mês). Taxas/derivadas usam os
+// brutos agregados do bucket (numerador/denominador); o resto lê o campo direto.
+function chartValue(d: DailyBucket, metric: ChartMetric, ticket: number): number {
+  switch (metric) {
+    case "convAgend": return d.leads > 0 ? (d.appointments / d.leads) * 100 : 0;
+    case "convConsulta": return d.leads > 0 ? (d.realizadas / d.leads) * 100 : 0;
+    case "custoAgend": return d.appointments > 0 ? d.investment / d.appointments : 0;
+    case "cac": return d.ganhos > 0 ? d.investment / d.ganhos : 0;
+    case "roasReal": return d.investment > 0 ? d.faturamento / d.investment : 0;
+    case "roasProj": return d.investment > 0 ? d.faturamentoProjetado / d.investment : 0;
+    case "ticketMedio": return ticket;
+    default: return (d as any)[metric] ?? 0;
+  }
+}
 
 // ==========================================
 // Componente principal
@@ -444,7 +474,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
     { id: "leads", title: "Leads", value: leadsValue, icon: Users, color: "text-cyan-600", bg: "bg-cyan-50", sub: agent === "todos" ? "entraram no período" : `atendidos ${agentNoun}`, agentScoped: true, originScoped: true },
     { id: "conversao_agend", title: "Conversão Lead → Agendamento", value: `${convAgendRate.toFixed(1)}%`, icon: Percent, color: "text-emerald-600", bg: "bg-emerald-50", sub: `${appointments.total} agend. ${agentNoun} ÷ ${leadsValue} ${leadsDenomLabel}`, agentScoped: true, originScoped: true },
     { id: "conversao_consulta", title: "Conversão Lead → Consulta", value: `${convConsultaRate.toFixed(1)}%`, icon: CheckCircle2, color: "text-green-600", bg: "bg-green-50", sub: `${attended} realizadas ÷ ${leadsValue} ${leadsDenomLabel}`, agentScoped: true, originScoped: true },
-    { id: "consultas", title: "Agendamentos Gerados", value: appointments.total, icon: CalendarCheck, color: "text-teal-600", bg: "bg-teal-50", sub: agent === "todos" ? `${appointments.ia} IA · ${appointments.manual} manual` : `via ${agentNoun}`, agentScoped: true, originScoped: true },
+    { id: "consultas", title: "Agendamentos Gerados", value: appointments.total, icon: CalendarCheck, color: "text-teal-600", bg: "bg-teal-50", sub: data.agendaViaFunil ? "via etapa do funil" : (agent === "todos" ? `${appointments.ia} IA · ${appointments.manual} manual` : `via ${agentNoun}`), agentScoped: true, originScoped: true },
     { id: "faturamento_agendado", title: "Faturamento Projetado", value: projectedRevenue != null ? fmtBRL(projectedRevenue) : "—", icon: Wallet, color: "text-emerald-700", bg: "bg-emerald-50", sub: configuredTicket != null ? `${validAppts} agend. ativos × ${fmtBRL(configuredTicket)}` : "configure o ticket médio em Dados da Clínica", agentScoped: true, originScoped: true },
     { id: "faturamento", title: "Faturamento Real", value: fmtBRL(fin.revenueScoped ?? fin.revenue), icon: Wallet, color: "text-emerald-700", bg: "bg-emerald-50", sub: "receita das consultas no recorte", agentScoped: true, originScoped: true },
     { id: "consultas_realizadas", title: "Consultas Realizadas", value: attended, icon: CheckCircle2, color: "text-emerald-600", bg: "bg-emerald-50", sub: `${pct(attended, appointments.total)} dos agendamentos`, agentScoped: true, originScoped: true },
@@ -656,7 +686,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
 
   const chartSeries = bucketDaily(data.daily, period);
   const sectionTrend = (
-    <Card key="trend" className="border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+    <Card key="trend" className="border border-slate-200 shadow-sm flex flex-col">
       <CardHeader className="bg-slate-50 border-b border-slate-100 py-3 flex flex-row items-center justify-between">
         <CardTitle className="text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2"><BarChart3 className="w-4 h-4 text-teal-600" />Tendências</CardTitle>
         <div className="relative" ref={dropdownRef}>
@@ -669,7 +699,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
           </button>
           <AnimatePresence>
             {isDropdownOpen && (
-              <motion.div initial={{ opacity: 0, y: 10, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 10, scale: 0.95 }} transition={{ duration: 0.15 }} className="absolute right-0 top-full mt-2 w-56 bg-white border border-slate-100 rounded-xl shadow-xl z-50 py-1.5 overflow-hidden">
+              <motion.div initial={{ opacity: 0, y: 10, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 10, scale: 0.95 }} transition={{ duration: 0.15 }} className="absolute right-0 top-full mt-2 w-56 bg-white border border-slate-100 rounded-xl shadow-xl z-50 py-1.5 max-h-80 overflow-y-auto">
                 {CHART_METRICS.map((m) => (
                   <button key={m.value} onClick={() => { setChartMetric(m.value); setIsDropdownOpen(false); }} className={`w-full flex items-center gap-3 px-3 py-2 text-[11px] font-bold transition-colors ${chartMetric === m.value ? "bg-teal-50 text-teal-700" : "text-slate-500 hover:bg-slate-50 hover:text-slate-700"}`}>
                     <div className={`p-1.5 rounded-lg ${chartMetric === m.value ? "bg-teal-100" : "bg-slate-100"}`}>{React.createElement(m.icon, { className: `w-3.5 h-3.5 ${chartMetric === m.value ? "text-teal-600" : "text-slate-500"}` })}</div>
@@ -682,7 +712,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
         </div>
       </CardHeader>
       <CardContent className="p-6 pt-7">
-        <TrendBarChart series={chartSeries.map((d) => ({ label: d.label, value: d[chartMetric] }))} height={176} />
+        <TrendBarChart series={chartSeries.map((d) => ({ label: d.label, value: chartValue(d, chartMetric, fin.defaultTicket) }))} height={176} format={fmtByType(CHART_METRICS.find((m) => m.value === chartMetric)?.type)} />
       </CardContent>
     </Card>
   );

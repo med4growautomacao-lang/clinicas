@@ -688,7 +688,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
       <CardContent className="p-6 pt-7">
         <div className="flex gap-2">
           {/* Eixo Y — quantidade */}
-          <div className="flex flex-col justify-between items-end text-[9px] font-bold text-slate-300 tabular-nums shrink-0 w-8" style={{ height: CHART_H }}>
+          <div className="flex flex-col justify-between items-end text-[12px] font-extrabold text-black tabular-nums shrink-0 w-9" style={{ height: CHART_H }}>
             <span>{maxVal}</span>
             <span>{Math.round(maxVal / 2)}</span>
             <span>0</span>
@@ -704,7 +704,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
               {avgVal > 0 && (
                 <div className="absolute inset-x-0 z-20 pointer-events-none" style={{ bottom: (avgVal / maxVal) * CHART_H }}>
                   <div className="border-t border-dashed border-teal-500/60" />
-                  <span className="absolute right-0 -top-2.5 text-[8px] font-bold text-teal-600 bg-white/90 px-1 rounded">méd {avgFmt}</span>
+                  <span className="absolute right-0 -top-3 text-[11px] font-extrabold text-black bg-white/90 px-1 rounded">méd {avgFmt}</span>
                 </div>
               )}
               {/* barras */}
@@ -726,7 +726,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
               {chartSeries.map((d, i) => (
                 <div key={`lbl-${d.label}-${i}`} className="flex-1 min-w-0 text-center">
                   {(i % labelStep === 0 || i === chartSeries.length - 1) && (
-                    <span className="block text-[8px] font-bold text-slate-400 uppercase tracking-tighter truncate">{d.label}</span>
+                    <span className="block text-[11px] font-extrabold text-black tracking-tight whitespace-nowrap">{d.label}</span>
                   )}
                 </div>
               ))}

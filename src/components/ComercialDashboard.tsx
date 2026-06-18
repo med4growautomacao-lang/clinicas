@@ -56,7 +56,7 @@ interface CommercialData {
   messages: { inbound: number; total: number };
   appointments: { total: number; ia: number; manual: number; byStatus: Record<string, number> };
   sla: { breaches: number; firstResponseMin: number; responseMin: number; overBreachMin: number; responseCycles: number; slaMinutes: number };
-  finance: { revenue: number; investment: number; investmentTotal: number; convertedValue: number; salesCycleDays: number; attendedConsults: number; defaultTicket: number };
+  finance: { revenue: number; revenueScoped: number; investment: number; investmentTotal: number; convertedValue: number; salesCycleDays: number; attendedConsults: number; defaultTicket: number };
   outcomes: { won: number; lost: number };
   agent: AgentFilter;
   csat: { type: string; answered: number; avg: number | null; distribution: { score: number; count: number }[] };
@@ -446,7 +446,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
     { id: "conversao_consulta", title: "Conversão Lead → Consulta", value: `${convConsultaRate.toFixed(1)}%`, icon: CheckCircle2, color: "text-green-600", bg: "bg-green-50", sub: `${attended} realizadas ÷ ${leadsValue} ${leadsDenomLabel}`, agentScoped: true, originScoped: true },
     { id: "consultas", title: "Agendamentos Gerados", value: appointments.total, icon: CalendarCheck, color: "text-teal-600", bg: "bg-teal-50", sub: agent === "todos" ? `${appointments.ia} IA · ${appointments.manual} manual` : `via ${agentNoun}`, agentScoped: true, originScoped: true },
     { id: "faturamento_agendado", title: "Faturamento Projetado", value: projectedRevenue != null ? fmtBRL(projectedRevenue) : "—", icon: Wallet, color: "text-emerald-700", bg: "bg-emerald-50", sub: configuredTicket != null ? `${validAppts} agend. ativos × ${fmtBRL(configuredTicket)}` : "configure o ticket médio em Dados da Clínica", agentScoped: true, originScoped: true },
-    { id: "faturamento", title: "Faturamento Real", value: fmtBRL(fin.revenue), icon: Wallet, color: "text-emerald-700", bg: "bg-emerald-50", agentScoped: false, originScoped: false },
+    { id: "faturamento", title: "Faturamento Real", value: fmtBRL(fin.revenueScoped ?? fin.revenue), icon: Wallet, color: "text-emerald-700", bg: "bg-emerald-50", sub: "receita das consultas no recorte", agentScoped: true, originScoped: true },
     { id: "consultas_realizadas", title: "Consultas Realizadas", value: attended, icon: CheckCircle2, color: "text-emerald-600", bg: "bg-emerald-50", sub: `${pct(attended, appointments.total)} dos agendamentos`, agentScoped: true, originScoped: true },
     { id: "custo_agendamento", title: "Custo por Agendamento", value: costPerAppt != null ? fmtBRL(costPerAppt) : "—", icon: Target, color: "text-rose-600", bg: "bg-rose-50", sub: "investimento ÷ agendamentos", agentScoped: true, originScoped: true },
     { id: "cac", title: "CAC", value: cac != null ? fmtBRL(cac) : "—", icon: UserCheck, color: "text-rose-600", bg: "bg-rose-50", sub: `investimento ÷ ${outcomes.won} vendas`, agentScoped: false, originScoped: true },

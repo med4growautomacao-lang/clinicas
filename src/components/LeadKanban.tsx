@@ -733,11 +733,13 @@ function CurrencyInput({ value, onChange, className, placeholder, autoFocus }: {
   );
 }
 
-function GanhoModal({ lead, onClose, onCancel, onCreate }: {
-  lead: { id: string; name: string };
+function GanhoModal({ lead, onClose, onCancel, onCreate, createPatient, updateLead }: {
+  lead: { id: string; name: string; phone?: string | null; patientId?: string | null };
   onClose: () => void;
   onCancel: () => void;
   onCreate: (data: Omit<Conversion, 'id' | 'clinic_id' | 'created_at'>) => Promise<boolean>;
+  createPatient: (p: { name: string; phone: string | null }) => Promise<{ id: string } | null>;
+  updateLead: (id: string, payload: { converted_patient_id: string }) => Promise<unknown>;
 }) {
   const { create: createTransaction } = useFinancial();
   const { data: protocols } = useProtocols();
@@ -757,6 +759,18 @@ function GanhoModal({ lead, onClose, onCancel, onCreate }: {
   const handleSave = async () => {
     if (!value || Number(value) <= 0) return;
     setSaving(true);
+    // Garante um paciente vinculado ao lead ANTES de fechar o ticket — senão o trigger
+    // fn_auto_create_lead_on_patient abriria um ticket novo. Sem patient_id, a receita
+    // nasce órfã e some do "Faturamento real" quando há filtro de coorte (Entrada).
+    let patientId = lead.patientId ?? null;
+    if (!patientId) {
+      const np = await createPatient({ name: lead.name, phone: lead.phone ?? null });
+      if (np?.id) {
+        patientId = np.id;
+        // O trigger já liga por telefone; este update cobre o caso de lead sem telefone.
+        await updateLead(lead.id, { converted_patient_id: np.id });
+      }
+    }
     const ok = await onCreate({
       lead_id: lead.id,
       value: Number(value),
@@ -775,6 +789,7 @@ function GanhoModal({ lead, onClose, onCancel, onCreate }: {
         status: txStatus,
         date,
         protocol_ids: protocolIds,
+        patient_id: patientId ?? undefined,
       });
       setDone(true);
       setTimeout(onClose, 1000);
@@ -990,7 +1005,7 @@ export function LeadKanban() {
   const { tickets, loading: ticketsLoading, moveTicket, openTicket, closeTicket, finalizeTicket } = useTickets();
   const { byLead: conversionsByLead, create: createConversion } = useConversions();
   const { aiConfig, updateAI } = useSettings();
-  const [ganhoLead, setGanhoLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
+  const [ganhoLead, setGanhoLead] = useState<{ id: string; name: string; phone: string | null; patientId: string | null; prevStageId: string | null; ticketId: string } | null>(null);
   const [lossLead, setLossLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
   const [orcamentoLead, setOrcamentoLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
   const { data: transitionRules, create: createRule, remove: removeRule, update: updateRule, reorder: reorderRules, testRule, lookupActiveStageByPhone } = useTransitionRules();
@@ -1199,7 +1214,7 @@ export function LeadKanban() {
       await moveTicket(draggedLead.id, targetStageId);
 
       if (targetStage?.slug === 'ganho') {
-        setGanhoLead({ id: draggedLead.lead_id, name: draggedLead.lead?.name ?? '', prevStageId: draggedLead.stage_id, ticketId: draggedLead.id });
+        setGanhoLead({ id: draggedLead.lead_id, name: draggedLead.lead?.name ?? '', phone: draggedLead.lead?.phone ?? null, patientId: draggedLead.lead?.converted_patient_id ?? null, prevStageId: draggedLead.stage_id, ticketId: draggedLead.id });
       } else if (targetStage?.slug === 'perdido') {
         setLossLead({ id: draggedLead.lead_id, name: draggedLead.lead?.name ?? '', prevStageId: draggedLead.stage_id, ticketId: draggedLead.id });
       } else if (targetStage?.slug === 'orcamento') {
@@ -1239,7 +1254,7 @@ export function LeadKanban() {
             if (isPerdido) {
               await closeTicket(openT.id, 'perdido');
             } else if (isConversao) {
-              setGanhoLead({ id: selectedLead.id, name: selectedLead.name, prevStageId: openT.stage_id, ticketId: openT.id });
+              setGanhoLead({ id: selectedLead.id, name: selectedLead.name, phone: selectedLead.phone ?? null, patientId: selectedLead.converted_patient_id ?? null, prevStageId: openT.stage_id, ticketId: openT.id });
             } else {
               await moveTicket(openT.id, targetStageId);
             }
@@ -2195,7 +2210,7 @@ export function LeadKanban() {
                                       {statusDropdownTicketId === ticket.id && (
                                         <div className="absolute right-0 top-5 z-50 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden w-28" onClick={e => e.stopPropagation()}>
                                           <button
-                                            onClick={() => { setStatusDropdownTicketId(null); setGanhoLead({ id: lead.id, name: lead.name, prevStageId: ticket.stage_id, ticketId: ticket.id }); }}
+                                            onClick={() => { setStatusDropdownTicketId(null); setGanhoLead({ id: lead.id, name: lead.name, phone: lead.phone ?? null, patientId: lead.converted_patient_id ?? null, prevStageId: ticket.stage_id, ticketId: ticket.id }); }}
                                             className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50 transition-colors"
                                           >
                                             <ThumbsUp className="w-3 h-3" /> Ganho
@@ -2732,6 +2747,8 @@ export function LeadKanban() {
       {ganhoLead && (
         <GanhoModal
           lead={ganhoLead}
+          createPatient={createPatient}
+          updateLead={update}
           onClose={() => setGanhoLead(null)}
           onCancel={() => {
             const { ticketId, prevStageId } = ganhoLead;
@@ -2798,7 +2815,7 @@ export function LeadKanban() {
             currentStageId={tickets.find(t => t.id === chatLead.ticketId)?.stage_id ?? null}
             onClose={() => setChatLead(null)}
             isDragging={draggedLead !== null}
-            onGanho={() => setGanhoLead({ id: chatLead.lead.id, name: chatLead.lead.name, prevStageId: null, ticketId: chatLead.ticketId })}
+            onGanho={() => setGanhoLead({ id: chatLead.lead.id, name: chatLead.lead.name, phone: chatLead.lead.phone ?? null, patientId: chatLead.lead.converted_patient_id ?? null, prevStageId: null, ticketId: chatLead.ticketId })}
             onPerdido={() => setLossLead({ id: chatLead.lead.id, name: chatLead.lead.name, prevStageId: null, ticketId: chatLead.ticketId })}
             onStageChange={async (stageId) => {
               const targetStage = stages.find(s => s.id === stageId);
@@ -2807,7 +2824,7 @@ export function LeadKanban() {
                 if (targetStage?.slug === 'perdido') {
                   await closeTicket(ticket.id, 'perdido');
                 } else if (targetStage?.slug === 'ganho') {
-                  setGanhoLead({ id: chatLead.lead.id, name: chatLead.lead.name, prevStageId: ticket.stage_id, ticketId: ticket.id });
+                  setGanhoLead({ id: chatLead.lead.id, name: chatLead.lead.name, phone: chatLead.lead.phone ?? null, patientId: chatLead.lead.converted_patient_id ?? null, prevStageId: ticket.stage_id, ticketId: ticket.id });
                 } else {
                   await moveTicket(ticket.id, stageId);
                 }

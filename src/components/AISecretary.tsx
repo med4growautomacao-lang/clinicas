@@ -39,6 +39,7 @@ import {
   Maximize2,
   Sparkles,
   ChevronDown,
+  Instagram,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -1733,6 +1734,7 @@ function ChatsView() {
             filteredLeads.map((lead) => {
               const isMeta = !!lead.fb_campaign_name || lead.source === 'meta_ads';
               const isGoogle = !!lead.g_campaign_name || lead.source === 'google_ads';
+              const isInstagram = !isMeta && !isGoogle && lead.source === 'instagram';
               const lastActivityAt = lead.last_activity_at ?? lead.created_at;
               return (
               <motion.div
@@ -1745,6 +1747,7 @@ function ChatsView() {
                     ? "bg-indigo-50 border-indigo-200 shadow-sm"
                     : isMeta ? "bg-blue-50/50 border-blue-100/60 hover:bg-blue-50"
                     : isGoogle ? "bg-emerald-50/50 border-emerald-100/60 hover:bg-emerald-50"
+                    : isInstagram ? "bg-pink-50/50 border-pink-100/60 hover:bg-pink-50"
                     : "border-transparent hover:bg-slate-50"
                 )}
               >
@@ -1763,7 +1766,12 @@ function ChatsView() {
                     {isGoogle && !isMeta && (
                       <img src={GoogleLogo} alt="Google" className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white shadow-sm z-10 bg-white" />
                     )}
-                    {!isMeta && !isGoogle && (
+                    {isInstagram && (
+                      <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white shadow-sm z-10 bg-white flex items-center justify-center">
+                        <Instagram className="w-2.5 h-2.5 text-pink-500" />
+                      </span>
+                    )}
+                    {!isMeta && !isGoogle && !isInstagram && (
                       <img src={SemOrigemLogo} alt="Sem Origem" className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white shadow-sm opacity-100 z-10 bg-white" />
                     )}
                   </div>

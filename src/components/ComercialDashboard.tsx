@@ -85,7 +85,6 @@ interface LeadRow {
 }
 
 type Period = "dia" | "sem" | "mês";
-type Audience = "dono" | "agencia";
 type AgentFilter = "todos" | "ia" | "humano";
 type OriginFilter = "todos" | "meta" | "google" | "sem_origem";
 type ChartMetric = "humanMessages" | "aiMessages" | "leads" | "appointments" | "handoffs" | "followups";
@@ -99,15 +98,14 @@ const METRICS_CONFIG: { id: string; label: string }[] = [
   { id: "conversao_agend", label: "Conversão Lead → Agend." },
   { id: "conversao_consulta", label: "Conversão Lead → Consulta" },
   { id: "consultas", label: "Agendamentos Gerados" },
-  { id: "faturamento_agendado", label: "Faturamento (Agendamentos)" },
+  { id: "faturamento_agendado", label: "Faturamento Projetado" },
+  { id: "faturamento", label: "Faturamento Real" },
   { id: "consultas_realizadas", label: "Consultas Realizadas" },
   { id: "custo_agendamento", label: "Custo por Agendamento" },
-  { id: "ticket_medio", label: "Ticket Médio" },
-  { id: "ticket_config", label: "Ticket Médio (configurado)" },
-  { id: "faturamento", label: "Faturamento" },
-  { id: "tempo_resposta", label: "Tempo de Resposta" },
-  { id: "ciclo_vendas", label: "Ciclo de Vendas" },
-  { id: "roas", label: "ROAS" },
+  { id: "cac", label: "CAC" },
+  { id: "ticket_config", label: "Ticket Médio" },
+  { id: "roas_projetado", label: "ROAS Projetado" },
+  { id: "roas", label: "ROAS Real" },
 ];
 const DEFAULT_METRIC_IDS = METRICS_CONFIG.map((m) => m.id);
 
@@ -220,16 +218,6 @@ const AUTOMATION_LABELS: Record<string, string> = {
   handoff: "Handoffs",
 };
 
-const STATUS_LABELS: Record<string, { label: string; tone: string }> = {
-  realizado: { label: "Realizados", tone: "text-emerald-600" },
-  compareceu: { label: "Compareceram", tone: "text-emerald-600" },
-  confirmado: { label: "Confirmados", tone: "text-blue-600" },
-  pendente: { label: "Pendentes", tone: "text-amber-600" },
-  faltou: { label: "Faltaram", tone: "text-rose-600" },
-  cancelado: { label: "Cancelados", tone: "text-slate-500" },
-  indefinido: { label: "Sem status", tone: "text-slate-400" },
-};
-
 const CHART_METRICS: { label: string; value: ChartMetric; icon: any }[] = [
   { label: "Msgs Humano", value: "humanMessages", icon: UserCheck },
   { label: "Msgs IA", value: "aiMessages", icon: Bot },
@@ -259,7 +247,6 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
   const [isEntryOpen, setIsEntryOpen] = useState(false);
   const [entryCal1, setEntryCal1] = useState<Date>(() => subDays(new Date(), 6));
   const [entryCal2, setEntryCal2] = useState<Date>(() => addMonths(subDays(new Date(), 6), 1));
-  const [audience, setAudience] = useState<Audience>(() => (localStorage.getItem("comercialAudience") as Audience) || "dono");
   const [agent, setAgent] = useState<AgentFilter>(() => (localStorage.getItem("comercialAgent") as AgentFilter) || "todos");
   const [origin, setOrigin] = useState<OriginFilter>(() => (localStorage.getItem("comercialOrigin") as OriginFilter) || "todos");
   const [chartMetric, setChartMetric] = useState<ChartMetric>("humanMessages");
@@ -394,7 +381,6 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
 
   useEffect(() => { fetchLeads(); }, [fetchLeads]);
 
-  const setAudiencePersist = (a: Audience) => { setAudience(a); localStorage.setItem("comercialAudience", a); };
   const setAgentPersist = (v: AgentFilter) => { setAgent(v); localStorage.setItem("comercialAgent", v); };
   const setOriginPersist = (v: OriginFilter) => { setOrigin(v); localStorage.setItem("comercialOrigin", v); };
 
@@ -410,6 +396,8 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
   const iaActed = agents.ia.messagesOut > 0 || agents.ia.leadsTouched > 0 || agents.ia.appointments > 0;
   const automations = agents.sistema.automations || {};
   const automationsTotal = Object.values(automations).reduce((a, b) => a + b, 0);
+  // Handoffs IA -> humano no período (não vem de automation_logs; é leads.handoff_triggered_at).
+  const handoffsCount = agents.ia.handoffs || 0;
 
   // ===== KPI strip (headline) — números que importam ao cliente (estilo Marketing) =====
   // Escopados pelo filtro de agente: conversão, consultas, preço/consulta, tempo de resposta.
@@ -422,12 +410,22 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
   const convAgendRate = leadsValue > 0 ? (appointments.total / leadsValue) * 100 : 0;
   const convConsultaRate = leadsValue > 0 ? (attended / leadsValue) * 100 : 0;
   const costPerAppt = appointments.total > 0 && fin.investment > 0 ? fin.investment / appointments.total : null;
-  const avgTicket = fin.attendedConsults > 0 && fin.convertedValue > 0 ? fin.convertedValue / fin.attendedConsults : null;
+  // CAC = investimento ÷ vendas ganhas (clientes adquiridos no período).
+  const cac = outcomes.won > 0 && fin.investment > 0 ? fin.investment / outcomes.won : null;
   // Ticket médio = espelho do valor configurado em Dados da Clínica (ai_config.default_ticket_value).
   const configuredTicket = fin.defaultTicket > 0 ? fin.defaultTicket : null;
-  // Faturamento sobre os agendamentos JÁ criados no período = nº de agendamentos × ticket configurado.
-  const projectedRevenue = configuredTicket != null ? appointments.total * configuredTicket : null;
+  // ===== Perdas (seção Comparecimento & Perdas) =====
+  const canceled = status.cancelado || 0;
+  const cancelRate = appointments.total > 0 ? (canceled / appointments.total) * 100 : 0;
+  // Perda projetada = (faltas + cancelamentos) × ticket configurado.
+  const lostAppts = noShow + canceled;
+  const projectedLoss = configuredTicket != null ? lostAppts * configuredTicket : null;
+  // Faturamento projetado: valora só os agendamentos que seguem de pé (exclui faltas e cancelamentos).
+  const validAppts = Math.max(appointments.total - lostAppts, 0);
+  const projectedRevenue = configuredTicket != null ? validAppts * configuredTicket : null;
   const roas = fin.investmentTotal > 0 ? fin.revenue / fin.investmentTotal : null;
+  // ROAS projetado = faturamento projetado (agend. × ticket) ÷ investimento.
+  const projectedRoas = fin.investmentTotal > 0 && projectedRevenue != null ? projectedRevenue / fin.investmentTotal : null;
   const leadsDenomLabel = agent === "todos" ? "leads" : "leads atendidos";
 
   type Kpi = { id: string; title: string; value: React.ReactNode; icon: any; color: string; bg: string; sub?: string; agentScoped: boolean; originScoped: boolean };
@@ -436,15 +434,14 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
     { id: "conversao_agend", title: "Conversão Lead → Agendamento", value: `${convAgendRate.toFixed(1)}%`, icon: Percent, color: "text-emerald-600", bg: "bg-emerald-50", sub: `${appointments.total} agend. ${agentNoun} ÷ ${leadsValue} ${leadsDenomLabel}`, agentScoped: true, originScoped: true },
     { id: "conversao_consulta", title: "Conversão Lead → Consulta", value: `${convConsultaRate.toFixed(1)}%`, icon: CheckCircle2, color: "text-green-600", bg: "bg-green-50", sub: `${attended} realizadas ÷ ${leadsValue} ${leadsDenomLabel}`, agentScoped: true, originScoped: true },
     { id: "consultas", title: "Agendamentos Gerados", value: appointments.total, icon: CalendarCheck, color: "text-teal-600", bg: "bg-teal-50", sub: agent === "todos" ? `${appointments.ia} IA · ${appointments.manual} manual` : `via ${agentNoun}`, agentScoped: true, originScoped: true },
-    { id: "faturamento_agendado", title: "Faturamento (Agendamentos)", value: projectedRevenue != null ? fmtBRL(projectedRevenue) : "—", icon: Wallet, color: "text-emerald-700", bg: "bg-emerald-50", sub: configuredTicket != null ? `${appointments.total} agend. × ${fmtBRL(configuredTicket)}` : "configure o ticket médio em Dados da Clínica", agentScoped: true, originScoped: true },
+    { id: "faturamento_agendado", title: "Faturamento Projetado", value: projectedRevenue != null ? fmtBRL(projectedRevenue) : "—", icon: Wallet, color: "text-emerald-700", bg: "bg-emerald-50", sub: configuredTicket != null ? `${validAppts} agend. ativos × ${fmtBRL(configuredTicket)}` : "configure o ticket médio em Dados da Clínica", agentScoped: true, originScoped: true },
+    { id: "faturamento", title: "Faturamento Real", value: fmtBRL(fin.revenue), icon: Wallet, color: "text-emerald-700", bg: "bg-emerald-50", agentScoped: false, originScoped: false },
     { id: "consultas_realizadas", title: "Consultas Realizadas", value: attended, icon: CheckCircle2, color: "text-emerald-600", bg: "bg-emerald-50", sub: `${pct(attended, appointments.total)} dos agendamentos`, agentScoped: true, originScoped: true },
     { id: "custo_agendamento", title: "Custo por Agendamento", value: costPerAppt != null ? fmtBRL(costPerAppt) : "—", icon: Target, color: "text-rose-600", bg: "bg-rose-50", sub: "investimento ÷ agendamentos", agentScoped: true, originScoped: true },
-    { id: "ticket_medio", title: "Ticket Médio das Consultas", value: avgTicket != null ? fmtBRL(avgTicket) : "—", icon: DollarSign, color: "text-blue-600", bg: "bg-blue-50", sub: fin.attendedConsults > 0 ? `valor convertido ÷ ${fin.attendedConsults} realizadas` : "sem consultas realizadas", agentScoped: false, originScoped: false },
-    { id: "ticket_config", title: "Ticket Médio (configurado)", value: configuredTicket != null ? fmtBRL(configuredTicket) : "—", icon: DollarSign, color: "text-blue-600", bg: "bg-blue-50", sub: "definido em Dados da Clínica", agentScoped: false, originScoped: false },
-    { id: "faturamento", title: "Faturamento Gerado", value: fmtBRL(fin.revenue), icon: Wallet, color: "text-emerald-700", bg: "bg-emerald-50", agentScoped: false, originScoped: false },
-    { id: "tempo_resposta", title: "Tempo de Resposta", value: fmtResponseTime(sla.responseMin, sla.responseCycles), icon: Clock, color: "text-amber-600", bg: "bg-amber-50", sub: sla.slaMinutes > 0 ? `meta: ${fmtDuration(sla.slaMinutes)}` : undefined, agentScoped: true, originScoped: true },
-    { id: "ciclo_vendas", title: "Ciclo Médio de Vendas", value: fin.salesCycleDays > 0 ? `${fin.salesCycleDays} dias` : "—", icon: Timer, color: "text-indigo-600", bg: "bg-indigo-50", agentScoped: false, originScoped: true },
-    { id: "roas", title: "ROAS", value: roas != null ? `${roas.toFixed(1)}x` : "—", icon: TrendingUp, color: "text-violet-600", bg: "bg-violet-50", sub: fin.investmentTotal > 0 ? `${fmtBRL(fin.revenue)} ÷ ${fmtBRL(fin.investmentTotal)}` : "sem investimento", agentScoped: false, originScoped: false },
+    { id: "cac", title: "CAC", value: cac != null ? fmtBRL(cac) : "—", icon: UserCheck, color: "text-rose-600", bg: "bg-rose-50", sub: `investimento ÷ ${outcomes.won} vendas`, agentScoped: false, originScoped: true },
+    { id: "ticket_config", title: "Ticket Médio", value: configuredTicket != null ? fmtBRL(configuredTicket) : "—", icon: DollarSign, color: "text-blue-600", bg: "bg-blue-50", sub: "definido em Dados da Clínica", agentScoped: false, originScoped: false },
+    { id: "roas_projetado", title: "ROAS Projetado", value: projectedRoas != null ? `${projectedRoas.toFixed(1)}x` : "—", icon: TrendingUp, color: "text-violet-600", bg: "bg-violet-50", sub: (fin.investmentTotal > 0 && projectedRevenue != null) ? `${fmtBRL(projectedRevenue)} ÷ ${fmtBRL(fin.investmentTotal)}` : "sem investimento", agentScoped: true, originScoped: true },
+    { id: "roas", title: "ROAS Real", value: roas != null ? `${roas.toFixed(1)}x` : "—", icon: TrendingUp, color: "text-violet-600", bg: "bg-violet-50", sub: fin.investmentTotal > 0 ? `${fmtBRL(fin.revenue)} ÷ ${fmtBRL(fin.investmentTotal)}` : "sem investimento", agentScoped: false, originScoped: false },
   ];
   const kpiById = Object.fromEntries(allKpis.map((k) => [k.id, k]));
   const headlineKpis = metricsOrder.filter((id) => visibleMetrics.includes(id)).map((id) => kpiById[id]).filter(Boolean) as Kpi[];
@@ -468,11 +465,11 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
           { icon: MessageSquare, label: "Mensagens recebidas (leads)", value: data.messages.inbound, color: "text-slate-500", bg: "bg-slate-100" },
         ]
       : [
-          { icon: Bot, label: "Mensagens da IA", value: agents.ia.messagesOut, color: "text-teal-600", bg: "bg-teal-50" },
-          { icon: UserCheck, label: "Mensagens do Humano", value: agents.humano.messagesOut, color: "text-blue-600", bg: "bg-blue-50" },
-          { icon: CalendarCheck, label: "Agendamentos (IA + manual)", value: appointments.total, color: "text-emerald-600", bg: "bg-emerald-50" },
-          { icon: ArrowRightLeft, label: "Handoffs IA → humano", value: agents.ia.handoffs, color: "text-orange-600", bg: "bg-orange-50" },
           { icon: MessageSquare, label: "Mensagens recebidas (leads)", value: data.messages.inbound, color: "text-slate-500", bg: "bg-slate-100" },
+          { icon: Bot, label: "Mensagens enviadas pela IA", value: agents.ia.messagesOut, color: "text-teal-600", bg: "bg-teal-50" },
+          { icon: UserCheck, label: "Mensagens enviadas pelo humano", value: agents.humano.messagesOut, color: "text-blue-600", bg: "bg-blue-50" },
+          { icon: Timer, label: "Ciclo médio de vendas", value: fin.salesCycleDays > 0 ? `${fin.salesCycleDays} dias` : "—", color: "text-indigo-600", bg: "bg-indigo-50" },
+          { icon: ArrowRightLeft, label: "Handoffs IA → humano", value: agents.ia.handoffs, color: "text-orange-600", bg: "bg-orange-50" },
         ];
   const agentSectionIcon = agent === "ia" ? Bot : agent === "humano" ? UserCheck : Users;
   const agentSectionLabel = agent === "ia" ? "IA" : agent === "humano" ? "Humano" : "Todos os agentes";
@@ -512,11 +509,12 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
         <CardTitle className="text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2"><Zap className="w-4 h-4 text-violet-600" />Automações do Sistema</CardTitle>
       </CardHeader>
       <CardContent className="p-5">
-        {automationsTotal > 0 ? (
+        {automationsTotal > 0 || handoffsCount > 0 ? (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {Object.entries(automations).sort((a, b) => b[1] - a[1]).map(([type, count]) => (
               <MetricTile key={type} icon={Zap} label={AUTOMATION_LABELS[type] || type} value={count} color="text-violet-600" bg="bg-violet-50" />
             ))}
+            <MetricTile key="handoff" icon={ArrowRightLeft} label="Handoffs IA → humano" value={handoffsCount} color="text-orange-600" bg="bg-orange-50" />
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center py-8 gap-2 text-slate-400 text-center">
@@ -586,13 +584,11 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
             <Hourglass className="w-5 h-5 text-emerald-500 mb-1" />
             <p className="text-2xl font-bold text-emerald-700">{fmtResponseTime(sla.firstResponseMin, sla.responseCycles)}</p>
             <p className="text-[10px] font-bold text-emerald-500/80 uppercase tracking-wider mt-1">Tempo médio da 1ª resposta</p>
-            {sla.slaMinutes > 0 && <p className="text-[10px] text-slate-400 font-medium mt-0.5">meta: {fmtDuration(sla.slaMinutes)}</p>}
           </div>
           <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-slate-50 border border-slate-100 text-center">
             <Clock className="w-5 h-5 text-slate-400 mb-1" />
             <p className="text-2xl font-bold text-slate-700">{fmtResponseTime(sla.responseMin, sla.responseCycles)}</p>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">Tempo médio de respostas</p>
-            <p className="text-[10px] text-slate-400 font-medium mt-0.5">todas as respostas</p>
           </div>
           <div className={`flex flex-col items-center justify-center p-4 rounded-xl border text-center ${sla.breaches > 0 ? "bg-rose-50/60 border-rose-200" : "bg-emerald-50/60 border-emerald-200"}`}>
             <AlertTriangle className={`w-5 h-5 mb-1 ${sla.breaches > 0 ? "text-rose-500" : "text-emerald-500"}`} />
@@ -603,7 +599,6 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
             <Timer className={`w-5 h-5 mb-1 ${sla.overBreachMin > 0 ? "text-amber-500" : "text-emerald-500"}`} />
             <p className={`text-2xl font-bold ${sla.overBreachMin > 0 ? "text-amber-700" : "text-emerald-700"}`}>{sla.breaches > 0 ? fmtDuration(sla.overBreachMin) : "—"}</p>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">Tempo médio de estouro de SLA</p>
-            <p className="text-[10px] text-slate-400 font-medium mt-0.5">além da meta</p>
           </div>
         </div>
       </CardContent>
@@ -613,40 +608,39 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
   const sectionAppointments = (
     <Card key="appointments" className="border border-slate-200 shadow-sm overflow-hidden">
       <CardHeader className="bg-slate-50 border-b border-slate-100 py-3">
-        <CardTitle className="text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2"><CalendarCheck className="w-4 h-4 text-teal-600" />Agendamentos & Comparecimento</CardTitle>
+        <CardTitle className="text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-rose-500" />Comparecimento & Perdas</CardTitle>
       </CardHeader>
       <CardContent className="p-5">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Origem */}
-          <div className="space-y-3">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Origem do agendamento</p>
-            <AgentMetric icon={Bot} label="Pela IA" value={agents.ia.appointments} tone="text-teal-600" bg="bg-teal-50" />
-            <AgentMetric icon={UserCheck} label="Manual (humano)" value={agents.humano.appointments} tone="text-blue-600" bg="bg-blue-50" />
-            <div className="pt-2 border-t border-slate-100">
-              <AgentMetric icon={CalendarCheck} label="Total" value={appointments.total} tone="text-slate-700" bg="bg-slate-100" />
-            </div>
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          {/* No-show */}
+          <div className={`flex flex-col items-center justify-center p-4 rounded-xl border text-center ${noShowBase > 0 && noShow / noShowBase > 0.15 ? "bg-rose-50/60 border-rose-200" : "bg-emerald-50/60 border-emerald-200"}`}>
+            <Percent className={`w-5 h-5 mb-1 ${noShowBase > 0 && noShow / noShowBase > 0.15 ? "text-rose-500" : "text-emerald-500"}`} />
+            <p className={`text-2xl font-bold ${noShowBase > 0 && noShow / noShowBase > 0.15 ? "text-rose-700" : "text-emerald-700"}`}>{noShowBase > 0 ? pct(noShow, noShowBase) : "—"}</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">Taxa de no-show</p>
           </div>
-          {/* Status */}
-          <div className="lg:col-span-2">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Por status</p>
-              {noShowBase > 0 && (
-                <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${noShow / noShowBase > 0.15 ? "bg-rose-50 text-rose-600" : "bg-emerald-50 text-emerald-600"}`}>
-                  No-show: {pct(noShow, noShowBase)}
-                </span>
-              )}
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-              {Object.entries(status).sort((a, b) => b[1] - a[1]).map(([key, count]) => {
-                const meta = STATUS_LABELS[key] || { label: key, tone: "text-slate-500" };
-                return (
-                  <div key={key} className="flex items-center justify-between p-2.5 rounded-lg bg-slate-50/60 border border-slate-100">
-                    <span className="text-[11px] font-medium text-slate-500 truncate">{meta.label}</span>
-                    <span className={`text-sm font-bold ${meta.tone}`}>{count}</span>
-                  </div>
-                );
-              })}
-            </div>
+          {/* Faltaram */}
+          <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-rose-50/60 border border-rose-100 text-center">
+            <XCircle className="w-5 h-5 text-rose-500 mb-1" />
+            <p className="text-2xl font-bold text-rose-700">{noShow}</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">Faltaram</p>
+          </div>
+          {/* Cancelados */}
+          <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-slate-50 border border-slate-100 text-center">
+            <XCircle className="w-5 h-5 text-slate-400 mb-1" />
+            <p className="text-2xl font-bold text-slate-700">{canceled}</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">Cancelados</p>
+          </div>
+          {/* Taxa de cancelamento */}
+          <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-amber-50/60 border border-amber-100 text-center">
+            <Percent className="w-5 h-5 text-amber-500 mb-1" />
+            <p className="text-2xl font-bold text-amber-700">{appointments.total > 0 ? `${cancelRate.toFixed(1)}%` : "—"}</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">Taxa de cancelamento</p>
+          </div>
+          {/* Perda projetada */}
+          <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-rose-50/60 border border-rose-200 text-center">
+            <Wallet className="w-5 h-5 text-rose-500 mb-1" />
+            <p className="text-2xl font-bold text-rose-700">{projectedLoss != null ? fmtBRL(projectedLoss) : "—"}</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">Perda projetada</p>
           </div>
         </div>
       </CardContent>
@@ -718,7 +712,6 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
                 <Star className="w-5 h-5 text-indigo-400 mb-1" />
                 <p className="text-3xl font-bold text-indigo-700">{csat.avg !== null ? Number(csat.avg).toFixed(1) : "—"}</p>
                 <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider mt-1">Nota Média</p>
-                <p className="text-[10px] text-indigo-300 font-medium">de {csat.type === "csat" ? "5" : "10"}</p>
               </div>
               <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-slate-50 border border-slate-100 text-center">
                 <ThumbsUp className="w-4 h-4 text-emerald-500 mb-1" />
@@ -865,10 +858,8 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
     </Card>
   );
 
-  // Ordem das seções por público
-  const ownerOrder = [sectionAgents, sectionSla, sectionAppointments, sectionSistema, sectionFunnel, sectionLeads, sectionTrend, sectionCsat];
-  const agencyOrder = [sectionFunnel, sectionLeads, sectionAgents, sectionAppointments, sectionSistema, sectionTrend, sectionSla, sectionCsat];
-  const orderedSections = audience === "dono" ? ownerOrder : agencyOrder;
+  // Ordem das seções (visão única)
+  const orderedSections = [sectionAgents, sectionSla, sectionAppointments, sectionSistema, sectionFunnel, sectionLeads, sectionTrend, sectionCsat];
 
   return (
     <div className="space-y-6 h-full overflow-y-auto pr-1 custom-scrollbar pb-8">
@@ -902,13 +893,8 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
             cal1={convCal1} setCal1={setConvCal1} cal2={convCal2} setCal2={setConvCal2}
           />
         </div>
-        {/* Público + Métricas */}
+        {/* Métricas */}
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
-            {([["dono", "Visão do Dono"], ["agencia", "Visão da Agência"]] as [Audience, string][]).map(([val, label]) => (
-              <button key={val} onClick={() => setAudiencePersist(val)} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${audience === val ? "bg-white text-teal-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>{label}</button>
-            ))}
-          </div>
           <MetricsConfigButton metricsOrder={metricsOrder} visibleMetrics={visibleMetrics} toggleMetric={toggleMetric} moveMetric={moveMetric} />
         </div>
       </div>
@@ -964,21 +950,20 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
       </div>
 
       {/* KPI strip */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6 gap-4">
         {headlineKpis.map((stat, i) => (
-          <motion.div key={stat.title} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.06 }}>
-            <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-all">
-              <CardContent className="p-5">
-                <div className="flex justify-between items-start mb-3">
-                  <div className={`p-2.5 rounded-xl ${stat.bg}`}><stat.icon className={`w-5 h-5 ${stat.color}`} /></div>
-                  {((agent !== "todos" && !stat.agentScoped) || (origin !== "todos" && !stat.originScoped)) && (
-                    <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full" title="Não atribuível ao filtro ativo — valor geral da clínica">geral</span>
-                  )}
-                </div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">{stat.title}</p>
-                <h3 className="text-2xl font-bold text-slate-900">{stat.value}</h3>
-                {stat.sub && <p className="text-[10px] text-slate-400 mt-1 font-medium">{stat.sub}</p>}
-              </CardContent>
+          <motion.div key={stat.title} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.06 }} className="h-full">
+            <Card className="h-full flex flex-col bg-white border-slate-200 shadow-lg rounded-2xl p-4 overflow-hidden group hover:shadow-xl transition-all">
+              <div className="flex items-start justify-between">
+                <div className={`p-2 rounded-xl ${stat.bg}`}><stat.icon className={`w-4 h-4 ${stat.color}`} /></div>
+                {((agent !== "todos" && !stat.agentScoped) || (origin !== "todos" && !stat.originScoped)) && (
+                  <span className="text-[8px] font-black uppercase tracking-wider text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full" title="Não atribuível ao filtro ativo — valor geral da clínica">geral</span>
+                )}
+              </div>
+              <div className="mt-3 flex flex-col flex-1">
+                <h3 className="text-[9px] font-black text-slate-400 uppercase tracking-widest min-h-[22px] leading-tight">{stat.title}</h3>
+                <p className="text-base font-black text-slate-900 mt-0.5 whitespace-nowrap">{stat.value}</p>
+              </div>
             </Card>
           </motion.div>
         ))}
@@ -1036,18 +1021,8 @@ function DatePill({ label, valueLabel, rangeText, open, setOpen, presets, active
 // ==========================================
 // Subcomponente: linha de métrica de agente
 // ==========================================
-function AgentMetric({ icon: Icon, label, value, tone, bg }: { icon: any; label: string; value: number; tone: string; bg: string }) {
-  return (
-    <div className="flex items-center gap-3">
-      <div className={`p-1.5 rounded-lg ${bg}`}><Icon className={`w-3.5 h-3.5 ${tone}`} /></div>
-      <span className="text-xs font-medium text-slate-500 flex-1">{label}</span>
-      <span className="text-sm font-bold text-slate-900">{value}</span>
-    </div>
-  );
-}
-
 // Tile maior (usado no painel de agente em largura total e nas automações)
-function MetricTile({ icon: Icon, label, value, color, bg }: { icon: any; label: string; value: number; color: string; bg: string }) {
+function MetricTile({ icon: Icon, label, value, color, bg }: { icon: any; label: string; value: React.ReactNode; color: string; bg: string }) {
   return (
     <div className="flex flex-col p-4 rounded-xl bg-slate-50/50 border border-slate-100 hover:border-slate-200 transition-all">
       <div className={`p-2 rounded-lg ${bg} w-fit mb-3`}><Icon className={`w-4 h-4 ${color}`} /></div>

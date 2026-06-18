@@ -39,12 +39,13 @@ import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
 import WhatsAppLogo from "../assets/logos/Logo Whatsapp.png";
 import SemOrigemLogo from "../assets/logos/Logo Sem origem.png";
-import { Share2, Globe, Layout, Smartphone, Sparkles } from "lucide-react";
+import { Share2, Globe, Layout, Smartphone, Sparkles, Instagram } from "lucide-react";
 import { DateRangePicker } from "./DateRangePicker";
 
 const SOURCE_LABELS: Record<string, string> = {
   'meta_ads': 'Meta Ads',
   'google_ads': 'Google Ads',
+  'instagram': 'Instagram',
   'sincronizacao': 'Sincronização',
   'whatsapp': 'WhatsApp',
   'forms': 'Forms',
@@ -2067,6 +2068,7 @@ export function LeadKanban() {
                                 : isPerdido ? "bg-white border-rose-200"
                                   : (!!lead.fb_campaign_name || lead.source === 'meta_ads') ? "bg-blue-50/60 border-blue-200/80"
                                     : (!!lead.g_campaign_name || lead.source === 'google_ads') ? "bg-emerald-50/60 border-emerald-200/80"
+                                    : (!lead.fb_campaign_name && !lead.g_campaign_name && lead.source === 'instagram') ? "bg-pink-50/60 border-pink-200/80"
                                       : lead.source === 'sincronizacao' ? "bg-violet-50/60 border-violet-200/80"
                                         : "bg-white border-slate-200"
                         )}
@@ -2075,7 +2077,8 @@ export function LeadKanban() {
                         {(() => {
                           const isMeta = !!lead.fb_campaign_name || lead.source === 'meta_ads';
                           const isGoogle = !!lead.g_campaign_name || lead.source === 'google_ads';
-                          const isSync = !isMeta && !isGoogle && lead.source === 'sincronizacao';
+                          const isInstagram = !isMeta && !isGoogle && lead.source === 'instagram';
+                          const isSync = !isMeta && !isGoogle && !isInstagram && lead.source === 'sincronizacao';
                           const campaignName = lead.fb_campaign_name || lead.g_campaign_name;
 
                           const hasUtms = !!(
@@ -2094,14 +2097,17 @@ export function LeadKanban() {
                                   {isGoogle && !isMeta && (
                                     <img src={GoogleLogo} alt="Google" className="w-3.5 h-3.5 rounded shrink-0" />
                                   )}
-                                  {!isMeta && !isGoogle && (
+                                  {isInstagram && (
+                                    <Instagram className="w-3.5 h-3.5 shrink-0 text-pink-500" />
+                                  )}
+                                  {!isMeta && !isGoogle && !isInstagram && (
                                     <img src={SemOrigemLogo} alt="Orgânico" className="w-3.5 h-3.5 rounded shrink-0 opacity-40" />
                                   )}
                                   <span className={cn(
                                     "text-[9px] font-black uppercase tracking-[0.1em] truncate",
-                                    isMeta ? "text-blue-500" : isGoogle ? "text-emerald-500" : isSync ? "text-violet-500" : "text-slate-400"
+                                    isMeta ? "text-blue-500" : isGoogle ? "text-emerald-500" : isInstagram ? "text-pink-500" : isSync ? "text-violet-500" : "text-slate-400"
                                   )}>
-                                    {isMeta ? 'Meta Ads' : isGoogle ? 'Google Ads' : isSync ? 'Sincronização' : 'Orgânico'}
+                                    {isMeta ? 'Meta Ads' : isGoogle ? 'Google Ads' : isInstagram ? 'Instagram' : isSync ? 'Sincronização' : 'Orgânico'}
                                   </span>
 
                                   {hasUtms && (

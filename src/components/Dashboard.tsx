@@ -322,7 +322,7 @@ export function Dashboard() {
           {[
             // Dinheiro
             { title: "Recebido", value: `R$ ${stats.totalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: "Pago no caixa", icon: TrendingUp, color: "bg-emerald-50 text-emerald-600" },
-            { title: "A Receber", value: `R$ ${stats.pendingRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: "Transações pendentes", icon: Clock, color: "bg-amber-50 text-amber-600" },
+            { title: "A Receber", value: `R$ ${stats.pendingRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: "Agend. a realizar × ticket", icon: Clock, color: "bg-amber-50 text-amber-600" },
             { title: "Investimento", value: `R$ ${stats.totalInvestment.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: "Em mídia paga", icon: DollarSign, color: "bg-sky-50 text-sky-600" },
             { title: "ROAS", value: roas > 0 ? `${roas.toFixed(2).replace('.', ',')}x` : "—", trend: "Recebido ÷ Investimento", icon: Activity, color: "bg-teal-50 text-teal-600" },
 

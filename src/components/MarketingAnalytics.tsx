@@ -1530,13 +1530,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
             return (
               <div className="h-[300px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={chartData}>
-                    <defs>
-                      <linearGradient id="colorMetric" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={activeMetric.color} stopOpacity={0.1} />
-                        <stop offset="95%" stopColor={activeMetric.color} stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
+                  <BarChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                     <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 'bold' }} dy={10} />
                     <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 'bold' }} />
@@ -1555,27 +1549,22 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
                       strokeOpacity={0.6}
                       label={{ value: avgLabel, position: 'insideTopRight', fontSize: 9, fontWeight: 'bold', fill: activeMetric.color, opacity: 0.8 }}
                     />
-                    <Area
-                      type="monotone"
+                    <Bar
                       dataKey={selectedMetric}
-                      stroke={activeMetric.color}
-                      strokeWidth={3}
-                      fillOpacity={1}
-                      fill="url(#colorMetric)"
+                      fill={activeMetric.color}
+                      radius={[6, 6, 0, 0]}
                       name={activeMetric.label}
                     />
                     {isComparing && (
-                      <Area
-                        type="monotone"
+                      <Bar
                         dataKey={`${selectedMetric}_prev`}
-                        stroke={activeMetric.color}
-                        strokeWidth={2}
-                        fill="none"
-                        strokeDasharray="5 5"
+                        fill={activeMetric.color}
+                        fillOpacity={0.35}
+                        radius={[6, 6, 0, 0]}
                         name={`${activeMetric.label} (Anterior)`}
                       />
                     )}
-                  </AreaChart>
+                  </BarChart>
                 </ResponsiveContainer>
               </div>
             );

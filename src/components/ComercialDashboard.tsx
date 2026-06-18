@@ -540,7 +540,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
   const sectionFunnel = (
     <Card key="funnel" className="border border-slate-200 shadow-sm overflow-hidden">
       <CardHeader className="bg-slate-50 border-b border-slate-100 py-3">
-        <CardTitle className="text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2"><Target className="w-4 h-4 text-cyan-600" />Funil Comercial</CardTitle>
+        <CardTitle className="text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2"><Target className="w-4 h-4 text-cyan-600" />Estágio Atual dos Leads</CardTitle>
       </CardHeader>
       <CardContent className="p-5">
         {funnel.length === 0 || funnel.every((s) => s.leads === 0) ? (
@@ -655,6 +655,10 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
 
   const chartSeries = bucketDaily(data.daily, period);
   const maxVal = Math.max(...chartSeries.map((d) => d[chartMetric]), 1);
+  const CHART_H = 176; // px da área de plotagem (card tem ~200px de conteúdo)
+  const avgVal = chartSeries.length ? chartSeries.reduce((a, d) => a + d[chartMetric], 0) / chartSeries.length : 0;
+  const avgFmt = avgVal >= 10 ? Math.round(avgVal).toString() : (Math.round(avgVal * 10) / 10).toString();
+  const labelStep = Math.max(1, Math.ceil(chartSeries.length / 12)); // ~12 rótulos no máx
   const sectionTrend = (
     <Card key="trend" className="border border-slate-200 shadow-sm overflow-hidden flex flex-col">
       <CardHeader className="bg-slate-50 border-b border-slate-100 py-3 flex flex-row items-center justify-between">
@@ -681,19 +685,53 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
           </AnimatePresence>
         </div>
       </CardHeader>
-      <CardContent className="p-6 flex-1 flex flex-col justify-end">
-        <div className="h-[200px] w-full flex items-end gap-1 px-1">
-          {chartSeries.map((d, i) => {
-            const val = d[chartMetric];
-            return (
-              <div key={`${d.label}-${i}`} className="flex-1 flex flex-col items-center justify-end gap-1.5 group min-w-0 h-full">
-                <motion.div initial={{ height: 0 }} animate={{ height: Math.max((val / maxVal) * 176, val > 0 ? 4 : 1) }} transition={{ delay: i * 0.02, duration: 0.5 }} className="w-full bg-gradient-to-t from-teal-500/30 to-teal-500/10 group-hover:from-teal-500/50 group-hover:to-teal-500/20 rounded-t-md relative flex justify-center border-t-2 border-teal-500">
-                  <div className="absolute -top-7 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900 text-white text-[10px] font-bold px-2 py-1 rounded whitespace-nowrap z-10">{val}</div>
-                </motion.div>
-                {chartSeries.length <= 16 && <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter truncate w-full text-center">{d.label}</span>}
+      <CardContent className="p-6 pt-7">
+        <div className="flex gap-2">
+          {/* Eixo Y — quantidade */}
+          <div className="flex flex-col justify-between items-end text-[9px] font-bold text-slate-300 tabular-nums shrink-0 w-8" style={{ height: CHART_H }}>
+            <span>{maxVal}</span>
+            <span>{Math.round(maxVal / 2)}</span>
+            <span>0</span>
+          </div>
+          {/* Plotagem + eixo X */}
+          <div className="flex-1 min-w-0">
+            <div className="relative" style={{ height: CHART_H }}>
+              {/* linhas de grade (topo / meio / base) */}
+              <div className="absolute inset-x-0 top-0 border-t border-slate-100" />
+              <div className="absolute inset-x-0 border-t border-slate-100" style={{ top: CHART_H / 2 }} />
+              <div className="absolute inset-x-0 bottom-0 border-t border-slate-200" />
+              {/* linha de média */}
+              {avgVal > 0 && (
+                <div className="absolute inset-x-0 z-20 pointer-events-none" style={{ bottom: (avgVal / maxVal) * CHART_H }}>
+                  <div className="border-t border-dashed border-teal-500/60" />
+                  <span className="absolute right-0 -top-2.5 text-[8px] font-bold text-teal-600 bg-white/90 px-1 rounded">méd {avgFmt}</span>
+                </div>
+              )}
+              {/* barras */}
+              <div className="absolute inset-0 flex items-end gap-1">
+                {chartSeries.map((d, i) => {
+                  const val = d[chartMetric];
+                  return (
+                    <div key={`${d.label}-${i}`} className="flex-1 flex items-end justify-center group min-w-0 h-full">
+                      <motion.div initial={{ height: 0 }} animate={{ height: Math.max((val / maxVal) * CHART_H, val > 0 ? 4 : 1) }} transition={{ delay: i * 0.02, duration: 0.5 }} className="w-full bg-gradient-to-t from-teal-500/30 to-teal-500/10 group-hover:from-teal-500/50 group-hover:to-teal-500/20 rounded-t-md relative flex justify-center border-t-2 border-teal-500">
+                        <div className="absolute -top-7 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900 text-white text-[10px] font-bold px-2 py-1 rounded whitespace-nowrap z-30">{val}</div>
+                      </motion.div>
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
+            </div>
+            {/* Eixo X — datas */}
+            <div className="flex gap-1 mt-1.5">
+              {chartSeries.map((d, i) => (
+                <div key={`lbl-${d.label}-${i}`} className="flex-1 min-w-0 text-center">
+                  {(i % labelStep === 0 || i === chartSeries.length - 1) && (
+                    <span className="block text-[8px] font-bold text-slate-400 uppercase tracking-tighter truncate">{d.label}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </CardContent>
     </Card>
@@ -816,7 +854,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
   );
 
   // Ordem das seções (visão única)
-  const orderedSections = [sectionAgents, sectionSla, sectionAppointments, ...(showAutomations ? [sectionSistema] : []), sectionFunnel, sectionLeads, sectionTrend];
+  const orderedSections = [sectionAgents, sectionSla, sectionAppointments, ...(showAutomations ? [sectionSistema] : []), sectionTrend, sectionFunnel, sectionLeads];
 
   return (
     <div className="space-y-6 h-full overflow-y-auto pr-1 custom-scrollbar pb-8">

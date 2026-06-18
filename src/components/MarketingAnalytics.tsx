@@ -83,7 +83,7 @@ type Platform = 'meta_ads' | 'google_ads' | 'no_track';
 const PLATFORM_LABELS: Record<Platform, string> = {
   meta_ads: 'META ADS',
   google_ads: 'GOOGLE ADS',
-  no_track: 'SEM ORIGEM'
+  no_track: 'ORGÂNICO'
 };
 
 const PLATFORM_COLORS: Record<Platform, string> = {
@@ -1206,7 +1206,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
     return [
       { id: 'meta_ads', name: 'Meta Ads', label: 'META', value: currentTotals.breakdown.meta_ads.leads, color: '#4f46e5', logo: MetaLogo },
       { id: 'google_ads', name: 'Google Ads', label: 'GOOGLE', value: currentTotals.breakdown.google_ads.leads, color: '#10b981', logo: GoogleLogo },
-      { id: 'no_track', name: 'Sem Origem', label: 'SEM ORIGEM', value: currentTotals.breakdown.no_track.leads, color: '#94a3b8', logo: SemOrigemLogo },
+      { id: 'no_track', name: 'Orgânico', label: 'ORGÂNICO', value: currentTotals.breakdown.no_track.leads, color: '#94a3b8', logo: SemOrigemLogo },
     ].filter(d => d.value > 0 && (selectedPlatform === 'all' || selectedPlatform === d.id));
   }, [currentTotals, selectedPlatform]);
 
@@ -1266,7 +1266,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
             { id: 'all', label: 'Todos', logo: null },
             { id: 'meta_ads', label: 'Meta', logo: MetaLogo },
             { id: 'google_ads', label: 'Google', logo: GoogleLogo },
-            { id: 'no_track', label: 'Sem Origem', logo: SemOrigemLogo }
+            { id: 'no_track', label: 'Orgânico', logo: SemOrigemLogo }
           ].map((plat) => (
             <button
               key={plat.id}
@@ -1623,7 +1623,7 @@ function PlatformRows({ platform, periods, metricsByPeriod, comparisonMetricsByP
             )}
             {platform === 'no_track' && (
               <div className="w-5 h-5 rounded flex items-center justify-center bg-slate-100/50 p-1">
-                <img src={SemOrigemLogo} alt="Sem Origem" className="w-full h-full object-contain opacity-50" />
+                <img src={SemOrigemLogo} alt="Orgânico" className="w-full h-full object-contain opacity-50" />
               </div>
             )}
             <span className={cn("text-[10px] font-black tracking-[3px]", PLATFORM_COLORS[platform as Platform])}>

@@ -19,16 +19,7 @@ import {
   Timer,
   AlertCircle
 } from "lucide-react";
-import {
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ReferenceLine,
-} from "recharts";
+import { TrendBarChart, fmtByType } from "./TrendBarChart";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { useDashboardStats, useAppointments, useDoctors } from "../hooks/useSupabase";
@@ -183,14 +174,6 @@ export function Dashboard() {
   const trendLabel = activeRangeLabel === "Personalizado" 
     ? "Período selecionado" 
     : activeRangeLabel.toLowerCase();
-
-  const formatValue = (val: any) => {
-    const metric = chartMetrics.find(m => m.id === selectedMetric);
-    if (!metric) return val;
-    if (metric.type === 'currency') return `R$ ${val.toLocaleString('pt-BR')}`;
-    if (metric.type === 'percent') return `${val}%`;
-    return val;
-  };
 
   return (
     <div className="space-y-8 relative">
@@ -429,86 +412,12 @@ export function Dashboard() {
         <CardContent className="pl-2 pt-2">
           {(() => {
             const activeMetric = chartMetrics.find(m => m.id === selectedMetric) || chartMetrics[0];
-            const values = processedChartData.map((d: any) => d[selectedMetric]).filter((v: number) => v != null);
-            const avg = values.length > 0 ? values.reduce((a: number, b: number) => a + b, 0) / values.length : 0;
-            const avgLabel = activeMetric.type === 'currency'
-              ? `Média R$ ${avg.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`
-              : activeMetric.type === 'percent'
-              ? `Média ${avg.toFixed(1)}%`
-              : `Média ${avg.toFixed(1)}`;
-
             return (
-              <div className="h-[400px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={processedChartData}>
-                    <defs>
-                      <linearGradient id="colorMetricDash" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={activeMetric.color} stopOpacity={0.2} />
-                        <stop offset="95%" stopColor={activeMetric.color} stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="8 8" vertical={false} stroke="#f1f5f9" />
-                    <XAxis 
-                      dataKey="name" 
-                      stroke="#94a3b8" 
-                      fontSize={11} 
-                      fontWeight="bold" 
-                      tickLine={false} 
-                      axisLine={false} 
-                      dy={10} 
-                    />
-                    <YAxis 
-                      stroke="#94a3b8" 
-                      fontSize={11} 
-                      fontWeight="bold" 
-                      tickLine={false} 
-                      axisLine={false} 
-                      tickFormatter={(v) => {
-                        if (activeMetric.type === 'currency') return `R$ ${v >= 1000 ? (v/1000).toFixed(0)+'k' : v}`;
-                        if (activeMetric.type === 'percent') return `${v}%`;
-                        return v;
-                      }}
-                    />
-                    <Tooltip 
-                      cursor={{ stroke: activeMetric.color, strokeWidth: 2, strokeDasharray: '5 5' }} 
-                      contentStyle={{ 
-                        borderRadius: "20px", 
-                        border: "none", 
-                        boxShadow: "0 20px 25px -5px rgb(0 0 0 / 0.1)", 
-                        fontWeight: "bold", 
-                        fontSize: '12px',
-                        padding: '16px'
-                      }} 
-                      formatter={(v) => [formatValue(v), activeMetric.label]}
-                    />
-                    <ReferenceLine
-                      y={avg}
-                      stroke={activeMetric.color}
-                      strokeDasharray="6 3"
-                      strokeWidth={1.5}
-                      strokeOpacity={0.4}
-                      label={{ 
-                        value: avgLabel, 
-                        position: 'insideTopRight', 
-                        fontSize: 10, 
-                        fontWeight: 'black', 
-                        fill: activeMetric.color, 
-                        opacity: 0.6,
-                        dy: -10
-                      }}
-                    />
-                    <Area 
-                      type="monotone"
-                      dataKey={selectedMetric} 
-                      stroke={activeMetric.color} 
-                      strokeWidth={4}
-                      fillOpacity={1}
-                      fill="url(#colorMetricDash)"
-                      animationDuration={1500}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
+              <TrendBarChart
+                series={processedChartData.map((d: any) => ({ label: d.name, value: Number(d[selectedMetric]) || 0 }))}
+                format={fmtByType(activeMetric.type)}
+                height={300}
+              />
             );
           })()}
         </CardContent>

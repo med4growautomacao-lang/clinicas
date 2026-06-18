@@ -50,6 +50,7 @@ import {
   ReferenceLine
 } from 'recharts';
 import { cn } from "@/src/lib/utils";
+import { TrendBarChart, fmtByType } from "./TrendBarChart";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLeads, useMarketing, MarketingData, Lead, useAppointments, useFunnelStages, useConversions, useFunnelCohort, useConversionStageEntries } from "../hooks/useSupabase";
 import {
@@ -1518,56 +1519,12 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
             </div>
           </CardHeader>
           {(() => {
-            const values = chartData.map((d: any) => d[selectedMetric]).filter((v: number) => v != null);
-            const avg = values.length > 0 ? values.reduce((a: number, b: number) => a + b, 0) / values.length : 0;
-            const avgLabel = activeMetric.type === 'currency'
-              ? `Média R$ ${avg.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-              : activeMetric.type === 'percent'
-              ? `Média ${avg.toFixed(1)}%`
-              : activeMetric.type === 'ratio'
-              ? `Média ${avg.toFixed(2)}x`
-              : `Média ${avg.toFixed(1)}`;
-            return (
-              <div className="h-[300px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 'bold' }} dy={10} />
-                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 'bold' }} />
-                    <Tooltip
-                      contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', padding: '12px' }}
-                      formatter={(value: any) => [
-                        activeMetric.type === 'currency' ? `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : activeMetric.type === 'percent' ? `${value.toFixed(1)}%` : activeMetric.type === 'ratio' ? `${value.toFixed(2)}x` : value,
-                        activeMetric.label
-                      ]}
-                    />
-                    <ReferenceLine
-                      y={avg}
-                      stroke={activeMetric.color}
-                      strokeDasharray="6 3"
-                      strokeWidth={1.5}
-                      strokeOpacity={0.6}
-                      label={{ value: avgLabel, position: 'insideTopRight', fontSize: 9, fontWeight: 'bold', fill: activeMetric.color, opacity: 0.8 }}
-                    />
-                    <Bar
-                      dataKey={selectedMetric}
-                      fill={activeMetric.color}
-                      radius={[6, 6, 0, 0]}
-                      name={activeMetric.label}
-                    />
-                    {isComparing && (
-                      <Bar
-                        dataKey={`${selectedMetric}_prev`}
-                        fill={activeMetric.color}
-                        fillOpacity={0.35}
-                        radius={[6, 6, 0, 0]}
-                        name={`${activeMetric.label} (Anterior)`}
-                      />
-                    )}
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            );
+            const series = chartData.map((d: any) => ({
+              label: d.name,
+              value: Number(d[selectedMetric]) || 0,
+              value2: isComparing ? (Number(d[`${selectedMetric}_prev`]) || 0) : undefined,
+            }));
+            return <TrendBarChart series={series} format={fmtByType(activeMetric.type)} height={260} />;
           })()}
         </Card>
       </div>

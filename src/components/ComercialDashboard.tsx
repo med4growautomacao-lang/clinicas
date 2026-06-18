@@ -38,6 +38,7 @@ import { DayPicker } from "react-day-picker";
 import { useAuth } from "../contexts/AuthContext";
 import { supabase } from "../lib/supabase";
 import { cn } from "../lib/utils";
+import { TrendBarChart } from "./TrendBarChart";
 import { Button } from "./ui/button";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
@@ -654,11 +655,6 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
   );
 
   const chartSeries = bucketDaily(data.daily, period);
-  const maxVal = Math.max(...chartSeries.map((d) => d[chartMetric]), 1);
-  const CHART_H = 176; // px da área de plotagem (card tem ~200px de conteúdo)
-  const avgVal = chartSeries.length ? chartSeries.reduce((a, d) => a + d[chartMetric], 0) / chartSeries.length : 0;
-  const avgFmt = avgVal >= 10 ? Math.round(avgVal).toString() : (Math.round(avgVal * 10) / 10).toString();
-  const labelStep = Math.max(1, Math.ceil(chartSeries.length / 12)); // ~12 rótulos no máx
   const sectionTrend = (
     <Card key="trend" className="border border-slate-200 shadow-sm overflow-hidden flex flex-col">
       <CardHeader className="bg-slate-50 border-b border-slate-100 py-3 flex flex-row items-center justify-between">
@@ -686,53 +682,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
         </div>
       </CardHeader>
       <CardContent className="p-6 pt-7">
-        <div className="flex gap-2">
-          {/* Eixo Y — quantidade */}
-          <div className="flex flex-col justify-between items-end text-[12px] font-extrabold text-black tabular-nums shrink-0 w-9" style={{ height: CHART_H }}>
-            <span>{maxVal}</span>
-            <span>{Math.round(maxVal / 2)}</span>
-            <span>0</span>
-          </div>
-          {/* Plotagem + eixo X */}
-          <div className="flex-1 min-w-0">
-            <div className="relative" style={{ height: CHART_H }}>
-              {/* linhas de grade (topo / meio / base) */}
-              <div className="absolute inset-x-0 top-0 border-t border-slate-100" />
-              <div className="absolute inset-x-0 border-t border-slate-100" style={{ top: CHART_H / 2 }} />
-              <div className="absolute inset-x-0 bottom-0 border-t border-slate-200" />
-              {/* linha de média */}
-              {avgVal > 0 && (
-                <div className="absolute inset-x-0 z-20 pointer-events-none" style={{ bottom: (avgVal / maxVal) * CHART_H }}>
-                  <div className="border-t border-dashed border-teal-500/60" />
-                  <span className="absolute right-0 -top-3 text-[11px] font-extrabold text-black bg-white/90 px-1 rounded">méd {avgFmt}</span>
-                </div>
-              )}
-              {/* barras */}
-              <div className="absolute inset-0 flex items-end gap-1">
-                {chartSeries.map((d, i) => {
-                  const val = d[chartMetric];
-                  return (
-                    <div key={`${d.label}-${i}`} className="flex-1 flex items-end justify-center group min-w-0 h-full">
-                      <motion.div initial={{ height: 0 }} animate={{ height: Math.max((val / maxVal) * CHART_H, val > 0 ? 4 : 1) }} transition={{ delay: i * 0.02, duration: 0.5 }} className="w-full bg-gradient-to-t from-teal-500/30 to-teal-500/10 group-hover:from-teal-500/50 group-hover:to-teal-500/20 rounded-t-md relative flex justify-center border-t-2 border-teal-500">
-                        <div className="absolute -top-7 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900 text-white text-[10px] font-bold px-2 py-1 rounded whitespace-nowrap z-30">{val}</div>
-                      </motion.div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-            {/* Eixo X — datas */}
-            <div className="flex gap-1 mt-1.5">
-              {chartSeries.map((d, i) => (
-                <div key={`lbl-${d.label}-${i}`} className="flex-1 min-w-0 text-center">
-                  {(i % labelStep === 0 || i === chartSeries.length - 1) && (
-                    <span className="block text-[11px] font-extrabold text-black tracking-tight whitespace-nowrap">{d.label}</span>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+        <TrendBarChart series={chartSeries.map((d) => ({ label: d.label, value: d[chartMetric] }))} height={176} />
       </CardContent>
     </Card>
   );

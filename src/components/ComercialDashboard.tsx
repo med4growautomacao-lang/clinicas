@@ -14,11 +14,8 @@ import {
   Calendar,
   ChevronDown,
   BarChart3,
-  Star,
-  ThumbsUp,
   Loader2,
   Target,
-  Trophy,
   XCircle,
   Hourglass,
   BellRing,
@@ -233,6 +230,7 @@ const CHART_METRICS: { label: string; value: ChartMetric; icon: any }[] = [
 export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: string) => void } = {}) {
   const { profile, activeClinicId } = useAuth();
   const [data, setData] = useState<CommercialData | null>(null);
+  const [clinicFeatures, setClinicFeatures] = useState<{ feature_followup?: boolean; feature_ia?: boolean } | null>(null);
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<Period>("dia");
   // Conversão (evento) — janela principal; presets INCLUEM hoje
@@ -343,6 +341,16 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
     return () => { supabase.removeChannel(channel); };
   }, [fetchData, activeClinicId, profile?.clinic_id]);
 
+  // Features da clínica (esconder "Automações do Sistema" quando não há follow-up nem IA)
+  useEffect(() => {
+    const clinicId = activeClinicId || profile?.clinic_id;
+    if (!clinicId) { setClinicFeatures(null); return; }
+    let cancelled = false;
+    supabase.from("clinics").select("features").eq("id", clinicId).maybeSingle()
+      .then(({ data: c }) => { if (!cancelled) setClinicFeatures((c?.features as { feature_followup?: boolean; feature_ia?: boolean } | null) ?? null); });
+    return () => { cancelled = true; };
+  }, [activeClinicId, profile?.clinic_id]);
+
   // ===== Lista de leads do filtro (drill-down) =====
   const [leadsList, setLeadsList] = useState<LeadRow[]>([]);
   const [leadsTotal, setLeadsTotal] = useState(0);
@@ -388,7 +396,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
     return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 text-teal-600 animate-spin" /></div>;
   }
 
-  const { agents, appointments, sla, outcomes, csat, funnel } = data;
+  const { agents, appointments, sla, outcomes, funnel } = data;
   const status = appointments.byStatus || {};
   const attended = (status.realizado || 0) + (status.compareceu || 0);
   const noShow = status.faltou || 0;
@@ -398,6 +406,8 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
   const automationsTotal = Object.values(automations).reduce((a, b) => a + b, 0);
   // Handoffs IA -> humano no período (não vem de automation_logs; é leads.handoff_triggered_at).
   const handoffsCount = agents.ia.handoffs || 0;
+  // Só mostra "Automações do Sistema" se a clínica tem follow-up ou IA (default: ligado).
+  const showAutomations = clinicFeatures?.feature_followup !== false || clinicFeatures?.feature_ia !== false;
 
   // ===== KPI strip (headline) — números que importam ao cliente (estilo Marketing) =====
   // Escopados pelo filtro de agente: conversão, consultas, preço/consulta, tempo de resposta.
@@ -563,10 +573,6 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
                 </div>
               ));
             })()}
-            <div className="flex items-center gap-4 pt-3 mt-1 border-t border-slate-100">
-              <div className="flex items-center gap-2"><Trophy className="w-4 h-4 text-emerald-600" /><span className="text-xs font-medium text-slate-500">Ganhos</span><span className="text-sm font-bold text-emerald-700">{outcomes.won}</span></div>
-              <div className="flex items-center gap-2"><XCircle className="w-4 h-4 text-rose-500" /><span className="text-xs font-medium text-slate-500">Perdidos</span><span className="text-sm font-bold text-rose-600">{outcomes.lost}</span></div>
-            </div>
           </div>
         )}
       </CardContent>
@@ -680,8 +686,8 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
           {chartSeries.map((d, i) => {
             const val = d[chartMetric];
             return (
-              <div key={`${d.label}-${i}`} className="flex-1 flex flex-col items-center gap-1.5 group min-w-0">
-                <motion.div initial={{ height: 0 }} animate={{ height: `${Math.max((val / maxVal) * 100, val > 0 ? 4 : 1)}%` }} transition={{ delay: i * 0.02, duration: 0.5 }} className="w-full bg-gradient-to-t from-teal-500/30 to-teal-500/10 group-hover:from-teal-500/50 group-hover:to-teal-500/20 rounded-t-md relative flex justify-center border-t-2 border-teal-500">
+              <div key={`${d.label}-${i}`} className="flex-1 flex flex-col items-center justify-end gap-1.5 group min-w-0 h-full">
+                <motion.div initial={{ height: 0 }} animate={{ height: Math.max((val / maxVal) * 176, val > 0 ? 4 : 1) }} transition={{ delay: i * 0.02, duration: 0.5 }} className="w-full bg-gradient-to-t from-teal-500/30 to-teal-500/10 group-hover:from-teal-500/50 group-hover:to-teal-500/20 rounded-t-md relative flex justify-center border-t-2 border-teal-500">
                   <div className="absolute -top-7 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900 text-white text-[10px] font-bold px-2 py-1 rounded whitespace-nowrap z-10">{val}</div>
                 </motion.div>
                 {chartSeries.length <= 16 && <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter truncate w-full text-center">{d.label}</span>}
@@ -689,55 +695,6 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
             );
           })}
         </div>
-      </CardContent>
-    </Card>
-  );
-
-  const sectionCsat = (
-    <Card key="csat" className="border border-slate-200 shadow-sm overflow-hidden">
-      <CardHeader className="bg-slate-50 border-b border-slate-100 py-3">
-        <CardTitle className="text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2"><Star className="w-4 h-4 text-indigo-500" />Satisfação — {csat.type === "nps" ? "NPS" : csat.type === "both" ? "CSAT / NPS" : "CSAT"}</CardTitle>
-      </CardHeader>
-      <CardContent className="p-5">
-        {csat.answered === 0 ? (
-          <div className="flex flex-col items-center justify-center py-10 gap-3 text-slate-400">
-            <Star className="w-10 h-10 text-slate-200" />
-            <p className="text-sm font-semibold">Nenhuma resposta no período</p>
-            <p className="text-xs">As notas aparecerão aqui após os pacientes responderem à pesquisa.</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-col items-center justify-center p-5 rounded-xl bg-indigo-50 border border-indigo-100 text-center">
-                <Star className="w-5 h-5 text-indigo-400 mb-1" />
-                <p className="text-3xl font-bold text-indigo-700">{csat.avg !== null ? Number(csat.avg).toFixed(1) : "—"}</p>
-                <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider mt-1">Nota Média</p>
-              </div>
-              <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-slate-50 border border-slate-100 text-center">
-                <ThumbsUp className="w-4 h-4 text-emerald-500 mb-1" />
-                <p className="text-xl font-bold text-slate-900">{csat.answered}</p>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-0.5">Respondidos</p>
-              </div>
-            </div>
-            <div className="lg:col-span-2 flex flex-col justify-center gap-2.5">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Distribuição de Notas</p>
-              {csat.distribution.map(({ score, count }) => {
-                const maxCount = Math.max(...csat.distribution.map((d) => d.count), 1);
-                const barPct = (count / maxCount) * 100;
-                const isHigh = csat.type === "nps" ? score >= 9 : score >= 4;
-                const isMid = csat.type === "nps" ? score >= 7 : score === 3;
-                const barColor = isHigh ? "bg-emerald-500" : isMid ? "bg-amber-400" : "bg-rose-400";
-                return (
-                  <div key={score} className="flex items-center gap-3">
-                    <span className="text-xs font-bold text-slate-600 w-5 text-right shrink-0">{score}</span>
-                    <div className="flex-1 bg-slate-100 rounded-full h-5 overflow-hidden"><motion.div initial={{ width: 0 }} animate={{ width: `${barPct}%` }} transition={{ duration: 0.6 }} className={`h-full rounded-full ${barColor}`} /></div>
-                    <span className="text-xs font-bold text-slate-500 w-6 shrink-0">{count}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
       </CardContent>
     </Card>
   );
@@ -859,7 +816,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
   );
 
   // Ordem das seções (visão única)
-  const orderedSections = [sectionAgents, sectionSla, sectionAppointments, sectionSistema, sectionFunnel, sectionLeads, sectionTrend, sectionCsat];
+  const orderedSections = [sectionAgents, sectionSla, sectionAppointments, ...(showAutomations ? [sectionSistema] : []), sectionFunnel, sectionLeads, sectionTrend];
 
   return (
     <div className="space-y-6 h-full overflow-y-auto pr-1 custom-scrollbar pb-8">

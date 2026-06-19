@@ -299,16 +299,18 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
         });
       });
     }
+    // Datas mais recentes no topo (desc); dentro do mesmo dia, horários em ordem crescente.
     return items.sort((a, b) => {
-      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      if (a.date !== b.date) return b.date.localeCompare(a.date);
       return a.sortTime.localeCompare(b.sortTime);
     });
   }, [filteredAppointments, blockedListItems, showBlocked]);
 
-  // Índice do primeiro item cuja data é hoje ou futura — usado para rolar a lista até o dia atual ao abrir.
+  // Lista em ordem decrescente (futuro no topo): o primeiro item de cima cuja data é hoje ou
+  // anterior marca a posição de "hoje" — usado para rolar a lista até o dia atual ao abrir.
   const todayStr = format(new Date(), 'yyyy-MM-dd');
   const todayAnchorIndex = useMemo(
-    () => timelineItems.findIndex(t => t.date >= todayStr),
+    () => timelineItems.findIndex(t => t.date <= todayStr),
     [timelineItems, todayStr]
   );
 
@@ -328,7 +330,7 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
         const delta = row.getBoundingClientRect().top - container.getBoundingClientRect().top;
         container.scrollTop += delta - headerH - 4;
       } else if (todayAnchorIndex === -1) {
-        // Todos os agendamentos estão no passado — posiciona no mais recente (fim da lista).
+        // Todos os agendamentos estão no futuro — posiciona no mais próximo de hoje (fim da lista).
         container.scrollTop = container.scrollHeight;
       }
       didAutoScrollRef.current = true;

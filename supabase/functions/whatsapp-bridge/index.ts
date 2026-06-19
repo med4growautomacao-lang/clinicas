@@ -8,6 +8,7 @@
 // quando confirmar zero trafego em /functions/v1/whatsapp-bridge nos logs.
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -24,7 +25,11 @@ serve(async (req) => {
   try { body = await req.json(); } catch { body = {}; }
   const action: string = body?.action ?? 'start';
 
-  // 1) Acoes de grupo seguem para o webhook do n8n
+  // 1) Acoes de grupo seguem para o webhook do n8n.
+  //    O workflow do n8n usa o token da instancia (header `token` da uazapi) que
+  //    espera receber no payload como `api_token`. Esse campo se perdeu quando a
+  //    bridge virou roteador fino; aqui resolvemos de whatsapp_instances pelo
+  //    clinic_id e reinjetamos antes de repassar.
   if (GROUP_ACTIONS.has(action)) {
     const groupUrl = Deno.env.get('WHATSAPP_GROUP_WEBHOOK');
     if (!groupUrl) {
@@ -32,11 +37,34 @@ serve(async (req) => {
         status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       });
     }
+
+    // Resolve o token da instancia da clinica
+    let apiToken = '';
+    try {
+      const supa = createClient(
+        Deno.env.get('SUPABASE_URL') ?? '',
+        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      );
+      const { data } = await supa
+        .from('whatsapp_instances')
+        .select('api_token')
+        .eq('clinic_id', body?.clinic_id)
+        .maybeSingle();
+      apiToken = data?.api_token ?? '';
+    } catch (_e) {
+      // segue sem token; tratamos abaixo com erro explicito
+    }
+    if (!apiToken) {
+      return new Response(JSON.stringify({ success: false, error: 'whatsapp_nao_conectado: instancia sem api_token para esta clinica' }), {
+        status: 409, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+      });
+    }
+
     try {
       const res = await fetch(groupUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ ...body, api_token: apiToken }),
       });
       const text = await res.text();
       return new Response(text, {

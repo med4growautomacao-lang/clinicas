@@ -1120,7 +1120,8 @@ function SystemSettingsTab() {
 
 // ─── AIAssistantConfigSection (config do botão flutuante de IA) ────────────────
 const ASSISTANT_KEY = 'ai_assistant_config';
-const ASSISTANT_ROLES = ['gestor', 'medico_gestor', 'secretaria', 'vendedor'];
+const ASSISTANT_ROLES = ['org_owner', 'org_admin', 'org_team'];
+const ASSISTANT_ROLE_LABELS: Record<string, string> = { org_owner: 'Owner', org_admin: 'Admin', org_team: 'Equipe' };
 
 interface AssistantCfg {
   enabled: boolean;
@@ -1229,15 +1230,15 @@ function AIAssistantConfigSection() {
           <div className="flex flex-wrap gap-2">
             {ASSISTANT_ROLES.map(r => (
               <button key={r} onClick={() => toggleRole(r)}
-                className={cn("px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors capitalize",
+                className={cn("px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors",
                   cfg.allowed_roles.includes(r)
                     ? "bg-teal-50 text-teal-700 border-teal-200"
                     : "bg-white text-slate-400 border-slate-200")}>
-                {r.replace('_', ' ')}
+                {ASSISTANT_ROLE_LABELS[r] || r}
               </button>
             ))}
           </div>
-          <p className="text-[11px] text-slate-400 mt-2">Org-admins e super-admin sempre têm acesso.</p>
+          <p className="text-[11px] text-slate-400 mt-2">Disponível apenas para papéis da organização, ao entrar em uma clínica específica. Papéis de clínica (gestor, secretária, etc.) não têm acesso.</p>
         </div>
 
         <div className="pt-2">

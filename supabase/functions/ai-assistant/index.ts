@@ -118,9 +118,10 @@ serve(async (req) => {
     try { cfg = cfgRow?.value ? JSON.parse(cfgRow.value) : {}; } catch { cfg = {}; }
 
     if (cfg.enabled === false) return jsonResponse({ error: "Assistente desativado." }, 403);
-    const allowedRoles: string[] = Array.isArray(cfg.allowed_roles) ? cfg.allowed_roles : [];
-    if (allowedRoles.length && !allowedRoles.includes(userRole) &&
-        !["org_owner", "org_admin", "super-admin"].includes(userRole)) {
+    // Disponível apenas para papéis da organização (Owner/Admin/Equipe).
+    const ORG_ROLES = ["org_owner", "org_admin", "org_team"];
+    const allowedRoles: string[] = Array.isArray(cfg.allowed_roles) ? cfg.allowed_roles : ORG_ROLES;
+    if (!ORG_ROLES.includes(userRole) || !allowedRoles.includes(userRole)) {
       return jsonResponse({ error: "Sem permissão para usar o assistente." }, 403);
     }
 

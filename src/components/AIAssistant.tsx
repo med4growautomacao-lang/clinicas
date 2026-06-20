@@ -15,6 +15,7 @@ interface AssistantConfig {
 }
 
 const DEFAULT_WELCOME = "Oi! Posso te ajudar com leads, agendamentos, faturamento e funil desta clínica.";
+const ORG_ROLES = ["org_owner", "org_admin", "org_team"];
 
 export function AIAssistant() {
   const { session, profile, activeClinicId } = useAuth();
@@ -49,9 +50,9 @@ export function AIAssistant() {
   }, [messages, loading]);
 
   const role = profile?.role || "";
-  const allowed = config?.allowed_roles && config.allowed_roles.length
-    ? (config.allowed_roles.includes(role) || role.startsWith("org_") || role === "super-admin")
-    : true;
+  const cfgRoles = config?.allowed_roles;
+  // Apenas papéis da organização (Owner/Admin/Equipe), filtrados pela config.
+  const allowed = ORG_ROLES.includes(role) && (!cfgRoles?.length || cfgRoles.includes(role));
 
   // Só aparece logado, com clínica ativa, habilitado e com permissão.
   if (!session || !activeClinicId || !config || config.enabled === false || !allowed) return null;

@@ -370,6 +370,35 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
 
   const isMedicoRole = (role: string) => role === 'medico' || role === 'medico_gestor';
 
+  // Médico criado/gerido pelo painel da Org precisa de uma linha em `doctors` para
+  // aparecer no Corpo Clínico e ter agenda — mesmo antes de criar a senha. Espelha o
+  // cadastro do Corpo Clínico (DoctorsManagement). user_id fica null até a ativação
+  // (activate_pending_medico) linkar por nome; para usuário já ativo, vinculamos direto.
+  const ensureDoctorRow = async (clinicId: string, fullName: string, userId: string | null) => {
+    const name = fullName.trim();
+    if (!name) return;
+    const { data: existing } = await supabase
+      .from('doctors')
+      .select('id, user_id')
+      .eq('clinic_id', clinicId)
+      .ilike('name', name)
+      .limit(1);
+    const found = existing?.[0];
+    if (found) {
+      // Já existe (ex.: criado pelo Corpo Clínico) — só garante o vínculo se faltava.
+      if (userId && !found.user_id) {
+        await supabase.from('doctors').update({ user_id: userId }).eq('id', found.id);
+      }
+      return;
+    }
+    await supabase.from('doctors').insert({
+      clinic_id: clinicId,
+      name,
+      user_id: userId,
+      status: 'offline',
+    });
+  };
+
   const handleAddClinicUser = async () => {
     if (!clinicUserTarget) return;
     const name = clinicUserForm.name.trim();
@@ -410,9 +439,14 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
       role: clinicUserForm.role,
     });
 
-    setClinicUserSaving(false);
-    if (error) { setClinicUserError(error.message); return; }
+    if (error) { setClinicUserSaving(false); setClinicUserError(error.message); return; }
 
+    // Médico já aparece no Corpo Clínico (e na agenda) mesmo antes de criar a senha.
+    if (isMedicoRole(clinicUserForm.role)) {
+      await ensureDoctorRow(clinicUserTarget.id, name, null);
+    }
+
+    setClinicUserSaving(false);
     setClinicUserTarget(null);
     setClinicUserForm({ name: '', email: '', password: '', role: 'gestor' });
     if (clinicUsersView?.id === clinicUserTarget?.id) fetchClinicUsers(clinicUserTarget.id);
@@ -435,6 +469,11 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
   const handleChangeClinicUserRole = async (user: ClinicUser, newRole: string) => {
     const table = user.is_pending ? 'pending_clinic_users' : 'clinic_users';
     await supabase.from(table).update({ role: newRole }).eq('id', user.id);
+    // Virou médico pelo painel → garante o registro no Corpo Clínico (agenda).
+    // Ativo: id == user_id (auth). Pendente: vincula por nome na ativação.
+    if (isMedicoRole(newRole) && clinicUsersView) {
+      await ensureDoctorRow(clinicUsersView.id, user.full_name || '', user.is_pending ? null : user.id);
+    }
     if (clinicUsersView) fetchClinicUsers(clinicUsersView.id);
   };
 

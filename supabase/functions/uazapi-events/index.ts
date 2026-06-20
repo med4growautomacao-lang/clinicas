@@ -10,13 +10,16 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { ownerToPhone } from '../_shared/phone.ts';
+import { ownerToPhone, normalizeBrazilianPhone } from '../_shared/phone.ts';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, token',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
+
+const UAZAPI_BASE = Deno.env.get('UAZAPI_BASE_URL') ?? 'https://med4growautomacao.uazapi.com';
+const STATUS_FETCH_TIMEOUT_MS = 4000;
 
 interface UazapiInstance {
   id?: string;
@@ -67,11 +70,15 @@ function extractInstanceData(payload: UazapiConnectionEvent): UazapiInstance & {
   return {};
 }
 
-async function findInstanceRow(supa: SupabaseClient, data: UazapiInstance): Promise<{ id: string; clinic_id: string; attempt_id: string | null; status: string } | null> {
+type InstanceRow = { id: string; clinic_id: string; attempt_id: string | null; status: string; api_token: string | null; phone_number: string | null };
+
+const ROW_COLS = 'id, clinic_id, attempt_id, status, api_token, phone_number';
+
+async function findInstanceRow(supa: SupabaseClient, data: UazapiInstance): Promise<InstanceRow | null> {
   if (data.id) {
     const { data: byId } = await supa
       .from('whatsapp_instances')
-      .select('id, clinic_id, attempt_id, status')
+      .select(ROW_COLS)
       .eq('api_id', data.id)
       .maybeSingle();
     if (byId) return byId as any;
@@ -79,7 +86,7 @@ async function findInstanceRow(supa: SupabaseClient, data: UazapiInstance): Prom
   if (data.token) {
     const { data: byToken } = await supa
       .from('whatsapp_instances')
-      .select('id, clinic_id, attempt_id, status')
+      .select(ROW_COLS)
       .eq('api_token', data.token)
       .maybeSingle();
     if (byToken) return byToken as any;
@@ -88,12 +95,40 @@ async function findInstanceRow(supa: SupabaseClient, data: UazapiInstance): Prom
     // name na uazapi = clinic_id
     const { data: byClinic } = await supa
       .from('whatsapp_instances')
-      .select('id, clinic_id, attempt_id, status')
+      .select(ROW_COLS)
       .eq('clinic_id', data.name)
       .maybeSingle();
     if (byClinic) return byClinic as any;
   }
   return null;
+}
+
+// Busca o numero (owner/jid) da instancia na uazapi via GET /instance/status.
+// Usado quando o webhook de 'connected' chega sem o campo 'owner' (comum no
+// primeiro evento pos-pareamento) -- assim o numero aparece na hora, sem
+// esperar o cron whatsapp-sync-status (09h/18h BRT).
+async function fetchOwnerPhone(apiToken: string): Promise<string | null> {
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), STATUS_FETCH_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch(`${UAZAPI_BASE}/instance/status`, {
+        method: 'GET',
+        headers: { Accept: 'application/json', token: apiToken },
+        signal: ctrl.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!res.ok) return null;
+    const body = await res.json();
+    const fromOwner = ownerToPhone(body?.instance?.owner);
+    if (fromOwner) return fromOwner;
+    return normalizeBrazilianPhone(body?.status?.jid?.user);
+  } catch {
+    return null;
+  }
 }
 
 serve(async (req) => {
@@ -128,10 +163,13 @@ serve(async (req) => {
 
   if (uazStatus === 'connected') {
     nextStatus = 'connected';
-    if (data.owner) {
-      const phone = ownerToPhone(data.owner);
-      if (phone) updates.phone_number = phone;
+    let phone = ownerToPhone(data.owner);
+    // O webhook de 'connected' costuma vir sem 'owner'. Se o numero ainda nao
+    // esta salvo, busca na uazapi agora para preencher imediatamente.
+    if (!phone && row.api_token && !row.phone_number) {
+      phone = await fetchOwnerPhone(row.api_token);
     }
+    if (phone) updates.phone_number = phone;
   } else if (uazStatus === 'connecting' || uazStatus === 'qrcode' || uazStatus === 'connectingphone') {
     nextStatus = row.status === 'connected' ? null : 'connecting'; // nao volta de connected p/ connecting
     if (data.qrcode) {
@@ -169,7 +207,7 @@ serve(async (req) => {
       ? (nextStatus === 'connected' ? 'connected' : nextStatus === 'disconnected' ? 'disconnected' : 'qr_received')
       : 'webhook_noop',
     source: 'uazapi_webhook',
-    payload: { uazapi_status: uazStatus, has_qr: !!data.qrcode, has_owner: !!data.owner },
+    payload: { uazapi_status: uazStatus, has_qr: !!data.qrcode, has_owner: !!data.owner, phone_set: !!updates.phone_number },
   });
 
   return json({ success: true, next_status: nextStatus ?? row.status });

@@ -12,7 +12,7 @@ const corsHeaders = {
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ALLOWED_MODELS = new Set(["claude-sonnet-4-6", "claude-opus-4-8"]);
-const MAX_AGENT_STEPS = 6;
+const MAX_AGENT_STEPS = 12;
 
 // ─── Tabelas que o assistente pode consultar (espelha os grants do assistant_ro) ───
 const ALLOWED_TABLES = [
@@ -140,8 +140,8 @@ serve(async (req) => {
       "Os dados já estão filtrados automaticamente para esta clínica — NÃO adicione filtro por clinic_id.",
       `Tabelas disponíveis: ${ALLOWED_TABLES.join(", ")}.`,
       "Para descobrir colunas, consulte information_schema.columns (ex.: SELECT column_name FROM information_schema.columns WHERE table_name='leads').",
-      "Dicas: tickets.outcome indica resultado (ex.: ganho/perdido); financial_transactions tem amount/type/status/date; marketing_data tem date/platform/investment; leads e chat_messages se ligam por lead_id.",
-      "Apresente valores em R$ e datas como dia/mês. Se não houver dados, diga que não encontrou. Responda apenas com a resposta final ao usuário.",
+      "Dicas: tickets.outcome indica resultado (ex.: ganho/perdido) e liga em lead_id; financial_transactions tem amount/type/status/date; marketing_data tem date/platform/investment; appointments liga em lead_id/ticket_id e tem doctor_id; chat_messages liga em lead_id e tem direction/sender/message/metadata (use sender/direction para saber quem respondeu — humano vs IA; faça SELECT DISTINCT sender se precisar).",
+      "Seja eficiente: descubra colunas só quando necessário e prefira poucas consultas. Apresente valores em R$ e datas como dia/mês. Se não houver dados, diga que não encontrou. Responda apenas com a resposta final ao usuário.",
     ].join("\n");
 
     const tools = [{
@@ -212,7 +212,22 @@ serve(async (req) => {
       return jsonResponse({ reply: text || "Não consegui gerar uma resposta." });
     }
 
-    return jsonResponse({ reply: "A consulta ficou complexa demais. Tente reformular a pergunta." });
+    // Esgotou os passos: força uma resposta final (sem novas consultas) com o que já foi coletado.
+    const finalResp = await fetch(ANTHROPIC_URL, {
+      method: "POST",
+      headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+      body: JSON.stringify({
+        model, max_tokens: 1024,
+        system: systemPrompt + "\n\nResponda agora ao usuário com base no que você já descobriu, mesmo que parcial. NÃO chame ferramentas.",
+        tools, tool_choice: { type: "none" }, messages: convo,
+      }),
+    });
+    if (finalResp.ok) {
+      const fd = await finalResp.json();
+      const t = (fd.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n").trim();
+      if (t) return jsonResponse({ reply: t });
+    }
+    return jsonResponse({ reply: "Não consegui responder isso com os dados disponíveis. Tente reformular a pergunta." });
   } catch (e) {
     console.error("ai-assistant fatal", e);
     return jsonResponse({ error: "Erro interno do assistente." }, 500);

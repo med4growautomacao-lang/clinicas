@@ -1193,7 +1193,8 @@ function AIAssistantConfigSection() {
           <div>
             <label className="block text-xs font-bold text-slate-600 mb-1.5">Modelo</label>
             <select value={cfg.model} onChange={e => set('model', e.target.value)} className={inputCls}>
-              <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (rápido/econômico)</option>
+              <option value="claude-haiku-4-5">Claude Haiku 4.5 (mais rápido/barato)</option>
+              <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (equilibrado)</option>
               <option value="claude-opus-4-8">Claude Opus 4.8 (mais capaz)</option>
             </select>
           </div>

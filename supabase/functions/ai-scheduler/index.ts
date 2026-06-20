@@ -712,6 +712,68 @@ serve(async (req) => {
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
       );
+    } else if (action === "close_as_lost") {
+      // Encerra o ticket aberto do lead como PERDIDO quando ele está fora do perfil
+      // (ex.: pede cirurgia ou quer tratar uma dor que a clínica não atende).
+      // Mantém o card aberto na etapa Perdido (resolve=false), grava o motivo, e NÃO
+      // desliga a IA: o follow-up de reengajamento já para sozinho porque o slug 'perdido'
+      // está na lista de etapas excluídas da query do n8n. A despedida é a resposta final
+      // do próprio agente (instruída via next_step).
+      const { lead_phone, detail } = payload;
+      if (!lead_phone) {
+        return new Response(JSON.stringify({ success: false, error: "lead_phone is required" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+      }
+
+      // Lookup do lead por telefone NORMALIZADO (sessao pode vir com 9o digito) — mesmo
+      // padrão do trigger_handoff.
+      const { data: lLookup } = await supabaseClient.rpc("find_patient_by_phone", { p_clinic_id: clinic_id, p_phone: lead_phone });
+      const canonicalLeadPhone = (lLookup as any)?.canonical_phone || lead_phone;
+      const { data: lead } = await supabaseClient.from("leads")
+        .select("id, name, phone").eq("clinic_id", clinic_id).eq("phone", canonicalLeadPhone).maybeSingle();
+      if (!lead) {
+        return new Response(JSON.stringify({ success: false, error_code: "lead_not_found", error: "Lead não encontrado para esse telefone" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+      }
+
+      // Acha o ticket aberto do lead (invariante: no máximo 1 aberto por lead)
+      const { data: openTickets } = await supabaseClient.from("tickets")
+        .select("id").eq("lead_id", lead.id).eq("status", "open")
+        .order("created_at", { ascending: false }).limit(1);
+      const openTicket = openTickets && openTickets.length > 0 ? openTickets[0] : null;
+      if (!openTicket) {
+        return new Response(JSON.stringify({
+          success: true, applied: false, reason: "no_open_ticket",
+          next_step: "Não há atendimento aberto para encerrar. Apenas se despeça com gentileza, explicando que a clínica não atende esse caso, sem oferecer agendamento.",
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+      }
+
+      // Marca PERDIDO + motivo, mantendo o card aberto (resolve=false). O trigger de
+      // invariante (fn_enforce_ticket_resolution_consistency) move o card para a etapa
+      // slug 'perdido' e trg_log_ticket_stage_change registra em lead_stage_history.
+      const { data: fin, error: finErr } = await supabaseClient.rpc("finalize_ticket", {
+        p_ticket_id: openTicket.id,
+        p_outcome: "perdido",
+        p_loss_reason: "Fora do perfil",
+        p_notes: detail || null,
+        p_resolve: false,
+      });
+      if (finErr || !(fin as any)?.success) {
+        return new Response(JSON.stringify({
+          success: false, error_code: (fin as any)?.error_code || "finalize_failed",
+          error: finErr?.message || "Falha ao encerrar o ticket como perdido",
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+      }
+
+      return new Response(JSON.stringify({
+        success: true,
+        applied: true,
+        ticket_id: openTicket.id,
+        lead_id: lead.id,
+        outcome: "perdido",
+        loss_reason: "Fora do perfil",
+        next_step: "Lead marcado como perdido (fora do perfil). Despeça-se com gentileza, explicando brevemente que a clínica não atende esse caso e, se útil, sugira procurar um especialista adequado. NÃO ofereça agendamento.",
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
     } else {
       return new Response(JSON.stringify({ success: false, error: "Invalid action" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });

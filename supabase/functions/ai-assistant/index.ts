@@ -12,7 +12,7 @@ const corsHeaders = {
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ALLOWED_MODELS = new Set(["claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-8"]);
-const MAX_AGENT_STEPS = 12;
+const MAX_AGENT_STEPS = 15;
 
 // ─── Tabelas que o assistente pode consultar (espelha os grants do assistant_ro) ───
 const ALLOWED_TABLES = [

@@ -12,6 +12,7 @@ import { MarketingAnalytics } from './components/MarketingAnalytics';
 import { OrgAdmin } from './components/OrgAdmin';
 import { UserProfile } from './components/UserProfile';
 import { TeamManagement } from './components/TeamManagement';
+import { AIAssistant } from './components/AIAssistant';
 
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ToastProvider } from './components/ui/toast';
@@ -139,6 +140,8 @@ function AppContent() {
           )}
         </div>
       </main>
+
+      <AIAssistant />
     </div>
   );
 }

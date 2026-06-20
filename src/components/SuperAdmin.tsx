@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   useClinics, useOrganizations, useSuperAdminData, useGlobalSystemSettings,
   usePromptTemplates, PromptTemplate,
@@ -1095,12 +1095,13 @@ function PromptTemplatesManager() {
 
 // ─── SystemSettingsTab (wrapper com sub-abas) ─────────────────────────────────
 function SystemSettingsTab() {
-  const [subTab, setSubTab] = useState<'prompts' | 'vars'>('prompts');
+  const [subTab, setSubTab] = useState<'prompts' | 'assistant' | 'vars'>('prompts');
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl w-fit">
         {[
           { id: 'prompts', label: 'Prompts Fixos' },
+          { id: 'assistant', label: 'AI Assistente' },
           { id: 'vars', label: 'Variáveis de Sistema' },
         ].map(t => (
           <button key={t.id} onClick={() => setSubTab(t.id as any)}
@@ -1110,7 +1111,141 @@ function SystemSettingsTab() {
           </button>
         ))}
       </div>
-      {subTab === 'prompts' ? <PromptTemplatesManager /> : <SystemVariablesSection />}
+      {subTab === 'prompts' ? <PromptTemplatesManager />
+        : subTab === 'assistant' ? <AIAssistantConfigSection />
+        : <SystemVariablesSection />}
+    </div>
+  );
+}
+
+// ─── AIAssistantConfigSection (config do botão flutuante de IA) ────────────────
+const ASSISTANT_KEY = 'ai_assistant_config';
+const ASSISTANT_ROLES = ['gestor', 'medico_gestor', 'secretaria', 'vendedor'];
+
+interface AssistantCfg {
+  enabled: boolean;
+  model: string;
+  system_prompt: string;
+  max_rows: number;
+  welcome_message: string;
+  example_questions: string[];
+  allowed_roles: string[];
+}
+
+const ASSISTANT_DEFAULTS: AssistantCfg = {
+  enabled: true,
+  model: 'claude-sonnet-4-6',
+  system_prompt: 'Você é o assistente de dados de uma clínica. Responda em português, de forma objetiva e amigável, usando SOMENTE os dados retornados pelas consultas.',
+  max_rows: 200,
+  welcome_message: 'Oi! Posso te ajudar com leads, agendamentos, faturamento e funil desta clínica.',
+  example_questions: ['Quantos leads novos entraram este mês?', 'Qual foi o faturamento dos últimos 30 dias?'],
+  allowed_roles: [...ASSISTANT_ROLES],
+};
+
+function AIAssistantConfigSection() {
+  const showToast = useToast();
+  const { settings, loading, updateSetting } = useGlobalSystemSettings();
+  const [cfg, setCfg] = useState<AssistantCfg | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (loading) return;
+    try {
+      const raw = settings[ASSISTANT_KEY];
+      setCfg({ ...ASSISTANT_DEFAULTS, ...(raw ? JSON.parse(raw) : {}) });
+    } catch {
+      setCfg({ ...ASSISTANT_DEFAULTS });
+    }
+  }, [loading, settings]);
+
+  if (loading || !cfg) {
+    return <div className="flex items-center justify-center min-h-[300px]"><Loader2 className="w-8 h-8 text-teal-600 animate-spin" /></div>;
+  }
+
+  const set = <K extends keyof AssistantCfg>(k: K, v: AssistantCfg[K]) => setCfg(c => c ? { ...c, [k]: v } : c);
+  const toggleRole = (r: string) =>
+    set('allowed_roles', cfg.allowed_roles.includes(r) ? cfg.allowed_roles.filter(x => x !== r) : [...cfg.allowed_roles, r]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    const ok = await updateSetting(ASSISTANT_KEY, JSON.stringify(cfg));
+    setSaving(false);
+    showToast(ok ? 'Configuração do assistente salva.' : 'Erro ao salvar.', ok ? 'success' : 'error');
+  };
+
+  const inputCls = "w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 text-sm";
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden max-w-3xl">
+      <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+        <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
+          <Sparkles className="w-5 h-5 text-teal-600" /> AI Assistente
+        </h2>
+        <button onClick={() => set('enabled', !cfg.enabled)}
+          className={cn("flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors",
+            cfg.enabled ? "bg-teal-50 text-teal-700" : "bg-slate-100 text-slate-500")}>
+          <Power className="w-3.5 h-3.5" /> {cfg.enabled ? 'Ativado' : 'Desativado'}
+        </button>
+      </div>
+
+      <div className="p-5 space-y-5">
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-600 mb-1.5">Modelo</label>
+            <select value={cfg.model} onChange={e => set('model', e.target.value)} className={inputCls}>
+              <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (rápido/econômico)</option>
+              <option value="claude-opus-4-8">Claude Opus 4.8 (mais capaz)</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-600 mb-1.5">Máx. de linhas por consulta</label>
+            <input type="number" min={10} max={1000} value={cfg.max_rows}
+              onChange={e => set('max_rows', parseInt(e.target.value) || 200)} className={inputCls} />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-bold text-slate-600 mb-1.5">Comportamento (system prompt)</label>
+          <textarea value={cfg.system_prompt} onChange={e => set('system_prompt', e.target.value)}
+            className={cn(inputCls, "h-28 resize-y")} />
+        </div>
+
+        <div>
+          <label className="block text-xs font-bold text-slate-600 mb-1.5">Mensagem de boas-vindas</label>
+          <textarea value={cfg.welcome_message} onChange={e => set('welcome_message', e.target.value)}
+            className={cn(inputCls, "h-16 resize-y")} />
+        </div>
+
+        <div>
+          <label className="block text-xs font-bold text-slate-600 mb-1.5">Perguntas-exemplo (uma por linha)</label>
+          <textarea value={cfg.example_questions.join('\n')}
+            onChange={e => set('example_questions', e.target.value.split('\n').map(s => s.trim()).filter(Boolean))}
+            className={cn(inputCls, "h-20 resize-y")} />
+        </div>
+
+        <div>
+          <label className="block text-xs font-bold text-slate-600 mb-2">Quem pode usar</label>
+          <div className="flex flex-wrap gap-2">
+            {ASSISTANT_ROLES.map(r => (
+              <button key={r} onClick={() => toggleRole(r)}
+                className={cn("px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors capitalize",
+                  cfg.allowed_roles.includes(r)
+                    ? "bg-teal-50 text-teal-700 border-teal-200"
+                    : "bg-white text-slate-400 border-slate-200")}>
+                {r.replace('_', ' ')}
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-slate-400 mt-2">Org-admins e super-admin sempre têm acesso.</p>
+        </div>
+
+        <div className="pt-2">
+          <button onClick={handleSave} disabled={saving}
+            className="flex items-center gap-2 px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-sm font-bold transition-colors disabled:opacity-50">
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Salvar
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

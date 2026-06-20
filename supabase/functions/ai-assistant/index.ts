@@ -76,17 +76,13 @@ serve(async (req) => {
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-
-    // 1) Identifica o usuário pelo JWT.
-    const userClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: { user }, error: userErr } = await userClient.auth.getUser();
-    if (userErr || !user) return jsonResponse({ error: "Sessão inválida." }, 401);
-
     const admin = createClient(supabaseUrl, serviceKey);
+
+    // 1) Identifica o usuário pelo JWT (validado via service role).
+    const token = authHeader.replace("Bearer ", "").trim();
+    const { data: { user }, error: userErr } = await admin.auth.getUser(token);
+    if (userErr || !user) return jsonResponse({ error: "Sessão inválida." }, 401);
 
     // 2) Resolve o clinic_id do usuário (nunca confia no clinicId cru do front).
     const body = await req.json().catch(() => ({}));

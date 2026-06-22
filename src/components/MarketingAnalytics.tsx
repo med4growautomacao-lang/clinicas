@@ -1252,6 +1252,9 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
     }));
   }, [funnelStages, funnelCohort, funnelOrder, funnelHidden, selectedPlatform, selectedChannel]);
 
+  // Maior volume entre as etapas visíveis — referência de 100% da largura das barras do funil.
+  const funnelMax = useMemo(() => Math.max(1, ...funnelData.map((s: any) => s.value)), [funnelData]);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -1412,42 +1415,38 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
             </div>
           </CardHeader>
 
-          <div className="flex flex-col gap-6 max-w-4xl mx-auto w-full">
+          <div className="flex flex-col gap-4 max-w-4xl mx-auto w-full">
             {funnelData.length === 0 && (
               <p className="text-center text-xs text-slate-400 py-8">
                 Nenhuma etapa selecionada. Use o ⚙️ para escolher as etapas do funil.
               </p>
             )}
-            {funnelData.map((stage, idx) => (
-              <div key={stage.id} className="relative flex flex-col items-center">
-                <div
-                  className="h-16 rounded-2xl flex items-center justify-between px-8 shadow-sm transition-all border border-transparent hover:border-slate-100 group w-full"
-                  style={{
-                    backgroundColor: `${stage.color}10`,
-                    width: `${Math.max(45, 100 - idx * 12)}%`
-                  }}
-                >
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-black uppercase tracking-widest opacity-50" style={{ color: stage.color }}>Etapa {idx + 1}</span>
-                    <span className="text-sm font-black text-slate-700">{stage.name}</span>
-                  </div>
-
-                  <div className="flex items-center gap-6">
-                    <div className="text-right">
-                      <p className="text-lg font-black" style={{ color: stage.color }}>{stage.value.toLocaleString('pt-BR')}</p>
-                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">{stage.subLabel}</p>
+            {funnelData.map((stage, idx) => {
+              // Largura proporcional ao nº de leads, com a MAIOR etapa = 100% (mais fiel).
+              // Os escritos (etapa/nome/conversão) ficam ACIMA da barra; só o número fica
+              // dentro. Um mínimo pequeno garante que o número caiba mesmo em etapas baixas.
+              const widthPct = Math.max(10, (stage.value / funnelMax) * 100);
+              return (
+                <div key={stage.id} className="flex flex-col items-center gap-1.5">
+                  <div className="flex flex-col items-center gap-0.5 text-center">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: stage.color, opacity: 0.6 }}>Etapa {idx + 1}</span>
+                      <span className="text-sm font-black text-slate-700">{stage.name}</span>
                     </div>
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">{stage.subLabel}</span>
+                  </div>
+                  <div
+                    className="h-14 rounded-2xl flex items-center justify-center shadow-sm transition-all border border-transparent hover:border-slate-100"
+                    style={{
+                      backgroundColor: `${stage.color}10`,
+                      width: `${widthPct}%`
+                    }}
+                  >
+                    <span className="text-lg font-black" style={{ color: stage.color }}>{stage.value.toLocaleString('pt-BR')}</span>
                   </div>
                 </div>
-
-                {idx < funnelData.length - 1 && (
-                  <div className="py-2 flex flex-col items-center">
-                    <div className="w-px h-6 bg-slate-100" />
-                    <ArrowDownRight className="w-4 h-4 text-slate-300 -rotate-45" />
-                  </div>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         </Card>
 

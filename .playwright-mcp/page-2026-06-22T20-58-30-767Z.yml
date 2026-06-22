@@ -1,0 +1,211 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - img [ref=e8]
+        - generic [ref=e12]: MedDesk
+      - navigation [ref=e13]:
+        - link "Funcionalidades" [ref=e14] [cursor=pointer]:
+          - /url: "#funcionalidades"
+        - link "Planos" [ref=e15] [cursor=pointer]:
+          - /url: "#planos"
+        - link "Contato" [ref=e16] [cursor=pointer]:
+          - /url: "#contato"
+      - button "Acessar painel" [ref=e17]:
+        - text: Acessar painel
+        - img [ref=e18]
+  - generic [ref=e22]:
+    - generic [ref=e23]:
+      - img [ref=e24]
+      - text: Plataforma completa para clínicas
+    - heading "Sua clínica no piloto automático" [level=1] [ref=e26]:
+      - text: Sua clínica no
+      - text: piloto automático
+    - paragraph [ref=e27]: IA que atende, qualifica e agenda leads pelo WhatsApp. Analytics de marketing em tempo real. Gestão financeira e de prontuários. Tudo integrado.
+    - generic [ref=e28]:
+      - button "Começar gratuitamente" [ref=e29]:
+        - text: Começar gratuitamente
+        - img [ref=e30]
+      - link "Ver funcionalidades" [ref=e32] [cursor=pointer]:
+        - /url: "#funcionalidades"
+  - generic [ref=e34]:
+    - generic [ref=e35]:
+      - paragraph [ref=e36]: 3x
+      - paragraph [ref=e37]: mais conversões de leads
+    - generic [ref=e38]:
+      - paragraph [ref=e39]: 80%
+      - paragraph [ref=e40]: menos tempo em tarefas manuais
+    - generic [ref=e41]:
+      - paragraph [ref=e42]: 24h
+      - paragraph [ref=e43]: atendimento automatizado
+    - generic [ref=e44]:
+      - paragraph [ref=e45]: 100%
+      - paragraph [ref=e46]: visibilidade do funil
+  - generic [ref=e48]:
+    - generic [ref=e49]:
+      - heading "Tudo que sua clínica precisa" [level=2] [ref=e50]
+      - paragraph [ref=e51]: Uma plataforma completa, sem precisar de 10 ferramentas diferentes.
+    - generic [ref=e52]:
+      - generic [ref=e53]:
+        - img [ref=e55]
+        - heading "IA Secretária" [level=3] [ref=e58]
+        - paragraph [ref=e59]: Atende leads no WhatsApp 24h, qualifica, agenda e move automaticamente pelo funil — sem intervenção humana.
+      - generic [ref=e60]:
+        - img [ref=e62]
+        - heading "Marketing Analytics" [level=3] [ref=e64]
+        - paragraph [ref=e65]: Acompanhe ROI de Meta Ads e Google Ads em tempo real. Saiba exatamente quanto cada lead custa e converte.
+      - generic [ref=e66]:
+        - img [ref=e68]
+        - heading "Agenda Inteligente" [level=3] [ref=e70]
+        - paragraph [ref=e71]: Gestão completa de consultas com confirmação automática, lembretes e controle de presença.
+      - generic [ref=e72]:
+        - img [ref=e74]
+        - heading "Funil de Leads" [level=3] [ref=e76]
+        - paragraph [ref=e77]: Kanban visual para acompanhar cada lead da captação à conversão, com regras de automação personalizadas.
+      - generic [ref=e78]:
+        - img [ref=e80]
+        - heading "Financeiro" [level=3] [ref=e82]
+        - paragraph [ref=e83]: Controle de receitas, despesas e fluxo de caixa com visão consolidada por clínica ou grupo.
+      - generic [ref=e84]:
+        - img [ref=e86]
+        - heading "Prontuário Eletrônico" [level=3] [ref=e91]
+        - paragraph [ref=e92]: Histórico completo dos pacientes, anotações clínicas e evolução do tratamento em um só lugar.
+  - generic [ref=e95]:
+    - generic [ref=e96]:
+      - generic [ref=e97]:
+        - img [ref=e98]
+        - text: IA Secretária
+      - heading "Nunca perca um lead por demora no atendimento" [level=2] [ref=e101]
+      - paragraph [ref=e102]: Nossa IA responde em segundos, qualifica o lead, envia orçamento e agenda a consulta — tudo pelo WhatsApp, sem nenhuma interação humana necessária.
+      - list [ref=e103]:
+        - listitem [ref=e104]:
+          - img [ref=e106]
+          - text: Atendimento 24h nos 7 dias
+        - listitem [ref=e108]:
+          - img [ref=e110]
+          - text: Move leads automaticamente no funil
+        - listitem [ref=e112]:
+          - img [ref=e114]
+          - text: Envio de mensagens personalizadas
+        - listitem [ref=e116]:
+          - img [ref=e118]
+          - text: Modo teste para validar respostas
+    - generic [ref=e121]:
+      - generic [ref=e123]:
+        - paragraph [ref=e124]: Olá! Vi o anúncio de vocês. Quanto custa uma consulta?
+        - generic [ref=e126]: 14:32
+      - generic [ref=e128]:
+        - paragraph [ref=e129]: Olá! Que bom que entrou em contato 😊 A consulta é R$150. Você tem preferência de horário?
+        - generic [ref=e130]:
+          - generic [ref=e131]: IA
+          - generic [ref=e132]: 14:32
+      - generic [ref=e134]:
+        - paragraph [ref=e135]: Manhã, de preferência.
+        - generic [ref=e137]: 14:33
+      - generic [ref=e139]:
+        - paragraph [ref=e140]: Perfeito! Temos disponibilidade amanhã às 9h ou quinta às 10h. Qual prefere?
+        - generic [ref=e141]:
+          - generic [ref=e142]: IA
+          - generic [ref=e143]: 14:33
+  - generic [ref=e145]:
+    - generic [ref=e146]:
+      - heading "Planos simples e transparentes" [level=2] [ref=e147]
+      - paragraph [ref=e148]: Sem taxa de setup. Cancele quando quiser.
+    - generic [ref=e149]:
+      - generic [ref=e150]:
+        - generic [ref=e151]:
+          - heading "Essencial" [level=3] [ref=e152]
+          - paragraph [ref=e153]: Ideal para clínicas solo ou pequenas equipes.
+          - generic [ref=e154]:
+            - generic [ref=e155]: R$ 297
+            - generic [ref=e156]: /mês
+        - list [ref=e157]:
+          - listitem [ref=e158]:
+            - img [ref=e159]
+            - text: 1 clínica
+          - listitem [ref=e161]:
+            - img [ref=e162]
+            - text: IA Secretária
+          - listitem [ref=e164]:
+            - img [ref=e165]
+            - text: Funil de Leads
+          - listitem [ref=e167]:
+            - img [ref=e168]
+            - text: Agenda
+          - listitem [ref=e170]:
+            - img [ref=e171]
+            - text: Suporte via WhatsApp
+        - button "Começar agora" [ref=e173]
+      - generic [ref=e174]:
+        - generic [ref=e176]:
+          - img [ref=e177]
+          - text: Mais popular
+        - generic [ref=e179]:
+          - heading "Profissional" [level=3] [ref=e180]
+          - paragraph [ref=e181]: Para clínicas em crescimento que precisam de mais.
+          - generic [ref=e182]:
+            - generic [ref=e183]: R$ 597
+            - generic [ref=e184]: /mês
+        - list [ref=e185]:
+          - listitem [ref=e186]:
+            - img [ref=e187]
+            - text: 3 clínicas
+          - listitem [ref=e189]:
+            - img [ref=e190]
+            - text: Tudo do Essencial
+          - listitem [ref=e192]:
+            - img [ref=e193]
+            - text: Marketing Analytics
+          - listitem [ref=e195]:
+            - img [ref=e196]
+            - text: Financeiro
+          - listitem [ref=e198]:
+            - img [ref=e199]
+            - text: Prontuário Eletrônico
+          - listitem [ref=e201]:
+            - img [ref=e202]
+            - text: Suporte prioritário
+        - button "Começar agora" [ref=e204]
+      - generic [ref=e205]:
+        - generic [ref=e206]:
+          - heading "Rede" [level=3] [ref=e207]
+          - paragraph [ref=e208]: Para grupos com múltiplas unidades e equipes.
+          - generic [ref=e210]: Sob consulta
+        - list [ref=e211]:
+          - listitem [ref=e212]:
+            - img [ref=e213]
+            - text: Clínicas ilimitadas
+          - listitem [ref=e215]:
+            - img [ref=e216]
+            - text: Tudo do Profissional
+          - listitem [ref=e218]:
+            - img [ref=e219]
+            - text: Gestão de organização
+          - listitem [ref=e221]:
+            - img [ref=e222]
+            - text: Onboarding dedicado
+          - listitem [ref=e224]:
+            - img [ref=e225]
+            - text: SLA garantido
+        - button "Falar com vendas" [ref=e227]
+  - generic [ref=e230]:
+    - img [ref=e232]
+    - heading "Pronto para automatizar sua clínica?" [level=2] [ref=e236]
+    - paragraph [ref=e237]: Entre em contato e veja como o MedDesk pode transformar sua operação.
+    - generic [ref=e238]:
+      - button "Acessar o painel" [ref=e239]:
+        - text: Acessar o painel
+        - img [ref=e240]
+      - link "Falar no WhatsApp" [ref=e242] [cursor=pointer]:
+        - /url: https://wa.me/5500000000000
+  - contentinfo [ref=e243]:
+    - generic [ref=e244]:
+      - generic [ref=e245]:
+        - img [ref=e247]
+        - generic [ref=e251]: MedDesk
+      - paragraph [ref=e252]: © 2026 MedDesk. Todos os direitos reservados.
+      - generic [ref=e253]:
+        - link "Políticas de Privacidade" [ref=e254] [cursor=pointer]:
+          - /url: /politicas
+        - link "Termos de Uso" [ref=e255] [cursor=pointer]:
+          - /url: /termos

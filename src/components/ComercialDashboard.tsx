@@ -477,7 +477,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
 
   type Kpi = { id: string; title: string; value: React.ReactNode; icon: any; color: string; bg: string; sub?: string; agentScoped: boolean; originScoped: boolean };
   const allKpis: Kpi[] = [
-    { id: "leads", title: "Leads", value: leadsValue, icon: Users, color: "text-cyan-600", bg: "bg-cyan-50", sub: agent === "todos" ? "entraram no período" : agent === "ia" ? "atendidos pela IA (inclui handoff)" : "atendidos só por humano", agentScoped: true, originScoped: true },
+    { id: "leads", title: "Leads", value: leadsValue, icon: Users, color: "text-cyan-600", bg: "bg-cyan-50", sub: agent === "todos" ? "entraram no período" : agent === "ia" ? "maioria das respostas pela IA" : "maioria das respostas por humano", agentScoped: true, originScoped: true },
     { id: "nao_atendidos", title: "Não atendidos", value: data.leadsNotAttended ?? 0, icon: XCircle, color: "text-rose-600", bg: "bg-rose-50", sub: "entraram e ninguém respondeu", agentScoped: false, originScoped: true },
     { id: "conversao_agend", title: "Conversão Lead → Agendamento", value: `${convAgendRate.toFixed(1)}%`, icon: Percent, color: "text-emerald-600", bg: "bg-emerald-50", sub: `${appointments.total} agend. ${agentNoun} ÷ ${leadsValue} ${leadsDenomLabel}`, agentScoped: true, originScoped: true },
     { id: "conversao_consulta", title: "Conversão Lead → Consulta", value: `${convConsultaRate.toFixed(1)}%`, icon: CheckCircle2, color: "text-green-600", bg: "bg-green-50", sub: `${attended} realizadas ÷ ${leadsValue} ${leadsDenomLabel}`, agentScoped: true, originScoped: true },

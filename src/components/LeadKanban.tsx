@@ -2654,8 +2654,12 @@ export function LeadKanban() {
                             <button
                               onClick={async () => {
                                 if (confirm(`Deseja realmente excluir a etapa "${stage.name}"?`)) {
-                                  await removeStage(stage.id);
-                                  setLocalStages(p => p.filter(s => s.id !== stage.id));
+                                  const ok = await removeStage(stage.id);
+                                  if (ok) {
+                                    setLocalStages(p => p.filter(s => s.id !== stage.id));
+                                  } else {
+                                    alert('Não foi possível excluir esta etapa. Provavelmente há leads/tickets parados nela — mova-os para outra etapa e tente novamente.');
+                                  }
                                 }
                               }}
                               className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md"

@@ -469,6 +469,9 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
   // Faturamento Real do recorte: receita das consultas realizadas escopada por origem/agente (revenueScoped);
   // cai no revenue não escopado só se a RPC não devolver o campo (versão antiga da função).
   const realRevenue = fin.revenueScoped ?? fin.revenue;
+  // Sem lançamento no financeiro: há consultas realizadas mas nenhuma receita registrada (clínica não
+  // lança pagamentos). Mostra "—" em vez de "R$ 0,00" para não parecer que faturou zero.
+  const noRevenueRecorded = realRevenue <= 0 && attended > 0;
   // ROAS real e projetado usam o investimento ESCOPADO (fin.investment) para serem coerentes por canal.
   const roas = fin.investment > 0 ? realRevenue / fin.investment : null;
   // ROAS projetado = faturamento projetado (agend. × ticket) ÷ investimento.
@@ -483,13 +486,13 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
     { id: "conversao_consulta", title: "Conversão Lead → Consulta", value: `${convConsultaRate.toFixed(1)}%`, icon: CheckCircle2, color: "text-green-600", bg: "bg-green-50", sub: `${attended} realizadas ÷ ${leadsValue} ${leadsDenomLabel}`, agentScoped: true, originScoped: true },
     { id: "consultas", title: "Agendamentos Gerados", value: appointments.total, icon: CalendarCheck, color: "text-teal-600", bg: "bg-teal-50", sub: data.agendaViaFunil ? "via etapa do funil" : (agent === "todos" ? `${appointments.ia} IA · ${appointments.manual} manual` : `via ${agentNoun}`), agentScoped: true, originScoped: true },
     { id: "faturamento_agendado", title: "Faturamento Projetado", value: projectedRevenue != null ? fmtBRL(projectedRevenue) : "—", icon: Wallet, color: "text-emerald-700", bg: "bg-emerald-50", sub: configuredTicket != null ? `${validAppts} agend. ativos × ${fmtBRL(configuredTicket)}` : "configure o ticket médio em Dados da Clínica", agentScoped: true, originScoped: true },
-    { id: "faturamento", title: "Faturamento Real", value: fmtBRL(realRevenue), icon: Wallet, color: "text-emerald-700", bg: "bg-emerald-50", sub: "receita das consultas no recorte", agentScoped: true, originScoped: true },
+    { id: "faturamento", title: "Faturamento Real", value: noRevenueRecorded ? "—" : fmtBRL(realRevenue), icon: Wallet, color: "text-emerald-700", bg: "bg-emerald-50", sub: noRevenueRecorded ? "consultas sem pagamento lançado" : "receita das consultas no recorte", agentScoped: true, originScoped: true },
     { id: "consultas_realizadas", title: "Consultas Realizadas", value: attended, icon: CheckCircle2, color: "text-emerald-600", bg: "bg-emerald-50", sub: `${pct(attended, appointments.total)} dos agendamentos`, agentScoped: true, originScoped: true },
     { id: "custo_agendamento", title: "Custo por Agendamento", value: costPerAppt != null ? fmtBRL(costPerAppt) : "—", icon: Target, color: "text-rose-600", bg: "bg-rose-50", sub: "investimento ÷ agendamentos", agentScoped: true, originScoped: true },
     { id: "cac", title: "CAC", value: cac != null ? fmtBRL(cac) : "—", icon: UserCheck, color: "text-rose-600", bg: "bg-rose-50", sub: `investimento ÷ ${outcomes.won} vendas`, agentScoped: false, originScoped: true },
     { id: "ticket_config", title: "Ticket Médio", value: configuredTicket != null ? fmtBRL(configuredTicket) : "—", icon: DollarSign, color: "text-blue-600", bg: "bg-blue-50", sub: "definido em Dados da Clínica", agentScoped: false, originScoped: false },
     { id: "roas_projetado", title: "ROAS Projetado", value: projectedRoas != null ? `${projectedRoas.toFixed(1)}x` : "—", icon: TrendingUp, color: "text-violet-600", bg: "bg-violet-50", sub: (fin.investment > 0 && projectedRevenue != null) ? `${fmtBRL(projectedRevenue)} ÷ ${fmtBRL(fin.investment)}` : "sem investimento", agentScoped: true, originScoped: true },
-    { id: "roas", title: "ROAS Real", value: roas != null ? `${roas.toFixed(1)}x` : "—", icon: TrendingUp, color: "text-violet-600", bg: "bg-violet-50", sub: fin.investment > 0 ? `${fmtBRL(realRevenue)} ÷ ${fmtBRL(fin.investment)}` : "sem investimento", agentScoped: false, originScoped: true },
+    { id: "roas", title: "ROAS Real", value: noRevenueRecorded ? "—" : (roas != null ? `${roas.toFixed(1)}x` : "—"), icon: TrendingUp, color: "text-violet-600", bg: "bg-violet-50", sub: noRevenueRecorded ? "sem receita lançada" : (fin.investment > 0 ? `${fmtBRL(realRevenue)} ÷ ${fmtBRL(fin.investment)}` : "sem investimento"), agentScoped: false, originScoped: true },
   ];
   const kpiById = Object.fromEntries(allKpis.map((k) => [k.id, k]));
   const headlineKpis = metricsOrder.filter((id) => visibleMetrics.includes(id)).map((id) => kpiById[id]).filter(Boolean) as Kpi[];

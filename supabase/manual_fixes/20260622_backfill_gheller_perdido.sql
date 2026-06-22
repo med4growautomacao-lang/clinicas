@@ -1,0 +1,41 @@
+-- 22/06/2026 — Backfill: Gheller, gatilho "Não realizamos" -> Perdido (39 tickets)
+--
+-- NOTA: aplicados 40 inicialmente (33 A + 7 B); 1 (lead Quezia, 555192646070) foi
+-- REVERTIDO após verificação por ter passado por 'Agendado' no histórico
+-- (Forms -> Agendado -> Qualificado). Resultado final: 39 perdido. Nenhum dos 39
+-- remanescentes passou por Agendado. Perdido Gheller: 57 -> 96.
+--
+-- Contexto:
+--   Gheller (clínica de exames) NÃO usa Ganho, Compareceu nem o módulo de Agenda
+--   (appointments=0, conversions=0). O único caminho de "resultado" é a regra
+--   keywords='Não realizamos' -> etapa 'perdido' (criada 26/05): recusa por convênio
+--   (Unimed/IPE) ou exame não ofertado. NÃO tem IA nem follow-up ativos (ai_config
+--   tudo false; mensagens 100% sender='human'; os 349 leads ai_enabled=true são só o
+--   DEFAULT da coluna leads.ai_enabled, inócuos). Ver [[stage-transition-rules-intermittent]].
+--
+--   200 leads receberam "Não realizamos"; 51 já estavam perdido. Dos demais, o gatilho
+--   não disparou (aplicação intermitente no n8n). Backfill em 2 ondas, sempre via
+--   finalize_ticket(...,'perdido', p_resolve:=false) — NÃO fecha o ticket (mantém card
+--   aberto, padrão da clínica) e não há risco de IA (mesmo o trigger fn_activate_ai...
+--   só age em status->closed).
+--
+--   ONDA A (33): tickets que COMPROVADAMENTE receberam a recusa (chat_messages.ticket_id),
+--     ainda não perdido, etapa atual != agendado/ganho/perdido. Mai/jun, alta confiança.
+--   ONDA B (7): leads cuja recusa NÃO tinha ticket vinculado (msgs antigas, abril/pré-regra).
+--     Aplicado SOMENTE onde o ticket aberto atual já existia na data da recusa
+--     (ticket_criado <= ultima_recusa + 1 dia) => é a conversa da recusa, não reabertura.
+--     Salvaguarda crítica: dos 76 candidatos, 69 tinham ticket aberto criado DEPOIS da
+--     recusa (voltaram com NOVA conversa/oportunidade) e foram PRESERVADOS (não marcados).
+--
+--   EXCLUÍDOS de propósito: 39 que receberam recusa mas estão em Agendado (recusaram um
+--   item, agendaram outro); 69 reaberturas da Onda B (oportunidade ativa).
+--
+-- Resultado verificado: 40/40 outcome='perdido', stage='perdido', status='open',
+--   loss_reason preenchido, lead_stage_history gravado; Perdido Gheller 57 -> 97;
+--   0 leads com IA religada. Backup: public._backfill_gheller_perdido_20260622 (col onda A/B).
+--
+-- ============================ REVERSÃO ============================
+-- UPDATE tickets t SET stage_id=b.old_stage_id, outcome=b.old_outcome,
+--        outcome_at=b.old_outcome_at, status=b.old_status, loss_reason=NULL
+-- FROM public._backfill_gheller_perdido_20260622 b
+-- WHERE t.id=b.ticket_id;  -- (remover também as linhas de lead_stage_history de hoje, se desejado)

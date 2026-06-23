@@ -559,6 +559,9 @@ export interface Lead {
   updated_at: string;
   avatar_url: string | null;
   loss_reason: string | null;
+  /** "Não Lead": registro que não é oportunidade real. Sai do funil/Conversas, não conta em métrica e não recebe automação. Reversível. */
+  is_not_lead: boolean;
+  not_lead_at: string | null;
 }
 
 export function useFunnelStages() {
@@ -779,7 +782,61 @@ export function useLeads(options?: { pageSize?: number }) {
     return true;
   };
 
-  return { data, loading, loadingMore, hasMore, error, refetch: fetch, loadMore, create, createWithTicket, update, remove };
+  // "Não Lead": tira o registro do funil/Conversas/métricas e desliga as
+  // automações (IA + follow-up) do lead. Reversível via restoreLead.
+  const markNotLead = async (id: string) =>
+    update(id, { is_not_lead: true, ai_enabled: false, followup_enabled: false, not_lead_at: new Date().toISOString() });
+
+  // "Tornar Lead": volta ao normal e religa IA + follow-up.
+  const restoreLead = async (id: string) =>
+    update(id, { is_not_lead: false, ai_enabled: true, followup_enabled: true, not_lead_at: null });
+
+  return { data, loading, loadingMore, hasMore, error, refetch: fetch, loadMore, create, createWithTicket, update, remove, markNotLead, restoreLead };
+}
+
+// Leads marcados como "Não Lead" (caixa de anexo do Kanban e de Conversas).
+// Lista os poucos registros is_not_lead da clínica + restaura ("Tornar Lead").
+export function useNotLeads() {
+  const { activeClinicId } = useAuth();
+  const [data, setData] = useState<Lead[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = useCallback(async () => {
+    if (!activeClinicId) { setData([]); setLoading(false); return; }
+    const { data } = await supabase
+      .from('leads')
+      .select('*')
+      .eq('clinic_id', activeClinicId)
+      .eq('is_not_lead', true)
+      .order('not_lead_at', { ascending: false, nullsFirst: false });
+    setData(data || []);
+    setLoading(false);
+  }, [activeClinicId]);
+
+  useEffect(() => {
+    fetch();
+    if (!activeClinicId) return;
+    const channel = supabase
+      .channel(`not_leads_realtime_${activeClinicId}`)
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'leads',
+        filter: `clinic_id=eq.${activeClinicId}`
+      }, () => { fetch(); })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [fetch, activeClinicId]);
+
+  const restore = useCallback(async (id: string) => {
+    setData(prev => prev.filter(l => l.id !== id));
+    const { error } = await supabase
+      .from('leads')
+      .update({ is_not_lead: false, ai_enabled: true, followup_enabled: true, not_lead_at: null })
+      .eq('id', id);
+    if (error) { fetch(); return false; }
+    return true;
+  }, [fetch]);
+
+  return { data, loading, refetch: fetch, restore };
 }
 
 // ==========================================
@@ -1282,6 +1339,7 @@ export interface Clinic {
   meta_token?: string | null;
   meta_ad_account_id?: string | null;
   meta_pixel_id?: string | null;
+  meta_forms_id?: string | null;
   wa_pre_msg?: string | null;
   organization_id?: string | null;
   category: string | null;

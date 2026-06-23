@@ -28,10 +28,12 @@ import {
   ThumbsDown,
   Eye,
   EyeOff,
+  UserX,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { useFunnelStages, useLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useAppointments, useDoctors, usePatients, useConsultationTypes, Conversion, Lead, Ticket, TransitionRule } from "../hooks/useSupabase";
+import { useFunnelStages, useLeads, useNotLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useAppointments, useDoctors, usePatients, useConsultationTypes, Conversion, Lead, Ticket, TransitionRule } from "../hooks/useSupabase";
+import { NotLeadPanel } from "./NotLeadPanel";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { format, parseISO, formatDistanceToNow } from "date-fns";
@@ -1001,8 +1003,9 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
 
 export function LeadKanban() {
   const { data: stages, loading: stagesLoading, reorder: reorderStages, update: updateStage, create: createStage, remove: removeStage } = useFunnelStages();
-  const { data: leads, create, createWithTicket, update, remove } = useLeads({ pageSize: 150 });
-  const { tickets, loading: ticketsLoading, moveTicket, openTicket, closeTicket, finalizeTicket } = useTickets();
+  const { data: leads, create, createWithTicket, update, remove, markNotLead } = useLeads({ pageSize: 150 });
+  const { data: notLeads, restore: restoreNotLead } = useNotLeads();
+  const { tickets, loading: ticketsLoading, refetch: refetchTickets, moveTicket, openTicket, closeTicket, finalizeTicket } = useTickets();
   const { byLead: conversionsByLead, create: createConversion } = useConversions();
   const { aiConfig, updateAI } = useSettings();
   const [ganhoLead, setGanhoLead] = useState<{ id: string; name: string; phone: string | null; patientId: string | null; prevStageId: string | null; ticketId: string } | null>(null);
@@ -1068,6 +1071,8 @@ export function LeadKanban() {
   const [sourceFilter, setSourceFilter] = useState<'all' | 'meta' | 'google' | 'sem_origem'>('all');
   const [channelFilter, setChannelFilter] = useState<'all' | 'forms' | 'whatsapp'>('all');
   const [showResolved, setShowResolved] = useState(false);
+  const [showNotLeadPanel, setShowNotLeadPanel] = useState(false);
+  const [confirmingNotLeadId, setConfirmingNotLeadId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const { activeClinicId } = useAuth();
   const [searchTickets, setSearchTickets] = useState<Ticket[]>([]);
@@ -1361,8 +1366,9 @@ export function LeadKanban() {
         })()
       : tickets;
     // Ignora tickets órfãos (lead deletado → lead_id virou NULL por SET NULL)
+    // e os marcados como "Não Lead" (vivem só no painel de anexo, fora do funil).
     const base = ((showResolved || hasSearch) ? source : source.filter(t => t.status !== 'closed'))
-      .filter(t => t.lead);
+      .filter(t => t.lead && !t.lead.is_not_lead);
     if (!hasSourceFilter && !hasChannelFilter && !hasEntryFilter && !hasConvFilter && !hasSearch) return base;
 
     return base.filter(ticket => {
@@ -1966,6 +1972,12 @@ export function LeadKanban() {
         )}
 
         <div className="flex items-center gap-1.5 ml-auto">
+          <Button variant="outline" size="icon" title={`Não Leads${notLeads.length ? ` (${notLeads.length})` : ''}`} className="relative h-8 w-8 text-slate-400 hover:text-slate-700" onClick={() => setShowNotLeadPanel(true)}>
+            <UserX className="w-3.5 h-3.5" />
+            {notLeads.length > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 min-w-[15px] h-[15px] px-0.5 flex items-center justify-center text-[9px] font-black text-white bg-slate-500 rounded-full">{notLeads.length}</span>
+            )}
+          </Button>
           <Button variant="outline" size="icon" title={showResolved ? 'Ocultar resolvidos' : 'Mostrar resolvidos'} className={cn("h-8 w-8", showResolved ? "text-teal-600 border-teal-300 bg-teal-50 hover:bg-teal-100" : "text-slate-400 hover:text-teal-600")} onClick={() => setShowResolved(v => !v)}>
             {showResolved ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
           </Button>
@@ -2196,8 +2208,27 @@ export function LeadKanban() {
                                 )}
                               </div>
                               <div className="flex flex-col items-end gap-1.5 shrink-0 ml-2">
+                                {confirmingNotLeadId === ticket.id ? (
+                                  <div className="flex items-center gap-1 animate-in fade-in zoom-in duration-150" onClick={e => e.stopPropagation()}>
+                                    <span className="text-[9px] font-bold text-slate-500">Não Lead?</span>
+                                    <button
+                                      onClick={async e => { e.stopPropagation(); setConfirmingNotLeadId(null); await markNotLead(lead.id); refetchTickets(true); }}
+                                      className="px-1.5 py-1 bg-slate-700 text-white rounded text-[9px] font-black hover:bg-slate-800 transition-all shadow-sm"
+                                    >
+                                      Confirmar
+                                    </button>
+                                    <button
+                                      onClick={e => { e.stopPropagation(); setConfirmingNotLeadId(null); }}
+                                      className="px-1 flex items-center justify-center bg-white text-slate-600 py-1 rounded hover:bg-slate-100 border border-slate-200 transition-all shadow-sm shrink-0"
+                                      title="Cancelar"
+                                    >
+                                      <X className="w-2.5 h-2.5" />
+                                    </button>
+                                  </div>
+                                ) : (
                                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                                   <button title="Agendar consulta" onClick={() => { setScheduleLead({ lead, ticketId: ticket.id }); setScheduleForm({ doctor_id: doctors[0]?.id || '', date: '', time: '', notes: '', consultation_type_id: '' }); setScheduleError(null); setScheduleSlots(null); }} className="p-0.5 text-slate-400 hover:text-indigo-600 rounded transition-colors"><CalendarPlus className="w-3 h-3" /></button>
+                                  <button title="Marcar como Não Lead" onClick={e => { e.stopPropagation(); setConfirmingNotLeadId(ticket.id); }} className="p-0.5 text-slate-400 hover:text-slate-700 rounded transition-colors"><UserX className="w-3 h-3" /></button>
                                   {!ticket.outcome && !isClosed && (
                                     <div className="relative">
                                       <button
@@ -2228,6 +2259,7 @@ export function LeadKanban() {
                                   <button title="Editar" onClick={() => openEditModal(ticket)} className="p-0.5 text-slate-400 hover:text-teal-600 rounded transition-colors"><Edit2 className="w-3 h-3" /></button>
                                   <button title="Excluir" onClick={() => openDeleteConfirm(ticket)} className="p-0.5 text-slate-400 hover:text-rose-600 rounded transition-colors"><Trash2 className="w-3 h-3" /></button>
                                 </div>
+                                )}
 
                                 {ticket.outcome && !isClosed && (
                                   <div className="mt-auto">
@@ -2746,6 +2778,14 @@ export function LeadKanban() {
 
       {/* Export Modal */}
       {exportOpen && <ExportModal onClose={() => setExportOpen(false)} />}
+
+      {/* Caixa de anexo: Não Leads */}
+      <NotLeadPanel
+        open={showNotLeadPanel}
+        onClose={() => setShowNotLeadPanel(false)}
+        leads={notLeads}
+        onRestore={async (id) => { await restoreNotLead(id); refetchTickets(true); }}
+      />
 
       {/* Ganho Modal */}
       {ganhoLead && (

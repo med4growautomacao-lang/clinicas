@@ -1199,6 +1199,22 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                             className="w-full px-4 py-3 border border-slate-200 rounded-xl font-medium text-slate-700 text-sm placeholder:text-slate-300 focus:ring-4 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all shadow-sm hover:border-blue-200"
                         />
                     </div>
+
+                    <div className="space-y-2 md:col-span-2 group/input">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                            ID do Formulário Nativo
+                        </label>
+                        <input
+                            type="text"
+                            value={clinicData.meta_forms_id || ''}
+                            onChange={(e) => onClinicChange({ meta_forms_id: e.target.value })}
+                            placeholder="Ex: 123456789012345"
+                            className="w-full px-4 py-3 border border-slate-200 rounded-xl font-medium text-slate-700 text-sm placeholder:text-slate-300 focus:ring-4 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all shadow-sm hover:border-blue-200"
+                        />
+                        <p className="text-[10px] text-slate-400 font-medium leading-relaxed pl-1">
+                            ID do formulário nativo do Meta (Lead Ads / Instant Forms) usado para vincular os leads capturados a esta clínica.
+                        </p>
+                    </div>
                 </CardContent>
             </Card>
                 </div>

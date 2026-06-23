@@ -46,7 +46,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { LeadKanban } from "./LeadKanban";
 import { ComercialDashboard } from "./ComercialDashboard";
 import { ChatThread } from "./ChatThread";
-import { useLeads, useChatMessages, useSettings, useFunnelStages, usePromptTemplates, FunnelStage } from "../hooks/useSupabase";
+import { useLeads, useNotLeads, useChatMessages, useSettings, useFunnelStages, usePromptTemplates, FunnelStage } from "../hooks/useSupabase";
+import { NotLeadPanel, NotLeadButton } from "./NotLeadPanel";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
 import SemOrigemLogo from "../assets/logos/Logo Sem origem.png";
@@ -1612,8 +1613,10 @@ export function AISecretary() {
 function ChatsView() {
   const { activeClinicId } = useAuth();
   const { data: leads, loading: leadsLoading, loadingMore, hasMore, loadMore, update: updateLead } = useLeads({ pageSize: 20 });
+  const { data: notLeads, restore: restoreNotLead } = useNotLeads();
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [leadSearch, setLeadSearch] = useState('');
+  const [showNotLeadPanel, setShowNotLeadPanel] = useState(false);
 
   // Busca server-side: o pageSize=20 carrega só os leads mais recentes, então
   // filtrar no cliente não encontra a maioria. Com termo, consulta o banco
@@ -1641,17 +1644,19 @@ function ChatsView() {
   }, [leadSearch, activeClinicId]);
 
   const filteredLeads = useMemo(() => {
-    if (!leadSearch.trim()) return leads;
+    // Não Leads não aparecem na lista de conversas (vivem só no painel de anexo).
+    if (!leadSearch.trim()) return leads.filter(l => !l.is_not_lead);
     // Refina os resultados do servidor com a lógica multi-termo do matchesSearch.
-    return searchResults.filter(l => matchesSearch(leadSearch, { name: l.name, email: l.email, phone: l.phone }, ['phone']));
+    return searchResults.filter(l => !l.is_not_lead && matchesSearch(leadSearch, { name: l.name, email: l.email, phone: l.phone }, ['phone']));
   }, [leads, leadSearch, searchResults]);
   const selectedLead = leads.find(l => l.id === selectedLeadId) || searchResults.find(l => l.id === selectedLeadId);
   const { data: messages, loading: messagesLoading } = useChatMessages(selectedLeadId || undefined, selectedLead?.phone);
 
-  // Auto-select first lead if none selected
+  // Auto-select first lead if none selected (ignora Não Leads, que não são listados)
   useEffect(() => {
-    if (leads.length > 0 && !selectedLeadId) {
-      setSelectedLeadId(leads[0].id);
+    if (!selectedLeadId) {
+      const first = leads.find(l => !l.is_not_lead);
+      if (first) setSelectedLeadId(first.id);
     }
   }, [leads, selectedLeadId]);
 
@@ -1691,13 +1696,23 @@ function ChatsView() {
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-8 h-full min-h-[600px]">
+      {/* Caixa de anexo: Não Leads */}
+      <NotLeadPanel
+        open={showNotLeadPanel}
+        onClose={() => setShowNotLeadPanel(false)}
+        leads={notLeads}
+        onRestore={(id) => restoreNotLead(id)}
+      />
       {/* Sidebar: Leads List */}
       <Card className="col-span-1 flex flex-col border border-slate-200 shadow-sm bg-white overflow-hidden">
         <CardHeader className="bg-slate-50/50 pb-6 border-b border-slate-100">
-          <CardTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
-            <MessageSquare className="w-5 h-5 text-teal-600" />
-            Conversas
-          </CardTitle>
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <MessageSquare className="w-5 h-5 text-teal-600" />
+              Conversas
+            </CardTitle>
+            <NotLeadButton count={notLeads.length} onClick={() => setShowNotLeadPanel(true)} />
+          </div>
           <div className="relative mt-4">
             <input
               type="text"

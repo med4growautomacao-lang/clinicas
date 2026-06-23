@@ -31,6 +31,11 @@ import {
   Phone,
   ExternalLink,
   Inbox,
+  FileText,
+  Download,
+  Copy,
+  Check,
+  Store,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { format, subDays, addMonths, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subMonths, subWeeks, parseISO } from "date-fns";
@@ -44,6 +49,7 @@ import { Button } from "./ui/button";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import SemOrigemLogo from "../assets/logos/Logo Sem origem.png";
+import WhatsAppLogo from "../assets/logos/Logo Whatsapp.png";
 
 // ==========================================
 // Tipos do retorno da RPC get_commercial_dashboard
@@ -88,6 +94,7 @@ interface LeadRow {
 type Period = "dia" | "sem" | "mês";
 type AgentFilter = "todos" | "ia" | "humano";
 type OriginFilter = "todos" | "meta" | "google" | "sem_origem";
+type ChannelFilter = "todos" | "forms" | "whatsapp" | "balcao";
 type ChartMetric = "humanMessages" | "aiMessages" | "leads" | "appointments" | "realizadas" | "ganhos" | "faturamento" | "faturamentoProjetado" | "handoffs" | "followups" | "convAgend" | "convConsulta" | "custoAgend" | "cac" | "roasReal" | "roasProj" | "ticketMedio";
 
 // ==========================================
@@ -258,12 +265,115 @@ function chartValue(d: DailyBucket, metric: ChartMetric, ticket: number): number
 }
 
 // ==========================================
+// Geração de relatório em texto para WhatsApp
+// ==========================================
+type ReportKind = "completo" | "geral" | "ia" | "humano";
+
+function fmtRatioReport(v: number | null): string {
+  return v != null ? `${v.toFixed(1)}x` : "—";
+}
+
+// Bloco "Visão Geral" (dados não atribuídos a agente — escopo "todos")
+function buildGeneralBlock(d: CommercialData): string {
+  const s = d.appointments.byStatus || {};
+  const attended = (s.realizado || 0) + (s.compareceu || 0);
+  const noShow = s.faltou || 0;
+  const canceled = s.cancelado || 0;
+  const fin = d.finance;
+  const leadsValue = d.newLeads;
+  const convAgend = leadsValue > 0 ? (d.appointments.total / leadsValue) * 100 : 0;
+  const convConsulta = leadsValue > 0 ? (attended / leadsValue) * 100 : 0;
+  const configuredTicket = fin.defaultTicket > 0 ? fin.defaultTicket : null;
+  const lostAppts = noShow + canceled;
+  const validAppts = Math.max(d.appointments.total - lostAppts, 0);
+  const projectedRevenue = configuredTicket != null ? validAppts * configuredTicket : null;
+  const realRevenue = fin.revenueScoped ?? fin.revenue;
+  const noRev = realRevenue <= 0 && attended > 0;
+  const roas = fin.investment > 0 ? realRevenue / fin.investment : null;
+  const cac = d.outcomes.won > 0 && fin.investment > 0 ? fin.investment / d.outcomes.won : null;
+  const costPerAppt = d.appointments.total > 0 && fin.investment > 0 ? fin.investment / d.appointments.total : null;
+  return [
+    "*📊 VISÃO GERAL*",
+    `👥 Leads: *${leadsValue}*`,
+    `🚫 Não atendidos: *${d.leadsNotAttended ?? 0}*`,
+    `📅 Agendamentos: *${d.appointments.total}*`,
+    `✅ Consultas realizadas: *${attended}*`,
+    `🏆 Vendas (ganhos): *${d.outcomes.won}*`,
+    `❌ Perdidos: *${d.outcomes.lost}*`,
+    `🎯 Conversão Lead → Agend.: *${convAgend.toFixed(1)}%*`,
+    `🎯 Conversão Lead → Consulta: *${convConsulta.toFixed(1)}%*`,
+    `💵 Faturamento Projetado: *${projectedRevenue != null ? fmtBRL(projectedRevenue) : "—"}*`,
+    `💰 Faturamento Real: *${noRev ? "—" : fmtBRL(realRevenue)}*`,
+    `🎟️ Ticket Médio: *${configuredTicket != null ? fmtBRL(configuredTicket) : "—"}*`,
+    `💸 Investimento: *${fin.investment > 0 ? fmtBRL(fin.investment) : "—"}*`,
+    `📈 ROAS Real: *${noRev ? "—" : fmtRatioReport(roas)}*`,
+    `🧮 CAC: *${cac != null ? fmtBRL(cac) : "—"}*`,
+    `🏷️ Custo por Agend.: *${costPerAppt != null ? fmtBRL(costPerAppt) : "—"}*`,
+    `⏱️ Tempo da 1ª resposta: *${fmtResponseTime(d.sla.firstResponseMin, d.sla.responseCycles)}*`,
+  ].join("\n");
+}
+
+// Bloco atribuído a um agente (IA ou Humano) — usa d.agent para escopo
+function buildAgentBlock(d: CommercialData): string {
+  const isIa = d.agent === "ia";
+  const s = d.appointments.byStatus || {};
+  const attended = (s.realizado || 0) + (s.compareceu || 0);
+  const fin = d.finance;
+  const leadsValue = isIa ? d.agents.ia.leadsTouched : d.agents.humano.leadsTouched;
+  const convAgend = leadsValue > 0 ? (d.appointments.total / leadsValue) * 100 : 0;
+  const convConsulta = leadsValue > 0 ? (attended / leadsValue) * 100 : 0;
+  const configuredTicket = fin.defaultTicket > 0 ? fin.defaultTicket : null;
+  const noShow = s.faltou || 0;
+  const canceled = s.cancelado || 0;
+  const validAppts = Math.max(d.appointments.total - (noShow + canceled), 0);
+  const projectedRevenue = configuredTicket != null ? validAppts * configuredTicket : null;
+  const realRevenue = fin.revenueScoped ?? fin.revenue;
+  const noRev = realRevenue <= 0 && attended > 0;
+  const lines = [
+    isIa ? "*🤖 ATRIBUÍDO À IA*" : "*🧑‍💼 ATRIBUÍDO AO HUMANO*",
+    `👥 Leads atendidos: *${leadsValue}*`,
+    `📅 Agendamentos: *${d.appointments.total}*`,
+    `✅ Consultas realizadas: *${attended}*`,
+    `🎯 Conversão Lead → Agend.: *${convAgend.toFixed(1)}%*`,
+    `🎯 Conversão Lead → Consulta: *${convConsulta.toFixed(1)}%*`,
+    `💵 Faturamento Projetado: *${projectedRevenue != null ? fmtBRL(projectedRevenue) : "—"}*`,
+    `💰 Faturamento Real: *${noRev ? "—" : fmtBRL(realRevenue)}*`,
+  ];
+  if (isIa) {
+    lines.push(`💬 Mensagens enviadas: *${d.agents.ia.messagesOut}*`);
+    lines.push(`🤝 Resolvidos sem humano: *${d.agents.ia.autonomous}*`);
+    lines.push(`↪️ Passados p/ humano: *${d.agents.ia.handoffs}*`);
+  } else {
+    lines.push(`💬 Mensagens enviadas: *${d.agents.humano.messagesOut}*`);
+    lines.push(`↩️ Conversas assumidas: *${d.agents.humano.handoffsReceived}*`);
+  }
+  return lines.join("\n");
+}
+
+// Monta o texto completo: cabeçalho (clínica + filtros de data/origem) + blocos
+function buildReportText(
+  meta: { clinicName: string; entryLabel: string; convLabel: string; originLabel: string; channelLabel: string },
+  blocks: string[],
+): string {
+  const header = [
+    "📊 *RELATÓRIO COMERCIAL*",
+    meta.clinicName ? `🏥 ${meta.clinicName}` : null,
+    `📅 Entrada: ${meta.entryLabel} · Conversão: ${meta.convLabel}`,
+    `🌐 Origem: ${meta.originLabel} · Canal: ${meta.channelLabel}`,
+    `🗓️ Gerado em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`,
+  ].filter(Boolean).join("\n");
+  const sep = "\n\n━━━━━━━━━━━━━━━\n\n";
+  return [header, ...blocks].join(sep);
+}
+
+// ==========================================
 // Componente principal
 // ==========================================
 export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: string) => void } = {}) {
   const { profile, activeClinicId } = useAuth();
   const [data, setData] = useState<CommercialData | null>(null);
   const [clinicFeatures, setClinicFeatures] = useState<{ feature_followup?: boolean; feature_ia?: boolean } | null>(null);
+  const [clinicName, setClinicName] = useState("");
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<Period>("dia");
   // Conversão (evento) — janela principal; presets INCLUEM hoje
@@ -280,6 +390,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
   const [entryCal2, setEntryCal2] = useState<Date>(() => addMonths(subDays(new Date(), 6), 1));
   const [agent, setAgent] = useState<AgentFilter>(() => (localStorage.getItem("comercialAgent") as AgentFilter) || "todos");
   const [origin, setOrigin] = useState<OriginFilter>(() => (localStorage.getItem("comercialOrigin") as OriginFilter) || "todos");
+  const [channel, setChannel] = useState<ChannelFilter>(() => (localStorage.getItem("comercialChannel") as ChannelFilter) || "todos");
   const [chartMetric, setChartMetric] = useState<ChartMetric>("humanMessages");
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [visibleMetrics, setVisibleMetrics] = useState<string[]>(() => {
@@ -351,6 +462,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
         p_conv_to: format(convRange.end, "yyyy-MM-dd"),
         p_agent: agent,
         p_origin: origin,
+        p_channel: channel,
       });
       if (error) throw error;
       setData(res as CommercialData);
@@ -359,7 +471,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [activeClinicId, profile?.clinic_id, convRange, entryRange, agent, origin]);
+  }, [activeClinicId, profile?.clinic_id, convRange, entryRange, agent, origin, channel]);
 
   useEffect(() => {
     const clinicId = activeClinicId || profile?.clinic_id;
@@ -377,10 +489,14 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
   // Features da clínica (esconder "Automações do Sistema" quando não há follow-up nem IA)
   useEffect(() => {
     const clinicId = activeClinicId || profile?.clinic_id;
-    if (!clinicId) { setClinicFeatures(null); return; }
+    if (!clinicId) { setClinicFeatures(null); setClinicName(""); return; }
     let cancelled = false;
-    supabase.from("clinics").select("features").eq("id", clinicId).maybeSingle()
-      .then(({ data: c }) => { if (!cancelled) setClinicFeatures((c?.features as { feature_followup?: boolean; feature_ia?: boolean } | null) ?? null); });
+    supabase.from("clinics").select("features, name").eq("id", clinicId).maybeSingle()
+      .then(({ data: c }) => {
+        if (cancelled) return;
+        setClinicFeatures((c?.features as { feature_followup?: boolean; feature_ia?: boolean } | null) ?? null);
+        setClinicName((c?.name as string) ?? "");
+      });
     return () => { cancelled = true; };
   }, [activeClinicId, profile?.clinic_id]);
 
@@ -391,7 +507,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
   const [leadsLoading, setLeadsLoading] = useState(true);
 
   // Volta para a 1ª página sempre que um filtro muda
-  useEffect(() => { setLeadsPage(0); }, [convRange, entryRange, agent, origin]);
+  useEffect(() => { setLeadsPage(0); }, [convRange, entryRange, agent, origin, channel]);
 
   const fetchLeads = useCallback(async () => {
     const clinicId = activeClinicId || profile?.clinic_id;
@@ -406,6 +522,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
         p_conv_to: format(convRange.end, "yyyy-MM-dd"),
         p_agent: agent,
         p_origin: origin,
+        p_channel: channel,
         p_limit: LEADS_PAGE_SIZE,
         p_offset: leadsPage * LEADS_PAGE_SIZE,
       });
@@ -418,12 +535,101 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
     } finally {
       setLeadsLoading(false);
     }
-  }, [activeClinicId, profile?.clinic_id, convRange, entryRange, agent, origin, leadsPage]);
+  }, [activeClinicId, profile?.clinic_id, convRange, entryRange, agent, origin, channel, leadsPage]);
 
   useEffect(() => { fetchLeads(); }, [fetchLeads]);
 
   const setAgentPersist = (v: AgentFilter) => { setAgent(v); localStorage.setItem("comercialAgent", v); };
   const setOriginPersist = (v: OriginFilter) => { setOrigin(v); localStorage.setItem("comercialOrigin", v); };
+  const setChannelPersist = (v: ChannelFilter) => { setChannel(v); localStorage.setItem("comercialChannel", v); };
+
+  // ===== Relatório em texto (WhatsApp) =====
+  const [reportLoading, setReportLoading] = useState<ReportKind | null>(null);
+  const [reportText, setReportText] = useState("");
+  const [reportKind, setReportKind] = useState<ReportKind>("completo");
+  const [showReport, setShowReport] = useState(false);
+  const [reportCopied, setReportCopied] = useState(false);
+
+  const originFilterLabel =
+    origin === "meta" ? "Meta" : origin === "google" ? "Google" : origin === "sem_origem" ? "Orgânico" : "Todas as origens";
+  const channelFilterLabel =
+    channel === "forms" ? "Formulário" : channel === "whatsapp" ? "WhatsApp" : channel === "balcao" ? "Balcão" : "Todos os canais";
+
+  // Busca os dados de um escopo de agente respeitando os filtros de data/origem atuais
+  const fetchScoped = useCallback(async (agentScope: AgentFilter): Promise<CommercialData | null> => {
+    const clinicId = activeClinicId || profile?.clinic_id;
+    if (!clinicId) return null;
+    const { data: res, error } = await supabase.rpc("get_commercial_dashboard", {
+      p_clinic_id: clinicId,
+      p_entry_from: entryRange ? format(entryRange.start, "yyyy-MM-dd") : null,
+      p_entry_to: entryRange ? format(entryRange.end, "yyyy-MM-dd") : null,
+      p_conv_from: format(convRange.start, "yyyy-MM-dd"),
+      p_conv_to: format(convRange.end, "yyyy-MM-dd"),
+      p_agent: agentScope,
+      p_origin: origin,
+      p_channel: channel,
+    });
+    if (error) throw error;
+    return res as CommercialData;
+  }, [activeClinicId, profile?.clinic_id, convRange, entryRange, origin, channel]);
+
+  const generateReport = useCallback(async (kind: ReportKind) => {
+    setReportLoading(kind);
+    setReportKind(kind);
+    try {
+      const meta = { clinicName, entryLabel, convLabel, originLabel: originFilterLabel, channelLabel: channelFilterLabel };
+      let text = "";
+      if (kind === "geral") {
+        const d = await fetchScoped("todos");
+        if (d) text = buildReportText(meta, [buildGeneralBlock(d)]);
+      } else if (kind === "ia") {
+        const d = await fetchScoped("ia");
+        if (d) text = buildReportText(meta, [buildAgentBlock(d)]);
+      } else if (kind === "humano") {
+        const d = await fetchScoped("humano");
+        if (d) text = buildReportText(meta, [buildAgentBlock(d)]);
+      } else {
+        const [todos, ia, humano] = await Promise.all([fetchScoped("todos"), fetchScoped("ia"), fetchScoped("humano")]);
+        const blocks: string[] = [];
+        if (todos) blocks.push(buildGeneralBlock(todos));
+        // Inclui IA só se a clínica tem IA e ela atuou no período ("humano ou IA se tiver")
+        const iaActed = !!ia && (ia.agents.ia.messagesOut > 0 || ia.agents.ia.leadsTouched > 0 || ia.agents.ia.appointments > 0);
+        if (iaActed && ia) blocks.push(buildAgentBlock(ia));
+        if (humano) blocks.push(buildAgentBlock(humano));
+        text = buildReportText(meta, blocks);
+      }
+      setReportText(text);
+      setReportCopied(false);
+      setShowReport(true);
+    } catch (err) {
+      console.error("ComercialDashboard report error:", err);
+      alert("Não foi possível gerar o relatório. Tente novamente.");
+    } finally {
+      setReportLoading(null);
+    }
+  }, [clinicName, entryLabel, convLabel, originFilterLabel, fetchScoped]);
+
+  const copyReport = async () => {
+    try {
+      await navigator.clipboard.writeText(reportText);
+      setReportCopied(true);
+      setTimeout(() => setReportCopied(false), 2000);
+    } catch {
+      alert("Não foi possível copiar. Selecione o texto manualmente.");
+    }
+  };
+
+  const downloadReport = () => {
+    const blob = new Blob([reportText], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `relatorio-comercial-${reportKind}-${format(new Date(), "yyyy-MM-dd")}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   if (loading || !data) {
     return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 text-teal-600 animate-spin" /></div>;
@@ -878,8 +1084,9 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
             cal1={convCal1} setCal1={setConvCal1} cal2={convCal2} setCal2={setConvCal2}
           />
         </div>
-        {/* Métricas */}
+        {/* Relatório + Métricas */}
         <div className="flex items-center gap-2">
+          <ReportButton onGenerate={generateReport} loadingKind={reportLoading} iaAvailable={clinicFeatures?.feature_ia !== false} />
           <MetricsConfigButton metricsOrder={metricsOrder} visibleMetrics={visibleMetrics} toggleMetric={toggleMetric} moveMetric={moveMetric} />
         </div>
       </div>
@@ -931,6 +1138,34 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
             ))}
           </div>
         </div>
+        {/* Filtro de canal de captação: Forms / WhatsApp / Balcão */}
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
+            {([
+              ["todos", "Todos", null],
+              ["forms", "Forms", null],
+              ["whatsapp", "WhatsApp", WhatsAppLogo],
+              ["balcao", "Balcão", null],
+            ] as [ChannelFilter, string, string | null][]).map(([val, label, logo]) => (
+              <button
+                key={val}
+                onClick={() => setChannelPersist(val)}
+                className={cn(
+                  "flex items-center gap-2 px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all",
+                  channel === val ? "bg-slate-900 text-white shadow-md shadow-slate-200" : "text-slate-400 hover:text-slate-600 hover:bg-slate-50"
+                )}
+                style={channel === val ? { backgroundColor: "#1e293b" } : {}}
+              >
+                {val === "forms"
+                  ? <FileText className={cn("w-3 h-3", channel === val ? "text-white" : "text-slate-400")} />
+                  : val === "balcao"
+                  ? <Store className={cn("w-3 h-3", channel === val ? "text-white" : "text-slate-400")} />
+                  : logo && <img src={logo} alt={label} className={cn("w-3 h-3 object-contain", channel === val ? "brightness-0 invert" : "")} />}
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
       </div>
 
@@ -956,6 +1191,46 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
 
       {/* Seções ordenadas por público */}
       {orderedSections}
+
+      {/* Modal de preview do relatório */}
+      <AnimatePresence>
+        {showReport && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
+            onClick={() => setShowReport(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 12 }}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 bg-slate-50">
+                <div className="flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-teal-600" />
+                  <span className="text-sm font-bold text-slate-700 uppercase tracking-wider">Relatório p/ WhatsApp</span>
+                </div>
+                <button onClick={() => setShowReport(false)} className="p-1 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors">
+                  <XCircle className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="p-4 overflow-y-auto custom-scrollbar">
+                <pre className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-slate-700 font-sans bg-slate-50 rounded-xl border border-slate-100 p-4">{reportText}</pre>
+              </div>
+              <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-slate-100 bg-slate-50">
+                <Button onClick={downloadReport} variant="outline" className="gap-2 border-slate-200 bg-white hover:bg-slate-50 text-slate-600">
+                  <Download className="w-4 h-4" />
+                  <span className="text-[11px] font-bold uppercase tracking-tight">Baixar .txt</span>
+                </Button>
+                <Button onClick={copyReport} className="gap-2 bg-teal-600 hover:bg-teal-700 text-white">
+                  {reportCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                  <span className="text-[11px] font-bold uppercase tracking-tight">{reportCopied ? "Copiado!" : "Copiar"}</span>
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -1013,6 +1288,68 @@ function MetricTile({ icon: Icon, label, value, color, bg }: { icon: any; label:
       <div className={`p-2 rounded-lg ${bg} w-fit mb-3`}><Icon className={`w-4 h-4 ${color}`} /></div>
       <p className="text-2xl font-bold text-slate-900">{value}</p>
       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1 leading-tight">{label}</p>
+    </div>
+  );
+}
+
+// Botão "Relatório" (dropdown: completo / geral / IA / humano) — gera texto p/ WhatsApp
+function ReportButton({ onGenerate, loadingKind, iaAvailable }: {
+  onGenerate: (kind: ReportKind) => void;
+  loadingKind: ReportKind | null;
+  iaAvailable: boolean;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const busy = loadingKind != null;
+  const options: { kind: ReportKind; label: string; desc: string }[] = [
+    { kind: "completo", label: "Completo", desc: "Geral + atribuição (IA/Humano)" },
+    { kind: "geral", label: "Somente Geral", desc: "Números totais da clínica" },
+    ...(iaAvailable ? [{ kind: "ia" as ReportKind, label: "Somente IA", desc: "Atribuído à IA" }] : []),
+    { kind: "humano", label: "Somente Humano", desc: "Atribuído ao humano" },
+  ];
+  return (
+    <div className="relative">
+      <Button
+        onClick={() => setIsOpen(!isOpen)}
+        disabled={busy}
+        variant="outline"
+        className={cn("gap-2 transition-all shadow-sm", isOpen ? "bg-teal-50 border-teal-200 text-teal-600 shadow-teal-100" : "border-slate-200 bg-white hover:bg-slate-50 text-slate-600")}
+      >
+        {busy ? <Loader2 className="w-4 h-4 animate-spin text-teal-600" /> : <FileText className="w-4 h-4" />}
+        <span className="text-[10px] font-bold uppercase tracking-tight">Relatório</span>
+      </Button>
+      <AnimatePresence>
+        {isOpen && (
+          <>
+            <div className="fixed inset-0 z-[105]" onClick={() => setIsOpen(false)} />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="absolute top-full right-0 mt-2 w-64 bg-white rounded-2xl border border-slate-200 shadow-2xl z-[110] p-2 overflow-hidden"
+            >
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 pl-2 pt-1">Baixar relatório</p>
+              <div className="space-y-0.5">
+                {options.map((opt) => (
+                  <button
+                    key={opt.kind}
+                    onClick={() => { onGenerate(opt.kind); setIsOpen(false); }}
+                    disabled={busy}
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left hover:bg-teal-50 transition-colors group disabled:opacity-50"
+                  >
+                    <div className="p-1.5 rounded-lg bg-slate-100 group-hover:bg-teal-100">
+                      {loadingKind === opt.kind ? <Loader2 className="w-3.5 h-3.5 text-teal-600 animate-spin" /> : <FileText className="w-3.5 h-3.5 text-slate-500 group-hover:text-teal-600" />}
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[11px] font-bold text-slate-700 uppercase tracking-tight">{opt.label}</span>
+                      <span className="text-[10px] text-slate-400">{opt.desc}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

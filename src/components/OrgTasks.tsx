@@ -290,16 +290,12 @@ export function OrgTasks({ organizationId, orgUsers, clinics, canManage = true }
         .task-overdue-blink {
           background-image: linear-gradient(
             100deg,
-            rgb(255 250 250) 0%,
-            rgb(255 245 246) 20%,
-            rgb(255 238 240) 40%,
-            rgb(254 226 230) 50%,
-            rgb(255 238 240) 60%,
-            rgb(255 245 246) 80%,
-            rgb(255 250 250) 100%
+            rgb(255 255 255) 0%,
+            rgb(253 164 175) 50%,
+            rgb(255 255 255) 100%
           );
           background-size: 200% 100%;
-          animation: taskOverdueSweep 6.5s linear infinite;
+          animation: taskOverdueSweep 8s linear infinite;
         }
       `}</style>
       {/* Toolbar */}

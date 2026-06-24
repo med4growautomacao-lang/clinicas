@@ -38,7 +38,7 @@ function normalizeBrazilianPhone(rawInput: string | null | undefined): string | 
 }
 
 const UAZAPI_BASE = "https://med4growautomacao.uazapi.com";
-const TYPING_DELAY_MS = 2500; // "digitando..." entre balões
+const TYPING_DELAY_MS = 5000; // "digitando..." (delay uazapi) antes de cada balão
 
 // horário de São Paulo (UTC-3) sem timezone — formato das colunas *_at em SP
 function nowSP(): string {

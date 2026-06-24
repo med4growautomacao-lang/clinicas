@@ -282,6 +282,26 @@ export function OrgTasks({ organizationId, orgUsers, clinics, canManage = true }
 
   return (
     <div className="flex-1 flex flex-col gap-4">
+      <style>{`
+        @keyframes taskOverdueSweep {
+          0%   { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
+        }
+        .task-overdue-blink {
+          background-image: linear-gradient(
+            100deg,
+            rgb(255 250 250) 0%,
+            rgb(255 245 246) 20%,
+            rgb(255 238 240) 40%,
+            rgb(254 226 230) 50%,
+            rgb(255 238 240) 60%,
+            rgb(255 245 246) 80%,
+            rgb(255 250 250) 100%
+          );
+          background-size: 200% 100%;
+          animation: taskOverdueSweep 6.5s linear infinite;
+        }
+      `}</style>
       {/* Toolbar */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2 text-slate-500">
@@ -395,6 +415,7 @@ export function OrgTasks({ organizationId, orgUsers, clinics, canManage = true }
                           canManage && "cursor-pointer hover:border-violet-300 hover:shadow-sm",
                           dragId === t.id && "opacity-50",
                           dragOverCard === t.id && "border-t-2 border-t-violet-500",
+                          overdue && "task-overdue-blink",
                           done && "bg-slate-50"
                         )}
                       >

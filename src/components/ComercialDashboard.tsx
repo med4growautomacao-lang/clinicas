@@ -107,7 +107,7 @@ const METRICS_CONFIG: { id: string; label: string }[] = [
   { id: "nao_atendidos", label: "Não atendidos" },
   { id: "conversao_agend", label: "Conversão Lead → Agend." },
   { id: "conversao_consulta", label: "Conversão Lead → Consulta" },
-  { id: "consultas", label: "Consultas (realizadas/agendados)" },
+  { id: "consultas", label: "Consultas (realizadas/marcadas)" },
   { id: "consultas_geradas", label: "Consultas Geradas" },
   { id: "faturamento", label: "Faturamento" },
   { id: "custo_agendamento", label: "Custo por Agendamento" },
@@ -364,7 +364,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
   // Estado inicial padrão do Resultados: ESTE MÊS nos 2 calendários (Entrada e
   // Conversão) e "Todos" em agente/origem/canal (sempre abre nesse baseline).
   const initMonth = computeRange("month");
-  // Conversão (evento) — janela principal; presets INCLUEM hoje
+  // Conversão = DATA DA CONSULTA (appointments.date). Alimenta p_appt no backend.
   const [convRange, setConvRange] = useState<{ start: Date; end: Date }>(() => ({ start: initMonth.start, end: initMonth.end }));
   const [convLabel, setConvLabel] = useState(initMonth.label);
   const [isConvOpen, setIsConvOpen] = useState(false);
@@ -376,8 +376,9 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
   const [isEntryOpen, setIsEntryOpen] = useState(false);
   const [entryCal1, setEntryCal1] = useState<Date>(() => initMonth.start);
   const [entryCal2, setEntryCal2] = useState<Date>(() => addMonths(initMonth.start, 1));
-  // Agenda (data da consulta = appointments.date) — também começa em ESTE MÊS
-  const [apptRange, setApptRange] = useState<{ start: Date; end: Date }>(() => ({ start: initMonth.start, end: initMonth.end }));
+  // Agenda = DATA DE CRIAÇÃO do agendamento (appointments.created_at). Alimenta p_conv.
+  // Começa em ESTE MÊS; aceita "Todos" (null).
+  const [apptRange, setApptRange] = useState<{ start: Date; end: Date } | null>(() => ({ start: initMonth.start, end: initMonth.end }));
   const [apptLabel, setApptLabel] = useState(initMonth.label);
   const [isApptOpen, setIsApptOpen] = useState(false);
   const [apptCal1, setApptCal1] = useState<Date>(() => initMonth.start);
@@ -426,13 +427,15 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
     setEntryLabel("PERSONALIZADO");
   };
   const setApptById = (id: string) => {
+    if (id === "todos") { setApptRange(null); setApptLabel("TODOS"); setIsApptOpen(false); return; }
     const r = computeRange(id);
     setApptRange({ start: r.start, end: r.end }); setApptLabel(r.label);
     setApptCal1(r.start); setApptCal2(addMonths(r.start, 1)); setIsApptOpen(false);
   };
   const onApptSelect = (r: { from?: Date; to?: Date } | undefined) => {
-    if (r?.from) { setApptRange((d) => ({ ...d, start: r.from! })); setApptLabel("PERSONALIZADO"); }
-    if (r?.to) { setApptRange((d) => ({ ...d, end: r.to! })); }
+    if (!r) return;
+    setApptRange((d) => ({ start: r.from ?? d?.start ?? r.to!, end: r.to ?? d?.end ?? r.from! }));
+    setApptLabel("PERSONALIZADO");
   };
 
   const toggleMetric = (id: string) => setVisibleMetrics((prev) => {
@@ -467,13 +470,16 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
         p_clinic_id: clinicId,
         p_entry_from: entryRange ? format(entryRange.start, "yyyy-MM-dd") : null,
         p_entry_to: entryRange ? format(entryRange.end, "yyyy-MM-dd") : null,
-        p_conv_from: format(convRange.start, "yyyy-MM-dd"),
-        p_conv_to: format(convRange.end, "yyyy-MM-dd"),
+        // Mapeamento calendário -> coluna no backend:
+        //   Agenda (apptRange)    -> p_conv -> appointments.created_at (geração: Geradas/CAC)
+        //   Conversão (convRange) -> p_appt -> appointments.date       (realização: realizadas/faturamento)
+        p_conv_from: apptRange ? format(apptRange.start, "yyyy-MM-dd") : null,
+        p_conv_to: apptRange ? format(apptRange.end, "yyyy-MM-dd") : null,
         p_agent: agent,
         p_origin: origin.length ? origin.join(",") : "todos",
         p_channel: channel.length ? channel.join(",") : "todos",
-        p_appt_from: format(apptRange.start, "yyyy-MM-dd"),
-        p_appt_to: format(apptRange.end, "yyyy-MM-dd"),
+        p_appt_from: format(convRange.start, "yyyy-MM-dd"),
+        p_appt_to: format(convRange.end, "yyyy-MM-dd"),
       });
       if (error) throw error;
       setData(res as CommercialData);
@@ -570,15 +576,16 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
       p_clinic_id: clinicId,
       p_entry_from: entryRange ? format(entryRange.start, "yyyy-MM-dd") : null,
       p_entry_to: entryRange ? format(entryRange.end, "yyyy-MM-dd") : null,
-      p_conv_from: format(convRange.start, "yyyy-MM-dd"),
-      p_conv_to: format(convRange.end, "yyyy-MM-dd"),
+      // Agenda (apptRange)->p_conv (created_at); Conversão (convRange)->p_appt (a.date)
+      p_conv_from: apptRange ? format(apptRange.start, "yyyy-MM-dd") : null,
+      p_conv_to: apptRange ? format(apptRange.end, "yyyy-MM-dd") : null,
       p_agent: agentScope,
       // O relatório respeita SOMENTE o filtro de data + o tipo escolhido (Geral/IA/Humano).
       // Ignora os filtros de origem/canal/agente da tela para não distorcer o que foi pedido.
       p_origin: "todos",
       p_channel: "todos",
-      p_appt_from: format(apptRange.start, "yyyy-MM-dd"),
-      p_appt_to: format(apptRange.end, "yyyy-MM-dd"),
+      p_appt_from: format(convRange.start, "yyyy-MM-dd"),
+      p_appt_to: format(convRange.end, "yyyy-MM-dd"),
     });
     if (error) throw error;
     return res as CommercialData;
@@ -660,6 +667,8 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
   const attended = (status.realizado || 0) + (status.compareceu || 0);
   const noShow = status.faltou || 0;
   const noShowBase = attended + noShow;
+  // Consultas a realizar = agendamentos que ainda não aconteceram (pendentes/confirmados), por byStatus.
+  const toRealize = (status.pendente || 0) + (status.confirmado || 0);
   const iaActed = agents.ia.messagesOut > 0 || agents.ia.leadsTouched > 0 || agents.ia.appointments > 0;
   const automations = agents.sistema.automations || {};
   const automationsTotal = Object.values(automations).reduce((a, b) => a + b, 0);
@@ -716,8 +725,8 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
     { id: "nao_atendidos", title: "Não atendidos", value: data.leadsNotAttended ?? 0, icon: XCircle, color: "text-rose-600", bg: "bg-rose-50", sub: "entraram e ninguém respondeu", agentScoped: false, originScoped: true },
     { id: "conversao_agend", title: "Conversão Lead → Agendamento", value: `${convAgendRate.toFixed(1)}%`, icon: Percent, color: "text-emerald-600", bg: "bg-emerald-50", sub: `${apptGenerated} agend. gerados ${agentNoun} ÷ ${leadsValue} ${leadsDenomLabel}`, agentScoped: true, originScoped: true },
     { id: "conversao_consulta", title: "Conversão Lead → Consulta", value: `${convConsultaRate.toFixed(1)}%`, valueLabel: "parcial", value2: `${convConsultaPrevistaRate.toFixed(1)}%`, value2Label: "previsto", icon: CheckCircle2, color: "text-green-600", bg: "bg-green-50", agentScoped: true, originScoped: true },
-    { id: "consultas", title: "Consultas", value: attended, valueLabel: "realizadas", value2: appointments.total, value2Label: "agendados", icon: CheckCircle2, color: "text-emerald-600", bg: "bg-emerald-50", sub: "na agenda do período", agentScoped: true, originScoped: true },
-    { id: "consultas_geradas", title: "Consultas Geradas", value: apptGenerated, icon: CalendarCheck, color: "text-teal-600", bg: "bg-teal-50", sub: "criadas no período (Conversão)", agentScoped: true, originScoped: true },
+    { id: "consultas", title: "Consultas", value: attended, valueLabel: "realizadas", value2: toRealize, value2Label: "marcadas", icon: CheckCircle2, color: "text-emerald-600", bg: "bg-emerald-50", sub: "no período (Conversão)", agentScoped: true, originScoped: true },
+    { id: "consultas_geradas", title: "Consultas Geradas", value: apptGenerated, icon: CalendarCheck, color: "text-teal-600", bg: "bg-teal-50", sub: "criadas no período (Agenda)", agentScoped: true, originScoped: true },
     { id: "faturamento", title: "Faturamento", value: noRevenueRecorded ? "—" : fmtBRL(realRevenue), valueLabel: "parcial", value2: projectedRevenue != null ? fmtBRL(projectedRevenue) : "—", value2Label: "previsto", icon: Wallet, color: "text-emerald-700", bg: "bg-emerald-50", agentScoped: true, originScoped: true },
     { id: "custo_agendamento", title: "Custo por Consulta", value: costPerRealizada != null ? fmtBRL(costPerRealizada) : "—", valueLabel: "parcial", value2: costPerAppt != null ? fmtBRL(costPerAppt) : "—", value2Label: "previsto", icon: Target, color: "text-rose-600", bg: "bg-rose-50", agentScoped: true, originScoped: true },
     { id: "cac", title: "CAC", value: cac != null ? fmtBRL(cac) : "—", valueLabel: "parcial", value2: cacPrevisto != null ? fmtBRL(cacPrevisto) : "—", value2Label: "previsto", icon: UserCheck, color: "text-rose-600", bg: "bg-rose-50", agentScoped: false, originScoped: true },
@@ -1094,7 +1103,16 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
             selected={entryRange ? { from: entryRange.start, to: entryRange.end } : undefined} onSelect={onEntrySelect}
             cal1={entryCal1} setCal1={setEntryCal1} cal2={entryCal2} setCal2={setEntryCal2}
           />
-          {/* Conversão (data de criação do agendamento / evento) */}
+          {/* Agenda = data de CRIAÇÃO do agendamento (appointments.created_at): rege Geradas / taxa Lead→Agend / CAC */}
+          <DatePill
+            label="Agenda" valueLabel={apptLabel}
+            rangeText={apptRange ? `${format(apptRange.start, "dd/MM")} - ${format(apptRange.end, "dd/MM")}` : "todas as datas"}
+            open={isApptOpen} setOpen={setIsApptOpen}
+            presets={[{ id: "todos", label: "Todos" }, ...RANGE_PRESETS]} activeLabel={apptLabel} onPreset={setApptById}
+            selected={apptRange ? { from: apptRange.start, to: apptRange.end } : undefined} onSelect={onApptSelect}
+            cal1={apptCal1} setCal1={setApptCal1} cal2={apptCal2} setCal2={setApptCal2}
+          />
+          {/* Conversão = data da CONSULTA (appointments.date): rege realizadas / comparecimento / faturamento real */}
           <DatePill
             label="Conversão" valueLabel={convLabel}
             rangeText={`${format(convRange.start, "dd/MM")} - ${format(convRange.end, "dd/MM")}`}
@@ -1102,15 +1120,6 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
             presets={RANGE_PRESETS} activeLabel={convLabel} onPreset={setConvById}
             selected={{ from: convRange.start, to: convRange.end }} onSelect={onConvSelect}
             cal1={convCal1} setCal1={setConvCal1} cal2={convCal2} setCal2={setConvCal2}
-          />
-          {/* Agenda (data da consulta = appointments.date): rege realizadas/comparecimento/faturamento real */}
-          <DatePill
-            label="Agenda" valueLabel={apptLabel}
-            rangeText={`${format(apptRange.start, "dd/MM")} - ${format(apptRange.end, "dd/MM")}`}
-            open={isApptOpen} setOpen={setIsApptOpen}
-            presets={RANGE_PRESETS} activeLabel={apptLabel} onPreset={setApptById}
-            selected={{ from: apptRange.start, to: apptRange.end }} onSelect={onApptSelect}
-            cal1={apptCal1} setCal1={setApptCal1} cal2={apptCal2} setCal2={setApptCal2}
           />
         </div>
       </div>

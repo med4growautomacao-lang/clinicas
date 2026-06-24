@@ -11,7 +11,6 @@ import {
   Clock,
   AlertTriangle,
   Users,
-  Calendar,
   ChevronDown,
   BarChart3,
   Loader2,
@@ -40,7 +39,6 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { format, subDays, addMonths, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subMonths, subWeeks, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { DayPicker } from "react-day-picker";
 import { useAuth } from "../contexts/AuthContext";
 import { supabase } from "../lib/supabase";
 import { cn } from "../lib/utils";
@@ -50,6 +48,10 @@ import MetaLogo from "../assets/logos/Logo Metaads.png";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import SemOrigemLogo from "../assets/logos/Logo Sem origem.png";
 import WhatsAppLogo from "../assets/logos/Logo Whatsapp.png";
+import { FilterChips } from "./filters/FilterChips";
+import { GranularityToggle } from "./filters/GranularityToggle";
+import { DateRangePopover } from "./filters/DateRangePopover";
+import { type Period, RANGE_PRESETS } from "../lib/dateRange";
 
 // ==========================================
 // Tipos do retorno da RPC get_commercial_dashboard
@@ -91,7 +93,6 @@ interface LeadRow {
   outcome: "ganho" | "perdido" | null;
 }
 
-type Period = "dia" | "sem" | "mês";
 type AgentFilter = "todos" | "ia" | "humano";
 type OriginFilter = "todos" | "meta" | "google" | "sem_origem";
 type ChannelFilter = "todos" | "forms" | "whatsapp" | "balcao";
@@ -136,19 +137,6 @@ function computeRange(id: string): { start: Date; end: Date; label: string } {
   }
   return { start, end, label };
 }
-
-const RANGE_PRESETS = [
-  { id: "today", label: "Hoje" },
-  { id: "yesterday", label: "Ontem" },
-  { id: "week", label: "Esta Semana" },
-  { id: "last_week", label: "Semana Passada" },
-  { id: "7days", label: "Últimos 7 dias" },
-  { id: "14days", label: "Últimos 14 dias" },
-  { id: "28days", label: "Últimos 28 dias" },
-  { id: "30days", label: "Últimos 30 dias" },
-  { id: "month", label: "Este Mês" },
-  { id: "last_month", label: "Mês Passado" },
-];
 
 type DailyPoint = { date: string; aiMessages: number; humanMessages: number; leads: number; appointments: number; realizadas: number; ganhos: number; faturamento: number; faturamentoProjetado: number; investment: number; handoffs: number; followups: number };
 type DailyBucket = Omit<DailyPoint, "date"> & { label: string };
@@ -1050,15 +1038,11 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
     <div className="space-y-6 h-full overflow-y-auto pr-1 custom-scrollbar pb-8">
       {/* Cabeçalho fixo: período + público + filtros globais */}
       <div className="sticky top-0 z-20 -mx-1 px-1 pt-1 pb-3 space-y-3 bg-slate-50/95 backdrop-blur-sm border-b border-slate-100">
-      {/* Controles: granularidade do gráfico + datas (Entrada/Conversão) + público + métricas */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
+      {/* Controles: granularidade do gráfico + datas (Entrada/Conversão), alinhados à direita */}
+      <div className="flex items-center justify-end gap-3 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
           {/* Granularidade do gráfico de tendências */}
-          <div className="flex bg-slate-50 rounded-xl p-1 border border-slate-200" title="Granularidade do gráfico de Tendências">
-            {(["dia", "sem", "mês"] as Period[]).map((p) => (
-              <button key={p} onClick={() => setPeriod(p)} className={cn("px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all", period === p ? "bg-white text-teal-600 shadow-sm border border-slate-200" : "text-slate-400 hover:text-slate-600")}>{p}</button>
-            ))}
-          </div>
+          <GranularityToggle period={period} onChange={setPeriod} className="border border-slate-200" />
           {/* Entrada (coorte de leads) */}
           <DatePill
             label="Entrada" valueLabel={entryLabel}
@@ -1078,87 +1062,44 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
             cal1={convCal1} setCal1={setConvCal1} cal2={convCal2} setCal2={setConvCal2}
           />
         </div>
-        {/* Relatório + Métricas */}
-        <div className="flex items-center gap-2">
-          <ReportButton onGenerate={generateReport} loadingKind={reportLoading} iaAvailable={clinicFeatures?.feature_ia !== false} />
-          <MetricsConfigButton metricsOrder={metricsOrder} visibleMetrics={visibleMetrics} toggleMetric={toggleMetric} moveMetric={moveMetric} />
-        </div>
       </div>
 
-      {/* Filtros globais (mudam os dados — mesmo design do Marketing): agente + origem */}
+      {/* Filtros globais (mudam os dados — mesmo design do Marketing): agente + origem + Relatório/Métricas à direita */}
       <div className="flex items-center gap-x-6 gap-y-3 flex-wrap">
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
-            {([
-              ["todos", "Todos", Users],
-              ["ia", "IA", Bot],
-              ["humano", "Humano", UserCheck],
-            ] as [AgentFilter, string, any][]).map(([val, label, Icon]) => (
-              <button
-                key={val}
-                onClick={() => setAgentPersist(val)}
-                className={cn(
-                  "flex items-center gap-1.5 px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all",
-                  agent === val ? "bg-slate-900 text-white shadow-md shadow-slate-200" : "text-slate-400 hover:text-slate-600 hover:bg-slate-50"
-                )}
-                style={agent === val ? { backgroundColor: "#1e293b" } : {}}
-              >
-                <Icon className="w-3 h-3" />
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
-            {([
-              ["todos", "Todos", null],
-              ["meta", "Meta", MetaLogo],
-              ["google", "Google", GoogleLogo],
-              ["sem_origem", "Orgânico", SemOrigemLogo],
-            ] as [OriginFilter, string, string | null][]).map(([val, label, logo]) => (
-              <button
-                key={val}
-                onClick={() => setOriginPersist(val)}
-                className={cn(
-                  "flex items-center gap-2 px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all",
-                  origin === val ? "bg-slate-900 text-white shadow-md shadow-slate-200" : "text-slate-400 hover:text-slate-600 hover:bg-slate-50"
-                )}
-                style={origin === val ? { backgroundColor: "#1e293b" } : {}}
-              >
-                {logo && <img src={logo} alt={label} className={cn("w-3 h-3 object-contain", origin === val ? "brightness-0 invert" : "")} />}
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
+        <FilterChips
+          value={agent}
+          onChange={(id) => setAgentPersist(id as AgentFilter)}
+          options={[
+            { id: "todos", label: "Todos", icon: Users },
+            { id: "ia", label: "IA", icon: Bot },
+            { id: "humano", label: "Humano", icon: UserCheck },
+          ]}
+        />
+        <FilterChips
+          value={origin}
+          onChange={(id) => setOriginPersist(id as OriginFilter)}
+          options={[
+            { id: "todos", label: "Todos" },
+            { id: "meta", label: "Meta", logo: MetaLogo },
+            { id: "google", label: "Google", logo: GoogleLogo },
+            { id: "sem_origem", label: "Orgânico", logo: SemOrigemLogo },
+          ]}
+        />
         {/* Filtro de canal de captação: Forms / WhatsApp / Balcão */}
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
-            {([
-              ["todos", "Todos", null],
-              ["forms", "Forms", null],
-              ["whatsapp", "WhatsApp", WhatsAppLogo],
-              ["balcao", "Balcão", null],
-            ] as [ChannelFilter, string, string | null][]).map(([val, label, logo]) => (
-              <button
-                key={val}
-                onClick={() => setChannelPersist(val)}
-                className={cn(
-                  "flex items-center gap-2 px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all",
-                  channel === val ? "bg-slate-900 text-white shadow-md shadow-slate-200" : "text-slate-400 hover:text-slate-600 hover:bg-slate-50"
-                )}
-                style={channel === val ? { backgroundColor: "#1e293b" } : {}}
-              >
-                {val === "forms"
-                  ? <FileText className={cn("w-3 h-3", channel === val ? "text-white" : "text-slate-400")} />
-                  : val === "balcao"
-                  ? <Store className={cn("w-3 h-3", channel === val ? "text-white" : "text-slate-400")} />
-                  : logo && <img src={logo} alt={label} className={cn("w-3 h-3 object-contain", channel === val ? "brightness-0 invert" : "")} />}
-                {label}
-              </button>
-            ))}
-          </div>
+        <FilterChips
+          value={channel}
+          onChange={(id) => setChannelPersist(id as ChannelFilter)}
+          options={[
+            { id: "todos", label: "Todos" },
+            { id: "forms", label: "Forms", icon: FileText },
+            { id: "whatsapp", label: "WhatsApp", logo: WhatsAppLogo },
+            { id: "balcao", label: "Balcão", icon: Store },
+          ]}
+        />
+        {/* Relatório + Métricas — alinhados à direita, abaixo dos filtros de data */}
+        <div className="flex items-center gap-2 ml-auto">
+          <ReportButton onGenerate={generateReport} loadingKind={reportLoading} iaAvailable={clinicFeatures?.feature_ia !== false} />
+          <MetricsConfigButton metricsOrder={metricsOrder} visibleMetrics={visibleMetrics} toggleMetric={toggleMetric} moveMetric={moveMetric} />
         </div>
       </div>
       </div>
@@ -1249,33 +1190,22 @@ function DatePill({ label, valueLabel, rangeText, open, setOpen, presets, active
   return (
     <div className="flex items-center gap-2 bg-white p-1.5 rounded-2xl border border-slate-200 shadow-sm">
       <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1.5">{label}</span>
-      <div className="relative">
-        <div onClick={() => setOpen(!open)} className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-slate-50 cursor-pointer transition-all border border-transparent hover:border-slate-200 group">
-          <Calendar className={cn("w-4 h-4 transition-colors", open ? "text-teal-600" : "text-slate-400 group-hover:text-teal-600")} />
-          <span className="text-xs font-bold text-slate-600 uppercase tracking-tight">{valueLabel}</span>
-          <span className="text-[10px] font-medium text-slate-400">{rangeText}</span>
-          <ChevronRight className={cn("w-3.5 h-3.5 text-slate-300 transition-transform", open ? "rotate-90 text-teal-600" : "")} />
-        </div>
-        <AnimatePresence>
-          {open && (
-            <>
-              <div className="fixed inset-0 z-[105]" onClick={() => setOpen(false)} />
-              <motion.div initial={{ opacity: 0, y: 10, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 10, scale: 0.95 }} className="absolute top-full left-0 mt-3 bg-white rounded-2xl border border-slate-200 shadow-2xl z-[110] overflow-hidden rdp-custom flex">
-                <div className="w-44 border-r border-slate-100 p-2 flex flex-col gap-0.5 shrink-0">
-                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-[2px] px-3 pt-1 pb-1.5">{label}</span>
-                  {presets.map((opt) => (
-                    <button key={opt.id} onClick={() => onPreset(opt.id)} className={cn("text-left px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors", activeLabel === opt.label.toUpperCase() ? "bg-teal-50 text-teal-700" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900")}>{opt.label}</button>
-                  ))}
-                </div>
-                <div className="flex flex-col divide-y divide-slate-100">
-                  <div className="p-3"><DayPicker mode="range" selected={selected as any} onSelect={onSelect} month={cal1} onMonthChange={setCal1} numberOfMonths={1} locale={ptBR} weekStartsOn={0} /></div>
-                  <div className="p-3"><DayPicker mode="range" selected={selected as any} onSelect={onSelect} month={cal2} onMonthChange={setCal2} numberOfMonths={1} locale={ptBR} weekStartsOn={0} /></div>
-                </div>
-              </motion.div>
-            </>
-          )}
-        </AnimatePresence>
-      </div>
+      <DateRangePopover
+        valueLabel={valueLabel}
+        rangeText={rangeText}
+        presets={presets}
+        activeLabel={activeLabel}
+        onPreset={onPreset}
+        selected={selected}
+        onSelect={onSelect}
+        month1={cal1}
+        setMonth1={setCal1}
+        month2={cal2}
+        setMonth2={setCal2}
+        open={open}
+        setOpen={setOpen}
+        presetsTitle={label}
+      />
     </div>
   );
 }

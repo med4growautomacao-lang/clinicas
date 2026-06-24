@@ -1087,7 +1087,7 @@ export interface DashboardStats {
   }[];
 }
 
-export function useDashboardStats(dateRange?: { start: string; end: string }, origin: string = 'todos') {
+export function useDashboardStats(dateRange?: { start: string; end: string }, origin: string = 'todos', channel: string = 'todos', agent: string = 'todos') {
   const { profile, activeClinicId } = useAuth();
   const [data, setData] = useState<DashboardStats>({
     totalAppointments: 0,
@@ -1119,6 +1119,8 @@ export function useDashboardStats(dateRange?: { start: string; end: string }, or
         p_date_from: startOfMonth,
         p_date_to: endOfMonth,
         p_origin: origin,
+        p_channel: channel,
+        p_agent: agent,
       });
       if (error) throw error;
       const r = data as any;
@@ -1142,7 +1144,7 @@ export function useDashboardStats(dateRange?: { start: string; end: string }, or
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [activeClinicId, dateRange?.start, dateRange?.end, origin]);
+  }, [activeClinicId, dateRange?.start, dateRange?.end, origin, channel, agent]);
 
   useEffect(() => {
     load();

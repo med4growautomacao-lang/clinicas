@@ -24,14 +24,14 @@ import {
   Download,
   Info,
   ChevronLeft,
-  ChevronRight,
   RefreshCw,
   Edit3,
   Link2,
   X,
   Activity,
   CheckCircle2,
-  FileText
+  FileText,
+  Store
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -72,13 +72,15 @@ import {
   differenceInDays
 } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { DayPicker } from "react-day-picker";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import SemOrigemLogo from "../assets/logos/Logo Sem origem.png";
 import WhatsAppLogo from "../assets/logos/Logo Whatsapp.png";
+import { FilterChips } from "./filters/FilterChips";
+import { GranularityToggle } from "./filters/GranularityToggle";
+import { DateRangePopover } from "./filters/DateRangePopover";
+import { type Period, RANGE_PRESETS } from "../lib/dateRange";
 
-type Period = 'dia' | 'sem' | 'mês';
 type Platform = 'meta_ads' | 'google_ads' | 'no_track';
 
 const PLATFORM_LABELS: Record<Platform, string> = {
@@ -401,7 +403,7 @@ export function MarketingAnalytics() {
   // em Agendamentos (etapa 'agendado') e Conversões (etapa de conversão), por período/plataforma/canal.
   // É a MESMA fonte do Funil de Vendas — garante que cards, gráfico, tabela e funil batam.
   const bucketStages = (cohort: any[], targetPeriods: typeof periods) => {
-    const mk = () => ({ appointments: 0, convs: 0, ch: { forms: { appointments: 0, convs: 0 }, whatsapp: { appointments: 0, convs: 0 } } });
+    const mk = () => ({ appointments: 0, convs: 0, ch: { forms: { appointments: 0, convs: 0 }, whatsapp: { appointments: 0, convs: 0 }, balcao: { appointments: 0, convs: 0 } } });
     const out: Record<string, Record<Platform, any>> = {};
     targetPeriods.forEach(p => { out[p.label] = { meta_ads: mk(), google_ads: mk(), no_track: mk() }; });
     (cohort || []).forEach((r: any) => {
@@ -415,7 +417,7 @@ export function MarketingAnalytics() {
       if (!bucket) return;
       const key = isAgend ? 'appointments' : 'convs';
       const n = Number(r.leads) || 0;
-      const ch = r.channel === 'forms' ? 'forms' : 'whatsapp';
+      const ch = r.channel === 'forms' ? 'forms' : r.channel === 'balcao' ? 'balcao' : 'whatsapp';
       bucket[key] += n;
       bucket.ch[ch][key] += n;
     });
@@ -429,6 +431,7 @@ export function MarketingAnalytics() {
       ch: {
         forms:    { leads: 0, convs: 0, conv_value: 0, appointments: 0 },
         whatsapp: { leads: 0, convs: 0, conv_value: 0, appointments: 0 },
+        balcao:   { leads: 0, convs: 0, conv_value: 0, appointments: 0 },
       },
     });
 
@@ -462,11 +465,11 @@ export function MarketingAnalytics() {
           const manualLeads = marketingData.find(d => d.date === dateStr && d.platform === platform)?.manual_leads_count;
 
           if (manualLeads === null || manualLeads === undefined || manualLeads === 0) {
-            const ch = lead.capture_channel === 'forms' ? 'forms' : 'whatsapp';
+            const ch = lead.capture_channel === 'forms' ? 'forms' : lead.capture_channel === 'balcao' ? 'balcao' : 'whatsapp';
             stats[pKey][platform].leads += 1;
             stats[pKey][platform].ch[ch].leads += 1;
             if (ch === 'forms') stats[pKey][platform].forms_leads += 1;
-            else stats[pKey][platform].whatsapp_leads += 1;
+            else if (ch === 'whatsapp') stats[pKey][platform].whatsapp_leads += 1;
           }
         }
       });
@@ -484,7 +487,7 @@ export function MarketingAnalytics() {
           if (!manualConvValue) {
             stats[pKey][platform].conv_value += Number(conv.value || 0);
             if (lead) {
-              const ch = lead.capture_channel === 'forms' ? 'forms' : 'whatsapp';
+              const ch = lead.capture_channel === 'forms' ? 'forms' : lead.capture_channel === 'balcao' ? 'balcao' : 'whatsapp';
               stats[pKey][platform].ch[ch].conv_value += Number(conv.value || 0);
             }
           }
@@ -502,8 +505,10 @@ export function MarketingAnalytics() {
         stats[pKey][platform].convs = b.convs || 0;
         stats[pKey][platform].ch.forms.appointments = b.ch?.forms?.appointments || 0;
         stats[pKey][platform].ch.whatsapp.appointments = b.ch?.whatsapp?.appointments || 0;
+        stats[pKey][platform].ch.balcao.appointments = b.ch?.balcao?.appointments || 0;
         stats[pKey][platform].ch.forms.convs = b.ch?.forms?.convs || 0;
         stats[pKey][platform].ch.whatsapp.convs = b.ch?.whatsapp?.convs || 0;
+        stats[pKey][platform].ch.balcao.convs = b.ch?.balcao?.convs || 0;
       });
     });
 
@@ -602,125 +607,41 @@ export function MarketingAnalytics() {
         <div className="flex flex-wrap xl:flex-nowrap items-center gap-3">
           {/* Date Pill */}
           <div className="flex items-center gap-3 bg-white p-1.5 rounded-2xl border border-slate-200 shadow-sm">
-            <div className="flex bg-slate-50 rounded-xl p-1">
-              {(['dia', 'sem', 'mês'] as Period[]).map((p) => (
-                <button
-                  key={p}
-                  onClick={() => setPeriod(p)}
-                  className={cn(
-                    "px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all",
-                    period === p ? "bg-white text-teal-600 shadow-sm border border-slate-200" : "text-slate-400 hover:text-slate-600"
-                  )}
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
+            <GranularityToggle period={period} onChange={setPeriod} />
 
             <div className="h-6 w-px bg-slate-200 mx-1" />
 
-            <div className="relative">
-              <div
-                onClick={() => setIsPeriodOpen(!isPeriodOpen)}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-slate-50 cursor-pointer transition-all border border-transparent hover:border-slate-200 group"
-              >
-                <Calendar className={cn("w-4 h-4 transition-colors", isPeriodOpen ? "text-teal-600" : "text-slate-400 group-hover:text-teal-600")} />
-                <span className="text-xs font-bold text-slate-600 uppercase tracking-tight">{activeRangeLabel}</span>
-                <span className="text-[10px] font-medium text-slate-400">{format(dateRange.start, 'dd/MM')} - {format(dateRange.end, 'dd/MM')}</span>
-                <ChevronRight className={cn("w-3.5 h-3.5 text-slate-300 transition-transform", isPeriodOpen ? "rotate-90 text-teal-600" : "")} />
-              </div>
-
-              <AnimatePresence>
-                {isPeriodOpen && (
-                  <>
-                    <div className="fixed inset-0 z-[105]" onClick={() => setIsPeriodOpen(false)} />
-                    <motion.div
-                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                      className="absolute top-full right-0 mt-3 bg-white rounded-2xl border border-slate-200 shadow-2xl z-[110] overflow-hidden rdp-custom flex"
-                    >
-                      {/* Quick options column */}
-                      <div className="w-44 border-r border-slate-100 p-2 flex flex-col gap-0.5 shrink-0">
-                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-[2px] px-3 pt-1 pb-1.5">Período</span>
-                        {[
-                          { id: 'today',      label: 'Hoje' },
-                          { id: 'yesterday',  label: 'Ontem' },
-                          { id: 'week',       label: 'Esta Semana' },
-                          { id: 'last_week',  label: 'Semana Passada' },
-                          { id: '7days',      label: 'Últimos 7 dias' },
-                          { id: '14days',     label: 'Últimos 14 dias' },
-                          { id: '28days',     label: 'Últimos 28 dias' },
-                          { id: '30days',     label: 'Últimos 30 dias' },
-                          { id: 'month',      label: 'Este Mês' },
-                          { id: 'last_month', label: 'Mês Passado' },
-                        ].map(opt => (
-                          <button
-                            key={opt.id}
-                            onClick={() => setRangeById(opt.id)}
-                            className={cn(
-                              "text-left px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors",
-                              activeRangeLabel === opt.label.toUpperCase()
-                                ? "bg-teal-50 text-teal-700"
-                                : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                            )}
-                          >
-                            {opt.label}
-                          </button>
-                        ))}
-                      </div>
-
-                      {/* Two stacked calendars */}
-                      <div className="flex flex-col divide-y divide-slate-100">
-                        <div className="p-3">
-                          <DayPicker
-                            mode="range"
-                            selected={{ from: dateRange.start, to: dateRange.end }}
-                            onSelect={(r) => {
-                              if (r?.from) { setDateRange(d => ({ ...d, start: r.from! })); setActiveRangeLabel("PERSONALIZADO"); }
-                              if (r?.to)   { setDateRange(d => ({ ...d, end: r.to! })); }
-                            }}
-                            month={calMonth1}
-                            onMonthChange={setCalMonth1}
-                            numberOfMonths={1}
-                            locale={ptBR}
-                            weekStartsOn={0}
-                          />
-                        </div>
-                        <div className="p-3">
-                          <DayPicker
-                            mode="range"
-                            selected={{ from: dateRange.start, to: dateRange.end }}
-                            onSelect={(r) => {
-                              if (r?.from) { setDateRange(d => ({ ...d, start: r.from! })); setActiveRangeLabel("PERSONALIZADO"); }
-                              if (r?.to)   { setDateRange(d => ({ ...d, end: r.to! })); }
-                            }}
-                            month={calMonth2}
-                            onMonthChange={setCalMonth2}
-                            numberOfMonths={1}
-                            locale={ptBR}
-                            weekStartsOn={0}
-                          />
-                        </div>
-                        {isComparing && (
-                          <div className="p-3 bg-teal-50/30">
-                            <span className="text-[9px] font-black text-teal-600 uppercase tracking-[2px] block mb-2">Período Comparativo</span>
-                            <DateRangePicker
-                              inline
-                              numberOfMonths={1}
-                              from={format(compareDateRange.start, 'yyyy-MM-dd')}
-                              to={format(compareDateRange.end, 'yyyy-MM-dd')}
-                              onFromChange={(v) => { if (v) setCompareDateRange(r => ({ ...r, start: parseISO(v) })); }}
-                              onToChange={(v) => { if (v) setCompareDateRange(r => ({ ...r, end: parseISO(v) })); }}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    </motion.div>
-                  </>
-                )}
-              </AnimatePresence>
-            </div>
+            <DateRangePopover
+              valueLabel={activeRangeLabel}
+              rangeText={`${format(dateRange.start, 'dd/MM')} - ${format(dateRange.end, 'dd/MM')}`}
+              presets={RANGE_PRESETS}
+              activeLabel={activeRangeLabel}
+              onPreset={setRangeById}
+              selected={{ from: dateRange.start, to: dateRange.end }}
+              onSelect={(r) => {
+                if (r?.from) { setDateRange(d => ({ ...d, start: r.from! })); setActiveRangeLabel("PERSONALIZADO"); }
+                if (r?.to)   { setDateRange(d => ({ ...d, end: r.to! })); }
+              }}
+              month1={calMonth1}
+              setMonth1={setCalMonth1}
+              month2={calMonth2}
+              setMonth2={setCalMonth2}
+              open={isPeriodOpen}
+              setOpen={setIsPeriodOpen}
+              footer={isComparing && (
+                <div className="p-3 bg-teal-50/30">
+                  <span className="text-[9px] font-black text-teal-600 uppercase tracking-[2px] block mb-2">Período Comparativo</span>
+                  <DateRangePicker
+                    inline
+                    numberOfMonths={1}
+                    from={format(compareDateRange.start, 'yyyy-MM-dd')}
+                    to={format(compareDateRange.end, 'yyyy-MM-dd')}
+                    onFromChange={(v) => { if (v) setCompareDateRange(r => ({ ...r, start: parseISO(v) })); }}
+                    onToChange={(v) => { if (v) setCompareDateRange(r => ({ ...r, end: parseISO(v) })); }}
+                  />
+                </div>
+              )}
+            />
           </div>
 
           {/* Actions Area */}
@@ -1054,7 +975,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
 
   const [selectedMetric, setSelectedMetric] = useState('leads');
   const [selectedPlatform, setSelectedPlatform] = useState<Platform | 'all'>('all');
-  const [selectedChannel, setSelectedChannel] = useState<'all' | 'forms' | 'whatsapp'>('all');
+  const [selectedChannel, setSelectedChannel] = useState<'all' | 'forms' | 'whatsapp' | 'balcao'>('all');
   const latestPeriod = periods[periods.length - 1]?.label || '';
 
   // Ajusta uma linha de stats (por plataforma ou já somada) ao canal selecionado.
@@ -1071,7 +992,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
   const getTotals = useCallback((metricSet: any) => {
     const res: any = {
       investment: 0, leads: 0, convs: 0, conv_value: 0, appointments: 0,
-      ch: { forms: { leads: 0, convs: 0, conv_value: 0, appointments: 0 }, whatsapp: { leads: 0, convs: 0, conv_value: 0, appointments: 0 } },
+      ch: { forms: { leads: 0, convs: 0, conv_value: 0, appointments: 0 }, whatsapp: { leads: 0, convs: 0, conv_value: 0, appointments: 0 }, balcao: { leads: 0, convs: 0, conv_value: 0, appointments: 0 } },
     };
     if (!metricSet) return res;
     Object.values(metricSet).forEach((p: any) => {
@@ -1080,7 +1001,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
       res.convs += p.convs || 0;
       res.conv_value += p.conv_value || 0;
       res.appointments += p.appointments || 0;
-      (['forms', 'whatsapp'] as const).forEach((ch) => {
+      (['forms', 'whatsapp', 'balcao'] as const).forEach((ch) => {
         const c = p.ch?.[ch] || {};
         res.ch[ch].leads += c.leads || 0;
         res.ch[ch].convs += c.convs || 0;
@@ -1257,83 +1178,40 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-teal-50 flex items-center justify-center">
-            <LayoutDashboard className="w-5 h-5 text-teal-600" />
-          </div>
-          <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest">Resumo de Performance</h2>
-        </div>
-
-        <div className="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
-          {[
-            { id: 'all', label: 'Todos', logo: null },
+      <div className="flex items-center flex-wrap gap-3">
+        <FilterChips
+          value={selectedPlatform}
+          onChange={(id) => setSelectedPlatform(id as any)}
+          options={[
+            { id: 'all', label: 'Todos' },
             { id: 'meta_ads', label: 'Meta', logo: MetaLogo },
             { id: 'google_ads', label: 'Google', logo: GoogleLogo },
-            { id: 'no_track', label: 'Orgânico', logo: SemOrigemLogo }
-          ].map((plat) => (
-            <button
-              key={plat.id}
-              onClick={() => setSelectedPlatform(plat.id as any)}
-              className={cn(
-                "flex items-center gap-2 px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all",
-                selectedPlatform === plat.id 
-                  ? "bg-slate-900 text-white shadow-md shadow-slate-200" 
-                  : "text-slate-400 hover:text-slate-600 hover:bg-slate-50"
-              )}
-              style={selectedPlatform === plat.id ? { backgroundColor: '#1e293b' } : {}}
-            >
-              {plat.logo && (
-                <img 
-                   src={plat.logo} 
-                   alt={plat.label} 
-                   className={cn("w-3 h-3 object-contain", selectedPlatform === plat.id ? "brightness-0 invert" : "")} 
-                />
-              )}
-              {plat.label}
-            </button>
-          ))}
-        </div>
+            { id: 'no_track', label: 'Orgânico', logo: SemOrigemLogo },
+          ]}
+        />
 
         {/* Filtro de canal: Todos / Forms / WhatsApp */}
-        <div className="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
-          {[
-            { id: 'all', label: 'Todos', logo: null, icon: false },
-            { id: 'forms', label: 'Forms', logo: null, icon: true },
-            { id: 'whatsapp', label: 'WhatsApp', logo: WhatsAppLogo, icon: false }
-          ].map((chOpt) => (
-            <button
-              key={chOpt.id}
-              onClick={() => setSelectedChannel(chOpt.id as any)}
-              className={cn(
-                "flex items-center gap-2 px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all",
-                selectedChannel === chOpt.id
-                  ? "bg-slate-900 text-white shadow-md shadow-slate-200"
-                  : "text-slate-400 hover:text-slate-600 hover:bg-slate-50"
-              )}
-              style={selectedChannel === chOpt.id ? { backgroundColor: '#1e293b' } : {}}
-            >
-              {chOpt.icon && <FileText className="w-3 h-3" />}
-              {chOpt.logo && (
-                <img
-                  src={chOpt.logo}
-                  alt={chOpt.label}
-                  className={cn("w-3 h-3 object-contain", selectedChannel === chOpt.id ? "brightness-0 invert" : "")}
-                />
-              )}
-              {chOpt.label}
-            </button>
-          ))}
-        </div>
-
-        <MetricsConfigButton
-          metricsOrder={metricsOrder} 
-          visibleMetrics={visibleMetrics} 
-          toggleMetric={toggleMetric} 
-          moveMetric={moveMetric}
-          variant="ghost"
-          className="h-8 px-3 rounded-xl hover:bg-slate-100 text-slate-400"
+        <FilterChips
+          value={selectedChannel}
+          onChange={(id) => setSelectedChannel(id as any)}
+          options={[
+            { id: 'all', label: 'Todos' },
+            { id: 'forms', label: 'Forms', icon: FileText },
+            { id: 'whatsapp', label: 'WhatsApp', logo: WhatsAppLogo },
+            { id: 'balcao', label: 'Balcão', icon: Store },
+          ]}
         />
+
+        <div className="ml-auto">
+          <MetricsConfigButton
+            metricsOrder={metricsOrder}
+            visibleMetrics={visibleMetrics}
+            toggleMetric={toggleMetric}
+            moveMetric={moveMetric}
+            variant="ghost"
+            className="h-8 px-3 rounded-xl hover:bg-slate-100 text-slate-400"
+          />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6 gap-4">

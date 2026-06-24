@@ -130,7 +130,7 @@ function AppContent() {
           }}
         />
 
-        <div className="max-w-7xl mx-auto h-full p-8 relative z-10">
+        <div className="w-full h-full p-8 relative z-10">
           {tabs.map(({ id, el }) =>
             visitedTabs.has(id) ? (
               <div key={id} className="h-full" style={{ display: activeTab === id ? 'block' : 'none' }}>

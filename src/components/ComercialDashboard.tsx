@@ -106,15 +106,13 @@ const METRICS_CONFIG: { id: string; label: string }[] = [
   { id: "nao_atendidos", label: "Não atendidos" },
   { id: "conversao_agend", label: "Conversão Lead → Agend." },
   { id: "conversao_consulta", label: "Conversão Lead → Consulta" },
-  { id: "consultas", label: "Agendamentos Gerados" },
-  { id: "faturamento_agendado", label: "Faturamento Projetado" },
-  { id: "faturamento", label: "Faturamento Real" },
-  { id: "consultas_realizadas", label: "Consultas Realizadas" },
+  { id: "consultas", label: "Consultas (realizadas/previstas)" },
+  { id: "faturamento", label: "Faturamento" },
+  { id: "consultas_a_realizar", label: "Consultas a Realizar" },
   { id: "custo_agendamento", label: "Custo por Agendamento" },
   { id: "cac", label: "CAC" },
   { id: "ticket_config", label: "Ticket Médio" },
-  { id: "roas_projetado", label: "ROAS Projetado" },
-  { id: "roas", label: "ROAS Real" },
+  { id: "roas", label: "ROAS" },
 ];
 const DEFAULT_METRIC_IDS = METRICS_CONFIG.map((m) => m.id);
 
@@ -269,48 +267,45 @@ function chartValue(d: DailyBucket, metric: ChartMetric, ticket: number): number
 // ==========================================
 type ReportKind = "completo" | "geral" | "ia" | "humano";
 
-function fmtRatioReport(v: number | null): string {
-  return v != null ? `${v.toFixed(1)}x` : "—";
+// Dinheiro em reais cheios (sem centavos) — mais limpo p/ o cliente
+function fmtMoney0(v: number): string {
+  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 }
 
-// Bloco "Visão Geral" (dados não atribuídos a agente — escopo "todos")
+// Bloco "Visão Geral" (escopo "todos") — linguagem simples, agrupado em Atendimento e Financeiro
 function buildGeneralBlock(d: CommercialData): string {
   const s = d.appointments.byStatus || {};
   const attended = (s.realizado || 0) + (s.compareceu || 0);
   const noShow = s.faltou || 0;
   const canceled = s.cancelado || 0;
   const fin = d.finance;
-  const leadsValue = d.newLeads;
-  const convAgend = leadsValue > 0 ? (d.appointments.total / leadsValue) * 100 : 0;
-  const convConsulta = leadsValue > 0 ? (attended / leadsValue) * 100 : 0;
-  const configuredTicket = fin.defaultTicket > 0 ? fin.defaultTicket : null;
-  const lostAppts = noShow + canceled;
-  const validAppts = Math.max(d.appointments.total - lostAppts, 0);
-  const projectedRevenue = configuredTicket != null ? validAppts * configuredTicket : null;
+  const interessados = d.newLeads;
+  const marcaram = d.appointments.total;
+  const pctMarcou = interessados > 0 ? Math.round((marcaram / interessados) * 100) : 0;
+  const ticket = fin.defaultTicket > 0 ? fin.defaultTicket : null;
+  const validAppts = Math.max(marcaram - (noShow + canceled), 0);
+  const aReceber = ticket != null ? validAppts * ticket : null;
   const realRevenue = fin.revenueScoped ?? fin.revenue;
-  const noRev = realRevenue <= 0 && attended > 0;
-  const roas = fin.investment > 0 ? realRevenue / fin.investment : null;
-  const cac = d.outcomes.won > 0 && fin.investment > 0 ? fin.investment / d.outcomes.won : null;
-  const costPerAppt = d.appointments.total > 0 && fin.investment > 0 ? fin.investment / d.appointments.total : null;
-  return [
-    "*📊 VISÃO GERAL*",
-    `👥 Leads: *${leadsValue}*`,
-    `🚫 Não atendidos: *${d.leadsNotAttended ?? 0}*`,
-    `📅 Agendamentos: *${d.appointments.total}*`,
-    `✅ Consultas realizadas: *${attended}*`,
-    `🏆 Vendas (ganhos): *${d.outcomes.won}*`,
-    `❌ Perdidos: *${d.outcomes.lost}*`,
-    `🎯 Conversão Lead → Agend.: *${convAgend.toFixed(1)}%*`,
-    `🎯 Conversão Lead → Consulta: *${convConsulta.toFixed(1)}%*`,
-    `💵 Faturamento Projetado: *${projectedRevenue != null ? fmtBRL(projectedRevenue) : "—"}*`,
-    `💰 Faturamento Real: *${noRev ? "—" : fmtBRL(realRevenue)}*`,
-    `🎟️ Ticket Médio: *${configuredTicket != null ? fmtBRL(configuredTicket) : "—"}*`,
-    `💸 Investimento: *${fin.investment > 0 ? fmtBRL(fin.investment) : "—"}*`,
-    `📈 ROAS Real: *${noRev ? "—" : fmtRatioReport(roas)}*`,
-    `🧮 CAC: *${cac != null ? fmtBRL(cac) : "—"}*`,
-    `🏷️ Custo por Agend.: *${costPerAppt != null ? fmtBRL(costPerAppt) : "—"}*`,
-    `⏱️ Tempo da 1ª resposta: *${fmtResponseTime(d.sla.firstResponseMin, d.sla.responseCycles)}*`,
+  const roas = fin.investment > 0 && realRevenue > 0 ? realRevenue / fin.investment : null;
+
+  const atendimento = [
+    "*👥 ATENDIMENTO*",
+    `• Interessados: *${interessados}*`,
+    `• Marcaram consulta: *${marcaram}*${interessados > 0 ? ` (${pctMarcou}%)` : ""}`,
+    `• Compareceram: *${attended}*`,
+    `• Viraram clientes: *${d.outcomes.won}*`,
   ].join("\n");
+
+  const finLines = [
+    "*💰 FINANCEIRO*",
+    `• Faturamento: *${realRevenue > 0 ? fmtMoney0(realRevenue) : "—"}*`,
+    `• A receber (já agendado): *${aReceber != null && aReceber > 0 ? fmtMoney0(aReceber) : "—"}*`,
+  ];
+  if (fin.investment > 0) {
+    finLines.push(`• Investido em anúncios: *${fmtMoney0(fin.investment)}*`);
+    finLines.push(`• Retorno: *${roas != null ? `R$ ${roas.toFixed(roas < 10 ? 1 : 0)} p/ cada R$ 1` : "—"}*`);
+  }
+  return `${atendimento}\n\n${finLines.join("\n")}`;
 }
 
 // Bloco atribuído a um agente (IA ou Humano) — usa d.agent para escopo
@@ -319,51 +314,43 @@ function buildAgentBlock(d: CommercialData): string {
   const s = d.appointments.byStatus || {};
   const attended = (s.realizado || 0) + (s.compareceu || 0);
   const fin = d.finance;
-  const leadsValue = isIa ? d.agents.ia.leadsTouched : d.agents.humano.leadsTouched;
-  const convAgend = leadsValue > 0 ? (d.appointments.total / leadsValue) * 100 : 0;
-  const convConsulta = leadsValue > 0 ? (attended / leadsValue) * 100 : 0;
-  const configuredTicket = fin.defaultTicket > 0 ? fin.defaultTicket : null;
+  const interessados = isIa ? d.agents.ia.leadsTouched : d.agents.humano.leadsTouched;
+  const marcaram = d.appointments.total;
+  const pctMarcou = interessados > 0 ? Math.round((marcaram / interessados) * 100) : 0;
+  const ticket = fin.defaultTicket > 0 ? fin.defaultTicket : null;
   const noShow = s.faltou || 0;
   const canceled = s.cancelado || 0;
-  const validAppts = Math.max(d.appointments.total - (noShow + canceled), 0);
-  const projectedRevenue = configuredTicket != null ? validAppts * configuredTicket : null;
-  const realRevenue = fin.revenueScoped ?? fin.revenue;
-  const noRev = realRevenue <= 0 && attended > 0;
+  const validAppts = Math.max(marcaram - (noShow + canceled), 0);
+  const aReceber = ticket != null ? validAppts * ticket : null;
   const lines = [
-    isIa ? "*🤖 ATRIBUÍDO À IA*" : "*🧑‍💼 ATRIBUÍDO AO HUMANO*",
-    `👥 Leads atendidos: *${leadsValue}*`,
-    `📅 Agendamentos: *${d.appointments.total}*`,
-    `✅ Consultas realizadas: *${attended}*`,
-    `🎯 Conversão Lead → Agend.: *${convAgend.toFixed(1)}%*`,
-    `🎯 Conversão Lead → Consulta: *${convConsulta.toFixed(1)}%*`,
-    `💵 Faturamento Projetado: *${projectedRevenue != null ? fmtBRL(projectedRevenue) : "—"}*`,
-    `💰 Faturamento Real: *${noRev ? "—" : fmtBRL(realRevenue)}*`,
+    isIa ? "*🤖 INTELIGÊNCIA ARTIFICIAL*" : "*🧑‍💼 EQUIPE (ATENDIMENTO HUMANO)*",
+    `• Atendeu: *${interessados}* interessados`,
+    `• Marcou consulta: *${marcaram}*${interessados > 0 ? ` (${pctMarcou}%)` : ""}`,
+    `• Compareceram: *${attended}*`,
   ];
   if (isIa) {
-    lines.push(`💬 Mensagens enviadas: *${d.agents.ia.messagesOut}*`);
-    lines.push(`🤝 Resolvidos sem humano: *${d.agents.ia.autonomous}*`);
-    lines.push(`↪️ Passados p/ humano: *${d.agents.ia.handoffs}*`);
+    lines.push(`• Resolveu sozinha (sem humano): *${d.agents.ia.autonomous}*`);
+    lines.push(`• Passou p/ humano: *${d.agents.ia.handoffs}*`);
   } else {
-    lines.push(`💬 Mensagens enviadas: *${d.agents.humano.messagesOut}*`);
-    lines.push(`↩️ Conversas assumidas: *${d.agents.humano.handoffsReceived}*`);
+    lines.push(`• Assumiu da IA: *${d.agents.humano.handoffsReceived}* conversas`);
   }
+  if (aReceber != null && aReceber > 0) lines.push(`• A receber (já agendado): *${fmtMoney0(aReceber)}*`);
   return lines.join("\n");
 }
 
-// Monta o texto completo: cabeçalho (clínica + filtros de data/origem) + blocos
+// Monta o texto completo: cabeçalho simples (clínica + período + filtro) + blocos
 function buildReportText(
-  meta: { clinicName: string; entryLabel: string; convLabel: string; originLabel: string; channelLabel: string },
+  meta: { clinicName: string; period: string; scopeLine: string | null },
   blocks: string[],
 ): string {
   const header = [
     "📊 *RELATÓRIO COMERCIAL*",
     meta.clinicName ? `🏥 ${meta.clinicName}` : null,
-    `📅 Entrada: ${meta.entryLabel} · Conversão: ${meta.convLabel}`,
-    `🌐 Origem: ${meta.originLabel} · Canal: ${meta.channelLabel}`,
-    `🗓️ Gerado em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`,
+    `📅 ${meta.period}`,
+    meta.scopeLine ? `🔎 ${meta.scopeLine}` : null,
   ].filter(Boolean).join("\n");
-  const sep = "\n\n━━━━━━━━━━━━━━━\n\n";
-  return [header, ...blocks].join(sep);
+  const body = [header, ...blocks].join("\n\n");
+  return `${body}\n\n_Gerado em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}_`;
 }
 
 // ==========================================
@@ -550,11 +537,6 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
   const [showReport, setShowReport] = useState(false);
   const [reportCopied, setReportCopied] = useState(false);
 
-  const originFilterLabel =
-    origin === "meta" ? "Meta" : origin === "google" ? "Google" : origin === "sem_origem" ? "Orgânico" : "Todas as origens";
-  const channelFilterLabel =
-    channel === "forms" ? "Formulário" : channel === "whatsapp" ? "WhatsApp" : channel === "balcao" ? "Balcão" : "Todos os canais";
-
   // Busca os dados de um escopo de agente respeitando os filtros de data/origem atuais
   const fetchScoped = useCallback(async (agentScope: AgentFilter): Promise<CommercialData | null> => {
     const clinicId = activeClinicId || profile?.clinic_id;
@@ -566,18 +548,24 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
       p_conv_from: format(convRange.start, "yyyy-MM-dd"),
       p_conv_to: format(convRange.end, "yyyy-MM-dd"),
       p_agent: agentScope,
-      p_origin: origin,
-      p_channel: channel,
+      // O relatório respeita SOMENTE o filtro de data + o tipo escolhido (Geral/IA/Humano).
+      // Ignora os filtros de origem/canal/agente da tela para não distorcer o que foi pedido.
+      p_origin: "todos",
+      p_channel: "todos",
     });
     if (error) throw error;
     return res as CommercialData;
-  }, [activeClinicId, profile?.clinic_id, convRange, entryRange, origin, channel]);
+  }, [activeClinicId, profile?.clinic_id, convRange, entryRange]);
 
   const generateReport = useCallback(async (kind: ReportKind) => {
     setReportLoading(kind);
     setReportKind(kind);
     try {
-      const meta = { clinicName, entryLabel, convLabel, originLabel: originFilterLabel, channelLabel: channelFilterLabel };
+      const meta = {
+        clinicName,
+        period: `${format(convRange.start, "dd/MM/yyyy")} a ${format(convRange.end, "dd/MM/yyyy")}`,
+        scopeLine: null,
+      };
       let text = "";
       if (kind === "geral") {
         const d = await fetchScoped("todos");
@@ -607,7 +595,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
     } finally {
       setReportLoading(null);
     }
-  }, [clinicName, entryLabel, convLabel, originFilterLabel, fetchScoped]);
+  }, [clinicName, convRange, fetchScoped]);
 
   const copyReport = async () => {
     try {
@@ -657,10 +645,13 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
   // (= leadsTouched) ou a coorte inteira quando "Todos". Mantém coerência com o card "Leads".
   const leadsValue = agent === "ia" ? agents.ia.leadsTouched : agent === "humano" ? agents.humano.leadsTouched : data.newLeads;
   const convAgendRate = leadsValue > 0 ? (appointments.total / leadsValue) * 100 : 0;
-  const convConsultaRate = leadsValue > 0 ? (attended / leadsValue) * 100 : 0;
-  const costPerAppt = appointments.total > 0 && fin.investment > 0 ? fin.investment / appointments.total : null;
-  // CAC = investimento ÷ vendas ganhas (clientes adquiridos no período).
+  const convConsultaRate = leadsValue > 0 ? (attended / leadsValue) * 100 : 0;          // parcial: realizadas ÷ leads
+  const convConsultaPrevistaRate = leadsValue > 0 ? (appointments.total / leadsValue) * 100 : 0; // previsto: previstas ÷ leads
+  const costPerAppt = appointments.total > 0 && fin.investment > 0 ? fin.investment / appointments.total : null; // previsto: invest ÷ agendamentos
+  const costPerRealizada = attended > 0 && fin.investment > 0 ? fin.investment / attended : null;                // parcial: invest ÷ realizadas
+  // CAC = investimento ÷ clientes. Parcial: ÷ vendas reais (ganhos). Previsto: ÷ consultas previstas.
   const cac = outcomes.won > 0 && fin.investment > 0 ? fin.investment / outcomes.won : null;
+  const cacPrevisto = appointments.total > 0 && fin.investment > 0 ? fin.investment / appointments.total : null;
   // Ticket médio = espelho do valor configurado em Dados da Clínica (ai_config.default_ticket_value).
   const configuredTicket = fin.defaultTicket > 0 ? fin.defaultTicket : null;
   // ===== Perdas (seção Comparecimento & Perdas) =====
@@ -672,6 +663,11 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
   // Faturamento projetado: valora só os agendamentos que seguem de pé (exclui faltas e cancelamentos).
   const validAppts = Math.max(appointments.total - lostAppts, 0);
   const projectedRevenue = configuredTicket != null ? validAppts * configuredTicket : null;
+  // Consultas a realizar = agendamentos que ainda não aconteceram (pendentes/confirmados).
+  // Modo agenda: pendente + confirmado (mesmo eixo do byStatus). Modo funil: agendados − realizados − perdas.
+  const toRealize = data.agendaViaFunil
+    ? Math.max(appointments.total - attended - lostAppts, 0)
+    : ((status.pendente || 0) + (status.confirmado || 0));
   // Faturamento Real do recorte: receita das consultas realizadas escopada por origem/agente (revenueScoped);
   // cai no revenue não escopado só se a RPC não devolver o campo (versão antiga da função).
   const realRevenue = fin.revenueScoped ?? fin.revenue;
@@ -684,21 +680,19 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
   const projectedRoas = fin.investment > 0 && projectedRevenue != null ? projectedRevenue / fin.investment : null;
   const leadsDenomLabel = agent === "todos" ? "leads" : "leads atendidos";
 
-  type Kpi = { id: string; title: string; value: React.ReactNode; icon: any; color: string; bg: string; sub?: string; agentScoped: boolean; originScoped: boolean };
+  type Kpi = { id: string; title: string; value: React.ReactNode; icon: any; color: string; bg: string; sub?: string; valueLabel?: string; value2?: React.ReactNode; value2Label?: string; agentScoped: boolean; originScoped: boolean };
   const allKpis: Kpi[] = [
     { id: "leads", title: "Leads", value: leadsValue, icon: Users, color: "text-cyan-600", bg: "bg-cyan-50", sub: agent === "todos" ? "entraram no período" : agent === "ia" ? "maioria das respostas pela IA" : "maioria das respostas por humano", agentScoped: true, originScoped: true },
     { id: "nao_atendidos", title: "Não atendidos", value: data.leadsNotAttended ?? 0, icon: XCircle, color: "text-rose-600", bg: "bg-rose-50", sub: "entraram e ninguém respondeu", agentScoped: false, originScoped: true },
     { id: "conversao_agend", title: "Conversão Lead → Agendamento", value: `${convAgendRate.toFixed(1)}%`, icon: Percent, color: "text-emerald-600", bg: "bg-emerald-50", sub: `${appointments.total} agend. ${agentNoun} ÷ ${leadsValue} ${leadsDenomLabel}`, agentScoped: true, originScoped: true },
-    { id: "conversao_consulta", title: "Conversão Lead → Consulta", value: `${convConsultaRate.toFixed(1)}%`, icon: CheckCircle2, color: "text-green-600", bg: "bg-green-50", sub: `${attended} realizadas ÷ ${leadsValue} ${leadsDenomLabel}`, agentScoped: true, originScoped: true },
-    { id: "consultas", title: "Agendamentos Gerados", value: appointments.total, icon: CalendarCheck, color: "text-teal-600", bg: "bg-teal-50", sub: data.agendaViaFunil ? "via etapa do funil" : (agent === "todos" ? `${appointments.ia} IA · ${appointments.manual} manual` : `via ${agentNoun}`), agentScoped: true, originScoped: true },
-    { id: "faturamento_agendado", title: "Faturamento Projetado", value: projectedRevenue != null ? fmtBRL(projectedRevenue) : "—", icon: Wallet, color: "text-emerald-700", bg: "bg-emerald-50", sub: configuredTicket != null ? `${validAppts} agend. ativos × ${fmtBRL(configuredTicket)}` : "configure o ticket médio em Dados da Clínica", agentScoped: true, originScoped: true },
-    { id: "faturamento", title: "Faturamento Real", value: noRevenueRecorded ? "—" : fmtBRL(realRevenue), icon: Wallet, color: "text-emerald-700", bg: "bg-emerald-50", sub: noRevenueRecorded ? "consultas sem pagamento lançado" : "receita das consultas no recorte", agentScoped: true, originScoped: true },
-    { id: "consultas_realizadas", title: "Consultas Realizadas", value: attended, icon: CheckCircle2, color: "text-emerald-600", bg: "bg-emerald-50", sub: `${pct(attended, appointments.total)} dos agendamentos`, agentScoped: true, originScoped: true },
-    { id: "custo_agendamento", title: "Custo por Agendamento", value: costPerAppt != null ? fmtBRL(costPerAppt) : "—", icon: Target, color: "text-rose-600", bg: "bg-rose-50", sub: "investimento ÷ agendamentos", agentScoped: true, originScoped: true },
-    { id: "cac", title: "CAC", value: cac != null ? fmtBRL(cac) : "—", icon: UserCheck, color: "text-rose-600", bg: "bg-rose-50", sub: `investimento ÷ ${outcomes.won} vendas`, agentScoped: false, originScoped: true },
+    { id: "conversao_consulta", title: "Conversão Lead → Consulta", value: `${convConsultaRate.toFixed(1)}%`, valueLabel: "parcial", value2: `${convConsultaPrevistaRate.toFixed(1)}%`, value2Label: "previsto", icon: CheckCircle2, color: "text-green-600", bg: "bg-green-50", agentScoped: true, originScoped: true },
+    { id: "consultas", title: "Consultas", value: attended, valueLabel: "realizadas", value2: appointments.total, value2Label: "previstas", icon: CheckCircle2, color: "text-emerald-600", bg: "bg-emerald-50", agentScoped: true, originScoped: true },
+    { id: "faturamento", title: "Faturamento", value: noRevenueRecorded ? "—" : fmtBRL(realRevenue), valueLabel: "parcial", value2: projectedRevenue != null ? fmtBRL(projectedRevenue) : "—", value2Label: "previsto", icon: Wallet, color: "text-emerald-700", bg: "bg-emerald-50", agentScoped: true, originScoped: true },
+    { id: "consultas_a_realizar", title: "Consultas a Realizar", value: toRealize, icon: Hourglass, color: "text-amber-600", bg: "bg-amber-50", sub: "agendadas, aguardando", agentScoped: true, originScoped: true },
+    { id: "custo_agendamento", title: "Custo por Consulta", value: costPerRealizada != null ? fmtBRL(costPerRealizada) : "—", valueLabel: "parcial", value2: costPerAppt != null ? fmtBRL(costPerAppt) : "—", value2Label: "previsto", icon: Target, color: "text-rose-600", bg: "bg-rose-50", agentScoped: true, originScoped: true },
+    { id: "cac", title: "CAC", value: cac != null ? fmtBRL(cac) : "—", valueLabel: "parcial", value2: cacPrevisto != null ? fmtBRL(cacPrevisto) : "—", value2Label: "previsto", icon: UserCheck, color: "text-rose-600", bg: "bg-rose-50", agentScoped: false, originScoped: true },
     { id: "ticket_config", title: "Ticket Médio", value: configuredTicket != null ? fmtBRL(configuredTicket) : "—", icon: DollarSign, color: "text-blue-600", bg: "bg-blue-50", sub: "definido em Dados da Clínica", agentScoped: false, originScoped: false },
-    { id: "roas_projetado", title: "ROAS Projetado", value: projectedRoas != null ? `${projectedRoas.toFixed(1)}x` : "—", icon: TrendingUp, color: "text-violet-600", bg: "bg-violet-50", sub: (fin.investment > 0 && projectedRevenue != null) ? `${fmtBRL(projectedRevenue)} ÷ ${fmtBRL(fin.investment)}` : "sem investimento", agentScoped: true, originScoped: true },
-    { id: "roas", title: "ROAS Real", value: noRevenueRecorded ? "—" : (roas != null ? `${roas.toFixed(1)}x` : "—"), icon: TrendingUp, color: "text-violet-600", bg: "bg-violet-50", sub: noRevenueRecorded ? "sem receita lançada" : (fin.investment > 0 ? `${fmtBRL(realRevenue)} ÷ ${fmtBRL(fin.investment)}` : "sem investimento"), agentScoped: false, originScoped: true },
+    { id: "roas", title: "ROAS", value: noRevenueRecorded ? "—" : (roas != null ? `${roas.toFixed(1)}x` : "—"), valueLabel: "parcial", value2: projectedRoas != null ? `${projectedRoas.toFixed(1)}x` : "—", value2Label: "previsto", icon: TrendingUp, color: "text-violet-600", bg: "bg-violet-50", agentScoped: false, originScoped: true },
   ];
   const kpiById = Object.fromEntries(allKpis.map((k) => [k.id, k]));
   const headlineKpis = metricsOrder.filter((id) => visibleMetrics.includes(id)).map((id) => kpiById[id]).filter(Boolean) as Kpi[];
@@ -1182,7 +1176,15 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
               </div>
               <div className="mt-3 flex flex-col flex-1">
                 <h3 className="text-[9px] font-black text-slate-400 uppercase tracking-widest min-h-[22px] leading-tight">{stat.title}</h3>
-                <p className="text-base font-black text-slate-900 mt-0.5 whitespace-nowrap">{stat.value}</p>
+                <p className={`${stat.valueLabel ? "text-sm" : "text-base"} font-black text-slate-900 mt-0.5 whitespace-nowrap`}>
+                  {stat.valueLabel && <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mr-1">{stat.valueLabel}:</span>}
+                  {stat.value}
+                </p>
+                {stat.value2 != null && (
+                  <p className="text-[10px] font-bold text-slate-400 mt-1 whitespace-nowrap uppercase tracking-wider">
+                    {stat.value2Label}: <span className="text-slate-600 font-black normal-case">{stat.value2}</span>
+                  </p>
+                )}
               </div>
             </Card>
           </motion.div>

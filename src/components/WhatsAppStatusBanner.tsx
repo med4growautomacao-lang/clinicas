@@ -18,7 +18,7 @@ export function WhatsAppStatusBanner({ onReconnect, userRole }: Props) {
 
   return (
     <div className="bg-gradient-to-r from-amber-50 via-orange-50 to-amber-50 border-b border-amber-200/80 shadow-sm">
-      <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between gap-4">
+      <div className="w-full px-8 py-3 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3 min-w-0">
           <div className="w-9 h-9 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
             <WifiOff className="w-4 h-4 text-amber-700" />

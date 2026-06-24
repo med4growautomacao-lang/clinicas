@@ -275,8 +275,17 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
   };
 
   const handleCreateClinic = async () => {
-    if (!clinicForm.name.trim() || !clinicForm.ownerName.trim() || !clinicForm.ownerEmail.trim() || !clinicForm.ownerPassword.trim()) {
-      setClinicError('Preencha todos os campos.');
+    if (!clinicForm.name.trim()) {
+      setClinicError('Informe o nome da clínica.');
+      return;
+    }
+    // Administrador é opcional: a clínica pode ser criada vazia e o admin adicionado
+    // depois (menu "Usuários da Clínica"). Mas se o usuário começou a preencher os
+    // dados do admin, exigimos e-mail + senha — a RPC só cria o login quando há e-mail,
+    // e e-mail sem senha geraria um acesso quebrado.
+    const wantsAdmin = !!(clinicForm.ownerName.trim() || clinicForm.ownerEmail.trim() || clinicForm.ownerPassword.trim());
+    if (wantsAdmin && (!clinicForm.ownerEmail.trim() || !clinicForm.ownerPassword.trim())) {
+      setClinicError('Para criar o administrador agora, informe e-mail e senha (ou deixe os três campos em branco).');
       return;
     }
     setClinicSaving(true);
@@ -1301,7 +1310,11 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                 )}
                 {!editClinicTarget && (
                   <div className="pt-1 border-t border-slate-100">
-                    <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Administrador da Clínica</p>
+                    <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-2">
+                      Administrador da Clínica
+                      <span className="text-[9px] font-bold normal-case tracking-normal px-1.5 py-0.5 rounded-md bg-teal-100 text-teal-700 border border-teal-200">Opcional</span>
+                    </p>
+                    <p className="text-[10px] text-slate-400 mb-2">Você pode criar a clínica sem administrador e adicioná-lo depois em "Usuários da Clínica".</p>
                     <div className="space-y-2">
                       <input value={clinicForm.ownerName} onChange={e => setClinicForm(f => ({ ...f, ownerName: e.target.value }))}
                         className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500" placeholder="Nome completo" />

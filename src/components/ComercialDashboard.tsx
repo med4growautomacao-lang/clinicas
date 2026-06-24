@@ -260,38 +260,46 @@ function fmtMoney0(v: number): string {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 }
 
-// Bloco "Visão Geral" (escopo "todos") — linguagem simples, agrupado em Atendimento e Financeiro
+// Retorno amigável (ROAS) — "R$ X p/ cada R$ 1"
+function fmtRetorno(v: number | null): string {
+  return v != null ? `R$ ${v.toFixed(v < 10 ? 1 : 0)} p/ cada R$ 1` : "—";
+}
+
+// Bloco "Visão Geral" (escopo "todos") — linguagem simples, com parcial (realizado) e previsto (agendado)
 function buildGeneralBlock(d: CommercialData): string {
   const s = d.appointments.byStatus || {};
-  const attended = (s.realizado || 0) + (s.compareceu || 0);
+  const realizadas = (s.realizado || 0) + (s.compareceu || 0);
   const noShow = s.faltou || 0;
   const canceled = s.cancelado || 0;
   const fin = d.finance;
   const interessados = d.newLeads;
-  const marcaram = d.appointments.total;
-  const pctMarcou = interessados > 0 ? Math.round((marcaram / interessados) * 100) : 0;
+  const previstas = d.appointments.total; // consultas marcadas (base do "previsto")
+  const pctMarcou = interessados > 0 ? Math.round((previstas / interessados) * 100) : 0;
   const ticket = fin.defaultTicket > 0 ? fin.defaultTicket : null;
-  const validAppts = Math.max(marcaram - (noShow + canceled), 0);
-  const aReceber = ticket != null ? validAppts * ticket : null;
+  const validAppts = Math.max(previstas - (noShow + canceled), 0);
+  const fatPrevisto = ticket != null ? validAppts * ticket : null;
   const realRevenue = fin.revenueScoped ?? fin.revenue;
-  const roas = fin.investment > 0 && realRevenue > 0 ? realRevenue / fin.investment : null;
+  const semFatLancado = realRevenue <= 0 && realizadas > 0;
+  const retornoReal = fin.investment > 0 && realRevenue > 0 ? realRevenue / fin.investment : null;
+  const retornoPrev = fin.investment > 0 && fatPrevisto != null && fatPrevisto > 0 ? fatPrevisto / fin.investment : null;
 
   const atendimento = [
     "*👥 ATENDIMENTO*",
     `• Interessados: *${interessados}*`,
-    `• Marcaram consulta: *${marcaram}*${interessados > 0 ? ` (${pctMarcou}%)` : ""}`,
-    `• Compareceram: *${attended}*`,
+    `• Consultas marcadas: *${previstas}*${interessados > 0 ? ` (${pctMarcou}%)` : ""}`,
+    `• Consultas realizadas: *${realizadas}*`,
     `• Viraram clientes: *${d.outcomes.won}*`,
   ].join("\n");
 
   const finLines = [
     "*💰 FINANCEIRO*",
-    `• Faturamento: *${realRevenue > 0 ? fmtMoney0(realRevenue) : "—"}*`,
-    `• A receber (já agendado): *${aReceber != null && aReceber > 0 ? fmtMoney0(aReceber) : "—"}*`,
+    `• Faturamento realizado: *${semFatLancado || realRevenue <= 0 ? "—" : fmtMoney0(realRevenue)}*`,
+    `• Faturamento previsto: *${fatPrevisto != null && fatPrevisto > 0 ? fmtMoney0(fatPrevisto) : "—"}*`,
   ];
   if (fin.investment > 0) {
     finLines.push(`• Investido em anúncios: *${fmtMoney0(fin.investment)}*`);
-    finLines.push(`• Retorno: *${roas != null ? `R$ ${roas.toFixed(roas < 10 ? 1 : 0)} p/ cada R$ 1` : "—"}*`);
+    finLines.push(`• Retorno realizado: *${fmtRetorno(retornoReal)}*`);
+    finLines.push(`• Retorno previsto: *${fmtRetorno(retornoPrev)}*`);
   }
   return `${atendimento}\n\n${finLines.join("\n")}`;
 }
@@ -300,21 +308,21 @@ function buildGeneralBlock(d: CommercialData): string {
 function buildAgentBlock(d: CommercialData): string {
   const isIa = d.agent === "ia";
   const s = d.appointments.byStatus || {};
-  const attended = (s.realizado || 0) + (s.compareceu || 0);
+  const realizadas = (s.realizado || 0) + (s.compareceu || 0);
   const fin = d.finance;
   const interessados = isIa ? d.agents.ia.leadsTouched : d.agents.humano.leadsTouched;
-  const marcaram = d.appointments.total;
-  const pctMarcou = interessados > 0 ? Math.round((marcaram / interessados) * 100) : 0;
+  const previstas = d.appointments.total;
+  const pctMarcou = interessados > 0 ? Math.round((previstas / interessados) * 100) : 0;
   const ticket = fin.defaultTicket > 0 ? fin.defaultTicket : null;
   const noShow = s.faltou || 0;
   const canceled = s.cancelado || 0;
-  const validAppts = Math.max(marcaram - (noShow + canceled), 0);
-  const aReceber = ticket != null ? validAppts * ticket : null;
+  const validAppts = Math.max(previstas - (noShow + canceled), 0);
+  const fatPrevisto = ticket != null ? validAppts * ticket : null;
   const lines = [
     isIa ? "*🤖 INTELIGÊNCIA ARTIFICIAL*" : "*🧑‍💼 EQUIPE (ATENDIMENTO HUMANO)*",
     `• Atendeu: *${interessados}* interessados`,
-    `• Marcou consulta: *${marcaram}*${interessados > 0 ? ` (${pctMarcou}%)` : ""}`,
-    `• Compareceram: *${attended}*`,
+    `• Consultas marcadas: *${previstas}*${interessados > 0 ? ` (${pctMarcou}%)` : ""}`,
+    `• Consultas realizadas: *${realizadas}*`,
   ];
   if (isIa) {
     lines.push(`• Resolveu sozinha (sem humano): *${d.agents.ia.autonomous}*`);
@@ -322,11 +330,11 @@ function buildAgentBlock(d: CommercialData): string {
   } else {
     lines.push(`• Assumiu da IA: *${d.agents.humano.handoffsReceived}* conversas`);
   }
-  if (aReceber != null && aReceber > 0) lines.push(`• A receber (já agendado): *${fmtMoney0(aReceber)}*`);
+  if (fatPrevisto != null && fatPrevisto > 0) lines.push(`• Faturamento previsto: *${fmtMoney0(fatPrevisto)}*`);
   return lines.join("\n");
 }
 
-// Monta o texto completo: cabeçalho simples (clínica + período + filtro) + blocos
+// Monta o texto completo: cabeçalho simples (clínica + período) + blocos + legenda
 function buildReportText(
   meta: { clinicName: string; period: string; scopeLine: string | null },
   blocks: string[],
@@ -338,7 +346,8 @@ function buildReportText(
     meta.scopeLine ? `🔎 ${meta.scopeLine}` : null,
   ].filter(Boolean).join("\n");
   const body = [header, ...blocks].join("\n\n");
-  return `${body}\n\n_Gerado em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}_`;
+  const legenda = "_Realizado = já aconteceu · Previsto = projeção do que já está agendado_";
+  return `${body}\n\n${legenda}\n_Gerado em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}_`;
 }
 
 // ==========================================
@@ -351,21 +360,25 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
   const [clinicName, setClinicName] = useState("");
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<Period>("dia");
+  // Estado inicial padrão do Resultados: ESTE MÊS nos 2 calendários (Entrada e
+  // Conversão) e "Todos" em agente/origem/canal (sempre abre nesse baseline).
+  const initMonth = computeRange("month");
   // Conversão (evento) — janela principal; presets INCLUEM hoje
-  const [convRange, setConvRange] = useState<{ start: Date; end: Date }>(() => ({ start: subDays(new Date(), 7), end: subDays(new Date(), 1) }));
-  const [convLabel, setConvLabel] = useState("ÚLTIMOS 7 DIAS");
+  const [convRange, setConvRange] = useState<{ start: Date; end: Date }>(() => ({ start: initMonth.start, end: initMonth.end }));
+  const [convLabel, setConvLabel] = useState(initMonth.label);
   const [isConvOpen, setIsConvOpen] = useState(false);
-  const [convCal1, setConvCal1] = useState<Date>(() => subDays(new Date(), 6));
-  const [convCal2, setConvCal2] = useState<Date>(() => addMonths(subDays(new Date(), 6), 1));
-  // Entrada (coorte) — null = "Todos"
-  const [entryRange, setEntryRange] = useState<{ start: Date; end: Date } | null>(null);
-  const [entryLabel, setEntryLabel] = useState("TODOS");
+  const [convCal1, setConvCal1] = useState<Date>(() => initMonth.start);
+  const [convCal2, setConvCal2] = useState<Date>(() => addMonths(initMonth.start, 1));
+  // Entrada (coorte) — também começa em ESTE MÊS
+  const [entryRange, setEntryRange] = useState<{ start: Date; end: Date } | null>(() => ({ start: initMonth.start, end: initMonth.end }));
+  const [entryLabel, setEntryLabel] = useState(initMonth.label);
   const [isEntryOpen, setIsEntryOpen] = useState(false);
-  const [entryCal1, setEntryCal1] = useState<Date>(() => subDays(new Date(), 6));
-  const [entryCal2, setEntryCal2] = useState<Date>(() => addMonths(subDays(new Date(), 6), 1));
-  const [agent, setAgent] = useState<AgentFilter>(() => (localStorage.getItem("comercialAgent") as AgentFilter) || "todos");
-  const [origin, setOrigin] = useState<OriginFilter>(() => (localStorage.getItem("comercialOrigin") as OriginFilter) || "todos");
-  const [channel, setChannel] = useState<ChannelFilter>(() => (localStorage.getItem("comercialChannel") as ChannelFilter) || "todos");
+  const [entryCal1, setEntryCal1] = useState<Date>(() => initMonth.start);
+  const [entryCal2, setEntryCal2] = useState<Date>(() => addMonths(initMonth.start, 1));
+  const [agent, setAgent] = useState<AgentFilter>("todos");
+  // Origem e Canal são multi-seleção: array vazio = "Todos". Agente segue único.
+  const [origin, setOrigin] = useState<OriginFilter[]>([]);
+  const [channel, setChannel] = useState<ChannelFilter[]>([]);
   const [chartMetric, setChartMetric] = useState<ChartMetric>("humanMessages");
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [visibleMetrics, setVisibleMetrics] = useState<string[]>(() => {
@@ -436,8 +449,8 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
         p_conv_from: format(convRange.start, "yyyy-MM-dd"),
         p_conv_to: format(convRange.end, "yyyy-MM-dd"),
         p_agent: agent,
-        p_origin: origin,
-        p_channel: channel,
+        p_origin: origin.length ? origin.join(",") : "todos",
+        p_channel: channel.length ? channel.join(",") : "todos",
       });
       if (error) throw error;
       setData(res as CommercialData);
@@ -496,8 +509,8 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
         p_conv_from: format(convRange.start, "yyyy-MM-dd"),
         p_conv_to: format(convRange.end, "yyyy-MM-dd"),
         p_agent: agent,
-        p_origin: origin,
-        p_channel: channel,
+        p_origin: origin.length ? origin.join(",") : "todos",
+        p_channel: channel.length ? channel.join(",") : "todos",
         p_limit: LEADS_PAGE_SIZE,
         p_offset: leadsPage * LEADS_PAGE_SIZE,
       });
@@ -514,9 +527,10 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
 
   useEffect(() => { fetchLeads(); }, [fetchLeads]);
 
-  const setAgentPersist = (v: AgentFilter) => { setAgent(v); localStorage.setItem("comercialAgent", v); };
-  const setOriginPersist = (v: OriginFilter) => { setOrigin(v); localStorage.setItem("comercialOrigin", v); };
-  const setChannelPersist = (v: ChannelFilter) => { setChannel(v); localStorage.setItem("comercialChannel", v); };
+  // Filtros não são persistidos: o Resultados sempre inicia em "Todos".
+  const setAgentPersist = (v: AgentFilter) => setAgent(v);
+  const setOriginPersist = (v: OriginFilter[]) => setOrigin(v);
+  const setChannelPersist = (v: ChannelFilter[]) => setChannel(v);
 
   // ===== Relatório em texto (WhatsApp) =====
   const [reportLoading, setReportLoading] = useState<ReportKind | null>(null);
@@ -607,7 +621,9 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
     URL.revokeObjectURL(url);
   };
 
-  if (loading || !data) {
+  // Spinner cheio só no 1º carregamento (sem dados ainda). Em mudanças de filtro,
+  // mantém os dados atuais visíveis durante o refetch (sem "piscar" a tela inteira).
+  if (!data) {
     return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 text-teal-600 animate-spin" /></div>;
   }
 
@@ -1076,8 +1092,9 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
           ]}
         />
         <FilterChips
+          multiple
           value={origin}
-          onChange={(id) => setOriginPersist(id as OriginFilter)}
+          onChange={(ids) => setOriginPersist(ids as OriginFilter[])}
           options={[
             { id: "todos", label: "Todos" },
             { id: "meta", label: "Meta", logo: MetaLogo },
@@ -1087,8 +1104,9 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
         />
         {/* Filtro de canal de captação: Forms / WhatsApp / Balcão */}
         <FilterChips
+          multiple
           value={channel}
-          onChange={(id) => setChannelPersist(id as ChannelFilter)}
+          onChange={(ids) => setChannelPersist(ids as ChannelFilter[])}
           options={[
             { id: "todos", label: "Todos" },
             { id: "forms", label: "Forms", icon: FileText },
@@ -1111,7 +1129,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
             <Card className="h-full flex flex-col bg-white border-slate-200 shadow-lg rounded-2xl p-4 overflow-hidden group hover:shadow-xl transition-all">
               <div className="flex items-start justify-between">
                 <div className={`p-2 rounded-xl ${stat.bg}`}><stat.icon className={`w-4 h-4 ${stat.color}`} /></div>
-                {((agent !== "todos" && !stat.agentScoped) || (origin !== "todos" && !stat.originScoped)) && (
+                {((agent !== "todos" && !stat.agentScoped) || (origin.length > 0 && !stat.originScoped)) && (
                   <span className="text-[8px] font-black uppercase tracking-wider text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full" title="Não atribuível ao filtro ativo — valor geral da clínica">geral</span>
                 )}
               </div>

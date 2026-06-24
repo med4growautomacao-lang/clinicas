@@ -974,19 +974,28 @@ function FunnelConfigButton({ stages, order, hidden, toggleStage, moveStage }: a
 function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, isComparing, visibleMetrics, metricsOrder, toggleMetric, moveMetric, funnelStages, funnelCohort, funnelOrder, funnelHidden, toggleFunnelStage, moveFunnelStage }: any) {
 
   const [selectedMetric, setSelectedMetric] = useState('leads');
-  const [selectedPlatform, setSelectedPlatform] = useState<Platform | 'all'>('all');
-  const [selectedChannel, setSelectedChannel] = useState<'all' | 'forms' | 'whatsapp' | 'balcao'>('all');
+  // Plataforma (origem) e Canal são multi-seleção: array vazio = "Todos".
+  const [selectedPlatform, setSelectedPlatform] = useState<string[]>([]);
+  const [selectedChannel, setSelectedChannel] = useState<string[]>([]);
   const latestPeriod = periods[periods.length - 1]?.label || '';
 
   // Ajusta uma linha de stats (por plataforma ou já somada) ao canal selecionado.
   // Investimento não tem canal — fica sempre cheio.
   const adjChannel = useCallback((s: any) => {
     if (!s) return { investment: 0, leads: 0, convs: 0, conv_value: 0, appointments: 0 };
-    if (selectedChannel === 'all') {
+    if (selectedChannel.length === 0) {
       return { investment: s.investment || 0, leads: s.leads || 0, convs: s.convs || 0, conv_value: s.conv_value || 0, appointments: s.appointments || 0 };
     }
-    const c = s.ch?.[selectedChannel] || {};
-    return { investment: s.investment || 0, leads: c.leads || 0, convs: c.convs || 0, conv_value: c.conv_value || 0, appointments: c.appointments || 0 };
+    // Soma os canais selecionados (investimento não tem canal -> fica cheio)
+    const acc = { investment: s.investment || 0, leads: 0, convs: 0, conv_value: 0, appointments: 0 };
+    selectedChannel.forEach((ch) => {
+      const c = s.ch?.[ch] || {};
+      acc.leads += c.leads || 0;
+      acc.convs += c.convs || 0;
+      acc.conv_value += c.conv_value || 0;
+      acc.appointments += c.appointments || 0;
+    });
+    return acc;
   }, [selectedChannel]);
 
   const getTotals = useCallback((metricSet: any) => {
@@ -1032,11 +1041,11 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
         const s = dayStats[platform];
         
         // Pizza "Origem dos Leads": respeita o canal selecionado
-        res.breakdown[platform].leads += selectedChannel === 'all' ? (s.leads || 0) : (s.ch?.[selectedChannel]?.leads || 0);
+        res.breakdown[platform].leads += selectedChannel.length === 0 ? (s.leads || 0) : selectedChannel.reduce((sum: number, ch: string) => sum + (s.ch?.[ch]?.leads || 0), 0);
         res.breakdown[platform].whatsapp += s.ch?.whatsapp?.leads || 0;
         res.breakdown[platform].forms += s.ch?.forms?.leads || 0;
 
-        if (selectedPlatform === 'all' || selectedPlatform === platform) {
+        if (selectedPlatform.length === 0 || selectedPlatform.includes(platform)) {
           const a = adjChannel(s);
           res.investment += a.investment;
           res.leads += a.leads;
@@ -1062,7 +1071,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
         const platform = pKey as Platform;
         const s = dayStats[platform];
         
-        if (selectedPlatform === 'all' || selectedPlatform === platform) {
+        if (selectedPlatform.length === 0 || selectedPlatform.includes(platform)) {
           const a = adjChannel(s);
           res.investment += a.investment;
           res.leads += a.leads;
@@ -1080,14 +1089,12 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
       const dayStats = metricsByPeriod[p.label];
       const compDayStats = comparisonMetricsByPeriod[p.label];
       
-      let rawStats, rawCompStats;
-      if (selectedPlatform === 'all') {
-         rawStats = getTotals(dayStats);
-         rawCompStats = getTotals(compDayStats);
-      } else {
-         rawStats = dayStats?.[selectedPlatform];
-         rawCompStats = compDayStats?.[selectedPlatform];
-      }
+      // Soma só as plataformas selecionadas (vazio = todas) via getTotals.
+      const pick = (ds: any) => (!ds || selectedPlatform.length === 0)
+        ? ds
+        : Object.fromEntries(Object.entries(ds).filter(([k]) => selectedPlatform.includes(k)));
+      const rawStats = getTotals(pick(dayStats));
+      const rawCompStats = getTotals(pick(compDayStats));
       const stats = adjChannel(rawStats);
       const compStats = adjChannel(rawCompStats);
 
@@ -1129,7 +1136,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
       { id: 'meta_ads', name: 'Meta Ads', label: 'META', value: currentTotals.breakdown.meta_ads.leads, color: '#4f46e5', logo: MetaLogo },
       { id: 'google_ads', name: 'Google Ads', label: 'GOOGLE', value: currentTotals.breakdown.google_ads.leads, color: '#10b981', logo: GoogleLogo },
       { id: 'no_track', name: 'Orgânico', label: 'ORGÂNICO', value: currentTotals.breakdown.no_track.leads, color: '#94a3b8', logo: SemOrigemLogo },
-    ].filter(d => d.value > 0 && (selectedPlatform === 'all' || selectedPlatform === d.id));
+    ].filter(d => d.value > 0 && (selectedPlatform.length === 0 || selectedPlatform.includes(d.id)));
   }, [currentTotals, selectedPlatform]);
 
   const platformTitle = "Origem dos Leads";
@@ -1153,8 +1160,8 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
     // O RPC retorna uma linha por (etapa, plataforma); somamos só as plataformas selecionadas.
     const countByStage = new Map<string, number>();
     (funnelCohort || []).forEach((r: any) => {
-      if (selectedPlatform !== 'all' && r.platform !== selectedPlatform) return;
-      if (selectedChannel !== 'all' && r.channel !== selectedChannel) return;
+      if (selectedPlatform.length > 0 && !selectedPlatform.includes(r.platform)) return;
+      if (selectedChannel.length > 0 && !selectedChannel.includes(r.channel)) return;
       countByStage.set(r.stage_id, (countByStage.get(r.stage_id) || 0) + (Number(r.leads) || 0));
     });
 
@@ -1180,8 +1187,10 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
     <div className="space-y-6">
       <div className="flex items-center flex-wrap gap-3">
         <FilterChips
+          multiple
+          allId="all"
           value={selectedPlatform}
-          onChange={(id) => setSelectedPlatform(id as any)}
+          onChange={(ids) => setSelectedPlatform(ids)}
           options={[
             { id: 'all', label: 'Todos' },
             { id: 'meta_ads', label: 'Meta', logo: MetaLogo },
@@ -1190,10 +1199,12 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
           ]}
         />
 
-        {/* Filtro de canal: Todos / Forms / WhatsApp */}
+        {/* Filtro de canal: Todos / Forms / WhatsApp / Balcão */}
         <FilterChips
+          multiple
+          allId="all"
           value={selectedChannel}
-          onChange={(id) => setSelectedChannel(id as any)}
+          onChange={(ids) => setSelectedChannel(ids)}
           options={[
             { id: 'all', label: 'Todos' },
             { id: 'forms', label: 'Forms', icon: FileText },

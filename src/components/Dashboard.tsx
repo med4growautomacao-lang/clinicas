@@ -48,8 +48,9 @@ import {
 export function Dashboard() {
   const [period, setPeriod] = useState<Period>('mês');
   const [isPeriodOpen, setIsPeriodOpen] = useState(false);
-  const [origin, setOrigin] = useState<'todos' | 'meta' | 'google' | 'sem_origem'>('todos');
-  const [channel, setChannel] = useState<'todos' | 'forms' | 'whatsapp' | 'balcao'>('todos');
+  // Origem e Canal são multi-seleção (array vazio = "Todos"). Agente segue único.
+  const [origin, setOrigin] = useState<string[]>([]);
+  const [channel, setChannel] = useState<string[]>([]);
   const [agent, setAgent] = useState<'todos' | 'ia' | 'humano'>('todos');
   const [activeRangeLabel, setActiveRangeLabel] = useState("ESTE MÊS");
   const [dateRange, setDateRange] = useState({
@@ -62,7 +63,12 @@ export function Dashboard() {
     end: format(dateRange.end, 'yyyy-MM-dd')
   }), [dateRange]);
 
-  const { data: stats, loading } = useDashboardStats(statsDateRange, origin, channel, agent);
+  const { data: stats, loading } = useDashboardStats(
+    statsDateRange,
+    origin.length ? origin.join(',') : 'todos',
+    channel.length ? channel.join(',') : 'todos',
+    agent
+  );
   const { data: appointments } = useAppointments();
   const { data: doctors } = useDoctors();
   const [calendarMonth, setCalendarMonth] = useState(new Date());
@@ -249,10 +255,11 @@ export function Dashboard() {
             ]}
           />
 
-          {/* Filtro de origem (Todos / Meta / Google / Orgânico) */}
+          {/* Filtro de origem (Todos / Meta / Google / Orgânico) — multi */}
           <FilterChips
+            multiple
             value={origin}
-            onChange={(id) => setOrigin(id as 'todos' | 'meta' | 'google' | 'sem_origem')}
+            onChange={(ids) => setOrigin(ids)}
             options={[
               { id: 'todos', label: 'Todos' },
               { id: 'meta', label: 'Meta', logo: MetaLogo },
@@ -261,10 +268,11 @@ export function Dashboard() {
             ]}
           />
 
-          {/* Filtro de canal (Todos / Forms / WhatsApp / Balcão) */}
+          {/* Filtro de canal (Todos / Forms / WhatsApp / Balcão) — multi */}
           <FilterChips
+            multiple
             value={channel}
-            onChange={(id) => setChannel(id as 'todos' | 'forms' | 'whatsapp' | 'balcao')}
+            onChange={(ids) => setChannel(ids)}
             options={[
               { id: 'todos', label: 'Todos' },
               { id: 'forms', label: 'Forms', icon: FileText },

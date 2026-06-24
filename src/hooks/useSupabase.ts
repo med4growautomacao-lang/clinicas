@@ -2570,3 +2570,111 @@ export function useExamRequests(patientId: string | null) {
 
   return { data, loading, create, remove, refetch: fetch };
 }
+
+// ==========================================
+// ORG TASKS (Matriz de Eisenhower - painel de organizacoes)
+// ==========================================
+export interface OrgTask {
+  id: string;
+  organization_id: string;
+  title: string;
+  is_urgent: boolean;
+  is_important: boolean;
+  responsible_ids: string[];
+  clinic_id: string | null;
+  position: number;
+  due_date: string | null;
+  status: 'todo' | 'doing' | 'done';
+  is_done: boolean;
+  done_at: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export function useOrgTasks(organizationId: string | null | undefined) {
+  const [data, setData] = useState<OrgTask[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetch = useCallback(async (silent = false, force = false) => {
+    if (!organizationId) return;
+    const cacheKey = `org_tasks:${organizationId}`;
+    if (force) invalidateCache(cacheKey);
+    const cached = getCached<OrgTask[]>(cacheKey);
+    if (cached) { setData(cached); setLoading(false); return; }
+    if (!silent) setLoading(true);
+    const { data, error } = await supabase
+      .from('org_tasks')
+      .select('*')
+      .eq('organization_id', organizationId)
+      .order('created_at', { ascending: false });
+
+    if (error) { setError(error.message); if (!silent) setLoading(false); return; }
+    setCached(cacheKey, data || []);
+    setData(data || []);
+    setError(null);
+    if (!silent) setLoading(false);
+  }, [organizationId]);
+
+  useEffect(() => {
+    fetch();
+    if (!organizationId) return;
+
+    const interval = setInterval(() => {
+      invalidateCache(`org_tasks:${organizationId}`);
+      fetch(true);
+    }, 120_000);
+
+    const channel = supabase
+      .channel(`org_tasks_realtime:${organizationId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'org_tasks', filter: `organization_id=eq.${organizationId}` }, () => {
+        invalidateCache(`org_tasks:${organizationId}`);
+        fetch(true);
+      })
+      .subscribe();
+
+    return () => {
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
+  }, [fetch, organizationId]);
+
+  const create = async (task: Partial<OrgTask>) => {
+    if (!organizationId) return null;
+    const { data: user } = await supabase.auth.getUser();
+    const { data, error } = await supabase
+      .from('org_tasks')
+      .insert({ ...task, organization_id: organizationId, created_by: user?.user?.id ?? null })
+      .select()
+      .single();
+    if (error) { setError(error.message); return null; }
+    invalidateCache(`org_tasks:${organizationId}`);
+    setData(prev => [data, ...prev]);
+    return data as OrgTask;
+  };
+
+  const update = async (id: string, updates: Partial<OrgTask>) => {
+    const patch = { ...updates, updated_at: new Date().toISOString() };
+    const { error } = await supabase.from('org_tasks').update(patch).eq('id', id);
+    if (error) { setError(error.message); return false; }
+    invalidateCache(`org_tasks:${organizationId}`);
+    setData(prev => prev.map(t => t.id === id ? { ...t, ...patch } : t));
+    return true;
+  };
+
+  const setStatus = async (task: OrgTask, status: OrgTask['status']) => {
+    const done = status === 'done';
+    return update(task.id, { status, is_done: done, done_at: done ? new Date().toISOString() : null });
+  };
+
+  const remove = async (id: string) => {
+    const { error } = await supabase.from('org_tasks').delete().eq('id', id);
+    if (error) { setError(error.message); return false; }
+    invalidateCache(`org_tasks:${organizationId}`);
+    setData(prev => prev.filter(t => t.id !== id));
+    return true;
+  };
+
+  return { data, loading, error, refetch: fetch, create, update, setStatus, remove };
+}

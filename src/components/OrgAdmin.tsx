@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
-import { Building2, Users, ArrowRight, LogIn, Loader2, X, Eye, EyeOff, Search, MoreVertical, UserPlus, Wifi, WifiOff, Settings, UserCheck, TrendingUp, UserCog, ChevronDown, Check, Trash2, MessageCircle, Globe, FileText, BarChart3, Search as SearchIcon, LayoutGrid, List as ListIcon, Stethoscope, Briefcase, AlertCircle, Plus, Building, Activity } from "lucide-react";
+import { Building2, Users, ArrowRight, LogIn, Loader2, X, Eye, EyeOff, Search, MoreVertical, UserPlus, Wifi, WifiOff, Settings, UserCheck, TrendingUp, UserCog, ChevronDown, Check, Trash2, MessageCircle, Globe, FileText, BarChart3, Search as SearchIcon, LayoutGrid, List as ListIcon, Stethoscope, Briefcase, AlertCircle, Plus, Building, Activity, ListTodo } from "lucide-react";
+import { OrgTasks } from "./OrgTasks";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { matchesSearch } from "../lib/search";
@@ -93,7 +94,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
   const [clinicMembers, setClinicMembers] = useState<ClinicMember[]>([]);
   const [orgUsers, setOrgUsers] = useState<OrgUser[]>([]);
   const [loadingClinics, setLoadingClinics] = useState(true);
-  const [activeSubTab, setActiveSubTab] = useState<"clinics" | "users" | "settings">(() => (localStorage.getItem('orgAdminTab') as any) || "clinics");
+  const [activeSubTab, setActiveSubTab] = useState<"clinics" | "users" | "settings" | "tasks">(() => (localStorage.getItem('orgAdminTab') as any) || "clinics");
   const [orgSettings, setOrgSettings] = useState<{ google_ad_mcc_id: string; google_ad_mcc_token: string }>({ google_ad_mcc_id: '', google_ad_mcc_token: '' });
   const [orgSettingsSaving, setOrgSettingsSaving] = useState(false);
   const [orgSettingsSaved, setOrgSettingsSaved] = useState(false);
@@ -106,6 +107,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
   const canManageClinics = userRole === 'org_owner' || userRole === 'org_admin';
   const canManageOrgUsers = userRole === 'org_owner' || userRole === 'org_admin';
   const canManageSettings = userRole === 'org_owner' || userRole === 'org_admin';
+  const canManageTasks = userRole === 'org_owner' || userRole === 'org_admin';
   const canAddClinicUsers = userRole === 'org_owner' || userRole === 'org_admin' || userRole === 'org_team';
   const canSetResponsaveis = userRole === 'org_owner' || userRole === 'org_admin';
 
@@ -500,6 +502,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
   const visibleTabs = [
     { id: "clinics", label: "Clínicas", icon: Building2, show: true },
     { id: "users", label: "Usuários", icon: Users, show: canManageOrgUsers },
+    { id: "tasks", label: "Tarefas", icon: ListTodo, show: canManageTasks },
     { id: "settings", label: "Configurações", icon: Settings, show: canManageSettings },
   ].filter(t => t.show);
 
@@ -1144,6 +1147,15 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
             </div>
           </div>
         </div>
+      )}
+
+      {activeSubTab === "tasks" && profile?.organization_id && (
+        <OrgTasks
+          organizationId={profile.organization_id}
+          orgUsers={orgUsers}
+          clinics={clinics.map(c => ({ id: c.id, name: c.name }))}
+          canManage={canManageTasks}
+        />
       )}
 
       {/* Modal: Nova / Editar Clínica */}

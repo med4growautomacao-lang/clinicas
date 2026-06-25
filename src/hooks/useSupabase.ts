@@ -1476,6 +1476,8 @@ export interface AIConfig {
   followup_enabled: boolean;
   followup_message: string;
   followup_delay: number;
+  followup_window_start?: number;
+  followup_window_end?: number;
   handoff_enabled: boolean;
   handoff_rules: any[] | null;
   transition_rules: any[] | null;

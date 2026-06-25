@@ -384,11 +384,12 @@ function ConfirmationsView() {
 }
 
 // Editor de um passo da régua de reengajamento (auto-save no blur).
-function FollowupStepEditor({ step, index, onUpdate, onRemove }: {
+function FollowupStepEditor({ step, index, onUpdate, onRemove, onSetClosing }: {
   step: FollowupStep;
   index: number;
   onUpdate: (id: string, updates: Partial<FollowupStep>) => void;
   onRemove: (id: string) => void;
+  onSetClosing: (id: string, value: boolean) => void;
 }) {
   const [msg, setMsg] = useState(step.message_text);
   const [delay, setDelay] = useState(step.delay_minutes);
@@ -439,7 +440,7 @@ function FollowupStepEditor({ step, index, onUpdate, onRemove }: {
       <label className="flex items-center gap-2 cursor-pointer pt-1">
         <button
           type="button"
-          onClick={() => onUpdate(step.id, { is_closing: !step.is_closing })}
+          onClick={() => onSetClosing(step.id, !step.is_closing)}
           className={cn("w-9 h-5 rounded-full relative transition-all shrink-0", step.is_closing ? "bg-rose-500" : "bg-slate-300")}
         >
           <div className={cn("w-3.5 h-3.5 bg-white rounded-full absolute top-[3px] transition-all shadow-sm", step.is_closing ? "right-[3px]" : "left-[3px]")} />
@@ -453,7 +454,7 @@ function FollowupStepEditor({ step, index, onUpdate, onRemove }: {
 function FollowupsView() {
   const { aiConfig, updateAI, loading } = useSettings();
   const [localConfig, setLocalConfig] = useState<any>(null);
-  const { steps, loading: stepsLoading, addStep, updateStep, removeStep } = useFollowupSteps();
+  const { steps, loading: stepsLoading, addStep, updateStep, removeStep, setClosing } = useFollowupSteps();
 
   useEffect(() => {
     if (aiConfig) {
@@ -559,7 +560,7 @@ function FollowupsView() {
             ) : (
               <div className="space-y-3">
                 {steps.map((s, i) => (
-                  <FollowupStepEditor key={s.id} step={s} index={i} onUpdate={updateStep} onRemove={removeStep} />
+                  <FollowupStepEditor key={s.id} step={s} index={i} onUpdate={updateStep} onRemove={removeStep} onSetClosing={setClosing} />
                 ))}
               </div>
             )}

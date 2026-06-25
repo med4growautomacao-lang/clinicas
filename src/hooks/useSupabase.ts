@@ -714,7 +714,22 @@ export function useFollowupSteps() {
     return true;
   };
 
-  return { steps, loading, addStep, updateStep, removeStep, refetch: fetch };
+  // Encerramento é exclusivo: ligar num passo desliga dos outros (no máx. 1 por clínica).
+  const setClosing = async (id: string, value: boolean) => {
+    if (!activeClinicId) return false;
+    setSteps(prev => prev.map(s => (value ? { ...s, is_closing: s.id === id } : (s.id === id ? { ...s, is_closing: false } : s))));
+    if (value) {
+      // ordem importa pro índice único: zera os outros antes de ligar este
+      await supabase.from('followup_steps').update({ is_closing: false }).eq('clinic_id', activeClinicId).neq('id', id);
+      await supabase.from('followup_steps').update({ is_closing: true }).eq('id', id);
+    } else {
+      await supabase.from('followup_steps').update({ is_closing: false }).eq('id', id);
+    }
+    await fetch();
+    return true;
+  };
+
+  return { steps, loading, addStep, updateStep, removeStep, setClosing, refetch: fetch };
 }
 
 export function useLeads(options?: { pageSize?: number }) {

@@ -29,6 +29,7 @@ import {
   Eye,
   EyeOff,
   UserX,
+  Store,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -43,6 +44,7 @@ import WhatsAppLogo from "../assets/logos/Logo Whatsapp.png";
 import SemOrigemLogo from "../assets/logos/Logo Sem origem.png";
 import { Share2, Globe, Layout, Smartphone, Sparkles, Instagram } from "lucide-react";
 import { DateRangePicker } from "./DateRangePicker";
+import { UtmLeadFilter, leadUtmKey, NO_UTM_KEY } from "./filters/UtmLeadFilter";
 
 const SOURCE_LABELS: Record<string, string> = {
   'meta_ads': 'Meta Ads',
@@ -1078,11 +1080,15 @@ export function LeadKanban() {
   const [showAutomationModal, setShowAutomationModal] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<'all' | 'meta' | 'google' | 'sem_origem'>('all');
-  const [channelFilter, setChannelFilter] = useState<'all' | 'forms' | 'whatsapp'>('all');
+  const [channelFilter, setChannelFilter] = useState<'all' | 'forms' | 'whatsapp' | 'balcao'>('all');
   const [showResolved, setShowResolved] = useState(false);
   const [showNotLeadPanel, setShowNotLeadPanel] = useState(false);
   const [confirmingNotLeadId, setConfirmingNotLeadId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  // Filtro de UTM combinável: seleções por dimensão (E entre dimensões, OU dentro de cada).
+  // `utmDimension` é só a dimensão em edição no popover. Vazio = sem filtro.
+  const [utmDimension, setUtmDimension] = useState('utm_campaign');
+  const [utmFilters, setUtmFilters] = useState<Record<string, string[]>>({});
   const { activeClinicId } = useAuth();
   const [searchTickets, setSearchTickets] = useState<Ticket[]>([]);
   const [columnPages, setColumnPages] = useState<Record<string, number>>({});
@@ -1379,12 +1385,71 @@ export function LeadKanban() {
     return () => { cancelled = true; clearTimeout(handle); };
   }, [searchQuery, activeClinicId]);
 
+  // Predicado de facetas (origem + canal + datas + UTM, podendo ignorar uma dimensão UTM).
+  // Reaproveitado na filtragem do board e na CONTAGEM dos valores de UTM, p/ que os números
+  // reflitam os filtros ativos (período, origem, canal e combinação de UTMs).
+  const ticketFacets = React.useCallback((ticket: any, skipUtmDim?: string) => {
+    const lead = ticket.lead;
+    if (!lead) return false;
+    if (sourceFilter !== 'all') {
+      const isMeta = !!lead.fb_campaign_name || lead.source === 'meta_ads';
+      const isGoogle = !!lead.g_campaign_name || lead.source === 'google_ads';
+      if (sourceFilter === 'meta' && !isMeta) return false;
+      if (sourceFilter === 'google' && !isGoogle) return false;
+      if (sourceFilter === 'sem_origem' && (isMeta || isGoogle)) return false;
+    }
+    if (channelFilter !== 'all' && lead.capture_channel !== channelFilter) return false;
+    if (entryDateFrom || entryDateTo) {
+      const opened = (ticket.opened_at || '').slice(0, 10);
+      if (entryDateFrom && opened < entryDateFrom) return false;
+      if (entryDateTo && opened > entryDateTo) return false;
+    }
+    if (convDateFrom || convDateTo) {
+      const convs = conversionsByLead[lead.id] || [];
+      const inRange = convs.some((c: any) => {
+        const d = (c.converted_at || '').slice(0, 10);
+        if (convDateFrom && d < convDateFrom) return false;
+        if (convDateTo && d > convDateTo) return false;
+        return true;
+      });
+      if (!inRange) return false;
+    }
+    for (const d of Object.keys(utmFilters)) {
+      if (d === skipUtmDim) continue;
+      const vals = utmFilters[d] || [];
+      if (vals.length && !vals.includes(leadUtmKey(lead, d))) return false;
+    }
+    return true;
+  }, [sourceFilter, channelFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo, conversionsByLead, utmFilters]);
+
+  // Valores da dimensão UTM ativa + contagem, refletindo os filtros ativos (período/origem/
+  // canal/combinação). Faceta: ignora a própria dimensão em edição p/ mostrar o universo.
+  const utmOptions = React.useMemo(() => {
+    const baseForOpts = (showResolved ? tickets : tickets.filter(t => t.status !== 'closed'))
+      .filter(t => t.lead && !t.lead.is_not_lead);
+    const totals = new Map<string, number>();
+    const seen = new Set<string>();
+    baseForOpts.forEach((t: any) => {
+      const lead = t.lead;
+      if (!lead || seen.has(lead.id)) return;
+      if (!ticketFacets(t, utmDimension)) return;
+      seen.add(lead.id);
+      const k = leadUtmKey(lead, utmDimension);
+      totals.set(k, (totals.get(k) || 0) + 1);
+    });
+    return [...totals.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([key, count]) => ({ key, label: key === NO_UTM_KEY ? 'Sem UTM' : key, value: count }));
+  }, [tickets, showResolved, ticketFacets, utmDimension]);
+
   const filteredTickets = React.useMemo(() => {
     const hasSourceFilter = sourceFilter !== 'all';
     const hasChannelFilter = channelFilter !== 'all';
     const hasEntryFilter = entryDateFrom || entryDateTo;
     const hasConvFilter = convDateFrom || convDateTo;
     const hasSearch = searchQuery.trim().length > 0;
+    const utmDims = Object.keys(utmFilters).filter(d => (utmFilters[d] || []).length > 0);
+    const hasUtm = utmDims.length > 0;
     // Ao buscar, une os tickets carregados com os do servidor (dedup por id),
     // cobrindo resolvidos e fechados fora da janela de 90d. A busca também
     // revela resolvidos mesmo com showResolved desligado.
@@ -1398,44 +1463,20 @@ export function LeadKanban() {
     // e os marcados como "Não Lead" (vivem só no painel de anexo, fora do funil).
     const base = ((showResolved || hasSearch) ? source : source.filter(t => t.status !== 'closed'))
       .filter(t => t.lead && !t.lead.is_not_lead);
-    if (!hasSourceFilter && !hasChannelFilter && !hasEntryFilter && !hasConvFilter && !hasSearch) return base;
+    if (!hasSourceFilter && !hasChannelFilter && !hasEntryFilter && !hasConvFilter && !hasSearch && !hasUtm) return base;
 
     return base.filter(ticket => {
       const lead = ticket.lead;
-      if (!lead) return true;
       if (hasSearch && !matchesSearch(searchQuery, { name: lead.name, email: lead.email, phone: lead.phone }, ['phone'])) {
         return false;
       }
-      if (hasSourceFilter) {
-        const isMeta = !!lead.fb_campaign_name || lead.source === 'meta_ads';
-        const isGoogle = !!lead.g_campaign_name || lead.source === 'google_ads';
-        if (sourceFilter === 'meta' && !isMeta) return false;
-        if (sourceFilter === 'google' && !isGoogle) return false;
-        if (sourceFilter === 'sem_origem' && (isMeta || isGoogle)) return false;
-      }
-      if (hasChannelFilter && lead.capture_channel !== channelFilter) return false;
-      if (hasEntryFilter) {
-        const opened = ticket.opened_at.slice(0, 10);
-        if (entryDateFrom && opened < entryDateFrom) return false;
-        if (entryDateTo && opened > entryDateTo) return false;
-      }
-      if (hasConvFilter) {
-        const convs = conversionsByLead[lead.id] || [];
-        const inRange = convs.some(c => {
-          const d = (c.converted_at || '').slice(0, 10);
-          if (convDateFrom && d < convDateFrom) return false;
-          if (convDateTo && d > convDateTo) return false;
-          return true;
-        });
-        if (!inRange) return false;
-      }
-      return true;
+      return ticketFacets(ticket);
     });
-  }, [tickets, searchTickets, sourceFilter, channelFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo, conversionsByLead, showResolved, searchQuery]);
+  }, [tickets, searchTickets, ticketFacets, showResolved, searchQuery, sourceFilter, channelFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo, utmFilters]);
 
-  const hasActiveFilters = sourceFilter !== 'all' || channelFilter !== 'all' || entryDateFrom || entryDateTo || convDateFrom || convDateTo || searchQuery.trim().length > 0;
+  const hasActiveFilters = sourceFilter !== 'all' || channelFilter !== 'all' || entryDateFrom || entryDateTo || convDateFrom || convDateTo || searchQuery.trim().length > 0 || Object.values(utmFilters).some(a => a.length > 0);
 
-  React.useEffect(() => { setColumnPages({}); }, [sourceFilter, channelFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo, searchQuery]);
+  React.useEffect(() => { setColumnPages({}); }, [sourceFilter, channelFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo, searchQuery, utmFilters]);
 
   if (stagesLoading || ticketsLoading) {
     return (
@@ -1945,6 +1986,7 @@ export function LeadKanban() {
             { id: 'all', label: 'Todos', logo: null },
             { id: 'forms', label: 'Forms', logo: null },
             { id: 'whatsapp', label: 'WhatsApp', logo: WhatsAppLogo },
+            { id: 'balcao', label: 'Balcão', logo: null },
           ] as const).map(opt => (
             <button
               key={opt.id}
@@ -1957,11 +1999,21 @@ export function LeadKanban() {
               )}
             >
               {opt.id === 'forms' && <FileText className="w-3 h-3" />}
+              {opt.id === 'balcao' && <Store className="w-3 h-3" />}
               {opt.logo && <img src={opt.logo} className="w-3 h-3 rounded" />}
               {opt.label}
             </button>
           ))}
         </div>
+
+        {/* Filtro de UTM (dimensão + valores), no formato do "Filtrar por motivo" */}
+        <UtmLeadFilter
+          dimension={utmDimension}
+          onDimensionChange={setUtmDimension}
+          options={utmOptions}
+          filters={utmFilters}
+          onChange={setUtmFilters}
+        />
 
         <DateRangePicker
           label="Entrada"
@@ -1992,7 +2044,7 @@ export function LeadKanban() {
 
         {hasActiveFilters && (
           <button
-            onClick={() => { setSourceFilter('all'); setChannelFilter('all'); setEntryDateFrom(''); setEntryDateTo(''); setConvDateFrom(''); setConvDateTo(''); setSearchQuery(''); }}
+            onClick={() => { setSourceFilter('all'); setChannelFilter('all'); setEntryDateFrom(''); setEntryDateTo(''); setConvDateFrom(''); setConvDateTo(''); setSearchQuery(''); setUtmFilters({}); }}
             className="text-[10px] font-bold text-rose-500 hover:text-rose-700 uppercase tracking-wider flex items-center gap-1 shrink-0"
             title="Limpar Filtros"
           >
@@ -2466,6 +2518,31 @@ export function LeadKanban() {
                     <p className="mt-2 text-xs text-slate-600 leading-relaxed whitespace-pre-wrap max-h-60 overflow-y-auto pr-1">{selectedLead.ai_summary}</p>
                   </details>
                 )}
+                {selectedLead && (() => {
+                  const utmRows = [
+                    { label: 'Campanha', value: selectedLead.fb_campaign_name || selectedLead.g_campaign_name },
+                    { label: 'Conjunto', value: selectedLead.fb_adset_name || selectedLead.g_adset_name },
+                    { label: 'Anúncio', value: selectedLead.fb_ad_name || selectedLead.g_ad_name },
+                    { label: 'Termo', value: selectedLead.g_term_name },
+                  ].filter(r => r.value);
+                  if (utmRows.length === 0) return null;
+                  return (
+                    <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+                      <div className="flex items-center gap-1.5 mb-2 text-slate-500">
+                        <Share2 className="w-3.5 h-3.5" />
+                        <span className="text-[10px] font-bold uppercase tracking-wider">UTMs capturadas</span>
+                      </div>
+                      <div className="space-y-1">
+                        {utmRows.map(r => (
+                          <div key={r.label} className="flex items-baseline gap-2 text-xs">
+                            <span className="text-slate-400 font-medium w-16 shrink-0">{r.label}</span>
+                            <span className="font-semibold text-slate-700 truncate" title={r.value as string}>{r.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Nome *</label>
                   <input type="text" value={formData.name} onChange={e => setFormData(p => ({ ...p, name: e.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 font-medium text-sm" placeholder="Nome do lead" />
@@ -2910,6 +2987,7 @@ export function LeadKanban() {
             currentStageId={tickets.find(t => t.id === chatLead.ticketId)?.stage_id ?? null}
             onClose={() => setChatLead(null)}
             isDragging={draggedLead !== null}
+            onEdit={() => { const ticket = tickets.find(t => t.id === chatLead.ticketId); if (ticket?.lead) { setChatLead(null); openEditModal(ticket); } }}
             onGanho={() => setGanhoLead({ id: chatLead.lead.id, name: chatLead.lead.name, phone: chatLead.lead.phone ?? null, patientId: chatLead.lead.converted_patient_id ?? null, prevStageId: null, ticketId: chatLead.ticketId })}
             onPerdido={() => setLossLead({ id: chatLead.lead.id, name: chatLead.lead.name, prevStageId: null, ticketId: chatLead.ticketId })}
             onStageChange={async (stageId) => {

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { X, Phone, ThumbsUp, ThumbsDown, TrendingUp } from "lucide-react";
+import { X, Phone, ThumbsUp, ThumbsDown, TrendingUp, Pencil } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useChatMessages, Lead, useLeads, useFunnelStages, useConversions } from "../hooks/useSupabase";
 import { cn } from "@/src/lib/utils";
@@ -18,9 +18,10 @@ interface LeadChatProps {
   onGanho?: () => void;
   onPerdido?: () => void;
   onStageChange?: (stageId: string) => void;
+  onEdit?: () => void;
 }
 
-export function LeadChat({ lead, onClose, isDragging = false, ticketId, currentStageId, onGanho, onPerdido, onStageChange }: LeadChatProps) {
+export function LeadChat({ lead, onClose, isDragging = false, ticketId, currentStageId, onGanho, onPerdido, onStageChange, onEdit }: LeadChatProps) {
   const { data: messages, loading } = useChatMessages(lead.id, lead.phone);
   const { update: updateLead } = useLeads();
   const { byLead: conversionsByLead } = useConversions();
@@ -61,9 +62,16 @@ export function LeadChat({ lead, onClose, isDragging = false, ticketId, currentS
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2">
               <h3 className="font-bold text-slate-900 truncate">{lead.name}</h3>
-              <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-all shrink-0 -mr-1">
-                <X className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-1 shrink-0 -mr-1">
+                {onEdit && (
+                  <button onClick={onEdit} title="Editar lead" className="p-1.5 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded-full transition-all">
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                )}
+                <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-all">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
             <div className="flex items-center gap-2 mt-1 flex-wrap">
               <button

@@ -1001,6 +1001,15 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
   );
 }
 
+// Status de agendamento que NÃO são terminais: enquanto o paciente estiver em um
+// desses, o ticket não pode ser resolvido (precisa virar Realizado, Faltou ou Cancelado).
+const NON_TERMINAL_APPT_STATUS = ['pendente', 'confirmado', 'compareceu'];
+const APPT_STATUS_LABELS: Record<string, string> = {
+  pendente: 'Pendente',
+  confirmado: 'Confirmado',
+  compareceu: 'Compareceu',
+};
+
 export function LeadKanban() {
   const { data: stages, loading: stagesLoading, reorder: reorderStages, update: updateStage, create: createStage, remove: removeStage } = useFunnelStages();
   const { data: leads, create, createWithTicket, update, remove, markNotLead } = useLeads({ pageSize: 150 });
@@ -1085,6 +1094,7 @@ export function LeadKanban() {
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [statusDropdownTicketId, setStatusDropdownTicketId] = useState<string | null>(null);
   const [confirmingResolveId, setConfirmingResolveId] = useState<string | null>(null);
+  const [resolveBlocked, setResolveBlocked] = useState<{ name: string; status: string } | null>(null);
   useEffect(() => {
     if (!statusDropdownTicketId && !confirmingResolveId) return;
     const close = () => {
@@ -1312,6 +1322,25 @@ export function LeadKanban() {
   const openDeleteConfirm = (ticket: Ticket) => {
     setSelectedLead({ ...ticket.lead!, _ticketId: ticket.id });
     setShowDeleteConfirm(true);
+  };
+
+  // Antes de resolver, garante que um agendamento vinculado ao ticket não ficou "em aberto".
+  // Se houver consulta Pendente/Confirmada/Compareceu, avisa para atualizar o status do
+  // paciente na agenda (Realizado, Faltou ou Cancelado) em vez de encerrar o atendimento.
+  const attemptResolve = async (ticket: Ticket) => {
+    const { data: pending, error } = await supabase
+      .from('appointments')
+      .select('status')
+      .eq('ticket_id', ticket.id)
+      .in('status', NON_TERMINAL_APPT_STATUS)
+      .order('date', { ascending: false })
+      .limit(1);
+    // Em caso de erro na checagem, não trava o usuário: segue o fluxo normal de confirmação.
+    if (!error && pending && pending.length > 0) {
+      setResolveBlocked({ name: ticket.lead?.name ?? 'Este lead', status: pending[0].status });
+      return;
+    }
+    setConfirmingResolveId(ticket.id);
   };
 
   const stageColors: Record<string, string> = {
@@ -2281,7 +2310,7 @@ export function LeadKanban() {
                                       </div>
                                     ) : (
                                       <button
-                                        onClick={e => { e.stopPropagation(); setConfirmingResolveId(ticket.id); }}
+                                        onClick={e => { e.stopPropagation(); attemptResolve(ticket); }}
                                         className={cn(
                                           "flex items-center justify-center gap-1 px-2.5 py-1 rounded text-[9px] font-bold transition-all shadow-sm truncate",
                                           ticket.outcome === 'ganho'
@@ -2565,6 +2594,28 @@ export function LeadKanban() {
                   {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Trash2 className="w-4 h-4 mr-2" />}
                   Excluir
                 </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* Aviso: ticket com agendamento em aberto não pode ser resolvido */}
+        {resolveBlocked && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setResolveBlocked(null)}>
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
+              <div className="p-6 text-center">
+                <div className="w-12 h-12 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-4"><AlertCircle className="w-6 h-6 text-amber-600" /></div>
+                <h3 className="text-xl font-bold text-slate-900 mb-2">Atualize o status do paciente</h3>
+                <p className="text-slate-500">
+                  <span className="font-semibold text-slate-700">{resolveBlocked.name}</span> tem um agendamento em aberto
+                  {APPT_STATUS_LABELS[resolveBlocked.status] ? <> (status atual: <span className="font-semibold text-slate-700">{APPT_STATUS_LABELS[resolveBlocked.status]}</span>)</> : null}.
+                </p>
+                <p className="text-slate-500 mt-2">
+                  Atualize o status do paciente na agenda para <span className="font-semibold text-emerald-700">Realizado</span>, <span className="font-semibold text-slate-700">Faltou</span> ou <span className="font-semibold text-rose-700">Cancelado</span> antes de resolver este atendimento.
+                </p>
+              </div>
+              <div className="flex p-6 border-t border-slate-100 bg-slate-50">
+                <Button className="flex-1" onClick={() => setResolveBlocked(null)}>Entendi</Button>
               </div>
             </motion.div>
           </motion.div>

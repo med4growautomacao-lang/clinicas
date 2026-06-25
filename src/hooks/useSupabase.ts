@@ -879,6 +879,42 @@ export function useFunnelCohort(start: string | null, end: string | null) {
   return data;
 }
 
+// Igual ao useFunnelCohort, mas chama o RPC marketing_utm_funnel_cohort, que adiciona
+// as dimensões de UTM (campanha/conjunto/anúncio/termo/origem) ao agrupamento. Alimenta
+// a seção "Análise por UTM × Etapa" do Marketing. Contagem por ticket / última entrada
+// (idêntica ao funil canônico — só com detalhe de UTM a mais).
+export interface UtmFunnelRow {
+  stage_id: string;
+  platform: string;
+  channel: string;
+  loss_reason: string | null;
+  utm_source: string | null;
+  utm_campaign: string | null;
+  utm_adset: string | null;
+  utm_ad: string | null;
+  utm_term: string | null;
+  entry_date: string;
+  leads: number;
+}
+
+export function useUtmFunnelCohort(start: string | null, end: string | null) {
+  const { activeClinicId } = useAuth();
+  const [data, setData] = useState<UtmFunnelRow[]>([]);
+
+  useEffect(() => {
+    if (!activeClinicId || !start || !end) { setData([]); return; }
+    let cancelled = false;
+    supabase
+      .rpc('marketing_utm_funnel_cohort', { p_clinic_id: activeClinicId, p_start: start, p_end: end })
+      .then(({ data: rows }: any) => {
+        if (!cancelled) setData(Array.isArray(rows) ? rows : []);
+      });
+    return () => { cancelled = true; };
+  }, [activeClinicId, start, end]);
+
+  return data;
+}
+
 // Entradas na etapa de conversão (lead_stage_history), por evento (changed_at).
 // Alimenta o card "Conversões" do Marketing no modelo por evento, igual ao módulo
 // Comercial. Carrega todas as entradas da etapa (como useConversions); o

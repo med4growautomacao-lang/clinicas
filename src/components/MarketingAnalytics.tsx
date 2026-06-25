@@ -44,15 +44,14 @@ import {
   PieChart,
   Pie,
   Cell,
-  BarChart,
-  Bar,
   Legend,
-  ReferenceLine
+  LineChart,
+  Line
 } from 'recharts';
 import { cn } from "@/src/lib/utils";
 import { TrendBarChart, fmtByType } from "./TrendBarChart";
 import { motion, AnimatePresence } from "framer-motion";
-import { useLeads, useMarketing, MarketingData, Lead, useAppointments, useFunnelStages, useConversions, useFunnelCohort, useConversionStageEntries } from "../hooks/useSupabase";
+import { useLeads, useMarketing, MarketingData, Lead, useAppointments, useFunnelStages, useConversions, useUtmFunnelCohort, useConversionStageEntries } from "../hooks/useSupabase";
 import {
   format,
   startOfDay,
@@ -113,6 +112,106 @@ const METRICS_CONFIG = [
 // Paleta de cores (hex) para as etapas do Funil de Vendas configurável
 const FUNNEL_PALETTE = ['#0d9488', '#8b5cf6', '#10b981', '#0ea5e9', '#f59e0b', '#ec4899', '#6366f1', '#ef4444'];
 
+// ===== UTM / Motivo de Perda (filtros globais + seção UTM × Etapa) =====
+const UTM_DIMENSIONS: { id: string; label: string }[] = [
+  { id: 'utm_campaign', label: 'Campanha' },
+  { id: 'utm_adset', label: 'Conjunto' },
+  { id: 'utm_ad', label: 'Anúncio' },
+  { id: 'utm_term', label: 'Termo' },
+  { id: 'utm_source', label: 'Origem' },
+];
+const UTM_SERIES_COLORS = ['#0d9488', '#8b5cf6', '#f59e0b', '#0ea5e9', '#ec4899', '#10b981', '#6366f1', '#ef4444'];
+const UTM_TOP_N = 10;            // máximo de valores UTM no ranking / matriz
+const UTM_TREND_SERIES = 6;      // máximo de séries (linhas) na tendência
+const NO_UTM_KEY = '__none__';   // sentinela p/ valor UTM nulo ("Sem UTM")
+
+// Valor da dimensão UTM ativa numa linha do coorte (já vem com colunas utm_*).
+function rowUtmKey(row: any, dim: string): string {
+  const v = row[dim];
+  return (v === null || v === undefined || v === '') ? NO_UTM_KEY : String(v);
+}
+
+// Monta os dados de uma pizza (participação %) para uma dimensão UTM, a partir das linhas
+// do coorte já filtradas, somando leads nas etapas em `stageSet`. Top fatias + "Outros".
+// `compareRows` (opcional): quando em modo Comparar, calcula a % de variação POR FATIA
+// (cada valor da UTM vs. o mesmo valor no período comparativo).
+function buildPie(rows: any[], dim: string, stageSet: Set<string>, compareRows?: any[]) {
+  const PIE_TOP = 6;
+  const totals = new Map<string, number>();
+  rows.forEach((r: any) => {
+    if (!stageSet.has(r.stage_id)) return;
+    const k = rowUtmKey(r, dim);
+    totals.set(k, (totals.get(k) || 0) + (Number(r.leads) || 0));
+  });
+  const sorted = [...totals.entries()]
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([key, value]) => ({ key, name: key === NO_UTM_KEY ? 'Sem UTM' : key, value }));
+  const total = sorted.reduce((a, b) => a + b.value, 0);
+
+  // Totais do comparativo por valor (para a % por fatia).
+  const cmp = new Map<string, number>();
+  if (compareRows) {
+    compareRows.forEach((r: any) => {
+      if (!stageSet.has(r.stage_id)) return;
+      const k = rowUtmKey(r, dim);
+      cmp.set(k, (cmp.get(k) || 0) + (Number(r.leads) || 0));
+    });
+  }
+  const deltaOf = (key: string, value: number): number | null => {
+    if (!compareRows) return null;
+    const prev = cmp.get(key) || 0;
+    return prev > 0 ? ((value - prev) / prev) * 100 : null;
+  };
+
+  let slices = sorted;
+  const topKeys = sorted.slice(0, PIE_TOP).map(s => s.key);
+  if (sorted.length > PIE_TOP) {
+    const rest = sorted.slice(PIE_TOP).reduce((a, b) => a + b.value, 0);
+    slices = [...sorted.slice(0, PIE_TOP), { key: '__outros__', name: 'Outros', value: rest }];
+  }
+  // % do comparativo para "Outros" = soma das chaves fora do top.
+  const cmpOutros = [...cmp.entries()].filter(([k]) => !topKeys.includes(k)).reduce((a, [, v]) => a + v, 0);
+  // Variação % do TOTAL (vs. comparativo) — exibida no centro da pizza ao comparar.
+  const cmpTotal = [...cmp.values()].reduce((a, b) => a + b, 0);
+  const totalDelta = compareRows ? (cmpTotal > 0 ? ((total - cmpTotal) / cmpTotal) * 100 : null) : null;
+
+  return {
+    total,
+    totalDelta,
+    slices: slices.map((s, i) => ({
+      ...s,
+      color: s.key === '__outros__' ? '#cbd5e1' : UTM_SERIES_COLORS[i % UTM_SERIES_COLORS.length],
+      pct: total > 0 ? (s.value / total) * 100 : 0,
+      delta: s.key === '__outros__'
+        ? (compareRows ? (cmpOutros > 0 ? ((s.value - cmpOutros) / cmpOutros) * 100 : null) : null)
+        : deltaOf(s.key, s.value),
+    })),
+  };
+}
+
+// Série temporal (por período) das chaves UTM em `keys`, para uma dimensão — alimenta o
+// mini-gráfico de tendência dentro do card de pizza.
+function buildDimTrend(rows: any[], dim: string, stageSet: Set<string>, periods: any[], keys: string[]) {
+  const byPeriod = new Map<string, Map<string, number>>();
+  periods.forEach((p: any) => byPeriod.set(p.label, new Map()));
+  rows.forEach((r: any) => {
+    if (!stageSet.has(r.stage_id)) return;
+    const k = rowUtmKey(r, dim);
+    if (!keys.includes(k)) return;
+    const period = periods.find((p: any) => r.entry_date >= format(p.start, 'yyyy-MM-dd') && r.entry_date <= format(p.end, 'yyyy-MM-dd'));
+    if (!period) return;
+    const m = byPeriod.get(period.label)!;
+    m.set(k, (m.get(k) || 0) + (Number(r.leads) || 0));
+  });
+  return periods.map((p: any) => {
+    const m = byPeriod.get(p.label)!;
+    const row: any = { name: p.label };
+    keys.forEach((k) => { row[k] = m.get(k) || 0; });
+    return row;
+  });
+}
+
 export function MarketingAnalytics() {
   const [period, setPeriod] = useState<Period>('dia');
   const [viewMode, setViewMode] = useState<'dashboard' | 'table'>(() => (localStorage.getItem('marketingViewMode') as any) || 'dashboard');
@@ -126,7 +225,10 @@ export function MarketingAnalytics() {
   const { data: marketingData, loading: mktLoading, fetch: fetchMkt, upsert: upsertMkt } = useMarketing();
   const { data: conversions } = useConversions();
   const { data: stages } = useFunnelStages();
-  const funnelCohort = useFunnelCohort(
+  // Coorte ÚNICO do funil (por ticket / última entrada) com dimensões de UTM e o motivo de
+  // perda do ticket. Alimenta cards, Funil, pizza, Tendência e a seção UTM × Etapa, e é a
+  // base dos filtros GLOBAIS de UTM e Motivo de Perda.
+  const utmCohort = useUtmFunnelCohort(
     format(dateRange.start, 'yyyy-MM-dd'),
     format(dateRange.end, 'yyyy-MM-dd')
   );
@@ -145,10 +247,14 @@ export function MarketingAnalytics() {
   });
 
   // Cohort do funil para o período de comparação (mesma fonte do funil principal).
-  const funnelCohortCompare = useFunnelCohort(
+  const utmCohortCompare = useUtmFunnelCohort(
     isComparing ? format(compareDateRange.start, 'yyyy-MM-dd') : null,
     isComparing ? format(compareDateRange.end, 'yyyy-MM-dd') : null
   );
+
+  // Filtros de origem/canal (no cabeçalho fixo, fora do DashboardView). Vazio = "Todos".
+  const [selectedPlatform, setSelectedPlatform] = useState<string[]>([]);
+  const [selectedChannel, setSelectedChannel] = useState<string[]>([]);
 
   const [dashboardVisibleMetrics, setDashboardVisibleMetrics] = useState<string[]>(() => {
     const saved = localStorage.getItem('mkt_dash_visible_metrics');
@@ -515,7 +621,7 @@ export function MarketingAnalytics() {
     return stats;
   };
 
-  const metricsByPeriod = useMemo(() => calculateStats(periods, bucketStages(funnelCohort, periods)), [periods, leads, marketingData, conversions, conversionStageId, agendadoStageId, funnelCohort]);
+  const metricsByPeriod = useMemo(() => calculateStats(periods, bucketStages(utmCohort, periods)), [periods, leads, marketingData, conversions, conversionStageId, agendadoStageId, utmCohort]);
 
   const comparisonMetricsByPeriod = useMemo(() => {
     if (!isComparing) return {};
@@ -535,8 +641,8 @@ export function MarketingAnalytics() {
       };
     });
 
-    return calculateStats(compPeriods as any, bucketStages(funnelCohortCompare, compPeriods as any));
-  }, [isComparing, periods, dateRange, compareDateRange, leads, marketingData, conversions, conversionStageId, agendadoStageId, funnelCohortCompare]);
+    return calculateStats(compPeriods as any, bucketStages(utmCohortCompare, compPeriods as any));
+  }, [isComparing, periods, dateRange, compareDateRange, leads, marketingData, conversions, conversionStageId, agendadoStageId, utmCohortCompare]);
 
   const handleEditData = () => {
     const initial: Record<string, any> = {};
@@ -589,7 +695,10 @@ export function MarketingAnalytics() {
   }
 
   return (
-    <div className="min-h-full bg-slate-50 text-slate-900 p-6 space-y-6 font-sans">
+    <div className="min-h-full bg-slate-50 text-slate-900 px-6 pb-6 font-sans">
+      {/* Cabeçalho FIXO: topo (período/ações) + barra de filtros (origem/canal).
+          Fundo SÓLIDO (sem backdrop-blur) — o blur re-renderiza a cada frame de scroll e pesava a tela. */}
+      <div className="sticky top-0 z-30 -mx-6 px-6 pt-6 pb-3 space-y-4 bg-slate-50 border-b border-slate-100 shadow-sm">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
@@ -656,6 +765,8 @@ export function MarketingAnalytics() {
                         start: subDays(dateRange.start, dayDelta),
                         end: subDays(dateRange.end, dayDelta)
                       });
+                      // Abre o calendário para o usuário ajustar o 2º período (comparativo).
+                      setIsPeriodOpen(true);
                     }
                     setIsComparing(!isComparing);
                   }}
@@ -694,24 +805,66 @@ export function MarketingAnalytics() {
         </div>
       </div>
 
-      <div className="space-y-4">
-        <div className={cn("flex justify-end gap-2 transition-all", isEditing ? "opacity-0 pointer-events-none h-0" : "opacity-100 h-10")}>
-          <div className="flex bg-white rounded-xl p-1 border border-slate-200 shadow-sm">
-            <button
-              onClick={() => { setViewMode('dashboard'); localStorage.setItem('marketingViewMode', 'dashboard'); }}
-              className={cn("p-2 rounded-lg transition-all", viewMode === 'dashboard' ? "bg-teal-600 text-white shadow-md" : "text-slate-400 hover:text-slate-600")}
-            >
-              <LayoutDashboard className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => { setViewMode('table'); localStorage.setItem('marketingViewMode', 'table'); }}
-              className={cn("p-2 rounded-lg transition-all", viewMode === 'table' ? "bg-teal-600 text-white shadow-md" : "text-slate-400 hover:text-slate-600")}
-            >
-              <TableIcon className="w-4 h-4" />
-            </button>
-          </div>
+      {/* Barra de filtros: alternância de visão + origem/canal + métricas (some ao editar) */}
+      <div className={cn("flex items-center flex-wrap gap-3 transition-all", isEditing && "opacity-0 pointer-events-none h-0 overflow-hidden")}>
+        <div className="flex bg-white rounded-xl p-1 border border-slate-200 shadow-sm">
+          <button
+            onClick={() => { setViewMode('dashboard'); localStorage.setItem('marketingViewMode', 'dashboard'); }}
+            className={cn("p-2 rounded-lg transition-all", viewMode === 'dashboard' ? "bg-teal-600 text-white shadow-md" : "text-slate-400 hover:text-slate-600")}
+          >
+            <LayoutDashboard className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => { setViewMode('table'); localStorage.setItem('marketingViewMode', 'table'); }}
+            className={cn("p-2 rounded-lg transition-all", viewMode === 'table' ? "bg-teal-600 text-white shadow-md" : "text-slate-400 hover:text-slate-600")}
+          >
+            <TableIcon className="w-4 h-4" />
+          </button>
         </div>
 
+        {viewMode === 'dashboard' && (
+          <>
+            <FilterChips
+              multiple
+              allId="all"
+              value={selectedPlatform}
+              onChange={(ids: string[]) => setSelectedPlatform(ids)}
+              options={[
+                { id: 'all', label: 'Todos' },
+                { id: 'meta_ads', label: 'Meta', logo: MetaLogo },
+                { id: 'google_ads', label: 'Google', logo: GoogleLogo },
+                { id: 'no_track', label: 'Orgânico', logo: SemOrigemLogo },
+              ]}
+            />
+            <FilterChips
+              multiple
+              allId="all"
+              value={selectedChannel}
+              onChange={(ids: string[]) => setSelectedChannel(ids)}
+              options={[
+                { id: 'all', label: 'Todos' },
+                { id: 'forms', label: 'Forms', icon: FileText },
+                { id: 'whatsapp', label: 'WhatsApp', logo: WhatsAppLogo },
+                { id: 'balcao', label: 'Balcão', icon: Store },
+              ]}
+            />
+            <div className="ml-auto">
+              <MetricsConfigButton
+                metricsOrder={dashboardMetricsOrder}
+                visibleMetrics={dashboardVisibleMetrics}
+                toggleMetric={(id: string) => toggleMetric(id, 'dashboard')}
+                moveMetric={(id: string, dir: any) => moveMetric(id, dir, 'dashboard')}
+                variant="ghost"
+                className="h-8 px-3 rounded-xl hover:bg-slate-100 text-slate-400"
+              />
+            </div>
+          </>
+        )}
+      </div>
+      </div>
+      {/* fim do cabeçalho fixo */}
+
+      <div className="space-y-4 pt-4">
         <AnimatePresence mode="wait">
           <motion.div
             key={`${viewMode}-${period}-${isEditing}`}
@@ -731,11 +884,14 @@ export function MarketingAnalytics() {
                 metricsOrder={dashboardMetricsOrder}
                 moveMetric={(id: string, dir) => moveMetric(id, dir as any, 'dashboard')}
                 funnelStages={stages}
-                funnelCohort={funnelCohort}
+                funnelCohort={utmCohort}
+                funnelCohortCompare={utmCohortCompare}
                 funnelOrder={funnelStagesOrder}
                 funnelHidden={effectiveFunnelHidden}
                 toggleFunnelStage={toggleFunnelStage}
                 moveFunnelStage={moveFunnelStage}
+                selectedPlatform={selectedPlatform}
+                selectedChannel={selectedChannel}
               />
             ) : (
               <div className="space-y-4">
@@ -971,12 +1127,9 @@ function FunnelConfigButton({ stages, order, hidden, toggleStage, moveStage }: a
   );
 }
 
-function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, isComparing, visibleMetrics, metricsOrder, toggleMetric, moveMetric, funnelStages, funnelCohort, funnelOrder, funnelHidden, toggleFunnelStage, moveFunnelStage }: any) {
+function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, isComparing, visibleMetrics, metricsOrder, toggleMetric, moveMetric, funnelStages, funnelCohort, funnelCohortCompare, funnelOrder, funnelHidden, toggleFunnelStage, moveFunnelStage, selectedPlatform, selectedChannel }: any) {
 
   const [selectedMetric, setSelectedMetric] = useState('leads');
-  // Plataforma (origem) e Canal são multi-seleção: array vazio = "Todos".
-  const [selectedPlatform, setSelectedPlatform] = useState<string[]>([]);
-  const [selectedChannel, setSelectedChannel] = useState<string[]>([]);
   const latestPeriod = periods[periods.length - 1]?.label || '';
 
   // Ajusta uma linha de stats (por plataforma ou já somada) ao canal selecionado.
@@ -1185,46 +1338,6 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center flex-wrap gap-3">
-        <FilterChips
-          multiple
-          allId="all"
-          value={selectedPlatform}
-          onChange={(ids) => setSelectedPlatform(ids)}
-          options={[
-            { id: 'all', label: 'Todos' },
-            { id: 'meta_ads', label: 'Meta', logo: MetaLogo },
-            { id: 'google_ads', label: 'Google', logo: GoogleLogo },
-            { id: 'no_track', label: 'Orgânico', logo: SemOrigemLogo },
-          ]}
-        />
-
-        {/* Filtro de canal: Todos / Forms / WhatsApp / Balcão */}
-        <FilterChips
-          multiple
-          allId="all"
-          value={selectedChannel}
-          onChange={(ids) => setSelectedChannel(ids)}
-          options={[
-            { id: 'all', label: 'Todos' },
-            { id: 'forms', label: 'Forms', icon: FileText },
-            { id: 'whatsapp', label: 'WhatsApp', logo: WhatsAppLogo },
-            { id: 'balcao', label: 'Balcão', icon: Store },
-          ]}
-        />
-
-        <div className="ml-auto">
-          <MetricsConfigButton
-            metricsOrder={metricsOrder}
-            visibleMetrics={visibleMetrics}
-            toggleMetric={toggleMetric}
-            moveMetric={moveMetric}
-            variant="ghost"
-            className="h-8 px-3 rounded-xl hover:bg-slate-100 text-slate-400"
-          />
-        </div>
-      </div>
-
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6 gap-4">
         {metricsOrder.filter((id: string) => visibleMetrics.includes(id)).map((id: string) => {
           const m = METRICS_CONFIG.find(x => x.id === id);
@@ -1346,7 +1459,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
               <div className="relative w-full h-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    <Pie data={platformData} cx="50%" cy="45%" innerRadius={60} outerRadius={85} paddingAngle={8} dataKey="value" stroke="none">
+                    <Pie data={platformData} cx="50%" cy="45%" innerRadius={60} outerRadius={85} paddingAngle={8} dataKey="value" stroke="none" isAnimationActive={false}>
                       {platformData.map((e, i) => <Cell key={i} fill={e.color} />)}
                     </Pie>
                     <Tooltip contentStyle={{ borderRadius: '20px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }} />
@@ -1416,6 +1529,532 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
           })()}
         </Card>
       </div>
+
+      <UtmFunnelSection
+        cohort={funnelCohort}
+        cohortCompare={funnelCohortCompare}
+        isComparing={isComparing}
+        stages={funnelStages}
+        funnelOrder={funnelOrder}
+        funnelHidden={funnelHidden}
+        periods={periods}
+        selectedPlatform={selectedPlatform}
+        selectedChannel={selectedChannel}
+      />
+    </div>
+  );
+}
+
+// Tendência em LINHAS (uma por valor UTM — lê melhor com várias séries que barras).
+function UtmTrendChart({ data, series, height = 260, showLegend = false }: {
+  data: any[];
+  series: { key: string; name: string; color: string }[];
+  height?: number;
+  showLegend?: boolean;
+}) {
+  return (
+    <div style={{ height }} className="w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={data} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+          <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#94a3b8' }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+          <YAxis tick={{ fontSize: 9, fill: '#94a3b8' }} axisLine={false} tickLine={false} allowDecimals={false} width={28} />
+          <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 20px -5px rgb(0 0 0 / 0.1)', fontSize: 11 }} />
+          {showLegend && <Legend wrapperStyle={{ fontSize: 10 }} />}
+          {series.map(s => (
+            <Line key={s.key} type="monotone" dataKey={s.key} name={s.name} stroke={s.color} strokeWidth={2} dot={false} activeDot={{ r: 3 }} isAnimationActive={false} />
+          ))}
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+// Card de pizza (donut) reutilizável: participação % por valor UTM, com total no centro.
+// `trend` (opcional): mini-gráfico de tendência no rodapé (linhas nas cores das fatias).
+function UtmPieCard({ title, pie, trend }: {
+  title: string;
+  pie: { total: number; totalDelta?: number | null; slices: any[] };
+  trend?: { data: any[]; series: { key: string; name: string; color: string }[] };
+}) {
+  return (
+    <Card className="bg-white border-slate-200 shadow-xl rounded-3xl p-6 overflow-hidden">
+      <CardHeader className="p-0 pb-6">
+        <CardTitle className="text-xs font-black text-slate-400 uppercase tracking-widest">{title}</CardTitle>
+      </CardHeader>
+      {pie.total === 0 ? (
+        <div className="h-[280px] flex items-center justify-center text-slate-300 text-[10px] font-bold uppercase tracking-widest">Sem dados</div>
+      ) : (
+        <div className="flex flex-col gap-4">
+          <div className="relative h-[220px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={pie.slices} cx="50%" cy="50%" innerRadius={60} outerRadius={88} paddingAngle={3} dataKey="value" stroke="none" isAnimationActive={false}>
+                  {pie.slices.map((s: any, i: number) => <Cell key={i} fill={s.color} />)}
+                </Pie>
+                <Tooltip
+                  contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)', fontSize: 12 }}
+                  formatter={(v: any, _n: any, p: any) => [`${Number(v).toLocaleString('pt-BR')} (${p?.payload?.pct?.toFixed(1)}%)`, p?.payload?.name]}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5 pointer-events-none">
+              <span className="text-[20px] font-black text-slate-700 leading-none">{pie.total.toLocaleString('pt-BR')}</span>
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Total</span>
+              {pie.totalDelta != null && (
+                <span className={cn("mt-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-black", pie.totalDelta >= 0 ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600")}>
+                  {pie.totalDelta >= 0 ? '↑' : '↓'} {Math.abs(pie.totalDelta).toFixed(1)}%
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            {pie.slices.map((s: any) => (
+              <div key={s.key} className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
+                  <span className="text-[11px] font-bold text-slate-600 truncate" title={s.name}>{s.name}</span>
+                </div>
+                <div className="flex items-baseline gap-2 shrink-0">
+                  {s.delta != null && (
+                    <span className={cn("px-1.5 py-0.5 rounded-full text-[9px] font-black", s.delta >= 0 ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600")}>
+                      {s.delta >= 0 ? '↑' : '↓'} {Math.abs(s.delta).toFixed(0)}%
+                    </span>
+                  )}
+                  <span className="text-[11px] font-black text-slate-700 tabular-nums">{s.pct.toFixed(1)}%</span>
+                  <span className="text-[10px] font-bold text-slate-400 tabular-nums">{s.value.toLocaleString('pt-BR')}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {trend && trend.series.length > 0 && (
+            <div className="pt-3 border-t border-slate-50">
+              <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">Tendência</span>
+              <UtmTrendChart data={trend.data} series={trend.series} height={110} />
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ============================================================================
+// Seção "Análise por UTM × Etapa de Funil"
+// Cruza desempenho por UTM (campanha/conjunto/anúncio/termo/origem) com as etapas
+// do funil. Fonte: coorte único marketing_utm_funnel_cohort (por ticket / última
+// entrada). A dimensão UTM e os valores UTM/Motivo de Perda são filtros GLOBAIS
+// (aplicados no pai); aqui o filtro próprio é só o de Etapas (lente analítica).
+// ============================================================================
+function UtmFunnelSection({ cohort, cohortCompare, isComparing, stages, funnelOrder, funnelHidden, periods, selectedPlatform, selectedChannel }: any) {
+  // Filtros LOCAIS da seção (aplicam-se SÓ aos gráficos de UTM): dimensão + valores UTM +
+  // motivo de perda + etapas. Não afetam cards/Funil/pizza/Tendência de Performance.
+  const [utmDimension, setUtmDimension] = useState<string>('utm_campaign');
+  const [selectedUtm, setSelectedUtm] = useState<string[]>([]);
+  const [selectedLossReasons, setSelectedLossReasons] = useState<string[]>([]);
+  const [selectedStages, setSelectedStages] = useState<string[]>([]);
+
+  // Quais etapas aparecem no filtro/visão desta seção (config própria, via ⚙️).
+  // Enquanto o usuário não customizar, segue a config do Funil de Vendas (ordem/ocultas).
+  const [stageOrder, setStageOrder] = useState<string[]>(() => {
+    const saved = localStorage.getItem('mkt_utm_stage_order');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [stageHiddenOverride, setStageHiddenOverride] = useState<string[] | null>(() => {
+    const saved = localStorage.getItem('mkt_utm_stage_hidden');
+    return saved ? JSON.parse(saved) : null;
+  });
+  const effectiveStageHidden = stageHiddenOverride ?? funnelHidden ?? [];
+  const effectiveStageOrder = stageOrder.length > 0 ? stageOrder : (funnelOrder || []);
+
+  const toggleStageVisibility = (id: string) => {
+    const willHide = !effectiveStageHidden.includes(id);
+    const next = willHide ? [...effectiveStageHidden, id] : effectiveStageHidden.filter((x: string) => x !== id);
+    setStageHiddenOverride(next);
+    localStorage.setItem('mkt_utm_stage_hidden', JSON.stringify(next));
+    // Se a etapa saiu da visão, remove-a também da seleção ativa do filtro.
+    if (willHide) setSelectedStages((prev) => prev.filter((x) => x !== id));
+  };
+
+  const moveStageOption = (id: string, direction: 'up' | 'down') => {
+    const byId = new Map<string, any>((stages || []).map((s: any) => [s.id, s]));
+    const sortedIds = [...(stages || [])].sort((a: any, b: any) => a.position - b.position).map((s: any) => s.id);
+    const saved = effectiveStageOrder.filter((x: string) => byId.has(x));
+    const cur = [...saved, ...sortedIds.filter((x: string) => !saved.includes(x))];
+    const i = cur.indexOf(id);
+    if (i === -1) return;
+    const j = direction === 'up' ? i - 1 : i + 1;
+    if (j < 0 || j >= cur.length) return;
+    const next = [...cur];
+    [next[i], next[j]] = [next[j], next[i]];
+    setStageOrder(next);
+    localStorage.setItem('mkt_utm_stage_order', JSON.stringify(next));
+  };
+
+  // Etapas visíveis na ordem escolhida (default = config do Funil de Vendas).
+  const visibleStages = useMemo(() => {
+    const byId = new Map<string, any>((stages || []).map((s: any) => [s.id, s]));
+    const savedOrder = (effectiveStageOrder || []).filter((id: string) => byId.has(id));
+    const missing = (stages || [])
+      .filter((s: any) => !savedOrder.includes(s.id))
+      .sort((a: any, b: any) => a.position - b.position)
+      .map((s: any) => s.id);
+    return [...savedOrder, ...missing]
+      .filter((id: string) => !(effectiveStageHidden || []).includes(id))
+      .map((id: string) => byId.get(id))
+      .filter(Boolean);
+  }, [stages, effectiveStageOrder, effectiveStageHidden]);
+
+  const visibleStageIds = useMemo(() => new Set(visibleStages.map((s: any) => s.id)), [visibleStages]);
+  // Etapas usadas como métrica em Ranking/Tendência: as selecionadas ou (vazio) todas as visíveis.
+  const effectiveStageIds = useMemo(
+    () => (selectedStages.length > 0 ? selectedStages : visibleStages.map((s: any) => s.id)),
+    [selectedStages, visibleStages]
+  );
+  const effectiveStageSet = useMemo(() => new Set(effectiveStageIds), [effectiveStageIds]);
+
+  // Linhas no escopo da seção: filtros globais de origem/canal + etapas visíveis.
+  const baseRows = useMemo(() => {
+    return (cohort || []).filter((r: any) => {
+      if (selectedPlatform.length > 0 && !selectedPlatform.includes(r.platform)) return false;
+      if (selectedChannel.length > 0 && !selectedChannel.includes(r.channel)) return false;
+      if (!visibleStageIds.has(r.stage_id)) return false;
+      return true;
+    });
+  }, [cohort, selectedPlatform, selectedChannel, visibleStageIds]);
+
+  const utmKeyOf = useCallback((r: any) => rowUtmKey(r, utmDimension), [utmDimension]);
+  const utmLabelOf = (key: string) => (key === NO_UTM_KEY ? 'Sem UTM' : key);
+
+  // Opções dos filtros locais (a partir de baseRows; independem da própria seleção).
+  const utmOptions = useMemo(() => {
+    const totals = new Map<string, number>();
+    baseRows.forEach((r: any) => {
+      if (!effectiveStageSet.has(r.stage_id)) return;
+      const k = utmKeyOf(r);
+      totals.set(k, (totals.get(k) || 0) + (Number(r.leads) || 0));
+    });
+    return [...totals.entries()].sort((a, b) => b[1] - a[1]).map(([key, value]) => ({ key, label: utmLabelOf(key), value }));
+  }, [baseRows, effectiveStageSet, utmKeyOf]);
+
+  // Motivos de perda derivados dos dados reais (variam por clínica). "Fora do perfil" = "sem perfil".
+  const lossReasonOptions = useMemo(() => {
+    const totals = new Map<string, number>();
+    baseRows.forEach((r: any) => { if (r.loss_reason) totals.set(r.loss_reason, (totals.get(r.loss_reason) || 0) + (Number(r.leads) || 0)); });
+    return [...totals.entries()].sort((a, b) => b[1] - a[1]).map(([key, value]) => ({ key, label: key, value }));
+  }, [baseRows]);
+
+  const changeDimension = (id: string) => { setUtmDimension(id); setSelectedUtm([]); };
+  const utmFilterActive = (key: string) => selectedUtm.length === 0 || selectedUtm.includes(key);
+  const lossFilterActive = (lr: string | null) => selectedLossReasons.length === 0 || (!!lr && selectedLossReasons.includes(lr));
+
+  // Linhas após os filtros locais de UTM (valor) e Motivo de perda — alimentam os 3 gráficos.
+  const filteredRows = useMemo(
+    () => baseRows.filter((r: any) => utmFilterActive(utmKeyOf(r)) && lossFilterActive(r.loss_reason)),
+    [baseRows, utmKeyOf, selectedUtm, selectedLossReasons]
+  );
+
+  // Mesmas regras de filtro aplicadas ao coorte do período COMPARATIVO (base dos % de variação).
+  const compareRows = useMemo(() => {
+    if (!isComparing) return [];
+    return (cohortCompare || []).filter((r: any) => {
+      if (selectedPlatform.length > 0 && !selectedPlatform.includes(r.platform)) return false;
+      if (selectedChannel.length > 0 && !selectedChannel.includes(r.channel)) return false;
+      if (!visibleStageIds.has(r.stage_id)) return false;
+      if (!utmFilterActive(utmKeyOf(r))) return false;
+      if (!lossFilterActive(r.loss_reason)) return false;
+      return true;
+    });
+  }, [isComparing, cohortCompare, selectedPlatform, selectedChannel, visibleStageIds, utmKeyOf, selectedUtm, selectedLossReasons]);
+
+  // Totais do comparativo por valor UTM (etapas efetivas) + total geral.
+  const compareTotals = useMemo(() => {
+    const m = new Map<string, number>();
+    compareRows.forEach((r: any) => { if (effectiveStageSet.has(r.stage_id)) m.set(utmKeyOf(r), (m.get(utmKeyOf(r)) || 0) + (Number(r.leads) || 0)); });
+    return m;
+  }, [compareRows, effectiveStageSet, utmKeyOf]);
+  const pctDelta = (cur: number, prev: number): number | null => (prev > 0 ? ((cur - prev) / prev) * 100 : null);
+
+  // === Ranking por UTM (Σ leads nas etapas efetivas, por valor da dimensão) ===
+  const rankingData = useMemo(() => {
+    const totals = new Map<string, number>();
+    filteredRows.forEach((r: any) => {
+      if (!effectiveStageSet.has(r.stage_id)) return;
+      const k = utmKeyOf(r);
+      totals.set(k, (totals.get(k) || 0) + (Number(r.leads) || 0));
+    });
+    return [...totals.entries()]
+      .map(([key, value]) => ({ key, name: utmLabelOf(key), value, delta: isComparing ? pctDelta(value, compareTotals.get(key) || 0) : null }))
+      .filter(d => d.value > 0)
+      .sort((a, b) => b.value - a.value)
+      .slice(0, UTM_TOP_N);
+  }, [filteredRows, effectiveStageSet, utmKeyOf, isComparing, compareTotals]);
+
+  // "Todos" os tipos de UTM: mostra uma pizza por dimensão (5 gráficos).
+  const isAllDims = utmDimension === 'all';
+
+  // Pizza (participação %) da dimensão ativa, com % de variação POR FATIA quando comparando.
+  const pieData = useMemo(
+    () => buildPie(filteredRows, utmDimension, effectiveStageSet, isComparing ? compareRows : undefined),
+    [filteredRows, utmDimension, effectiveStageSet, isComparing, compareRows]
+  );
+
+  // Uma pizza por dimensão UTM (usada no modo "Todos"), com mini-tendência das top fatias
+  // e % de variação por fatia.
+  const allPies = useMemo(() => {
+    if (!isAllDims) return [];
+    return UTM_DIMENSIONS.map(d => {
+      const pie = buildPie(filteredRows, d.id, effectiveStageSet, isComparing ? compareRows : undefined);
+      const top = pie.slices.filter((s: any) => s.key !== '__outros__').slice(0, 4);
+      const trend = {
+        data: buildDimTrend(filteredRows, d.id, effectiveStageSet, periods, top.map((s: any) => s.key)),
+        series: top.map((s: any) => ({ key: s.key, name: s.name, color: s.color })),
+      };
+      return { id: d.id, label: d.label, pie, trend };
+    });
+  }, [isAllDims, filteredRows, effectiveStageSet, periods, isComparing, compareRows]);
+
+  // === Tendência por UTM (uma série por valor UTM, top N, ao longo dos períodos) ===
+  const { trendData, trendKeys } = useMemo(() => {
+    // top N valores UTM por volume nas etapas efetivas
+    const topKeys = rankingData.slice(0, UTM_TREND_SERIES).map(d => d.key);
+    const byPeriodKey = new Map<string, Map<string, number>>(); // periodLabel -> (utmKey -> leads)
+    periods.forEach((p: any) => byPeriodKey.set(p.label, new Map()));
+    filteredRows.forEach((r: any) => {
+      if (!effectiveStageSet.has(r.stage_id)) return;
+      const k = utmKeyOf(r);
+      if (!topKeys.includes(k)) return;
+      const period = periods.find((p: any) => r.entry_date >= format(p.start, 'yyyy-MM-dd') && r.entry_date <= format(p.end, 'yyyy-MM-dd'));
+      if (!period) return;
+      const m = byPeriodKey.get(period.label)!;
+      m.set(k, (m.get(k) || 0) + (Number(r.leads) || 0));
+    });
+    const data = periods.map((p: any) => {
+      const m = byPeriodKey.get(p.label)!;
+      const row: any = { name: p.label };
+      topKeys.forEach((k) => { row[k] = m.get(k) || 0; });
+      return row;
+    });
+    return { trendData: data, trendKeys: topKeys };
+  }, [rankingData, filteredRows, effectiveStageSet, utmKeyOf, periods]);
+
+  // Séries (cor por valor UTM) para a tendência em barras empilhadas.
+  const trendSeries = useMemo(
+    () => trendKeys.map((k, i) => ({ key: k, name: utmLabelOf(k), color: UTM_SERIES_COLORS[i % UTM_SERIES_COLORS.length] })),
+    [trendKeys]
+  );
+
+  const rankingMax = useMemo(() => Math.max(1, ...rankingData.map(d => d.value)), [rankingData]);
+  const activeDimLabel = UTM_DIMENSIONS.find(d => d.id === utmDimension)?.label || 'UTM';
+
+  const stageChipOptions = useMemo(
+    () => [{ id: 'all', label: 'Todas' }, ...visibleStages.map((s: any) => ({ id: s.id, label: s.name }))],
+    [visibleStages]
+  );
+
+  return (
+    <div className="space-y-4 pt-2">
+      <div className="flex items-center gap-3">
+        <div className="w-8 h-8 rounded-lg bg-teal-50 flex items-center justify-center">
+          <Filter className="w-5 h-5 text-teal-600" />
+        </div>
+        <div className="flex flex-col">
+          <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest">Análise por UTM × Etapa</h2>
+          <span className="text-[9px] font-semibold text-slate-300 normal-case tracking-tight">por ticket · última entrada na etapa</span>
+        </div>
+      </div>
+
+      {/* Filtros desta seção — aplicam-se SÓ aos gráficos de UTM abaixo. */}
+      <div className="flex items-center flex-wrap gap-3">
+        <FilterChips
+          value={utmDimension}
+          onChange={changeDimension}
+          options={[...UTM_DIMENSIONS.map(d => ({ id: d.id, label: d.label })), { id: 'all', label: 'Todos' }]}
+        />
+        {!isAllDims && (
+          <UtmValuePicker
+            label={activeDimLabel}
+            allLabel={`Todas as ${activeDimLabel.toLowerCase()}s`}
+            options={utmOptions}
+            selected={selectedUtm}
+            onChange={setSelectedUtm}
+          />
+        )}
+        <UtmValuePicker
+          label="Motivo de perda"
+          allLabel="Todos os motivos"
+          options={lossReasonOptions}
+          selected={selectedLossReasons}
+          onChange={setSelectedLossReasons}
+        />
+        <div className="flex items-center gap-1.5">
+          <FilterChips
+            multiple
+            allId="all"
+            value={selectedStages}
+            onChange={(ids: string[]) => setSelectedStages(ids)}
+            options={stageChipOptions}
+          />
+          <FunnelConfigButton
+            stages={stages}
+            order={effectiveStageOrder}
+            hidden={effectiveStageHidden}
+            toggleStage={toggleStageVisibility}
+            moveStage={moveStageOption}
+          />
+        </div>
+      </div>
+
+      {isAllDims ? (
+      /* "Todos" os tipos: uma pizza de participação por dimensão (5 gráficos) */
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+        {allPies.map((p: any) => (
+          <UtmPieCard key={p.id} title={`Participação por ${p.label}`} pie={p.pie} trend={p.trend} />
+        ))}
+      </div>
+      ) : (
+      <>
+      {/* Ranking + Participação (pizza) lado a lado */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <Card className="bg-white border-slate-200 shadow-xl rounded-3xl p-6 overflow-hidden">
+        <CardHeader className="p-0 pb-6">
+          <CardTitle className="text-xs font-black text-slate-400 uppercase tracking-widest">Ranking por {activeDimLabel}</CardTitle>
+        </CardHeader>
+        {rankingData.length === 0 ? (
+          <div className="h-[280px] flex items-center justify-center text-slate-300 text-[10px] font-bold uppercase tracking-widest">Sem dados</div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {rankingData.map((d, idx) => {
+              const widthPct = Math.max(4, (d.value / rankingMax) * 100);
+              const color = UTM_SERIES_COLORS[idx % UTM_SERIES_COLORS.length];
+              return (
+                <div key={d.key} className="flex flex-col gap-1">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-[11px] font-bold text-slate-600 truncate" title={d.name}>{d.name}</span>
+                    <div className="flex items-baseline gap-2 shrink-0">
+                      {d.delta != null && (
+                        <span className={cn("px-1.5 py-0.5 rounded-full text-[9px] font-black", d.delta >= 0 ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600")}>
+                          {d.delta >= 0 ? '↑' : '↓'} {Math.abs(d.delta).toFixed(0)}%
+                        </span>
+                      )}
+                      <span className="text-[11px] font-black text-slate-700 tabular-nums">{d.value.toLocaleString('pt-BR')}</span>
+                    </div>
+                  </div>
+                  <div className="h-3 rounded-full bg-slate-50 overflow-hidden">
+                    <div className="h-full rounded-full transition-all" style={{ width: `${widthPct}%`, backgroundColor: color }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+
+      <UtmPieCard title={`Participação por ${activeDimLabel}`} pie={pieData} />
+      </div>
+
+      {/* Tendência por UTM — barras empilhadas (top valores) + linha de média */}
+      <Card className="bg-white border-slate-200 shadow-xl rounded-3xl p-6 overflow-hidden">
+        <CardHeader className="p-0 pb-6">
+          <CardTitle className="text-xs font-black text-slate-400 uppercase tracking-widest">Tendência por {activeDimLabel}</CardTitle>
+        </CardHeader>
+        {trendSeries.length === 0 ? (
+          <div className="h-[300px] flex items-center justify-center text-slate-300 text-[10px] font-bold uppercase tracking-widest">Sem dados</div>
+        ) : (
+          <UtmTrendChart data={trendData} series={trendSeries} height={300} showLegend />
+        )}
+      </Card>
+      </>
+      )}
+
+    </div>
+  );
+}
+
+// Dropdown popover de seleção de valores UTM (multi, com busca). Modelado no padrão
+// dos botões de config deste arquivo (overlay + motion.div). Vazio = "Todos".
+function UtmValuePicker({ label, allLabel, options, selected, onChange }: {
+  label: string;
+  allLabel?: string;
+  options: { key: string; label: string; value: number }[];
+  selected: string[];
+  onChange: (v: string[]) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState('');
+
+  const filtered = useMemo(
+    () => options.filter(o => o.label.toLowerCase().includes(query.toLowerCase())),
+    [options, query]
+  );
+
+  const toggle = (key: string) => {
+    onChange(selected.includes(key) ? selected.filter(k => k !== key) : [...selected, key]);
+  };
+
+  const summary = selected.length === 0 ? (allLabel ?? `Todas as ${label.toLowerCase()}s`) : `${selected.length} selecionada(s)`;
+
+  return (
+    <div className="relative">
+      <Button
+        onClick={() => setIsOpen(!isOpen)}
+        variant="outline"
+        className={cn(
+          "rounded-xl h-9 gap-2 text-[10px] font-bold uppercase transition-all shadow-sm",
+          isOpen || selected.length > 0 ? "bg-teal-50 border-teal-200 text-teal-600 shadow-teal-100" : "border-slate-200 bg-white hover:bg-slate-50 text-slate-600"
+        )}
+      >
+        <Filter className="w-3.5 h-3.5" />
+        {summary}
+      </Button>
+
+      <AnimatePresence>
+        {isOpen && (
+          <>
+            <div className="fixed inset-0 z-[105]" onClick={() => setIsOpen(false)} />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="absolute top-full left-0 mt-2 w-72 bg-white rounded-2xl border border-slate-200 shadow-2xl z-[110] p-3 overflow-hidden"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">{label}</p>
+                {selected.length > 0 && (
+                  <button onClick={() => onChange([])} className="text-[9px] font-bold text-teal-600 hover:underline uppercase tracking-tight">Limpar</button>
+                )}
+              </div>
+              <input
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                placeholder="Buscar..."
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-700 mb-2 focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all placeholder:text-slate-300"
+              />
+              <div className="max-h-64 overflow-y-auto custom-scrollbar space-y-1">
+                {filtered.length === 0 ? (
+                  <p className="text-[10px] text-slate-400 px-2 py-2">Nenhum valor encontrado.</p>
+                ) : filtered.map(o => (
+                  <button
+                    key={o.key}
+                    onClick={() => toggle(o.key)}
+                    className={cn(
+                      "w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-[10px] font-bold transition-all",
+                      selected.includes(o.key) ? "bg-teal-50 text-teal-700" : "text-slate-500 hover:bg-slate-50 hover:text-slate-600"
+                    )}
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      {selected.includes(o.key) && <CheckCircle2 className="w-3 h-3 shrink-0" />}
+                      <span className="truncate" title={o.label}>{o.label}</span>
+                    </span>
+                    <span className="tabular-nums text-slate-400 shrink-0">{o.value}</span>
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

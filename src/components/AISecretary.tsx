@@ -473,7 +473,7 @@ function FollowupsView() {
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 h-full font-sans">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 font-sans">
       <Card className="border border-slate-200 shadow-sm relative overflow-hidden">
         <div className="h-1.5 bg-teal-600 absolute top-0 left-0 right-0" />
         <CardHeader className="pb-4">
@@ -633,7 +633,7 @@ function WelcomeFollowupView() {
   };
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 h-full font-sans">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 font-sans">
       <Card className="border border-slate-200 shadow-sm relative overflow-hidden">
         <div className="h-1.5 bg-teal-600 absolute top-0 left-0 right-0" />
         <CardHeader className="pb-4">
@@ -788,7 +788,7 @@ function PosFollowupView() {
   const days = localConfig[keys.days] ?? (outcomeTab === 'ganho' ? 7 : 30);
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 h-full font-sans">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 font-sans">
       <Card className="border border-slate-200 shadow-sm relative overflow-hidden">
         <div className="h-1.5 bg-teal-600 absolute top-0 left-0 right-0" />
         <CardHeader className="pb-4">
@@ -956,7 +956,7 @@ function AllFollowupsView() {
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -6 }}
           transition={{ duration: 0.15 }}
-          className="flex-1 min-h-0"
+          className="flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-1"
         >
           {subTab === "welcome" && <WelcomeFollowupView />}
           {subTab === "reengagement" && <FollowupsView />}

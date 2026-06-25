@@ -2501,7 +2501,7 @@ export function LeadKanban() {
       {/* Create Lead Modal */}
       <AnimatePresence>
         {showModal && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-[80] flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
             <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between p-6 border-b border-slate-100">
                 <h3 className="text-lg font-bold text-slate-900">{selectedLead ? 'Editar Lead' : 'Novo Lead'}</h3>
@@ -2987,7 +2987,7 @@ export function LeadKanban() {
             currentStageId={tickets.find(t => t.id === chatLead.ticketId)?.stage_id ?? null}
             onClose={() => setChatLead(null)}
             isDragging={draggedLead !== null}
-            onEdit={() => { const ticket = tickets.find(t => t.id === chatLead.ticketId); if (ticket?.lead) { setChatLead(null); openEditModal(ticket); } }}
+            onEdit={() => { const ticket = tickets.find(t => t.id === chatLead.ticketId); if (ticket?.lead) openEditModal(ticket); }}
             onGanho={() => setGanhoLead({ id: chatLead.lead.id, name: chatLead.lead.name, phone: chatLead.lead.phone ?? null, patientId: chatLead.lead.converted_patient_id ?? null, prevStageId: null, ticketId: chatLead.ticketId })}
             onPerdido={() => setLossLead({ id: chatLead.lead.id, name: chatLead.lead.name, prevStageId: null, ticketId: chatLead.ticketId })}
             onStageChange={async (stageId) => {

@@ -1042,7 +1042,7 @@ function MetricsConfigButton({ metricsOrder, visibleMetrics, toggleMetric, moveM
   );
 }
 
-function FunnelConfigButton({ stages, order, hidden, toggleStage, moveStage }: any) {
+function FunnelConfigButton({ stages, order, hidden, toggleStage, moveStage, fixedIds }: any) {
   const [isOpen, setIsOpen] = useState(false);
 
   const orderedStages = useMemo(() => {
@@ -1084,17 +1084,20 @@ function FunnelConfigButton({ stages, order, hidden, toggleStage, moveStage }: a
               ) : (
                 <div className="space-y-1">
                   {orderedStages.map((s: any, idx: number) => {
-                    const isVisible = !(hidden || []).includes(s.id);
+                    const isFixed = fixedIds?.has?.(s.id);
+                    const isVisible = isFixed || !(hidden || []).includes(s.id);
                     return (
                       <div key={s.id} className="group relative flex items-center gap-1">
                         <button
-                          onClick={() => toggleStage(s.id)}
+                          onClick={() => { if (!isFixed) toggleStage(s.id); }}
+                          disabled={isFixed}
+                          title={isFixed ? 'Etapa fixa' : undefined}
                           className={cn(
                             "flex-1 flex items-center justify-between px-3 py-2 rounded-xl text-[10px] font-bold transition-all",
-                            isVisible ? "bg-teal-50 text-teal-700" : "text-slate-400 hover:bg-slate-50 hover:text-slate-600"
+                            isFixed ? "bg-teal-50/60 text-teal-700/70 cursor-default" : isVisible ? "bg-teal-50 text-teal-700" : "text-slate-400 hover:bg-slate-50 hover:text-slate-600"
                           )}
                         >
-                          <span className="uppercase tracking-tight truncate">{s.name}</span>
+                          <span className="uppercase tracking-tight truncate">{s.name}{isFixed && <span className="ml-1 normal-case text-[8px] text-teal-600/60">(fixa)</span>}</span>
                           {isVisible && <CheckCircle2 className="w-3 h-3 shrink-0" />}
                         </button>
 
@@ -1692,7 +1695,15 @@ function UtmFunnelSection({ cohort, cohortCompare, isComparing, stages, funnelOr
     localStorage.setItem('mkt_utm_stage_order', JSON.stringify(next));
   };
 
+  // Etapas FIXAS: sempre aparecem no filtro (não podem ser ocultadas pelo ⚙️).
+  const fixedStageIds = useMemo(
+    () => new Set((stages || []).filter((s: any) => ['forms', 'whatsapp', 'ganho', 'perdido'].includes(s.slug)).map((s: any) => s.id)),
+    [stages]
+  );
+  const perdidoStageId = useMemo(() => (stages || []).find((s: any) => s.slug === 'perdido')?.id ?? null, [stages]);
+
   // Etapas visíveis na ordem escolhida (default = config do Funil de Vendas).
+  // As fixas entram sempre, mesmo se ocultas na config.
   const visibleStages = useMemo(() => {
     const byId = new Map<string, any>((stages || []).map((s: any) => [s.id, s]));
     const savedOrder = (effectiveStageOrder || []).filter((id: string) => byId.has(id));
@@ -1701,10 +1712,10 @@ function UtmFunnelSection({ cohort, cohortCompare, isComparing, stages, funnelOr
       .sort((a: any, b: any) => a.position - b.position)
       .map((s: any) => s.id);
     return [...savedOrder, ...missing]
-      .filter((id: string) => !(effectiveStageHidden || []).includes(id))
+      .filter((id: string) => fixedStageIds.has(id) || !(effectiveStageHidden || []).includes(id))
       .map((id: string) => byId.get(id))
       .filter(Boolean);
-  }, [stages, effectiveStageOrder, effectiveStageHidden]);
+  }, [stages, effectiveStageOrder, effectiveStageHidden, fixedStageIds]);
 
   const visibleStageIds = useMemo(() => new Set(visibleStages.map((s: any) => s.id)), [visibleStages]);
   // Etapas usadas como métrica em Ranking/Tendência: as selecionadas ou (vazio) todas as visíveis.
@@ -1870,7 +1881,7 @@ function UtmFunnelSection({ cohort, cohortCompare, isComparing, stages, funnelOr
         <FilterChips
           value={utmDimension}
           onChange={changeDimension}
-          options={[...UTM_DIMENSIONS.map(d => ({ id: d.id, label: d.label })), { id: 'all', label: 'Todos' }]}
+          options={[{ id: 'all', label: 'Todos' }, ...UTM_DIMENSIONS.map(d => ({ id: d.id, label: d.label }))]}
         />
         {!isAllDims && (
           <UtmValuePicker
@@ -1883,10 +1894,16 @@ function UtmFunnelSection({ cohort, cohortCompare, isComparing, stages, funnelOr
         )}
         <UtmValuePicker
           label="Motivo de perda"
-          allLabel="Todos os motivos"
+          allLabel="Filtrar por motivo"
           options={lossReasonOptions}
           selected={selectedLossReasons}
-          onChange={setSelectedLossReasons}
+          onChange={(v: string[]) => {
+            setSelectedLossReasons(v);
+            // Ao escolher um motivo de perda, marca automaticamente a etapa "Perdido".
+            if (v.length > 0 && perdidoStageId) {
+              setSelectedStages(prev => (prev.includes(perdidoStageId) ? prev : [...prev, perdidoStageId]));
+            }
+          }}
         />
         <div className="flex items-center gap-1.5">
           <FilterChips
@@ -1902,6 +1919,7 @@ function UtmFunnelSection({ cohort, cohortCompare, isComparing, stages, funnelOr
             hidden={effectiveStageHidden}
             toggleStage={toggleStageVisibility}
             moveStage={moveStageOption}
+            fixedIds={fixedStageIds}
           />
         </div>
       </div>

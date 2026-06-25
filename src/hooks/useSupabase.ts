@@ -660,6 +660,63 @@ export function useFunnelStages() {
   return { data, loading, refetch: fetch, create, update, remove, reorder };
 }
 
+export interface FollowupStep {
+  id: string;
+  clinic_id: string;
+  step_no: number;
+  message_text: string;
+  delay_minutes: number;
+  enabled: boolean;
+  is_closing: boolean;
+}
+
+// Régua de reengajamento (drip): passos por clínica em followup_steps.
+export function useFollowupSteps() {
+  const { activeClinicId } = useAuth();
+  const [steps, setSteps] = useState<FollowupStep[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = useCallback(async () => {
+    if (!activeClinicId) { setSteps([]); setLoading(false); return; }
+    const { data } = await supabase
+      .from('followup_steps')
+      .select('*')
+      .eq('clinic_id', activeClinicId)
+      .order('step_no', { ascending: true });
+    setSteps(data || []);
+    setLoading(false);
+  }, [activeClinicId]);
+
+  useEffect(() => { fetch(); }, [fetch]);
+
+  const addStep = async (message_text: string, delay_minutes: number) => {
+    if (!activeClinicId) return false;
+    const nextNo = (steps[steps.length - 1]?.step_no ?? 0) + 1;
+    const { error } = await supabase.from('followup_steps').insert({
+      clinic_id: activeClinicId, step_no: nextNo, message_text, delay_minutes, enabled: true,
+    });
+    if (error) return false;
+    await fetch();
+    return true;
+  };
+
+  const updateStep = async (id: string, updates: Partial<FollowupStep>) => {
+    setSteps(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
+    const { error } = await supabase.from('followup_steps').update(updates).eq('id', id);
+    if (error) { await fetch(); return false; }
+    return true;
+  };
+
+  const removeStep = async (id: string) => {
+    const { error } = await supabase.from('followup_steps').delete().eq('id', id);
+    if (error) return false;
+    await fetch();
+    return true;
+  };
+
+  return { steps, loading, addStep, updateStep, removeStep, refetch: fetch };
+}
+
 export function useLeads(options?: { pageSize?: number }) {
   const PAGE_SIZE = options?.pageSize ?? null;
   const { profile, activeClinicId } = useAuth();

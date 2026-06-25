@@ -46,7 +46,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { LeadKanban } from "./LeadKanban";
 import { ComercialDashboard } from "./ComercialDashboard";
 import { ChatThread } from "./ChatThread";
-import { useLeads, useNotLeads, useChatMessages, useSettings, useFunnelStages, usePromptTemplates, FunnelStage } from "../hooks/useSupabase";
+import { useLeads, useNotLeads, useChatMessages, useSettings, useFunnelStages, usePromptTemplates, FunnelStage, useFollowupSteps, FollowupStep } from "../hooks/useSupabase";
 import { NotLeadPanel, NotLeadButton } from "./NotLeadPanel";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
@@ -383,24 +383,83 @@ function ConfirmationsView() {
   );
 }
 
+// Editor de um passo da régua de reengajamento (auto-save no blur).
+function FollowupStepEditor({ step, index, onUpdate, onRemove }: {
+  step: FollowupStep;
+  index: number;
+  onUpdate: (id: string, updates: Partial<FollowupStep>) => void;
+  onRemove: (id: string) => void;
+}) {
+  const [msg, setMsg] = useState(step.message_text);
+  const [delay, setDelay] = useState(step.delay_minutes);
+  useEffect(() => { setMsg(step.message_text); setDelay(step.delay_minutes); }, [step.id, step.message_text, step.delay_minutes]);
+
+  const fmtDelay = (m: number) =>
+    m >= 1440 ? `~${Math.floor(m / 1440)}d` : m >= 60 ? `~${Math.floor(m / 60)}h` : `${m}min`;
+
+  return (
+    <div className={cn("p-4 rounded-xl border bg-slate-50/50 space-y-3", step.enabled ? "border-slate-200" : "border-slate-200 opacity-60")}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-bold uppercase tracking-wider bg-teal-100 text-teal-700 px-2 py-0.5 rounded-md">Passo {index + 1}</span>
+          <button
+            onClick={() => onUpdate(step.id, { enabled: !step.enabled })}
+            className={cn("text-[10px] font-bold uppercase px-2 py-0.5 rounded-md transition-colors", step.enabled ? "bg-teal-600 text-white" : "bg-slate-200 text-slate-500")}
+          >
+            {step.enabled ? "Ativo" : "Pausado"}
+          </button>
+        </div>
+        <button onClick={() => onRemove(step.id)} title="Remover passo" className="text-slate-300 hover:text-red-500 transition-colors">
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
+
+      <textarea
+        rows={4}
+        value={msg}
+        onChange={(e) => setMsg(e.target.value)}
+        onBlur={() => { if (msg !== step.message_text) onUpdate(step.id, { message_text: msg }); }}
+        className="w-full p-3 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all resize-none text-sm leading-relaxed"
+        placeholder="Mensagem do passo... (linha em branco = novo balão; {paciente} = nome)"
+      />
+
+      <div className="flex items-center gap-3">
+        <span className="text-[11px] font-bold text-slate-500 uppercase">Após</span>
+        <input
+          type="number"
+          min={1}
+          value={delay}
+          onChange={(e) => setDelay(parseInt(e.target.value) || 0)}
+          onBlur={() => { if (delay !== step.delay_minutes) onUpdate(step.id, { delay_minutes: delay }); }}
+          className="w-28 px-3 py-2 border border-slate-200 rounded-lg font-bold text-teal-700 focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all text-sm"
+        />
+        <span className="text-[11px] font-bold text-slate-400 uppercase">min de inatividade ({fmtDelay(delay)})</span>
+      </div>
+
+      <label className="flex items-center gap-2 cursor-pointer pt-1">
+        <button
+          type="button"
+          onClick={() => onUpdate(step.id, { is_closing: !step.is_closing })}
+          className={cn("w-9 h-5 rounded-full relative transition-all shrink-0", step.is_closing ? "bg-rose-500" : "bg-slate-300")}
+        >
+          <div className={cn("w-3.5 h-3.5 bg-white rounded-full absolute top-[3px] transition-all shadow-sm", step.is_closing ? "right-[3px]" : "left-[3px]")} />
+        </button>
+        <span className="text-[11px] font-bold text-slate-600">🏁 Encerrar atendimento neste passo <span className="font-medium text-slate-400">(move o ticket p/ Perdido)</span></span>
+      </label>
+    </div>
+  );
+}
+
 function FollowupsView() {
   const { aiConfig, updateAI, loading } = useSettings();
-  const [saving, setSaving] = useState(false);
-  const [isDirty, setIsDirty] = useState(false);
   const [localConfig, setLocalConfig] = useState<any>(null);
-
-  const setConfig = (updates: any) => { setLocalConfig((p: any) => ({ ...p, ...updates })); setIsDirty(true); };
+  const { steps, loading: stepsLoading, addStep, updateStep, removeStep } = useFollowupSteps();
 
   useEffect(() => {
     if (aiConfig) {
       setLocalConfig({ ...aiConfig });
-      setIsDirty(false);
     } else if (!loading) {
-      setLocalConfig({
-        followup_enabled: false,
-        followup_message: "Olá {paciente}, percebi que ainda não finalizamos seu agendamento. Gostaria de continuar de onde paramos?",
-        followup_delay: 1440,
-      });
+      setLocalConfig({ followup_enabled: false });
     }
   }, [aiConfig, loading]);
 
@@ -411,13 +470,6 @@ function FollowupsView() {
       </div>
     );
   }
-
-  const handleSave = async () => {
-    setSaving(true);
-    await updateAI(localConfig);
-    setSaving(false);
-    setIsDirty(false);
-  };
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-8 h-full font-sans">
@@ -452,69 +504,37 @@ function FollowupsView() {
             </button>
           </div>
 
-          <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1 flex items-center gap-2">
-              <Clock className="w-3 h-3" />
-              Tempo de Espera (minutos)
-            </label>
-            <div className="flex items-center gap-4">
-              <input
-                type="number"
-                value={localConfig.followup_delay || ""}
-                onChange={(e) => setConfig({ followup_delay: parseInt(e.target.value) || 0 })}
-                className="w-32 px-4 py-2 border border-slate-200 rounded-lg font-bold text-teal-700 focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all"
-                placeholder="Ex: 1440"
-              />
-              <div className="flex-1 text-[10px] font-bold text-slate-400 uppercase leading-tight">
-                {localConfig.followup_delay >= 60 
-                  ? `${Math.floor(localConfig.followup_delay / 60)}h ${localConfig.followup_delay % 60}min de inatividade`
-                  : `${localConfig.followup_delay} minutos de inatividade`
-                }
-              </div>
+          {/* Régua de mensagens (passos) — auto-save por passo */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between pl-1">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                <Clock className="w-3 h-3" /> Régua de mensagens
+              </label>
+              <button
+                onClick={() => addStep("Olá {paciente}, podemos continuar de onde paramos?", steps[steps.length - 1]?.delay_minutes ?? 1440)}
+                className="flex items-center gap-1 text-xs font-bold text-teal-700 hover:text-teal-800"
+              >
+                <Plus className="w-3.5 h-3.5" /> Adicionar passo
+              </button>
             </div>
-          </div>
+            <p className="text-[11px] text-slate-400 font-medium pl-1 leading-relaxed">
+              Cada passo é enviado após o lead ficar inativo pelo tempo do passo. Linha em branco separa em balões. <span className="font-bold">{'{paciente}'}</span> = primeiro nome.
+            </p>
 
-          <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1 flex items-center gap-2">
-              <Activity className="w-3 h-3" />
-              Tentativas Máximas
-            </label>
-            <div className="flex items-center gap-4">
-              <input
-                type="number"
-                min={1}
-                max={10}
-                value={localConfig.followup_max_attempts ?? 3}
-                onChange={(e) => setConfig({ followup_max_attempts: parseInt(e.target.value) || 1 })}
-                className="w-32 px-4 py-2 border border-slate-200 rounded-lg font-bold text-teal-700 focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all"
-                placeholder="Ex: 3"
-              />
-              <div className="flex-1 text-[10px] font-bold text-slate-400 uppercase leading-tight">
-                {localConfig.followup_max_attempts ?? 3} envio{(localConfig.followup_max_attempts ?? 3) !== 1 ? "s" : ""} por lead
+            {stepsLoading ? (
+              <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 text-teal-600 animate-spin" /></div>
+            ) : steps.length === 0 ? (
+              <div className="text-center py-6 text-xs text-slate-400 font-medium border border-dashed border-slate-200 rounded-xl">
+                Nenhum passo configurado. Clique em "Adicionar passo".
               </div>
-            </div>
+            ) : (
+              <div className="space-y-3">
+                {steps.map((s, i) => (
+                  <FollowupStepEditor key={s.id} step={s} index={i} onUpdate={updateStep} onRemove={removeStep} />
+                ))}
+              </div>
+            )}
           </div>
-
-          <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1 font-sans">
-              Mensagem de Reengajamento
-            </label>
-            <textarea
-              rows={5}
-              value={localConfig.followup_message || ""}
-              onChange={(e) => setConfig({ followup_message: e.target.value })}
-              className="w-full p-4 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all resize-none text-sm leading-relaxed"
-              placeholder="Olá {paciente}, notamos que..."
-            />
-          </div>
-
-          <Button
-            onClick={handleSave}
-            disabled={saving || !isDirty}
-            className={cn("w-full py-6 transition-all", isDirty ? "bg-teal-600 hover:bg-teal-700 text-white shadow-lg shadow-teal-100" : "bg-slate-100 text-slate-400 cursor-default")}
-          >
-            {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : isDirty ? "Salvar Configuração de Follow-up" : "Configuração Salva ✓"}
-          </Button>
         </CardContent>
       </Card>
 
@@ -541,8 +561,8 @@ function FollowupsView() {
           </CardHeader>
           <CardContent className="pt-2">
             <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 max-w-[85%] relative">
-               <p className="text-sm text-slate-700 leading-relaxed font-medium">
-                 {localConfig.followup_message ? localConfig.followup_message.replace(/{paciente}/g, "João") : ""}
+               <p className="text-sm text-slate-700 leading-relaxed font-medium whitespace-pre-line">
+                 {steps[0]?.message_text ? steps[0].message_text.replace(/\{paciente\}/gi, "João") : "Adicione um passo para ver a prévia."}
                </p>
                <span className="text-[9px] text-slate-400 font-bold uppercase mt-2 block">10:45</span>
                <div className="absolute -left-2 top-4 w-4 h-4 bg-white border-l border-b border-slate-100 rotate-45" />

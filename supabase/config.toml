@@ -21,3 +21,9 @@ enabled = true
 # Disparada por pg_net a partir de process_forms_followup() (sem JWT).
 verify_jwt = false
 entrypoint = "./functions/forms-welcome-followup/index.ts"
+
+[functions.reengagement-followup]
+enabled = true
+# Disparada por pg_net a partir de process_reengagement_followup() (sem JWT).
+verify_jwt = false
+entrypoint = "./functions/reengagement-followup/index.ts"

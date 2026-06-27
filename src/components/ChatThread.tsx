@@ -53,6 +53,24 @@ export function extractMessageText(message: any): string {
   return JSON.stringify(message);
 }
 
+// ─── Traces de tool da IA: NÃO devem aparecer na conversa ────────────────────
+// O agente (LangChain) persiste na MESMA tabela (chat_messages) tanto as chamadas
+// de tool ("Calling X with input: …", type 'ai' com tool_calls preenchido) quanto
+// os resultados (type 'tool'). Isso é memória da IA, não conteúdo pro usuário.
+export function isToolTrace(message: any): boolean {
+  let obj: any = message;
+  if (typeof obj === 'string') {
+    const t = obj.trim();
+    if (t.startsWith('{')) { try { obj = JSON.parse(t); } catch { obj = null; } }
+  }
+  if (obj && typeof obj === 'object') {
+    if (obj.type === 'tool') return true;                                                    // resultado de tool
+    if (obj.type === 'ai' && Array.isArray(obj.tool_calls) && obj.tool_calls.length > 0) return true; // "Calling X…"
+  }
+  // fallback textual (mensagens malformadas/string)
+  return /^Calling\s+\S+\s+with input:/.test(extractMessageText(message).trimStart());
+}
+
 // ─── Mídia: detecta áudio/imagem/vídeo/documento via fileURL + mimetype ──────
 export type MediaKind = 'image' | 'audio' | 'video' | 'document' | null;
 
@@ -161,6 +179,9 @@ export function ChatThread({
     return format(date, "d 'de' MMMM", { locale: ptBR });
   };
 
+  // Esconde os traces de tool da IA (chamadas + resultados) — só exibição
+  const visibleMessages = messages.filter((m) => !isToolTrace(m.message));
+
   return (
     <div
       ref={scrollRef}
@@ -174,7 +195,7 @@ export function ChatThread({
           <Loader2 className="w-8 h-8 animate-spin" />
           <p className="text-sm font-medium">Carregando conversa...</p>
         </div>
-      ) : messages.length === 0 ? (
+      ) : visibleMessages.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-4 opacity-50">
           <div className="w-16 h-16 bg-white rounded-2xl shadow-sm flex items-center justify-center">
             <MessageSquare className="w-8 h-8 text-teal-600" />
@@ -183,7 +204,7 @@ export function ChatThread({
           {emptyHint && <p className="text-xs text-center max-w-[220px]">{emptyHint}</p>}
         </div>
       ) : (() => {
-        const sorted = [...messages].sort((a, b) =>
+        const sorted = [...visibleMessages].sort((a, b) =>
           new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
         );
         return (

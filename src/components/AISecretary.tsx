@@ -85,8 +85,8 @@ function ValidationModal({ isOpen, onClose, missingTags }: { isOpen: boolean, on
                 <AlertTriangle className="w-6 h-6 text-amber-600" />
               </div>
               <div>
-                <h3 className="text-xl font-bold text-slate-900">Variáveis Faltando</h3>
-                <p className="text-sm text-slate-500 font-medium">O template da mensagem está incompleto.</p>
+                <h3 className="text-xl font-bold text-slate-900">Salvo, mas atenção</h3>
+                <p className="text-sm text-slate-500 font-medium">Salvamos sua mensagem. Recomendamos revisar.</p>
               </div>
               <button 
                 onClick={onClose}
@@ -98,7 +98,7 @@ function ValidationModal({ isOpen, onClose, missingTags }: { isOpen: boolean, on
 
             <div className="space-y-4 mb-8">
               <p className="text-sm text-slate-600 leading-relaxed font-medium">
-                Para que a confirmação funcione corretamente, as seguintes variáveis precisam estar presentes no texto:
+                Para que a confirmação funcione melhor, recomendamos incluir estas variáveis no texto:
               </p>
               <div className="flex flex-wrap gap-2">
                 {missingTags.map(tag => (
@@ -164,16 +164,16 @@ function ConfirmationsView() {
     const requiredTags = ['{paciente}', '{data}', '{hora}'];
     const missing = requiredTags.filter(tag => !localConfig.confirm_message.toLowerCase().includes(tag));
 
-    if (missing.length > 0) {
-      setMissingTags(missing);
-      setShowValidation(true);
-      return;
-    }
-
+    // Salva sempre; o aviso de variáveis é apenas informativo (não bloqueia).
     setSaving(true);
     await updateAI(localConfig);
     setSaving(false);
     setIsDirty(false);
+
+    if (missing.length > 0) {
+      setMissingTags(missing);
+      setShowValidation(true);
+    }
   };
 
   return (

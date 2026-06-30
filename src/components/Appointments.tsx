@@ -86,6 +86,10 @@ function getDoctorColor(doctorId: string) {
 
 export function Appointments({ isActive = true }: { isActive?: boolean }) {
   const { userRole, profile, activeClinicId } = useAuth();
+  // Membros da organização (com clínica selecionada) gerenciam a clínica como um gestor.
+  // Espelha o effectiveRole da Sidebar para liberar ações de gestão (ex.: Configurar Agenda).
+  const isOrgUser = ['org_owner', 'org_admin', 'org_team'].includes(userRole);
+  const canConfigureSchedule = userRole === 'gestor' || userRole === 'secretaria' || userRole === 'medico_gestor' || (isOrgUser && !!activeClinicId);
   const { data: appointments, loading, create, update, remove } = useAppointments();
   const { data: doctors, refetch: refetchDoctors } = useDoctors();
   const { data: patients, refetch: refetchPatients, create: createPatient } = usePatients();
@@ -739,7 +743,7 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
                <Settings className="w-5 h-5 mr-2 text-slate-500" /> Configurar Agenda
              </Button>
           )}
-          {(userRole === 'gestor' || userRole === 'secretaria' || userRole === 'medico_gestor') && doctors.length > 0 && (
+          {canConfigureSchedule && doctors.length > 0 && (
             <div className="relative" ref={doctorPickerRef}>
               <Button variant="outline" className="py-5 px-6 font-bold" onClick={() => setShowDoctorSchedulePicker(v => !v)}>
                 <Settings className="w-5 h-5 mr-2 text-slate-500" /> Configurar Agenda

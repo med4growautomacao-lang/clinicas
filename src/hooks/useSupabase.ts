@@ -562,6 +562,8 @@ export interface Lead {
   /** "Não Lead": registro que não é oportunidade real. Sai do funil/Conversas, não conta em métrica e não recebe automação. Reversível. */
   is_not_lead: boolean;
   not_lead_at: string | null;
+  /** Número confirmado SEM WhatsApp (uazapi /chat/check no envio do welcome). Sinaliza no card e em Conversas; não recebe envio automático. */
+  whatsapp_invalid: boolean;
 }
 
 export function useFunnelStages() {

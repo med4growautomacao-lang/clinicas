@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { X, Phone, ThumbsUp, ThumbsDown, TrendingUp, Pencil } from "lucide-react";
+import { X, Phone, ThumbsUp, ThumbsDown, TrendingUp, Pencil, PhoneOff } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useChatMessages, Lead, useLeads, useFunnelStages, useConversions } from "../hooks/useSupabase";
 import { cn } from "@/src/lib/utils";
@@ -129,6 +129,16 @@ export function LeadChat({ lead, onClose, isDragging = false, ticketId, currentS
           </div>
         </div>
       </div>
+
+      {/* Aviso: número não está no WhatsApp */}
+      {lead.whatsapp_invalid && (
+        <div className="px-5 py-2 bg-rose-50 border-b border-rose-100 flex items-center gap-2">
+          <PhoneOff className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+          <span className="text-[11px] font-semibold text-rose-700 leading-snug">
+            Este número não está no WhatsApp — não é possível enviar mensagens automáticas. Contate o lead por outro canal.
+          </span>
+        </div>
+      )}
 
       {/* Stage selector */}
       {stages.length > 0 && (

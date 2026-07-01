@@ -2,10 +2,15 @@
 //
 // Chamada por pg_net (sem JWT), 1 vez por lead, a partir do selector SQL process_forms_followup()
 // (cron forms-followup-job, 1/min) que já fez os gates (welcome_message_enabled, delay,
-// "ainda não respondeu"). Aqui fazemos: claim atômico (anti-duplicação) → envio via uazapi →
-// automation_logs → chat_messages (aparece em Conversas + memória do agente).
+// "ainda não respondeu"). Aqui fazemos: claim atômico (anti-duplicação) →
+// resolve o número real no WhatsApp (uazapi /chat/check, tenta com/sem 9º dígito) →
+// envio via uazapi → automation_logs → chat_messages (aparece em Conversas + memória).
 //
-// Normalização de telefone espelha _shared/phone.ts (inline); envio espelha o ai-scheduler.
+// Tratamento de falha:
+//   • número não está no WhatsApp (check confirma) → marca leads.whatsapp_invalid=true (sinaliza
+//     no card do Kanban e em Conversas), loga o motivo, NÃO reenvia (terminal).
+//   • envio falhou mas o número é válido (erro transitório do uazapi) → retry LIMITADO
+//     (welcome_attempts < MAX): reverte o claim (welcome_sent=false) p/ o cron tentar de novo.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -14,6 +19,8 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+const MAX_ATTEMPTS = 3; // tentativas de envio p/ número válido antes de desistir (evita loop)
 
 // Mesma lógica de _shared/phone.ts (inline p/ deploy sem dependência relativa):
 // normaliza p/ o formato BR canônico (sem o 9º dígito), igual ao n8n.
@@ -35,6 +42,16 @@ function normalizeBrazilianPhone(rawInput: string | null | undefined): string | 
   if (phone.startsWith("55")) return stripExtra9(phone);
   if (phone.length === 10 || phone.length === 11) return stripExtra9("55" + phone);
   return phone;
+}
+
+// Candidatos a jid no WhatsApp: o número normalizado (sem 9) e, p/ celular BR, a variante COM o 9.
+// Muitos celulares só existem no WhatsApp com o 9 — por isso testamos os dois.
+function whatsappCandidates(normalized: string): string[] {
+  const out = [normalized];
+  if (/^55\d{10}$/.test(normalized)) {
+    out.push(normalized.slice(0, 4) + "9" + normalized.slice(4)); // 55 + DDD + 9 + resto
+  }
+  return out;
 }
 
 const UAZAPI_BASE = "https://med4growautomacao.uazapi.com";
@@ -59,17 +76,53 @@ function renderMessage(text: string, firstName: string): string {
     .trim();
 }
 
-async function sendText(token: string, number: string, text: string, delay = 0): Promise<boolean> {
+// Consulta o uazapi se algum dos candidatos existe no WhatsApp.
+//   valid   → number = jid resolvido (mandar p/ esse);
+//   invalid → todos responderam e nenhum está no WhatsApp (número sem WhatsApp);
+//   unknown → check indisponível/parcial (não bloqueia; cai no fallback de envio).
+async function checkWhatsapp(
+  token: string,
+  numbers: string[],
+): Promise<{ status: "valid"; number: string } | { status: "invalid" } | { status: "unknown" }> {
+  try {
+    const resp = await fetch(`${UAZAPI_BASE}/chat/check`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json", "token": token },
+      body: JSON.stringify({ numbers }),
+    });
+    if (!resp.ok) return { status: "unknown" };
+    const arr = await resp.json();
+    if (!Array.isArray(arr)) return { status: "unknown" };
+    const hit = arr.find((x: any) => x?.isInWhatsapp === true);
+    if (hit) {
+      const jidNum = String(hit.jid || "").split("@")[0];
+      return { status: "valid", number: jidNum || String(hit.query ?? "") };
+    }
+    const allAnswered = numbers.every((q) => arr.some((x: any) => String(x?.query) === q));
+    return allAnswered ? { status: "invalid" } : { status: "unknown" };
+  } catch (e) {
+    console.error("[forms-welcome-followup] check error:", e);
+    return { status: "unknown" };
+  }
+}
+
+async function sendText(
+  token: string,
+  number: string,
+  text: string,
+  delay = 0,
+): Promise<{ ok: boolean; status: number; body: string }> {
   try {
     const resp = await fetch(`${UAZAPI_BASE}/send/text`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Accept": "application/json", "token": token },
       body: JSON.stringify({ number, text, delay }),
     });
-    return resp.ok;
+    const body = await resp.text().catch(() => "");
+    return { ok: resp.ok, status: resp.status, body: body.slice(0, 500) };
   } catch (e) {
     console.error("[forms-welcome-followup] uazapi send error:", e);
-    return false;
+    return { ok: false, status: 0, body: String(e) };
   }
 }
 
@@ -106,14 +159,15 @@ serve(async (req) => {
     .update({ welcome_sent: true })
     .eq("id", lead_id)
     .eq("welcome_sent", false)
-    .select("id");
+    .select("id, welcome_attempts");
   if (claimErr) return json({ ok: false, error: claimErr.message }, 500);
   if (!claimed || claimed.length === 0) return json({ ok: true, skipped: "already_claimed" });
+  const priorAttempts = Number(claimed[0]?.welcome_attempts ?? 0);
 
-  const logFail = async (reason: string) => {
+  const logFail = async (reason: string, metadata: Record<string, unknown> = {}) => {
     await supabase.from("automation_logs").insert({
       clinic_id, lead_id, type: "forms_welcome", status: "failed",
-      message_sent: reason, triggered_at: nowSP(),
+      message_sent: reason, triggered_at: nowSP(), metadata,
     });
   };
 
@@ -121,46 +175,66 @@ serve(async (req) => {
   const { data: instance } = await supabase
     .from("whatsapp_instances").select("api_token").eq("clinic_id", clinic_id).maybeSingle();
   const token = instance?.api_token;
-  if (!token) { await logFail("sem api_token (WhatsApp não conectado)"); return json({ ok: false, error: "no_token" }); }
+  if (!token) { await logFail("sem api_token (WhatsApp não conectado)", { reason: "no_token" }); return json({ ok: false, error: "no_token" }); }
 
   // (3) telefones
   const leadNumber = normalizeBrazilianPhone(phone);
   const clinicNumber = normalizeBrazilianPhone(clinic_phone);
-  if (!leadNumber) { await logFail("telefone do lead inválido"); return json({ ok: false, error: "invalid_phone" }); }
+  if (!leadNumber) { await logFail("telefone do lead inválido", { reason: "invalid_phone", phone }); return json({ ok: false, error: "invalid_phone" }); }
+
+  // (3.1) resolve o número real no WhatsApp (testa sem-9 e com-9)
+  const candidates = whatsappCandidates(leadNumber);
+  const check = await checkWhatsapp(token, candidates);
+  if (check.status === "invalid") {
+    // Número confirmado SEM WhatsApp → sinaliza no card/Conversas e NÃO reenvia (terminal).
+    await supabase.from("leads").update({ whatsapp_invalid: true }).eq("id", lead_id);
+    await logFail("número não está no WhatsApp", { reason: "not_on_whatsapp", checked: candidates, phone });
+    return json({ ok: true, whatsapp_invalid: true, lead_id });
+  }
+  const sendNumber = check.status === "valid" ? check.number : leadNumber; // unknown → tenta o normalizado
 
   // (4) mensagem (multi-balão por parágrafo)
   const rendered = renderMessage(message_text, firstNameCapitalized(name));
   const bubbles = rendered.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
-  if (bubbles.length === 0) { await logFail("welcome_message_text vazio"); return json({ ok: false, error: "empty_message" }); }
+  if (bubbles.length === 0) { await logFail("welcome_message_text vazio", { reason: "empty_message" }); return json({ ok: false, error: "empty_message" }); }
 
-  // (5) envio sequencial
+  // (5) envio sequencial (cada balão com delay de digitação da uazapi)
   let anySent = false;
+  let lastErr: { status: number; body: string } | null = null;
   for (const bubble of bubbles) {
-    const ok = await sendText(token, leadNumber, bubble, TYPING_DELAY_MS);
-    anySent = anySent || ok;
+    const r = await sendText(token, sendNumber, bubble, TYPING_DELAY_MS);
+    if (r.ok) anySent = true;
+    else lastErr = { status: r.status, body: r.body };
   }
 
   const joined = bubbles.join(" | ");
 
-  // (6) log
-  await supabase.from("automation_logs").insert({
-    clinic_id, lead_id, type: "forms_welcome",
-    status: anySent ? "sent" : "failed",
-    message_sent: joined, triggered_at: nowSP(),
-  });
-
-  // (7) memória/conversa (só se algo saiu) — mesma escrita que o n8n fazia
   if (anySent) {
+    // sucesso
+    await supabase.from("automation_logs").insert({
+      clinic_id, lead_id, type: "forms_welcome", status: "sent",
+      message_sent: joined, triggered_at: nowSP(), metadata: { number: sendNumber },
+    });
+    // limpa flag (caso estivesse marcada) e zera contador
+    await supabase.from("leads").update({ whatsapp_invalid: false, welcome_attempts: 0 }).eq("id", lead_id);
+    // memória/conversa — mesma escrita que o n8n fazia
     const session_id = `${clinicNumber ?? ""}${leadNumber}`;
     await supabase.from("chat_messages").insert({
-      session_id,
-      clinic_id,
-      lead_id,
-      sender: "ai",
-      direction: "outbound",
+      session_id, clinic_id, lead_id, sender: "ai", direction: "outbound",
       message: { type: "ai", content: `FOLLOWUP: ${joined}`, additional_kwargs: {}, response_metadata: {} },
     });
+    return json({ ok: true, sent: true, bubbles: bubbles.length, lead_id });
   }
 
-  return json({ ok: true, sent: anySent, bubbles: bubbles.length, lead_id });
+  // (6) falha de envio com número (provavelmente) válido → retry LIMITADO
+  const attempts = priorAttempts + 1;
+  await logFail("falha no envio (uazapi)", { reason: "send_failed", attempt: attempts, uazapi: lastErr });
+  if (attempts < MAX_ATTEMPTS) {
+    // reverte o claim p/ o cron tentar de novo no próximo tick
+    await supabase.from("leads").update({ welcome_sent: false, welcome_attempts: attempts }).eq("id", lead_id);
+  } else {
+    // desiste após MAX_ATTEMPTS (welcome_sent fica true → cron não pega mais)
+    await supabase.from("leads").update({ welcome_attempts: attempts }).eq("id", lead_id);
+  }
+  return json({ ok: false, sent: false, retry: attempts < MAX_ATTEMPTS, attempt: attempts, lead_id });
 });

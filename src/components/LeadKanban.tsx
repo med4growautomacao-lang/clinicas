@@ -42,7 +42,7 @@ import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
 import WhatsAppLogo from "../assets/logos/Logo Whatsapp.png";
 import SemOrigemLogo from "../assets/logos/Logo Sem origem.png";
-import { Share2, Globe, Layout, Smartphone, Sparkles, Instagram } from "lucide-react";
+import { Share2, Globe, Layout, Smartphone, Sparkles, Instagram, PhoneOff } from "lucide-react";
 import { DateRangePicker } from "./DateRangePicker";
 import { UtmLeadFilter, leadUtmKey, NO_UTM_KEY } from "./filters/UtmLeadFilter";
 
@@ -2422,8 +2422,14 @@ export function LeadKanban() {
                         )}
 
                         {/* Badges de status */}
-                        {(aguardando || precisaResponder || slaBreach > 0) && (
-                          <div className="flex items-center gap-1.5 mt-2">
+                        {(aguardando || precisaResponder || slaBreach > 0 || lead.whatsapp_invalid) && (
+                          <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                            {lead.whatsapp_invalid && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border bg-rose-50 border-rose-200 text-rose-600 flex items-center gap-1" title="Número não está no WhatsApp — envio automático não é possível">
+                                <PhoneOff className="w-2.5 h-2.5 shrink-0" />
+                                Sem WhatsApp
+                              </span>
+                            )}
                             {aguardando && (
                               <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border bg-blue-50 border-blue-200 text-blue-600">
                                 Aguardando Lead

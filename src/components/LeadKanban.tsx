@@ -42,7 +42,7 @@ import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
 import WhatsAppLogo from "../assets/logos/Logo Whatsapp.png";
 import SemOrigemLogo from "../assets/logos/Logo Sem origem.png";
-import { Share2, Globe, Layout, Smartphone, Sparkles, Instagram, PhoneOff } from "lucide-react";
+import { Share2, Globe, Layout, Smartphone, Sparkles, Instagram, PhoneOff, RotateCcw } from "lucide-react";
 import { DateRangePicker } from "./DateRangePicker";
 import { UtmLeadFilter, leadUtmKey, NO_UTM_KEY } from "./filters/UtmLeadFilter";
 
@@ -1003,6 +1003,103 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
   );
 }
 
+// Aviso ao arrastar um card já resolvido (venda/perda) para uma etapa ativa. Duas escolhas:
+//  - Manter: preserva o desfecho (novo ciclo → card único no board, pois o ticket ganho antigo
+//    fica "closed" e some do board com showResolved desligado) e move.
+//  - Cancelar: reabre o MESMO ticket, desfazendo a venda/perda. Para venda, apaga a receita
+//    lançada; se houver consulta ativa, pergunta antes se cancela a consulta junto.
+function ReopenChoiceModal({ info, targetStageName, checkAppointment, onKeep, onCancelOutcome, onClose }: {
+  info: { ticket: Ticket; outcome: 'ganho' | 'perdido'; targetStageId: string };
+  targetStageName: string;
+  checkAppointment: (ticketId: string) => Promise<{ id: string; date: string; time: string; status: string; doctorName?: string } | null>;
+  onKeep: () => Promise<void> | void;
+  onCancelOutcome: (cancelAppointment: boolean) => Promise<void> | void;
+  onClose: () => void;
+}) {
+  const isGanho = info.outcome === 'ganho';
+  const noun = isGanho ? 'venda' : 'perda';
+  const leadName = info.ticket.lead?.name ?? '';
+  const [phase, setPhase] = useState<'choice' | 'appt'>('choice');
+  const [appt, setAppt] = useState<{ id: string; date: string; time: string; status: string; doctorName?: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const STATUS_LABEL: Record<string, string> = { pendente: 'pendente', confirmado: 'confirmada', compareceu: 'realizada', realizado: 'realizada' };
+  const fmtDate = (d: string) => { try { return format(parseISO(d), 'dd/MM/yyyy'); } catch { return d; } };
+
+  const handleKeep = async () => { setBusy(true); await onKeep(); };
+  const handleCancelClick = async () => {
+    setBusy(true);
+    if (isGanho) {
+      const a = await checkAppointment(info.ticket.id);
+      if (a) { setAppt(a); setPhase('appt'); setBusy(false); return; }
+    }
+    await onCancelOutcome(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={busy ? undefined : onClose}>
+      <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="h-1.5 bg-amber-500" />
+        <div className="p-6 space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <AlertCircle className="w-5 h-5 text-amber-500 shrink-0" />
+              <div className="min-w-0">
+                <h3 className="text-base font-black text-slate-900 capitalize">Mover {noun}</h3>
+                <p className="text-xs text-slate-500 font-medium mt-0.5 truncate">{leadName} → {targetStageName}</p>
+              </div>
+            </div>
+            <button onClick={onClose} disabled={busy} className="p-1.5 hover:bg-slate-100 rounded-lg disabled:opacity-40 shrink-0"><X className="w-4 h-4 text-slate-400" /></button>
+          </div>
+
+          {phase === 'choice' ? (
+            <>
+              <p className="text-sm text-slate-600">
+                Este card está marcado como <strong>{noun}</strong>. O que fazer ao movê-lo para <strong>{targetStageName}</strong>?
+              </p>
+              <div className="space-y-2">
+                <button onClick={handleKeep} disabled={busy}
+                  className="w-full text-left px-4 py-3 rounded-xl border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/60 transition-all disabled:opacity-50">
+                  <div className="flex items-center gap-2 font-bold text-sm text-slate-800"><Check className="w-4 h-4 text-emerald-600 shrink-0" /> Manter {noun}</div>
+                  <p className="text-xs text-slate-500 mt-1">Preserva o registro — a {noun} continua contando nos relatórios — e mostra o card na nova etapa.</p>
+                </button>
+                <button onClick={handleCancelClick} disabled={busy}
+                  className="w-full text-left px-4 py-3 rounded-xl border border-slate-200 hover:border-rose-300 hover:bg-rose-50/60 transition-all disabled:opacity-50">
+                  <div className="flex items-center gap-2 font-bold text-sm text-slate-800"><RotateCcw className="w-4 h-4 text-rose-500 shrink-0" /> Cancelar {noun}</div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    {isGanho ? 'Desfaz a venda e remove a receita lançada. ' : 'Desfaz a perda. '}O lead volta ativo nesta etapa.
+                  </p>
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800 leading-relaxed">
+                Este lead tem uma consulta <strong>{STATUS_LABEL[appt!.status] ?? appt!.status}</strong>{appt!.doctorName ? ` com ${appt!.doctorName}` : ''} em <strong>{fmtDate(appt!.date)} {appt!.time?.slice(0, 5)}</strong>. O que fazer com ela ao cancelar a venda?
+              </div>
+              <div className="space-y-2">
+                <button onClick={async () => { setBusy(true); await onCancelOutcome(false); }} disabled={busy}
+                  className="w-full text-left px-4 py-3 rounded-xl border border-slate-200 hover:border-teal-300 hover:bg-teal-50/60 transition-all disabled:opacity-50">
+                  <div className="font-bold text-sm text-slate-800">Reabrir mantendo a consulta</div>
+                  <p className="text-xs text-slate-500 mt-1">A consulta continua agendada; só o desfecho de venda é desfeito.</p>
+                </button>
+                <button onClick={async () => { setBusy(true); await onCancelOutcome(true); }} disabled={busy}
+                  className="w-full text-left px-4 py-3 rounded-xl border border-slate-200 hover:border-rose-300 hover:bg-rose-50/60 transition-all disabled:opacity-50">
+                  <div className="font-bold text-sm text-rose-700">Cancelar a consulta também</div>
+                  <p className="text-xs text-slate-500 mt-1">Marca a consulta como cancelada e desfaz a venda.</p>
+                </button>
+              </div>
+            </>
+          )}
+
+          {busy && <div className="flex items-center justify-center pt-1"><Loader2 className="w-4 h-4 animate-spin text-slate-400" /></div>}
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 // Status de agendamento que NÃO são terminais: enquanto o paciente estiver em um
 // desses, o ticket não pode ser resolvido (precisa virar Realizado, Faltou ou Cancelado).
 const NON_TERMINAL_APPT_STATUS = ['pendente', 'confirmado', 'compareceu'];
@@ -1016,12 +1113,15 @@ export function LeadKanban() {
   const { data: stages, loading: stagesLoading, reorder: reorderStages, update: updateStage, create: createStage, remove: removeStage } = useFunnelStages();
   const { data: leads, create, createWithTicket, update, remove, markNotLead } = useLeads({ pageSize: 150 });
   const { data: notLeads, restore: restoreNotLead } = useNotLeads();
-  const { tickets, loading: ticketsLoading, refetch: refetchTickets, moveTicket, openTicket, closeTicket, finalizeTicket } = useTickets();
+  const { tickets, loading: ticketsLoading, refetch: refetchTickets, moveTicket, reopenTicket, openTicket, closeTicket, finalizeTicket } = useTickets();
   const { byLead: conversionsByLead, create: createConversion } = useConversions();
   const { aiConfig, updateAI } = useSettings();
   const [ganhoLead, setGanhoLead] = useState<{ id: string; name: string; phone: string | null; patientId: string | null; prevStageId: string | null; ticketId: string } | null>(null);
   const [lossLead, setLossLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
   const [orcamentoLead, setOrcamentoLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
+  // Aviso ao arrastar um card já resolvido (venda/perda) para uma etapa ativa: manter (novo
+  // ciclo, card único) ou cancelar (reabre o mesmo ticket). Guarda o ticket p/ o fluxo "Manter".
+  const [reopenLead, setReopenLead] = useState<{ ticket: Ticket; outcome: 'ganho' | 'perdido'; targetStageId: string } | null>(null);
   const { data: transitionRules, create: createRule, remove: removeRule, update: updateRule, reorder: reorderRules, testRule, lookupActiveStageByPhone } = useTransitionRules();
   const [showModal, setShowModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -1211,39 +1311,58 @@ export function LeadKanban() {
     setDragOverStage(stageId);
   };
 
+  // Executa o drop "normal" (usado tanto no arraste comum quanto no botão "Manter" do aviso):
+  // move o ticket e, conforme a etapa-alvo, abre o modal de registro. Num ticket resolvido, o
+  // moveTicket dispara o "novo ciclo" (preserva a venda/perda e abre ticket novo na etapa-alvo).
+  const performDrop = async (ticket: Ticket, targetStageId: string) => {
+    const targetStage = stages.find(s => s.id === targetStageId);
+
+    // "Agendado" exige um agendamento real: em vez de só mover a etapa, abre o modal
+    // de agenda (mesmo do módulo Agendamentos). O ticket só vai para "Agendado" quando
+    // o appointment é criado (trigger fn_auto_move_lead_to_agendado). Se cancelar, não move.
+    if (targetStage?.slug === 'agendado') {
+      if (ticket.lead) {
+        setScheduleLead({ lead: ticket.lead, ticketId: ticket.id });
+        setScheduleForm({ doctor_id: doctors[0]?.id || '', date: '', time: '', notes: '', consultation_type_id: '' });
+        setScheduleError(null);
+        setScheduleSlots(null);
+      }
+      return;
+    }
+
+    await moveTicket(ticket.id, targetStageId);
+
+    if (targetStage?.slug === 'ganho') {
+      setGanhoLead({ id: ticket.lead_id, name: ticket.lead?.name ?? '', phone: ticket.lead?.phone ?? null, patientId: ticket.lead?.converted_patient_id ?? null, prevStageId: ticket.stage_id, ticketId: ticket.id });
+    } else if (targetStage?.slug === 'perdido') {
+      setLossLead({ id: ticket.lead_id, name: ticket.lead?.name ?? '', prevStageId: ticket.stage_id, ticketId: ticket.id });
+    } else if (targetStage?.slug === 'orcamento') {
+      // Registra valor + produto/serviço (NÃO gera conversão; só metadados no lead/ticket).
+      setOrcamentoLead({ id: ticket.lead_id, name: ticket.lead?.name ?? '', prevStageId: ticket.stage_id, ticketId: ticket.id });
+    }
+  };
+
   const handleDrop = async (e: React.DragEvent, targetStageId: string) => {
     e.preventDefault();
     setDragOverStage(null);
 
-    if (draggedLead && draggedLead.stage_id !== targetStageId) {
-      const targetStage = stages.find(s => s.id === targetStageId);
-
-      // "Agendado" exige um agendamento real: em vez de só mover a etapa, abre o modal
-      // de agenda (mesmo do módulo Agendamentos). O ticket só vai para "Agendado" quando
-      // o appointment é criado (trigger fn_auto_move_lead_to_agendado). Se cancelar, não move.
-      if (targetStage?.slug === 'agendado') {
-        if (draggedLead.lead) {
-          setScheduleLead({ lead: draggedLead.lead, ticketId: draggedLead.id });
-          setScheduleForm({ doctor_id: doctors[0]?.id || '', date: '', time: '', notes: '', consultation_type_id: '' });
-          setScheduleError(null);
-          setScheduleSlots(null);
-        }
-        setDraggedLead(null);
-        return;
-      }
-
-      await moveTicket(draggedLead.id, targetStageId);
-
-      if (targetStage?.slug === 'ganho') {
-        setGanhoLead({ id: draggedLead.lead_id, name: draggedLead.lead?.name ?? '', phone: draggedLead.lead?.phone ?? null, patientId: draggedLead.lead?.converted_patient_id ?? null, prevStageId: draggedLead.stage_id, ticketId: draggedLead.id });
-      } else if (targetStage?.slug === 'perdido') {
-        setLossLead({ id: draggedLead.lead_id, name: draggedLead.lead?.name ?? '', prevStageId: draggedLead.stage_id, ticketId: draggedLead.id });
-      } else if (targetStage?.slug === 'orcamento') {
-        // Registra valor + produto/serviço (NÃO gera conversão; só metadados no lead/ticket).
-        setOrcamentoLead({ id: draggedLead.lead_id, name: draggedLead.lead?.name ?? '', prevStageId: draggedLead.stage_id, ticketId: draggedLead.id });
-      }
-    }
+    const ticket = draggedLead;
     setDraggedLead(null);
+    if (!ticket || ticket.stage_id === targetStageId) return;
+
+    const targetStage = stages.find(s => s.id === targetStageId);
+    const originStage = stages.find(s => s.id === ticket.stage_id);
+    const resolvedKind: 'ganho' | 'perdido' | null =
+      ticket.outcome ?? (originStage?.slug === 'ganho' ? 'ganho' : originStage?.slug === 'perdido' ? 'perdido' : null);
+    // Origem já resolvida (venda/perda) indo para uma etapa ATIVA: pergunta Manter x Cancelar.
+    // Alvos terminais/agendado seguem o fluxo normal (mudar de venda p/ perda, reagendar, etc.).
+    const targetIsSpecial = !!targetStage && ['ganho', 'perdido', 'agendado'].includes(targetStage.slug || '');
+    if (resolvedKind && !targetIsSpecial) {
+      setReopenLead({ ticket, outcome: resolvedKind, targetStageId });
+      return;
+    }
+
+    await performDrop(ticket, targetStageId);
   };
 
   const handleSubmit = async () => {
@@ -2136,9 +2255,14 @@ export function LeadKanban() {
                     const lead = ticket.lead!;
                     const isClosed = ticket.status === 'closed';
                     const isPerdido = stage.slug === 'perdido';
+                    const isGanho = stage.slug === 'ganho';
                     const semMotivo = isPerdido && !lead.loss_reason && !ticket.loss_reason && !isClosed;
                     const lastContact = lead.last_activity_at ?? lead.created_at;
                     const frozen = isClosed || !!lead.converted_patient_id || isPerdido;
+                    // Cards na etapa "Ganho" (ticket fechado/convertido) podem ser arrastados p/ outra
+                    // etapa: o move_lead_stage preserva o ganho e abre um ticket NOVO (novo ciclo) na
+                    // etapa-alvo — ver migration 20260622000006.
+                    const canDrag = isGanho || (!isClosed && !lead.converted_patient_id);
                     // Contagem persistente do banco + ciclo atual estourado
                     const currentCycleBreach = (() => {
                       if (frozen || !aiConfig?.sla_minutes || !aiConfig?.business_hours || !lead.last_message_at) return false;
@@ -2160,13 +2284,13 @@ export function LeadKanban() {
                       <motion.div
                         key={ticket.id}
                         id={`funnel-card-${lead.id}`}
-                        draggable={!isClosed && !lead.converted_patient_id}
-                        onDragStart={!isClosed && !lead.converted_patient_id ? (e) => handleDragStart(e as unknown as React.DragEvent<Element>, ticket) : undefined}
-                        whileHover={{ y: isClosed ? 0 : -1 }}
+                        draggable={canDrag}
+                        onDragStart={canDrag ? (e) => handleDragStart(e as unknown as React.DragEvent<Element>, ticket) : undefined}
+                        whileHover={{ y: canDrag ? -1 : 0 }}
                         className={cn(
                           "px-3 py-2.5 rounded-lg border shadow-sm transition-all group",
                           highlightLeadId === lead.id && "ring-2 ring-teal-400 ring-offset-2 shadow-lg",
-                          !frozen && !isClosed ? "cursor-pointer active:cursor-move hover:shadow-md" : "cursor-default",
+                          canDrag ? "cursor-pointer active:cursor-move hover:shadow-md" : "cursor-default",
                           isClosed && "opacity-50 grayscale-[0.5] hover:opacity-75",
                           draggedLead?.id === ticket.id && "opacity-50",
                           semMotivo && "animate-pulse",
@@ -2934,7 +3058,8 @@ export function LeadKanban() {
             if (prevStageId) moveTicket(ticketId, prevStageId);
           }}
           onCreate={async (data) => {
-            const ok = await createConversion(data);
+            // Grava ticket_id na conversão p/ o "Cancelar venda" apagá-la com precisão depois.
+            const ok = await createConversion({ ...data, ticket_id: ganhoLead.ticketId });
             if (ok) {
               const ganhoStage = stages.find(s => s.slug === 'ganho');
               if (ganhoStage) await moveTicket(ganhoLead.ticketId, ganhoStage.id);
@@ -2980,6 +3105,34 @@ export function LeadKanban() {
               await supabase.from('tickets').update({ notes: description }).eq('id', orcamentoLead.ticketId);
             }
             return true;
+          }}
+        />
+      )}
+
+      {/* Aviso Manter x Cancelar ao arrastar um card já resolvido (venda/perda) p/ etapa ativa */}
+      {reopenLead && (
+        <ReopenChoiceModal
+          info={reopenLead}
+          targetStageName={stages.find(s => s.id === reopenLead.targetStageId)?.name ?? ''}
+          onClose={() => setReopenLead(null)}
+          onKeep={async () => {
+            const { ticket, targetStageId } = reopenLead;
+            setReopenLead(null);
+            await performDrop(ticket, targetStageId);
+          }}
+          onCancelOutcome={async (cancelAppointment) => {
+            const { ticket, targetStageId } = reopenLead;
+            setReopenLead(null);
+            await reopenTicket(ticket.id, targetStageId, cancelAppointment);
+          }}
+          checkAppointment={async (ticketId) => {
+            const { data } = await supabase
+              .from('appointments')
+              .select('id, date, time, status, doctor:doctors(name)')
+              .eq('ticket_id', ticketId)
+              .order('date', { ascending: false });
+            const a = (data || []).find((x: any) => x.status !== 'cancelado' && x.status !== 'faltou');
+            return a ? { id: a.id, date: a.date, time: a.time, status: a.status, doctorName: (a as any).doctor?.name } : null;
           }}
         />
       )}

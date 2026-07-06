@@ -1070,6 +1070,24 @@ export function useTickets() {
     return true;
   };
 
+  // Cancela o desfecho (venda/perda) reabrindo o MESMO ticket na etapa-alvo — diferente do
+  // moveTicket, que num ticket resolvido dispara "novo ciclo" (ticket novo). A RPC reopen_ticket
+  // zera outcome (via trigger de consistência), reabre status/closed_at e, para venda, apaga a
+  // receita órfã (conversions + financial_transactions) e desvincula o paciente se não houver
+  // consulta ativa. p_cancel_appointment cancela também a consulta ativa, se houver.
+  const reopenTicket = async (ticketId: string, stageId: string, cancelAppointment = false) => {
+    setTickets(prev => prev.map(t => t.id === ticketId
+      ? { ...t, stage_id: stageId, status: 'open', outcome: null, outcome_at: null, closed_at: null, loss_reason: null }
+      : t));
+    const { data, error } = await supabase.rpc('reopen_ticket', {
+      p_ticket_id: ticketId,
+      p_new_stage_id: stageId,
+      p_cancel_appointment: cancelAppointment,
+    });
+    if (error || !(data as any)?.success) { fetch(true); return false; }
+    return true;
+  };
+
   const openTicket = async (leadId: string, stageId: string) => {
     const alreadyOpen = tickets.some(t => t.lead_id === leadId && t.status === 'open');
     if (alreadyOpen) return null;
@@ -1168,7 +1186,7 @@ export function useTickets() {
     }
   };
 
-  return { tickets, loading, refetch: fetch, moveTicket, openTicket, closeTicket, finalizeTicket };
+  return { tickets, loading, refetch: fetch, moveTicket, reopenTicket, openTicket, closeTicket, finalizeTicket };
 }
 
 // ==========================================
@@ -2450,6 +2468,9 @@ export interface Conversion {
   protocol_ids: string[];
   converted_at: string;
   created_at: string;
+  // Vínculo com o ticket da venda. Permite ao reopen_ticket (Cancelar venda) apagar a conversão
+  // com precisão, em vez de depender do casamento por proximidade temporal (vendas antigas).
+  ticket_id?: string | null;
 }
 
 export function useConversions() {

@@ -33,10 +33,12 @@ import {
     Edit2,
     ToggleLeft,
     ToggleRight,
+    Package,
+    Ruler,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { useSettings, useProtocols, Protocol, Clinic, AIConfig, WhatsappInstance } from "../hooks/useSupabase";
+import { useSettings, useProtocols, Protocol, useProducts, Product, ProductAttribute, Clinic, AIConfig, WhatsappInstance } from "../hooks/useSupabase";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "./ui/toast";
@@ -60,7 +62,7 @@ export function Settings() {
     const { userRole } = useAuth();
     const showToast = useToast();
     const { clinic, aiConfig, whatsapp, loading, updateClinic, updateAI, updateWhatsapp, generateConnectToken } = useSettings();
-    const [activeTab, setActiveTab] = useState<"clinic" | "integrations" | "protocols">(() => (localStorage.getItem('settingsTab') as any) || "clinic");
+    const [activeTab, setActiveTab] = useState<"clinic" | "integrations" | "protocols" | "products">(() => (localStorage.getItem('settingsTab') as any) || "clinic");
     const [activeIntTab, setActiveIntTab] = useState<'whatsapp' | 'meta' | 'google'>(() => (localStorage.getItem('settingsIntTab') as any) || 'whatsapp');
     
     // Local states for editing
@@ -75,6 +77,12 @@ export function Settings() {
     const { data: protocols, create: createProtocol, update: updateProtocol, remove: removeProtocol } = useProtocols();
     const [protocolModal, setProtocolModal] = useState<{ open: boolean; item: Partial<Protocol> | null }>({ open: false, item: null });
     const [savingProtocol, setSavingProtocol] = useState(false);
+
+    // Produtos (catalogo generico e personalizavel)
+    const { data: products, create: createProduct, update: updateProduct, remove: removeProduct } = useProducts();
+    const [productModal, setProductModal] = useState<{ open: boolean; item: Partial<Product> | null }>({ open: false, item: null });
+    const [savingProduct, setSavingProduct] = useState(false);
+
     const loadedClinicId = useRef<string | null>(null);
 
     useEffect(() => {
@@ -231,6 +239,14 @@ export function Settings() {
         }
     }, [restrictedIntegrations, activeIntTab]);
 
+    // Aba de Produtos e restrita (config de catalogo); secretaria cai de volta em "clinic".
+    useEffect(() => {
+        if (isSecretaria && activeTab === 'products') {
+            setActiveTab('clinic');
+            localStorage.setItem('settingsTab', 'clinic');
+        }
+    }, [isSecretaria, activeTab]);
+
     // Deep-link vindo do banner global (WhatsApp desconectado): leva direto
     // para Integracoes > WhatsApp.
     useEffect(() => {
@@ -260,6 +276,7 @@ export function Settings() {
     const tabs = [
         { id: "clinic", label: "Dados da Clínica", icon: Building2, color: "text-emerald-600" },
         { id: "integrations", label: "Integrações", icon: Plug, color: "text-violet-600" },
+        ...(!isSecretaria ? [{ id: "products", label: "Produtos", icon: Package, color: "text-amber-600" }] : []),
     ];
 
     const handleSaveProtocol = async () => {
@@ -283,6 +300,40 @@ export function Settings() {
         setSavingProtocol(false);
         setProtocolModal({ open: false, item: null });
     };
+
+    const handleSaveProduct = async () => {
+        const item = productModal.item;
+        if (!item?.name?.trim()) return;
+        setSavingProduct(true);
+        // Descarta campos extras totalmente vazios
+        const cleanAttrs = (item.attributes ?? []).filter(a => (a.label?.trim() || a.value?.trim()));
+        const payload = {
+            name: item.name.trim(),
+            description: item.description?.trim() || null,
+            unit: item.unit?.trim() || 'un',
+            unit_price: item.unit_price ?? 0,
+            attributes: cleanAttrs,
+            is_active: item.is_active ?? true,
+        };
+        if (item.id) {
+            await updateProduct(item.id, payload);
+        } else {
+            await createProduct(payload);
+        }
+        setSavingProduct(false);
+        setProductModal({ open: false, item: null });
+    };
+
+    // Edicao dos campos personalizados (attributes) dentro do modal de produto
+    const addProductAttr = () => setProductModal(prev => prev.item
+        ? { ...prev, item: { ...prev.item, attributes: [...(prev.item.attributes ?? []), { label: '', value: '', unit: '' }] } }
+        : prev);
+    const updateProductAttr = (i: number, field: keyof ProductAttribute, val: string) => setProductModal(prev => prev.item
+        ? { ...prev, item: { ...prev.item, attributes: (prev.item.attributes ?? []).map((a, idx) => idx === i ? { ...a, [field]: val } : a) } }
+        : prev);
+    const removeProductAttr = (i: number) => setProductModal(prev => prev.item
+        ? { ...prev, item: { ...prev.item, attributes: (prev.item.attributes ?? []).filter((_, idx) => idx !== i) } }
+        : prev);
 
     return (
         <div className="space-y-8 h-full flex flex-col">
@@ -546,9 +597,188 @@ export function Settings() {
                             />
                         )}
 
+                        {activeTab === "products" && !isSecretaria && (
+                            <Card className="border border-slate-200 shadow-sm max-w-4xl mx-auto">
+                                <CardHeader className="flex flex-row items-start justify-between gap-4">
+                                    <div>
+                                        <CardTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                                            <Package className="w-5 h-5 text-teal-600" />
+                                            Catálogo de Produtos
+                                        </CardTitle>
+                                        <p className="text-xs text-slate-400 mt-1 max-w-md">Cadastre produtos com unidade, valor e campos personalizados. No orçamento, basta escolher o produto e a quantidade — o total é calculado automaticamente.</p>
+                                    </div>
+                                    <Button onClick={() => setProductModal({ open: true, item: { name: '', description: '', unit: 'metro', unit_price: 0, attributes: [], is_active: true } })} className="gap-2 shrink-0">
+                                        <Plus className="w-4 h-4" /> Novo Produto
+                                    </Button>
+                                </CardHeader>
+                                <CardContent>
+                                    {products.length === 0 ? (
+                                        <div className="text-center py-12 text-slate-400">
+                                            <Package className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                                            <p className="font-medium">Nenhum produto cadastrado</p>
+                                            <p className="text-sm">Crie produtos para orçar automaticamente por quantidade × valor</p>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {products.map(p => (
+                                                <div key={p.id} className="flex items-center justify-between p-3 rounded-xl border border-slate-100 hover:border-slate-200 bg-white transition-all group">
+                                                    <div className="flex items-center gap-3 min-w-0">
+                                                        <button onClick={() => updateProduct(p.id, { is_active: !p.is_active })} className="shrink-0">
+                                                            {p.is_active
+                                                                ? <ToggleRight className="w-6 h-6 text-teal-500" />
+                                                                : <ToggleLeft className="w-6 h-6 text-slate-300" />}
+                                                        </button>
+                                                        <div className="min-w-0">
+                                                            <p className={cn("font-semibold text-sm truncate", !p.is_active && "text-slate-400 line-through")}>{p.name}</p>
+                                                            <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                                                                {p.description && <span className="text-xs text-slate-400 truncate max-w-[200px]">{p.description}</span>}
+                                                                {(p.attributes ?? []).slice(0, 4).map((a, i) => (
+                                                                    <span key={i} className="text-[10px] font-medium bg-slate-50 border border-slate-100 text-slate-500 px-1.5 py-0.5 rounded">
+                                                                        {a.label}{a.value ? `: ${a.value}` : ''}{a.unit ? ` ${a.unit}` : ''}
+                                                                    </span>
+                                                                ))}
+                                                                {(p.attributes?.length ?? 0) > 4 && <span className="text-[10px] text-slate-400">+{(p.attributes!.length - 4)}</span>}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-3 shrink-0 ml-4">
+                                                        <span className="text-sm font-semibold text-emerald-600 whitespace-nowrap">
+                                                            R$ {Number(p.unit_price).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                            <span className="text-xs font-normal text-slate-400"> /{p.unit}</span>
+                                                        </span>
+                                                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                            <button onClick={() => setProductModal({ open: true, item: { ...p, attributes: [...(p.attributes ?? [])] } })} className="p-1.5 rounded-lg text-slate-400 hover:text-teal-600 hover:bg-teal-50 transition-colors"><Edit2 className="w-3.5 h-3.5" /></button>
+                                                            <button onClick={() => removeProduct(p.id)} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </CardContent>
+                            </Card>
+                        )}
+
                     </motion.div>
                 </AnimatePresence>
             </div>
+
+            {/* Modal: Produto */}
+            <AnimatePresence>
+                {productModal.open && productModal.item && (
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setProductModal({ open: false, item: null })}>
+                        <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4 max-h-[90vh] overflow-y-auto custom-scrollbar" onClick={e => e.stopPropagation()}>
+                            <div className="flex items-center justify-between">
+                                <h3 className="font-bold text-slate-900 text-base">{productModal.item.id ? 'Editar Produto' : 'Novo Produto'}</h3>
+                                <button onClick={() => setProductModal({ open: false, item: null })} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+                            </div>
+
+                            <datalist id="product-unit-suggestions">
+                                {['metro', 'm²', 'unidade', 'hora', 'kg', 'litro', 'peça', 'pacote', 'caixa', 'rolo', 'dia', 'm³'].map(u => <option key={u} value={u} />)}
+                            </datalist>
+
+                            <div className="space-y-3">
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Nome *</label>
+                                    <input
+                                        type="text"
+                                        placeholder="Ex: Tela Mosquiteira Fio 0,30"
+                                        value={productModal.item.name ?? ''}
+                                        onChange={e => setProductModal(prev => ({ ...prev, item: { ...prev.item!, name: e.target.value } }))}
+                                        className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                                        autoFocus
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Descrição</label>
+                                    <input
+                                        type="text"
+                                        placeholder="Descrição opcional"
+                                        value={productModal.item.description ?? ''}
+                                        onChange={e => setProductModal(prev => ({ ...prev, item: { ...prev.item!, description: e.target.value } }))}
+                                        className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                                    />
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Unidade de medida</label>
+                                        <div className="relative">
+                                            <Ruler className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300 pointer-events-none" />
+                                            <input
+                                                type="text"
+                                                list="product-unit-suggestions"
+                                                placeholder="metro"
+                                                value={productModal.item.unit ?? ''}
+                                                onChange={e => setProductModal(prev => ({ ...prev, item: { ...prev.item!, unit: e.target.value } }))}
+                                                className="w-full border border-slate-200 rounded-xl pl-9 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                                            />
+                                        </div>
+                                        <p className="text-[10px] text-slate-400 mt-1">Base do cálculo (ex.: valor por metro)</p>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Valor por unidade</label>
+                                        <MoneyInput
+                                            value={productModal.item.unit_price ?? 0}
+                                            onChange={v => setProductModal(prev => ({ ...prev, item: { ...prev.item!, unit_price: v || 0 } }))}
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="pt-1">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide">Campos personalizados</label>
+                                        <button type="button" onClick={addProductAttr} className="text-xs font-bold text-teal-600 hover:text-teal-700 flex items-center gap-1">
+                                            <Plus className="w-3.5 h-3.5" /> Adicionar campo
+                                        </button>
+                                    </div>
+                                    {(productModal.item.attributes ?? []).length === 0 ? (
+                                        <p className="text-xs text-slate-400 bg-slate-50 border border-dashed border-slate-200 rounded-xl px-3 py-3 text-center">
+                                            Nenhum campo. Ex.: Fio, Malha, Material, Comprimento, Altura…
+                                        </p>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {(productModal.item.attributes ?? []).map((a, i) => (
+                                                <div key={i} className="flex items-center gap-2">
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Rótulo (ex: Fio)"
+                                                        value={a.label}
+                                                        onChange={e => updateProductAttr(i, 'label', e.target.value)}
+                                                        className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                                                    />
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Valor"
+                                                        value={a.value}
+                                                        onChange={e => updateProductAttr(i, 'value', e.target.value)}
+                                                        className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                                                    />
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Un."
+                                                        value={a.unit ?? ''}
+                                                        onChange={e => updateProductAttr(i, 'unit', e.target.value)}
+                                                        className="w-14 shrink-0 border border-slate-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                                                    />
+                                                    <button type="button" onClick={() => removeProductAttr(i)} className="p-1.5 shrink-0 text-slate-300 hover:text-rose-500 transition-colors"><Trash2 className="w-4 h-4" /></button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="flex gap-2 pt-2">
+                                <Button variant="outline" className="flex-1" onClick={() => setProductModal({ open: false, item: null })}>Cancelar</Button>
+                                <Button className="flex-1" onClick={handleSaveProduct} disabled={savingProduct || !productModal.item.name?.trim()}>
+                                    {savingProduct ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Check className="w-4 h-4 mr-2" />}
+                                    Salvar
+                                </Button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             {/* Modal: Protocolo */}
             <AnimatePresence>

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from "react";
+import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import { matchesSearch, leadSearchOrFilter } from "../lib/search";
@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { useFunnelStages, useLeads, useNotLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useAppointments, useDoctors, usePatients, useConsultationTypes, Conversion, Lead, Ticket, TransitionRule } from "../hooks/useSupabase";
+import { useFunnelStages, useLeads, useNotLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useProducts, Product, useAppointments, useDoctors, usePatients, useConsultationTypes, Conversion, Lead, Ticket, TransitionRule } from "../hooks/useSupabase";
 import { NotLeadPanel } from "./NotLeadPanel";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -927,23 +927,71 @@ function GanhoModal({ lead, onClose, onCancel, onCreate, createPatient, updateLe
   );
 }
 
-// Modal ao mover para "Orçamento Enviado": registra valor + produto/serviço.
-// NÃO gera conversão — só grava metadados no lead (estimated_value) e no ticket (notes).
+// Quantidade "bonita": sem casas decimais forçadas (30, 1,5, 12,25...).
+const formatQty = (n: number) => Number(n).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
+
+// Modal ao mover para "Orçamento Enviado": monta o orçamento selecionando produtos do
+// catálogo (produto + quantidade => subtotal = qtd × valor/unidade) e soma o total.
+// NÃO gera conversão — só grava metadados no lead (estimated_value = total) e no ticket
+// (notes = resumo itemizado em texto). Se a clínica ainda não tem catálogo, cai no modo
+// manual (digita o valor), preservando o comportamento anterior.
 function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
   lead: { id: string; name: string };
   onClose: () => void;
   onCancel: () => void;
   onConfirm: (value: number, description: string) => Promise<boolean>;
 }) {
-  const [value, setValue] = useState('');
-  const [description, setDescription] = useState('');
+  const { data: products } = useProducts();
+  const activeProducts = useMemo(() => products.filter(p => p.is_active), [products]);
+  const hasCatalog = activeProducts.length > 0;
+  const productById = useMemo(() => {
+    const m: Record<string, Product> = {};
+    activeProducts.forEach(p => { m[p.id] = p; });
+    return m;
+  }, [activeProducts]);
+
+  const [lines, setLines] = useState<{ productId: string; qty: string }[]>([{ productId: '', qty: '' }]);
+  const [manualValue, setManualValue] = useState('');
+  const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
 
+  const lineSubtotal = (l: { productId: string; qty: string }) => {
+    const p = productById[l.productId];
+    const q = Number(String(l.qty).replace(',', '.'));
+    if (!p || !q || q <= 0) return 0;
+    return q * Number(p.unit_price);
+  };
+  const computedTotal = useMemo(
+    () => lines.reduce((s, l) => s + lineSubtotal(l), 0),
+    [lines, productById]
+  );
+  const total = hasCatalog ? computedTotal : Number(manualValue || 0);
+
+  const addLine = () => setLines(prev => [...prev, { productId: '', qty: '' }]);
+  const removeLine = (i: number) => setLines(prev => prev.length === 1 ? prev : prev.filter((_, idx) => idx !== i));
+  const updateLine = (i: number, field: 'productId' | 'qty', val: string) =>
+    setLines(prev => prev.map((l, idx) => idx === i ? { ...l, [field]: val } : l));
+
+  const buildDescription = () => {
+    const parts: string[] = [];
+    if (hasCatalog) {
+      lines.forEach(l => {
+        const p = productById[l.productId];
+        const q = Number(String(l.qty).replace(',', '.'));
+        if (!p || !q || q <= 0) return;
+        parts.push(`${p.name} — ${formatQty(q)} ${p.unit} × ${formatBRL(p.unit_price)} = ${formatBRL(q * Number(p.unit_price))}`);
+      });
+      if (parts.length) parts.push(`TOTAL: ${formatBRL(total)}`);
+    }
+    if (notes.trim()) parts.push(`${parts.length ? '\n' : ''}Obs: ${notes.trim()}`);
+    return parts.join('\n');
+  };
+
   const handleSave = async () => {
-    if (!value || Number(value) <= 0) return;
+    if (!total || total <= 0) return;
     setSaving(true);
-    const ok = await onConfirm(Number(value), description.trim());
+    const ok = await onConfirm(total, buildDescription().trim());
     if (ok) { setDone(true); setTimeout(onClose, 900); }
     setSaving(false);
   };
@@ -953,11 +1001,11 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden max-h-[90vh] flex flex-col"
         onClick={e => e.stopPropagation()}
       >
-        <div className="h-1.5 bg-blue-500" />
-        <div className="p-6 space-y-4">
+        <div className="h-1.5 bg-blue-500 shrink-0" />
+        <div className="p-6 space-y-4 overflow-y-auto">
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-base font-black text-slate-900">Registrar Orçamento</h3>
@@ -966,18 +1014,70 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
             <button onClick={onCancel} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4 text-slate-400" /></button>
           </div>
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Valor do Orçamento (R$)</label>
-            <CurrencyInput autoFocus value={value} onChange={setValue} className="focus:ring-blue-500/20 focus:border-blue-500" />
-          </div>
+          {hasCatalog ? (
+            <div className="space-y-2.5">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Produtos</label>
+              {lines.map((l, i) => {
+                const p = productById[l.productId];
+                const subtotal = lineSubtotal(l);
+                return (
+                  <div key={i} className="rounded-xl border border-slate-200 p-2.5 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={l.productId}
+                        onChange={e => updateLine(i, 'productId', e.target.value)}
+                        className="flex-1 min-w-0 px-2.5 py-2 border border-slate-200 rounded-lg text-sm font-medium bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                      >
+                        <option value="">Selecione um produto…</option>
+                        {activeProducts.map(op => <option key={op.id} value={op.id}>{op.name}</option>)}
+                      </select>
+                      {lines.length > 1 && (
+                        <button onClick={() => removeLine(i)} className="p-1.5 shrink-0 text-slate-300 hover:text-rose-500 transition-colors"><Trash2 className="w-4 h-4" /></button>
+                      )}
+                    </div>
+                    {p && (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          inputMode="decimal"
+                          placeholder="Qtd"
+                          value={l.qty}
+                          onChange={e => updateLine(i, 'qty', e.target.value)}
+                          className="w-20 shrink-0 px-2.5 py-2 border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                        />
+                        <span className="text-xs font-medium text-slate-500 flex-1 min-w-0 truncate">{p.unit} × {formatBRL(p.unit_price)}</span>
+                        <span className="text-sm font-black text-slate-800 shrink-0">{formatBRL(subtotal)}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              <button onClick={addLine} className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1">
+                <Plus className="w-3.5 h-3.5" /> Adicionar produto
+              </button>
+
+              <div className="flex items-center justify-between pt-2 mt-1 border-t border-slate-100">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Total</span>
+                <span className="text-lg font-black text-blue-600">{formatBRL(total)}</span>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Valor do Orçamento (R$)</label>
+              <CurrencyInput autoFocus value={manualValue} onChange={setManualValue} className="focus:ring-blue-500/20 focus:border-blue-500" />
+              <p className="text-[11px] text-slate-400">Cadastre produtos em Configurações › Produtos para calcular automaticamente.</p>
+            </div>
+          )}
 
           <div className="space-y-1.5">
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Produto / Serviço</label>
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Observações</label>
             <textarea
-              value={description}
-              onChange={e => setDescription(e.target.value)}
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
               rows={2}
-              placeholder="Descreva o produto ou serviço orçado..."
+              placeholder="Detalhes adicionais do orçamento (opcional)…"
               className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none"
             />
           </div>
@@ -988,11 +1088,11 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
             </button>
             <button
               onClick={handleSave}
-              disabled={saving || !value || Number(value) <= 0}
+              disabled={saving || !total || total <= 0}
               className={cn(
                 "flex-1 py-2.5 rounded-xl text-sm font-black transition-all flex items-center justify-center gap-2",
                 done ? "bg-emerald-500 text-white" :
-                  saving ? "bg-slate-100 text-slate-400" :
+                  (saving || !total || total <= 0) ? "bg-slate-100 text-slate-400" :
                     "bg-blue-600 hover:bg-blue-700 text-white"
               )}
             >

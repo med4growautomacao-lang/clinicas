@@ -2600,6 +2600,89 @@ export function useProtocols() {
 }
 
 // ==========================================
+// PRODUCTS (catalogo generico e personalizavel)
+// ==========================================
+
+// Campo extra livre de um produto (fio, malha, material, comprimento...).
+export interface ProductAttribute {
+  label: string;
+  value: string;
+  unit?: string | null;
+}
+
+export interface Product {
+  id: string;
+  clinic_id: string;
+  name: string;
+  description: string | null;
+  unit: string;              // unidade de medida (metro, m2, un, hora, kg...)
+  unit_price: number;        // valor por unidade
+  attributes: ProductAttribute[];
+  is_active: boolean;
+  created_at: string;
+}
+
+export type ProductInput = Pick<Product, 'name' | 'description' | 'unit' | 'unit_price' | 'attributes' | 'is_active'>;
+
+export function useProducts() {
+  const { activeClinicId } = useAuth();
+  const [data, setData] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = useCallback(async (silent = false) => {
+    if (!activeClinicId) return;
+    const cacheKey = `products:${activeClinicId}`;
+    const cached = getCached<Product[]>(cacheKey);
+    if (cached) { setData(cached); setLoading(false); return; }
+    if (!silent) setLoading(true);
+    const { data } = await supabase
+      .from('products')
+      .select('*')
+      .eq('clinic_id', activeClinicId)
+      .order('name');
+    setCached(cacheKey, data || []);
+    setData((data as Product[]) || []);
+    setLoading(false);
+  }, [activeClinicId]);
+
+  useEffect(() => { fetch(); }, [fetch]);
+
+  const create = async (product: ProductInput) => {
+    if (!activeClinicId) return null;
+    const { data, error } = await supabase
+      .from('products')
+      .insert({ ...product, clinic_id: activeClinicId })
+      .select()
+      .single();
+    if (!error) {
+      invalidateCache(`products:${activeClinicId}`);
+      setData(prev => [...prev, data as Product].sort((a, b) => a.name.localeCompare(b.name)));
+    }
+    return error ? null : (data as Product);
+  };
+
+  const update = async (id: string, updates: Partial<Product>) => {
+    const { error } = await supabase.from('products').update(updates).eq('id', id);
+    if (!error) {
+      invalidateCache(`products:${activeClinicId}`);
+      setData(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+    }
+    return !error;
+  };
+
+  const remove = async (id: string) => {
+    const { error } = await supabase.from('products').delete().eq('id', id);
+    if (!error) {
+      invalidateCache(`products:${activeClinicId}`);
+      setData(prev => prev.filter(p => p.id !== id));
+    }
+    return !error;
+  };
+
+  return { data, loading, create, update, remove, refetch: fetch };
+}
+
+// ==========================================
 // PRESCRIPTIONS
 // ==========================================
 export interface PrescriptionMed {

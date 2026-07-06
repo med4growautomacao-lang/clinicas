@@ -936,11 +936,12 @@ const formatQty = (n: number) => Number(n).toLocaleString('pt-BR', { maximumFrac
 // (notes = resumo itemizado em texto). Se a clínica ainda não tem catálogo, cai no modo
 // manual (digita o valor), preservando o comportamento anterior.
 function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
-  lead: { id: string; name: string };
+  lead: { id: string; name: string; phone?: string | null };
   onClose: () => void;
   onCancel: () => void;
   onConfirm: (value: number, description: string) => Promise<boolean>;
 }) {
+  const { activeClinicId } = useAuth();
   const { data: products, create: createProduct } = useProducts();
   const [quickNewFor, setQuickNewFor] = useState<number | null>(null); // linha que está cadastrando produto novo
   const activeProducts = useMemo(() => products.filter(p => p.is_active), [products]);
@@ -956,6 +957,20 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
   const [manualValue, setManualValue] = useState('');
   const [editPrices, setEditPrices] = useState(false);  // destrava a edicao do valor unitario (antes de x qtd)
   const [notes, setNotes] = useState('');
+
+  // Etapa 2 (opcional): configuracao da mensagem enviada por WhatsApp.
+  const firstName = (lead.name || '').trim().split(/\s+/)[0] || '';
+  const [step, setStep] = useState<1 | 2>(1);
+  const [saudacao, setSaudacao] = useState(firstName ? `Olá ${firstName}! 👋` : 'Olá! 👋');
+  const [rodape, setRodape] = useState('Qualquer dúvida, estou à disposição! 😊');
+  const [validade, setValidade] = useState('');
+  const [pagamento, setPagamento] = useState('');
+  const [includeSpecs, setIncludeSpecs] = useState(true);
+  const [messageText, setMessageText] = useState('');
+  const [msgTouched, setMsgTouched] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
 
@@ -1028,13 +1043,73 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
     return parts.join('\n');
   };
 
-  const handleSave = async () => {
-    if (!total || total <= 0) return;
+  // Mensagem formatada para o WhatsApp, montada a partir dos campos da etapa 2 + orçamento.
+  const buildWhatsappMessage = () => {
+    const out: string[] = [];
+    if (saudacao.trim()) { out.push(saudacao.trim()); out.push(''); }
+    out.push('*Orçamento*');
+    lines.forEach(l => {
+      const p = productById[l.productId];
+      const base = lineBase(l);
+      if (!p || base <= 0) return;
+      const q = Number(String(l.qty).replace(',', '.'));
+      out.push('');
+      out.push(`*${p.name}*`);
+      if (includeSpecs && (p.attributes?.length ?? 0) > 0) {
+        out.push((p.attributes ?? []).map(a => `${a.label}${a.value ? `: ${a.value}` : ''}`).join(' | '));
+      }
+      out.push(`${formatQty(q)} ${p.unit} × ${formatBRL(unitPrice(l))} = ${formatBRL(base)}`);
+      if (linePct(l) > 0) out.push(`Desconto ${formatQty(linePct(l))}%: -${formatBRL(lineDiscountValue(l))}`);
+      if (lineFeeValue(l) > 0) out.push(`Frete: +${formatBRL(lineFeeValue(l))}`);
+      if (linePct(l) > 0 || lineFeeValue(l) > 0) out.push(`Subtotal do item: ${formatBRL(lineTotal(l))}`);
+    });
+    out.push('');
+    out.push(`*TOTAL: ${formatBRL(total)}*`);
+    if (validade.trim()) out.push(`Validade: ${validade.trim()}`);
+    if (pagamento.trim()) out.push(`Pagamento: ${pagamento.trim()}`);
+    if (notes.trim()) { out.push(''); out.push(notes.trim()); }
+    if (rodape.trim()) { out.push(''); out.push(rodape.trim()); }
+    return out.join('\n');
+  };
+  const generatedMessage = buildWhatsappMessage();
+  // Enquanto o usuário não editar manualmente, o preview acompanha os campos.
+  useEffect(() => { if (!msgTouched) setMessageText(generatedMessage); }, [generatedMessage, msgTouched]);
+
+  const mapSendError = (code: string) => (({
+    whatsapp_nao_conectado: 'WhatsApp da clínica não está conectado.',
+    telefone_invalido: 'Telefone do lead inválido.',
+    forbidden: 'Sem permissão para enviar por esta clínica.',
+    uazapi_error: 'O WhatsApp recusou o envio. Verifique o número.',
+    send_failed: 'Falha na conexão com o WhatsApp.',
+    missing_params: 'Dados insuficientes para enviar.',
+  } as Record<string, string>)[code] || 'Não foi possível enviar. Tente novamente.');
+
+  // Etapa 1: registra o orçamento sem enviar (fluxo antigo — o WhatsApp é opcional).
+  const handleRegisterOnly = async () => {
+    if (!total || total <= 0 || saving) return;
     setSaving(true);
     const ok = await onConfirm(total, buildDescription().trim());
     if (ok) { setDone(true); setTimeout(onClose, 900); }
     setSaving(false);
   };
+
+  // Etapa 2: registra o orçamento E envia a mensagem pelo WhatsApp do lead.
+  const handleSend = async () => {
+    if (!messageText.trim() || sending) return;
+    if (!activeClinicId || !lead.phone) { setSendError('Lead sem telefone cadastrado.'); return; }
+    setSending(true); setSendError(null);
+    const ok = await onConfirm(total, buildDescription().trim());
+    if (!ok) { setSending(false); setSendError('Falha ao registrar o orçamento.'); return; }
+    const { data, error } = await supabase.functions.invoke('send-quote', {
+      body: { clinic_id: activeClinicId, lead_id: lead.id, phone: lead.phone, text: messageText.trim() },
+    });
+    setSending(false);
+    const code = error ? 'send_failed' : (data && data.ok === false ? String(data.error || '') : null);
+    if (code) { setSendError(mapSendError(code)); return; }
+    setDone(true); setTimeout(onClose, 1300);
+  };
+
+  const canWhatsapp = total > 0 && !!lead.phone;
 
   return (
     <>
@@ -1049,12 +1124,13 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
         <div className="p-6 space-y-4 overflow-y-auto">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-base font-black text-slate-900">Registrar Orçamento</h3>
-              <p className="text-xs text-slate-500 font-medium mt-0.5">{lead.name}</p>
+              <h3 className="text-base font-black text-slate-900">{step === 1 ? 'Registrar Orçamento' : 'Enviar por WhatsApp'}</h3>
+              <p className="text-xs text-slate-500 font-medium mt-0.5">{lead.name}{step === 2 ? ' · Etapa 2 de 2' : ''}</p>
             </div>
             <button onClick={onCancel} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4 text-slate-400" /></button>
           </div>
 
+          {step === 1 && (<>
           {hasCatalog ? (
             <div className="space-y-2.5">
               <div className="flex items-center justify-between">
@@ -1215,26 +1291,139 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
               className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none"
             />
           </div>
+          </>)}
 
-          <div className="flex gap-2 pt-1">
-            <button onClick={onCancel} className="flex-1 py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-500 hover:bg-slate-50 transition-all">
-              Cancelar
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={saving || !total || total <= 0}
-              className={cn(
-                "flex-1 py-2.5 rounded-xl text-sm font-black transition-all flex items-center justify-center gap-2",
-                done ? "bg-emerald-500 text-white" :
-                  (saving || !total || total <= 0) ? "bg-slate-100 text-slate-400" :
-                    "bg-blue-600 hover:bg-blue-700 text-white"
+          {step === 2 && (
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Saudação</label>
+                <input
+                  type="text"
+                  value={saudacao}
+                  onChange={e => setSaudacao(e.target.value)}
+                  placeholder="Olá! Segue seu orçamento:"
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Validade</label>
+                  <input
+                    type="text"
+                    value={validade}
+                    onChange={e => setValidade(e.target.value)}
+                    placeholder="Ex: 7 dias"
+                    className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Pagamento</label>
+                  <input
+                    type="text"
+                    value={pagamento}
+                    onChange={e => setPagamento(e.target.value)}
+                    placeholder="Ex: PIX, cartão…"
+                    className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Rodapé</label>
+                <input
+                  type="text"
+                  value={rodape}
+                  onChange={e => setRodape(e.target.value)}
+                  placeholder="Qualquer dúvida, estou à disposição!"
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                />
+              </div>
+              <label className="flex items-center gap-2 text-sm font-medium text-slate-600 cursor-pointer select-none">
+                <input type="checkbox" checked={includeSpecs} onChange={e => setIncludeSpecs(e.target.checked)} className="w-4 h-4 accent-blue-600" />
+                Incluir especificações dos produtos (malha, fio…)
+              </label>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Mensagem</label>
+                  {msgTouched && (
+                    <button type="button" onClick={() => setMsgTouched(false)} className="text-[11px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1">
+                      <RotateCcw className="w-3 h-3" /> Regenerar
+                    </button>
+                  )}
+                </div>
+                <textarea
+                  value={messageText}
+                  onChange={e => { setMessageText(e.target.value); setMsgTouched(true); }}
+                  rows={10}
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-[13px] leading-relaxed font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none"
+                />
+                <p className="text-[10px] text-slate-400">
+                  {lead.phone ? <>Será enviada ao WhatsApp <span className="font-semibold">{lead.phone}</span>. </> : 'Lead sem telefone cadastrado. '}
+                  No WhatsApp, texto entre *asteriscos* fica em negrito.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Rodapé por etapa */}
+          {step === 1 ? (
+            <div className="space-y-2 pt-1">
+              <button
+                onClick={() => { if (canWhatsapp) { setMsgTouched(false); setStep(2); } }}
+                disabled={!canWhatsapp}
+                title={!lead.phone ? 'Lead sem telefone cadastrado' : (total <= 0 ? 'Monte o orçamento primeiro' : '')}
+                className={cn(
+                  "w-full py-2.5 rounded-xl text-sm font-black transition-all flex items-center justify-center gap-2",
+                  canWhatsapp ? "bg-blue-600 hover:bg-blue-700 text-white" : "bg-slate-100 text-slate-400"
+                )}
+              >
+                <Send className="w-4 h-4" /> Enviar por WhatsApp →
+              </button>
+              <div className="flex gap-2">
+                <button onClick={onCancel} className="flex-1 py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-500 hover:bg-slate-50 transition-all">
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleRegisterOnly}
+                  disabled={saving || !total || total <= 0}
+                  className={cn(
+                    "flex-1 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 border",
+                    done ? "bg-emerald-500 border-emerald-500 text-white" :
+                      (saving || !total || total <= 0) ? "bg-slate-50 border-slate-200 text-slate-400" :
+                        "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+                  )}
+                >
+                  {done ? <><Check className="w-4 h-4" /> Registrado!</> :
+                    saving ? <Loader2 className="w-4 h-4 animate-spin" /> :
+                      'Só registrar'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2 pt-1">
+              {sendError && (
+                <div className="flex items-start gap-2 text-xs font-semibold text-rose-600 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2">
+                  <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {sendError}
+                </div>
               )}
-            >
-              {done ? <><Check className="w-4 h-4" /> Registrado!</> :
-                saving ? <Loader2 className="w-4 h-4 animate-spin" /> :
-                  'Confirmar Orçamento'}
-            </button>
-          </div>
+              <button
+                onClick={handleSend}
+                disabled={sending || done || !messageText.trim()}
+                className={cn(
+                  "w-full py-2.5 rounded-xl text-sm font-black transition-all flex items-center justify-center gap-2",
+                  done ? "bg-emerald-500 text-white" :
+                    (sending || !messageText.trim()) ? "bg-slate-100 text-slate-400" :
+                      "bg-blue-600 hover:bg-blue-700 text-white"
+                )}
+              >
+                {done ? <><Check className="w-4 h-4" /> Enviado!</> :
+                  sending ? <><Loader2 className="w-4 h-4 animate-spin" /> Enviando…</> :
+                    <><Send className="w-4 h-4" /> Enviar pelo WhatsApp</>}
+              </button>
+              <button onClick={() => setStep(1)} disabled={sending} className="w-full py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-500 hover:bg-slate-50 transition-all">
+                ← Voltar
+              </button>
+            </div>
+          )}
         </div>
       </motion.div>
     </div>
@@ -1503,7 +1692,7 @@ export function LeadKanban() {
   const { aiConfig, updateAI } = useSettings();
   const [ganhoLead, setGanhoLead] = useState<{ id: string; name: string; phone: string | null; patientId: string | null; prevStageId: string | null; ticketId: string } | null>(null);
   const [lossLead, setLossLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
-  const [orcamentoLead, setOrcamentoLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
+  const [orcamentoLead, setOrcamentoLead] = useState<{ id: string; name: string; phone: string | null; prevStageId: string | null; ticketId: string } | null>(null);
   // Aviso ao arrastar um card já resolvido (venda/perda) para uma etapa ativa: manter (novo
   // ciclo, card único) ou cancelar (reabre o mesmo ticket). Guarda o ticket p/ o fluxo "Manter".
   const [reopenLead, setReopenLead] = useState<{ ticket: Ticket; outcome: 'ganho' | 'perdido'; targetStageId: string } | null>(null);
@@ -1723,7 +1912,7 @@ export function LeadKanban() {
       setLossLead({ id: ticket.lead_id, name: ticket.lead?.name ?? '', prevStageId: ticket.stage_id, ticketId: ticket.id });
     } else if (targetStage?.slug === 'orcamento') {
       // Registra valor + produto/serviço (NÃO gera conversão; só metadados no lead/ticket).
-      setOrcamentoLead({ id: ticket.lead_id, name: ticket.lead?.name ?? '', prevStageId: ticket.stage_id, ticketId: ticket.id });
+      setOrcamentoLead({ id: ticket.lead_id, name: ticket.lead?.name ?? '', phone: ticket.lead?.phone ?? null, prevStageId: ticket.stage_id, ticketId: ticket.id });
     }
   };
 

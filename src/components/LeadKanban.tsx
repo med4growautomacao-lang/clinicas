@@ -950,42 +950,45 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
     return m;
   }, [activeProducts]);
 
-  const [lines, setLines] = useState<{ productId: string; qty: string; price: string }[]>([{ productId: '', qty: '', price: '' }]);
+  type Line = { productId: string; qty: string; price: string; discount: string; fee: string };
+  const [lines, setLines] = useState<Line[]>([{ productId: '', qty: '', price: '', discount: '', fee: '' }]);
   const [manualValue, setManualValue] = useState('');
-  const [discountPct, setDiscountPct] = useState('');   // desconto em %
-  const [distanceFee, setDistanceFee] = useState('');   // acrescimo por distancia/frete (R$)
   const [editPrices, setEditPrices] = useState(false);  // destrava a edicao do valor unitario (antes de x qtd)
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
 
   // Valor unitario efetivo: o preco editado na linha, ou o cadastrado no produto.
-  const unitPrice = (l: { productId: string; price: string }) => {
+  const unitPrice = (l: Line) => {
     const p = productById[l.productId];
     if (!p) return 0;
     const edited = Number(String(l.price).replace(',', '.'));
     return (l.price !== '' && !isNaN(edited) && edited >= 0) ? edited : Number(p.unit_price);
   };
-  const lineSubtotal = (l: { productId: string; qty: string; price: string }) => {
+  // Desconto (%) e frete (R$) sao POR PRODUTO (por linha).
+  const lineBase = (l: Line) => {
     const p = productById[l.productId];
     const q = Number(String(l.qty).replace(',', '.'));
     if (!p || !q || q <= 0) return 0;
     return q * unitPrice(l);
   };
+  const linePct = (l: Line) => Math.min(100, Math.max(0, Number(String(l.discount).replace(',', '.')) || 0));
+  const lineDiscountValue = (l: Line) => lineBase(l) * (linePct(l) / 100);
+  const lineFeeValue = (l: Line) => Number(l.fee || 0);
+  const lineTotal = (l: Line) => {
+    const base = lineBase(l);
+    if (base <= 0) return 0; // sem produto/quantidade valida -> ignora ajustes
+    return Math.max(0, base - lineDiscountValue(l)) + lineFeeValue(l);
+  };
   const computedTotal = useMemo(
-    () => lines.reduce((s, l) => s + lineSubtotal(l), 0),
+    () => lines.reduce((s, l) => s + lineTotal(l), 0),
     [lines, productById]
   );
-  // Base (produtos ou valor manual) -> aplica desconto (%) -> soma distancia (R$) = total final.
-  const baseTotal = hasCatalog ? computedTotal : Number(manualValue || 0);
-  const pct = Math.min(100, Math.max(0, Number(String(discountPct).replace(',', '.')) || 0));
-  const discountValue = baseTotal * (pct / 100);
-  const feeValue = Number(distanceFee || 0);
-  const total = Math.max(0, baseTotal - discountValue) + feeValue;
+  const total = hasCatalog ? computedTotal : Number(manualValue || 0);
 
-  const addLine = () => setLines(prev => [...prev, { productId: '', qty: '', price: '' }]);
+  const addLine = () => setLines(prev => [...prev, { productId: '', qty: '', price: '', discount: '', fee: '' }]);
   const removeLine = (i: number) => setLines(prev => prev.length === 1 ? prev : prev.filter((_, idx) => idx !== i));
-  const updateLine = (i: number, field: 'qty' | 'price', val: string) =>
+  const updateLine = (i: number, field: 'qty' | 'price' | 'discount' | 'fee', val: string) =>
     setLines(prev => prev.map((l, idx) => idx === i ? { ...l, [field]: val } : l));
   // Ao escolher o produto, semeia o valor unitario com o preco cadastrado (editavel se destravado).
   const selectProduct = (i: number, productId: string) =>
@@ -998,17 +1001,16 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
     if (hasCatalog) {
       lines.forEach(l => {
         const p = productById[l.productId];
+        const base = lineBase(l);
+        if (!p || base <= 0) return;
         const q = Number(String(l.qty).replace(',', '.'));
-        if (!p || !q || q <= 0) return;
-        const up = unitPrice(l);
-        parts.push(`${p.name} — ${formatQty(q)} ${p.unit} × ${formatBRL(up)} = ${formatBRL(q * up)}`);
+        let line = `${p.name} — ${formatQty(q)} ${p.unit} × ${formatBRL(unitPrice(l))} = ${formatBRL(base)}`;
+        const adj: string[] = [];
+        if (linePct(l) > 0) adj.push(`desconto ${formatQty(linePct(l))}%: -${formatBRL(lineDiscountValue(l))}`);
+        if (lineFeeValue(l) > 0) adj.push(`frete: +${formatBRL(lineFeeValue(l))}`);
+        if (adj.length) line += ` [${adj.join('; ')}] = ${formatBRL(lineTotal(l))}`;
+        parts.push(line);
       });
-    }
-    // Subtotal + ajustes (só quando há desconto ou distância).
-    if (pct > 0 || feeValue > 0) {
-      parts.push(`Subtotal: ${formatBRL(baseTotal)}`);
-      if (pct > 0) parts.push(`Desconto ${formatQty(pct)}%: -${formatBRL(discountValue)}`);
-      if (feeValue > 0) parts.push(`Frete: +${formatBRL(feeValue)}`);
     }
     if (parts.length) parts.push(`TOTAL: ${formatBRL(total)}`);
     if (notes.trim()) parts.push(`${parts.length ? '\n' : ''}Obs: ${notes.trim()}`);
@@ -1059,7 +1061,9 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
               </div>
               {lines.map((l, i) => {
                 const p = productById[l.productId];
-                const subtotal = lineSubtotal(l);
+                const base = lineBase(l);
+                const pct = linePct(l);
+                const fee = lineFeeValue(l);
                 return (
                   <div key={i} className="rounded-xl border border-slate-200 p-2.5 space-y-2">
                     <div className="flex items-center gap-2">
@@ -1107,7 +1111,7 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
                           ) : (
                             <span className="text-xs font-medium text-slate-500 flex-1 min-w-0 truncate">{p.unit} × {formatBRL(unitPrice(l))}</span>
                           )}
-                          <span className="text-sm font-black text-slate-800 shrink-0">{formatBRL(subtotal)}</span>
+                          <span className="text-sm font-black text-slate-800 shrink-0">{formatBRL(base)}</span>
                         </div>
                         {(p.description || (p.attributes?.length ?? 0) > 0) && (
                           <div className="flex flex-wrap gap-1.5 pt-0.5">
@@ -1119,6 +1123,50 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
                                 {a.label}{a.value ? `: ${a.value}` : ''}
                               </span>
                             ))}
+                          </div>
+                        )}
+                        {/* Desconto (%) e frete (R$) deste produto */}
+                        <div className="grid grid-cols-2 gap-2 pt-0.5">
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Desconto</label>
+                            <div className="relative">
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="any"
+                                inputMode="decimal"
+                                placeholder="0"
+                                value={l.discount}
+                                onChange={e => updateLine(i, 'discount', e.target.value)}
+                                className="w-full pl-2.5 pr-6 py-1.5 border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                              />
+                              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 pointer-events-none">%</span>
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Frete</label>
+                            <div className="relative">
+                              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] font-bold text-slate-400 pointer-events-none">R$</span>
+                              <input
+                                type="number"
+                                min="0"
+                                step="any"
+                                inputMode="decimal"
+                                placeholder="0,00"
+                                value={l.fee}
+                                onChange={e => updateLine(i, 'fee', e.target.value)}
+                                className="w-full pl-7 pr-2 py-1.5 border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        {(pct > 0 || fee > 0) && (
+                          <div className="flex items-center justify-between pt-1 border-t border-slate-100">
+                            <span className="text-[11px] font-medium text-slate-400">
+                              {pct > 0 ? `−${formatQty(pct)}%` : ''}{pct > 0 && fee > 0 ? ' · ' : ''}{fee > 0 ? `+${formatBRL(fee)} frete` : ''}
+                            </span>
+                            <span className="text-sm font-black text-blue-600">{formatBRL(lineTotal(l))}</span>
                           </div>
                         )}
                       </>
@@ -1138,45 +1186,10 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
             </div>
           )}
 
-          {/* Ajustes: desconto (%) e acréscimo por distância (R$) */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Desconto (%)</label>
-              <div className="relative">
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="any"
-                  inputMode="decimal"
-                  placeholder="0"
-                  value={discountPct}
-                  onChange={e => setDiscountPct(e.target.value)}
-                  className="w-full pl-3 pr-7 py-3 border border-slate-200 rounded-xl text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400 pointer-events-none">%</span>
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Frete (R$)</label>
-              <CurrencyInput value={distanceFee} onChange={setDistanceFee} className="focus:ring-blue-500/20 focus:border-blue-500" />
-            </div>
-          </div>
-
-          {/* Resumo + total */}
-          <div className="rounded-xl bg-slate-50 border border-slate-100 p-3 space-y-1.5">
-            {(pct > 0 || feeValue > 0) && (
-              <>
-                <div className="flex justify-between text-xs text-slate-500"><span>Subtotal</span><span>{formatBRL(baseTotal)}</span></div>
-                {pct > 0 && <div className="flex justify-between text-xs text-emerald-600"><span>Desconto {formatQty(pct)}%</span><span>− {formatBRL(discountValue)}</span></div>}
-                {feeValue > 0 && <div className="flex justify-between text-xs text-slate-500"><span>Frete</span><span>+ {formatBRL(feeValue)}</span></div>}
-                <div className="border-t border-slate-200" />
-              </>
-            )}
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Total</span>
-              <span className="text-lg font-black text-blue-600">{formatBRL(total)}</span>
-            </div>
+          {/* Total geral: soma dos itens, cada um já com seu desconto e frete */}
+          <div className="flex items-center justify-between rounded-xl bg-slate-50 border border-slate-100 p-3">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Total</span>
+            <span className="text-lg font-black text-blue-600">{formatBRL(total)}</span>
           </div>
 
           <div className="space-y-1.5">

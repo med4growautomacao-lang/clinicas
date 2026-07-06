@@ -775,6 +775,20 @@ function GanhoModal({ lead, onClose, onCancel, onCreate, createPatient, updateLe
         await updateLead(lead.id, { converted_patient_id: np.id });
       }
     }
+    // Cria a receita PRIMEIRO para vincular a conversão a ela (financial_transaction_id).
+    // Esse vínculo deixa a limpeza automática confiável: quando o ticket sai de 'ganho', o
+    // gatilho fn_purge_ticket_sale apaga a conversão E a receita ligada (sem órfão no Financeiro).
+    const tx = await createTransaction({
+      type: 'receita',
+      category: 'Consulta',
+      amount: Number(value),
+      description: description || 'Venda registrada',
+      payment_method: paymentMethod as any,
+      status: txStatus,
+      date,
+      protocol_ids: protocolIds,
+      patient_id: patientId ?? undefined,
+    });
     const ok = await onCreate({
       lead_id: lead.id,
       value: Number(value),
@@ -782,19 +796,9 @@ function GanhoModal({ lead, onClose, onCancel, onCreate, createPatient, updateLe
       payment_method: paymentMethod,
       protocol_ids: protocolIds,
       converted_at: new Date(date + 'T12:00:00').toISOString(),
+      financial_transaction_id: (tx as any)?.id ?? null,
     });
     if (ok) {
-      await createTransaction({
-        type: 'receita',
-        category: 'Consulta',
-        amount: Number(value),
-        description: description || 'Venda registrada',
-        payment_method: paymentMethod as any,
-        status: txStatus,
-        date,
-        protocol_ids: protocolIds,
-        patient_id: patientId ?? undefined,
-      });
       setDone(true);
       setTimeout(onClose, 1000);
     }

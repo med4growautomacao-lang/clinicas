@@ -2479,6 +2479,9 @@ export interface Conversion {
   // Vínculo com o ticket da venda. Permite ao reopen_ticket (Cancelar venda) apagar a conversão
   // com precisão, em vez de depender do casamento por proximidade temporal (vendas antigas).
   ticket_id?: string | null;
+  // Vínculo com a receita lançada. Permite ao gatilho fn_purge_ticket_sale apagar a receita
+  // junto quando o ticket sai de 'ganho' (invariante: conversão só existe enquanto ganho).
+  financial_transaction_id?: string | null;
 }
 
 export function useConversions() {

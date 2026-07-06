@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { useFunnelStages, useLeads, useNotLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useProducts, Product, useAppointments, useDoctors, usePatients, useConsultationTypes, Conversion, Lead, Ticket, TransitionRule } from "../hooks/useSupabase";
+import { useFunnelStages, useLeads, useNotLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useProducts, Product, ProductInput, useAppointments, useDoctors, usePatients, useConsultationTypes, Conversion, Lead, Ticket, TransitionRule } from "../hooks/useSupabase";
 import { NotLeadPanel } from "./NotLeadPanel";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -941,7 +941,8 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
   onCancel: () => void;
   onConfirm: (value: number, description: string) => Promise<boolean>;
 }) {
-  const { data: products } = useProducts();
+  const { data: products, create: createProduct } = useProducts();
+  const [quickNewFor, setQuickNewFor] = useState<number | null>(null); // linha que está cadastrando produto novo
   const activeProducts = useMemo(() => products.filter(p => p.is_active), [products]);
   const hasCatalog = activeProducts.length > 0;
   const productById = useMemo(() => {
@@ -991,10 +992,20 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
   const updateLine = (i: number, field: 'qty' | 'price' | 'discount' | 'fee', val: string) =>
     setLines(prev => prev.map((l, idx) => idx === i ? { ...l, [field]: val } : l));
   // Ao escolher o produto, semeia o valor unitario com o preco cadastrado (editavel se destravado).
-  const selectProduct = (i: number, productId: string) =>
+  // Opcao especial "__new__": abre o mini-modal de cadastro de produto para esta linha.
+  const selectProduct = (i: number, productId: string) => {
+    if (productId === '__new__') { setQuickNewFor(i); return; }
     setLines(prev => prev.map((l, idx) => idx === i
       ? { ...l, productId, price: productId ? String(productById[productId]?.unit_price ?? '') : '' }
       : l));
+  };
+  // Produto recém-criado no mini-modal: seleciona na linha que disparou o cadastro.
+  const handleProductCreated = (p: Product) => {
+    setLines(prev => prev.map((l, idx) => idx === quickNewFor
+      ? { ...l, productId: p.id, price: String(p.unit_price ?? '') }
+      : l));
+    setQuickNewFor(null);
+  };
 
   const buildDescription = () => {
     const parts: string[] = [];
@@ -1026,6 +1037,7 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
   };
 
   return (
+    <>
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onCancel}>
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }}
@@ -1074,6 +1086,7 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
                       >
                         <option value="">Selecione um produto…</option>
                         {activeProducts.map(op => <option key={op.id} value={op.id}>{op.name}</option>)}
+                        <option value="__new__">➕ Cadastrar novo produto…</option>
                       </select>
                       {lines.length > 1 && (
                         <button onClick={() => removeLine(i)} className="p-1.5 shrink-0 text-slate-300 hover:text-rose-500 transition-colors"><Trash2 className="w-4 h-4" /></button>
@@ -1222,6 +1235,153 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
                   'Confirmar Orçamento'}
             </button>
           </div>
+        </div>
+      </motion.div>
+    </div>
+
+    {quickNewFor !== null && (
+      <QuickProductModal
+        create={createProduct}
+        onClose={() => setQuickNewFor(null)}
+        onCreated={handleProductCreated}
+      />
+    )}
+    </>
+  );
+}
+
+// Mini-modal de cadastro rápido de produto, acionado pela opção "Cadastrar novo produto…"
+// do seletor no Orçamento. Cria o produto no catálogo (useProducts.create) e devolve o produto
+// criado para ser selecionado na linha que abriu o cadastro.
+function QuickProductModal({ create, onClose, onCreated }: {
+  create: (product: ProductInput) => Promise<Product | null>;
+  onClose: () => void;
+  onCreated: (p: Product) => void;
+}) {
+  const [name, setName] = useState('');
+  const [unit, setUnit] = useState('metro');
+  const [price, setPrice] = useState('');
+  const [attrs, setAttrs] = useState<{ label: string; value: string }[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  const addAttr = () => setAttrs(a => [...a, { label: '', value: '' }]);
+  const updateAttr = (i: number, field: 'label' | 'value', v: string) =>
+    setAttrs(a => a.map((x, idx) => idx === i ? { ...x, [field]: v } : x));
+  const removeAttr = (i: number) => setAttrs(a => a.filter((_, idx) => idx !== i));
+
+  const handleSave = async () => {
+    if (!name.trim() || saving) return;
+    setSaving(true);
+    const p = await create({
+      name: name.trim(),
+      description: null,
+      unit: unit.trim() || 'un',
+      unit_price: Number(price || 0),
+      attributes: attrs.filter(a => a.label.trim() || a.value.trim()),
+      is_active: true,
+    });
+    setSaving(false);
+    if (p) onCreated(p);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-sm max-h-[90vh] overflow-y-auto p-6 space-y-4"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-black text-slate-900">Novo Produto</h3>
+          <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4 text-slate-400" /></button>
+        </div>
+
+        <datalist id="quick-product-units">
+          {['metro', 'm²', 'unidade', 'hora', 'kg', 'litro', 'peça', 'pacote', 'caixa', 'rolo', 'dia', 'm³'].map(u => <option key={u} value={u} />)}
+        </datalist>
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Nome *</label>
+            <input
+              type="text"
+              autoFocus
+              placeholder="Ex: Alambrado 14-1.80-3"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Unidade</label>
+              <input
+                type="text"
+                list="quick-product-units"
+                placeholder="metro"
+                value={unit}
+                onChange={e => setUnit(e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Valor / unidade</label>
+              <CurrencyInput value={price} onChange={setPrice} className="focus:ring-blue-500/20 focus:border-blue-500" />
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Campos personalizados</label>
+              <button type="button" onClick={addAttr} className="text-[11px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1">
+                <Plus className="w-3 h-3" /> Adicionar campo
+              </button>
+            </div>
+            {attrs.length === 0 ? (
+              <p className="text-[11px] text-slate-400 bg-slate-50 border border-dashed border-slate-200 rounded-xl px-3 py-2.5 text-center">
+                Opcional. Ex.: Malha, Fio, Altura…
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {attrs.map((a, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="Rótulo (ex: Malha)"
+                      value={a.label}
+                      onChange={e => updateAttr(i, 'label', e.target.value)}
+                      className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Valor (ex: 0,30 mm)"
+                      value={a.value}
+                      onChange={e => updateAttr(i, 'value', e.target.value)}
+                      className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                    />
+                    <button type="button" onClick={() => removeAttr(i)} className="p-1.5 shrink-0 text-slate-300 hover:text-rose-500 transition-colors"><Trash2 className="w-4 h-4" /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex gap-2 pt-1">
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-500 hover:bg-slate-50 transition-all">
+            Cancelar
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving || !name.trim()}
+            className={cn(
+              "flex-1 py-2.5 rounded-xl text-sm font-black transition-all flex items-center justify-center gap-2",
+              (saving || !name.trim()) ? "bg-slate-100 text-slate-400" : "bg-blue-600 hover:bg-blue-700 text-white"
+            )}
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Plus className="w-4 h-4" /> Cadastrar</>}
+          </button>
         </div>
       </motion.div>
     </div>

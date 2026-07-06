@@ -1066,7 +1066,11 @@ export function useTickets() {
       p_ticket_id: ticketId,
       p_new_stage_id: stageId,
     });
-    if (error || !(data as any)?.success) { fetch(true); return false; }
+    if (error || !(data as any)?.success) {
+      console.error('[moveTicket] move_lead_stage falhou', { ticketId, stageId, error, data });
+      fetch(true);
+      return false;
+    }
     return true;
   };
 
@@ -1084,7 +1088,11 @@ export function useTickets() {
       p_new_stage_id: stageId,
       p_cancel_appointment: cancelAppointment,
     });
-    if (error || !(data as any)?.success) { fetch(true); return false; }
+    if (error || !(data as any)?.success) {
+      console.error('[reopenTicket] reopen_ticket falhou', { ticketId, stageId, error, data });
+      fetch(true);
+      return false;
+    }
     return true;
   };
 

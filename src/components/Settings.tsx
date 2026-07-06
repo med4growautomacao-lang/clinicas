@@ -326,7 +326,7 @@ export function Settings() {
 
     // Edicao dos campos personalizados (attributes) dentro do modal de produto
     const addProductAttr = () => setProductModal(prev => prev.item
-        ? { ...prev, item: { ...prev.item, attributes: [...(prev.item.attributes ?? []), { label: '', value: '', unit: '' }] } }
+        ? { ...prev, item: { ...prev.item, attributes: [...(prev.item.attributes ?? []), { label: '', value: '' }] } }
         : prev);
     const updateProductAttr = (i: number, field: keyof ProductAttribute, val: string) => setProductModal(prev => prev.item
         ? { ...prev, item: { ...prev.item, attributes: (prev.item.attributes ?? []).map((a, idx) => idx === i ? { ...a, [field]: val } : a) } }
@@ -634,7 +634,7 @@ export function Settings() {
                                                                 {p.description && <span className="text-xs text-slate-400 truncate max-w-[200px]">{p.description}</span>}
                                                                 {(p.attributes ?? []).slice(0, 4).map((a, i) => (
                                                                     <span key={i} className="text-[10px] font-medium bg-slate-50 border border-slate-100 text-slate-500 px-1.5 py-0.5 rounded">
-                                                                        {a.label}{a.value ? `: ${a.value}` : ''}{a.unit ? ` ${a.unit}` : ''}
+                                                                        {a.label}{a.value ? `: ${a.value}` : ''}
                                                                     </span>
                                                                 ))}
                                                                 {(p.attributes?.length ?? 0) > 4 && <span className="text-[10px] text-slate-400">+{(p.attributes!.length - 4)}</span>}
@@ -748,17 +748,10 @@ export function Settings() {
                                                     />
                                                     <input
                                                         type="text"
-                                                        placeholder="Valor"
+                                                        placeholder="Valor (ex: 0,30 mm)"
                                                         value={a.value}
                                                         onChange={e => updateProductAttr(i, 'value', e.target.value)}
                                                         className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-                                                    />
-                                                    <input
-                                                        type="text"
-                                                        placeholder="Un."
-                                                        value={a.unit ?? ''}
-                                                        onChange={e => updateProductAttr(i, 'unit', e.target.value)}
-                                                        className="w-14 shrink-0 border border-slate-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
                                                     />
                                                     <button type="button" onClick={() => removeProductAttr(i)} className="p-1.5 shrink-0 text-slate-300 hover:text-rose-500 transition-colors"><Trash2 className="w-4 h-4" /></button>
                                                 </div>

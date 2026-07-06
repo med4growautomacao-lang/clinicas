@@ -1008,7 +1008,7 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
     if (pct > 0 || feeValue > 0) {
       parts.push(`Subtotal: ${formatBRL(baseTotal)}`);
       if (pct > 0) parts.push(`Desconto ${formatQty(pct)}%: -${formatBRL(discountValue)}`);
-      if (feeValue > 0) parts.push(`Distância: +${formatBRL(feeValue)}`);
+      if (feeValue > 0) parts.push(`Frete: +${formatBRL(feeValue)}`);
     }
     if (parts.length) parts.push(`TOTAL: ${formatBRL(total)}`);
     if (notes.trim()) parts.push(`${parts.length ? '\n' : ''}Obs: ${notes.trim()}`);
@@ -1116,7 +1116,7 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
                             )}
                             {(p.attributes ?? []).map((a, idx) => (
                               <span key={idx} className="text-[10px] font-semibold bg-blue-50 border border-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
-                                {a.label}{a.value ? `: ${a.value}` : ''}{a.unit ? ` ${a.unit}` : ''}
+                                {a.label}{a.value ? `: ${a.value}` : ''}
                               </span>
                             ))}
                           </div>
@@ -1158,7 +1158,7 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
               </div>
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Distância (R$)</label>
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Frete (R$)</label>
               <CurrencyInput value={distanceFee} onChange={setDistanceFee} className="focus:ring-blue-500/20 focus:border-blue-500" />
             </div>
           </div>
@@ -1169,7 +1169,7 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
               <>
                 <div className="flex justify-between text-xs text-slate-500"><span>Subtotal</span><span>{formatBRL(baseTotal)}</span></div>
                 {pct > 0 && <div className="flex justify-between text-xs text-emerald-600"><span>Desconto {formatQty(pct)}%</span><span>− {formatBRL(discountValue)}</span></div>}
-                {feeValue > 0 && <div className="flex justify-between text-xs text-slate-500"><span>Distância</span><span>+ {formatBRL(feeValue)}</span></div>}
+                {feeValue > 0 && <div className="flex justify-between text-xs text-slate-500"><span>Frete</span><span>+ {formatBRL(feeValue)}</span></div>}
                 <div className="border-t border-slate-200" />
               </>
             )}

@@ -3119,11 +3119,15 @@ export function LeadKanban() {
             const { ticket, targetStageId } = reopenLead;
             setReopenLead(null);
             await performDrop(ticket, targetStageId);
+            // Novo ciclo cria um ticket novo e fecha o antigo — reconcilia já, sem depender
+            // do timing do realtime (senão o card parece "voltar" para Ganho).
+            await refetchTickets(true);
           }}
           onCancelOutcome={async (cancelAppointment) => {
             const { ticket, targetStageId } = reopenLead;
             setReopenLead(null);
             await reopenTicket(ticket.id, targetStageId, cancelAppointment);
+            await refetchTickets(true);
           }}
           checkAppointment={async (ticketId) => {
             const { data } = await supabase

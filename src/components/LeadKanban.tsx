@@ -1036,20 +1036,34 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
                       )}
                     </div>
                     {p && (
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="number"
-                          min="0"
-                          step="any"
-                          inputMode="decimal"
-                          placeholder="Qtd"
-                          value={l.qty}
-                          onChange={e => updateLine(i, 'qty', e.target.value)}
-                          className="w-20 shrink-0 px-2.5 py-2 border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                        />
-                        <span className="text-xs font-medium text-slate-500 flex-1 min-w-0 truncate">{p.unit} × {formatBRL(p.unit_price)}</span>
-                        <span className="text-sm font-black text-slate-800 shrink-0">{formatBRL(subtotal)}</span>
-                      </div>
+                      <>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            inputMode="decimal"
+                            placeholder="Qtd"
+                            value={l.qty}
+                            onChange={e => updateLine(i, 'qty', e.target.value)}
+                            className="w-20 shrink-0 px-2.5 py-2 border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                          />
+                          <span className="text-xs font-medium text-slate-500 flex-1 min-w-0 truncate">{p.unit} × {formatBRL(p.unit_price)}</span>
+                          <span className="text-sm font-black text-slate-800 shrink-0">{formatBRL(subtotal)}</span>
+                        </div>
+                        {(p.description || (p.attributes?.length ?? 0) > 0) && (
+                          <div className="flex flex-wrap gap-1.5 pt-0.5">
+                            {p.description && (
+                              <span className="w-full text-[11px] text-slate-400">{p.description}</span>
+                            )}
+                            {(p.attributes ?? []).map((a, idx) => (
+                              <span key={idx} className="text-[10px] font-semibold bg-blue-50 border border-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
+                                {a.label}{a.value ? `: ${a.value}` : ''}{a.unit ? ` ${a.unit}` : ''}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 );

@@ -942,7 +942,14 @@ const alturaOf = (attributes?: { label: string; value: string }[]) => {
   const n = a ? Number(String(a.value).replace(',', '.').replace(/[^\d.]/g, '')) : 0;
   return n > 0 ? n : 0;
 };
-const areaMult = (unit?: string, attributes?: { label: string; value: string }[]) => (isM2Unit(unit) && alturaOf(attributes) ? alturaOf(attributes) : 1);
+// Altura efetiva p/ m²: valor digitado na linha (l.altura) tem prioridade sobre o campo do produto.
+const lineAlturaFor = (unit: string | undefined, attributes: { label: string; value: string }[] | undefined, lineAltura?: string) => {
+  if (!isM2Unit(unit)) return 1;
+  const typed = Number(String(lineAltura ?? '').replace(',', '.'));
+  if (String(lineAltura ?? '').trim() !== '' && !isNaN(typed) && typed > 0) return typed;
+  const fb = alturaOf(attributes);
+  return fb > 0 ? fb : 1;
+};
 
 // Modal ao mover para "Orçamento Enviado": monta o orçamento selecionando produtos do
 // catálogo (produto + quantidade => subtotal = qtd × valor/unidade) e soma o total.
@@ -988,8 +995,8 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   const sourceNoun = (useProd && useProt) ? 'item' : (onlyProt ? 'protocolo' : 'produto');
   const sectionLabel = (useProd && useProt) ? 'Itens' : (onlyProt ? 'Protocolos' : 'Produtos');
 
-  type Line = { productId: string; qty: string; price: string; discount: string; fee: string };
-  const [lines, setLines] = useState<Line[]>(Array.isArray(iq?.lines) && iq.lines.length ? iq.lines : [{ productId: '', qty: '', price: '', discount: '', fee: '' }]);
+  type Line = { productId: string; qty: string; price: string; discount: string; fee: string; altura?: string };
+  const [lines, setLines] = useState<Line[]>(Array.isArray(iq?.lines) && iq.lines.length ? iq.lines : [{ productId: '', qty: '', price: '', discount: '', fee: '', altura: '' }]);
   const [manualValue, setManualValue] = useState(iq?.manualValue ?? '');
   const [editPrices, setEditPrices] = useState(false);  // destrava a edicao do valor unitario (antes de x qtd)
   const [notes, setNotes] = useState(iq?.notes ?? '');
@@ -1048,13 +1055,15 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
     const edited = Number(String(l.price).replace(',', '.'));
     return (l.price !== '' && !isNaN(edited) && edited >= 0) ? edited : Number(p.unit_price);
   };
+  // Altura efetiva da linha (só p/ m²): valor digitado na linha, ou o "altura" do produto, ou 1.
+  const lineAltura = (l: Line) => lineAlturaFor(itemById[l.productId]?.unit, itemById[l.productId]?.attributes, l.altura);
   // Desconto (%) e frete (R$) sao POR PRODUTO (por linha).
-  // Em m², a base = quantidade × altura × valor/m² (área).
+  // Em m², a base = quantidade (comprimento) × altura × valor/m² (área).
   const lineBase = (l: Line) => {
     const p = itemById[l.productId];
     const q = Number(String(l.qty).replace(',', '.'));
     if (!p || !q || q <= 0) return 0;
-    return q * areaMult(p.unit, p.attributes) * unitPrice(l);
+    return q * lineAltura(l) * unitPrice(l);
   };
   const linePct = (l: Line) => Math.min(100, Math.max(0, Number(String(l.discount).replace(',', '.')) || 0));
   const lineDiscountValue = (l: Line) => lineBase(l) * (linePct(l) / 100);
@@ -1070,16 +1079,19 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   );
   const total = hasCatalog ? computedTotal : Number(manualValue || 0);
 
-  const addLine = () => setLines(prev => [...prev, { productId: '', qty: '', price: '', discount: '', fee: '' }]);
+  const addLine = () => setLines(prev => [...prev, { productId: '', qty: '', price: '', discount: '', fee: '', altura: '' }]);
   const removeLine = (i: number) => setLines(prev => prev.length === 1 ? prev : prev.filter((_, idx) => idx !== i));
-  const updateLine = (i: number, field: 'qty' | 'price' | 'discount' | 'fee', val: string) =>
+  const updateLine = (i: number, field: 'qty' | 'price' | 'discount' | 'fee' | 'altura', val: string) =>
     setLines(prev => prev.map((l, idx) => idx === i ? { ...l, [field]: val } : l));
-  // Ao escolher o produto, semeia o valor unitario com o preco cadastrado (editavel se destravado).
+  // Ao escolher o produto, semeia o valor unitario (e a altura, se m², vinda do campo "altura").
   // Opcao especial "__new__": abre o mini-modal de cadastro de produto para esta linha.
   const selectProduct = (i: number, productId: string) => {
     if (productId === '__new__') { setQuickNewFor(i); return; }
+    const it = itemById[productId];
+    const altAttr = (it?.attributes ?? []).find(a => (a.label || '').toLowerCase().includes('altura'));
+    const altSeed = it && isM2Unit(it.unit) && altAttr ? String(altAttr.value) : '';
     setLines(prev => prev.map((l, idx) => idx === i
-      ? { ...l, productId, price: productId ? String(itemById[productId]?.unit_price ?? '') : '' }
+      ? { ...l, productId, price: productId ? String(it?.unit_price ?? '') : '', altura: altSeed }
       : l));
     if (productId) requestAnimationFrame(() => qtyRefs.current[i]?.focus());
   };
@@ -1150,7 +1162,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
     .map(l => {
       const p = itemById[l.productId]!;
       const q = Number(String(l.qty).replace(',', '.'));
-      const altTxt = isM2Unit(p.unit) && alturaOf(p.attributes) ? ` × ${formatQty(alturaOf(p.attributes))}m alt` : '';
+      const altTxt = isM2Unit(p.unit) ? ` × ${formatQty(lineAltura(l))}m alt` : '';
       const meta = [`${formatQty(q)} ${p.unit}${altTxt} × ${formatBRL(unitPrice(l))}`];
       if (linePct(l) > 0) meta.push(`desc ${formatQty(linePct(l))}%`);
       if (lineFeeValue(l) > 0) meta.push(`frete ${formatBRL(lineFeeValue(l))}`);
@@ -1320,6 +1332,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
                 const base = lineBase(l);
                 const pct = linePct(l);
                 const fee = lineFeeValue(l);
+                const isM2 = !!p && isM2Unit(p.unit);
                 return (
                   <div key={i} className="rounded-xl border border-slate-200 p-2.5 space-y-2">
                     <div className="flex items-center gap-2">
@@ -1354,14 +1367,29 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
                             min="0"
                             step="any"
                             inputMode="decimal"
-                            placeholder="Qtd"
+                            placeholder={isM2 ? 'Compr.' : 'Qtd'}
                             value={l.qty}
                             onChange={e => updateLine(i, 'qty', e.target.value)}
-                            className="w-24 shrink-0 px-2.5 py-2 border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                            className={cn("shrink-0 px-2.5 py-2 border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500", isM2 ? "w-16" : "w-24")}
                           />
+                          {isM2 && (
+                            <>
+                              <span className="text-xs font-bold text-slate-400 shrink-0">×</span>
+                              <input
+                                type="number"
+                                min="0"
+                                step="any"
+                                inputMode="decimal"
+                                placeholder="Alt."
+                                value={l.altura ?? ''}
+                                onChange={e => updateLine(i, 'altura', e.target.value)}
+                                className="w-16 shrink-0 px-2.5 py-2 border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                              />
+                            </>
+                          )}
                           {editPrices ? (
                             <div className="flex items-center gap-1 flex-1 min-w-0">
-                              <span className="text-xs font-medium text-slate-400 shrink-0">{p.unit} ×</span>
+                              {!isM2 && <span className="text-xs font-medium text-slate-400 shrink-0">{p.unit} ×</span>}
                               <div className="relative flex-1 min-w-0">
                                 <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] font-bold text-slate-400 pointer-events-none">R$</span>
                                 <input
@@ -1376,7 +1404,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
                               </div>
                             </div>
                           ) : (
-                            <span className="text-xs font-medium text-slate-500 flex-1 min-w-0 truncate">{p.unit}{isM2Unit(p.unit) && alturaOf(p.attributes) ? ` · alt ${formatQty(alturaOf(p.attributes))}m` : ''} × {formatBRL(unitPrice(l))}</span>
+                            <span className="text-xs font-medium text-slate-500 flex-1 min-w-0 truncate">{p.unit} × {formatBRL(unitPrice(l))}</span>
                           )}
                           <span className="text-sm font-black text-slate-800 shrink-0">{formatBRL(base)}</span>
                         </div>
@@ -1710,7 +1738,7 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
     if (!q || q <= 0) return 0;
     const edited = Number(String(l.price).replace(',', '.'));
     const up = (l.price !== '' && !isNaN(edited) && edited >= 0) ? edited : it.unit_price;
-    const base = q * areaMult(it.unit, it.attributes) * up;
+    const base = q * lineAlturaFor(it.unit, it.attributes, l.altura) * up;
     const pct = Math.min(100, Math.max(0, Number(String(l.discount).replace(',', '.')) || 0));
     const fee = Number(l.fee || 0);
     return Math.max(0, base - base * (pct / 100)) + fee;
@@ -1723,7 +1751,10 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
       if (!it || !q || q <= 0) return null;
       return {
         name: it.name,
-        attrs: (it.attributes ?? []).map((a: any) => ({ label: a.label, value: a.value })),
+        attrs: (it.attributes ?? []).map((a: any) => {
+          const isAlt = isM2Unit(it.unit) && (a.label || '').toLowerCase().includes('altura') && String(l.altura ?? '').trim() !== '';
+          return { label: a.label, value: isAlt ? String(l.altura) : a.value };
+        }),
         qty: `${formatQty(q)} ${it.unit}`,
         value: lineValue(l),
       };

@@ -229,9 +229,9 @@ export function QuoteDocument({ docRef, clinicName, clinicLegalName, clinicPhone
         </div>
       ) : null}
 
-      <div style={{ marginTop: 44, marginLeft: "auto", width: "56%", display: "flex", flexDirection: "column", gap: 26 }}>
-        {pagamento ? <SectionBlock accent={accent} title="FORMA DE PAGAMENTO" align="right">{pagamento}</SectionBlock> : null}
-        <SectionBlock accent={accent} title="TERMOS E CONDIÇÕES" align="right">
+      <div style={{ marginTop: 44, width: "56%", display: "flex", flexDirection: "column", gap: 26 }}>
+        {pagamento ? <SectionBlock accent={accent} title="FORMA DE PAGAMENTO">{pagamento}</SectionBlock> : null}
+        <SectionBlock accent={accent} title="TERMOS E CONDIÇÕES">
           {validade ? `Este orçamento é válido por ${formatValidade(validade)}.` : "Orçamento sujeito a confirmação de disponibilidade."}
         </SectionBlock>
       </div>

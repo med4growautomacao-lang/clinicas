@@ -140,8 +140,8 @@ export function LeadChat({ lead, onClose, isDragging = false, ticketId, currentS
         </div>
       )}
 
-      {/* Stage selector */}
-      {stages.length > 0 && (
+      {/* Stage selector — só quando o pai sabe tratar a mudança de etapa (ex.: Kanban) */}
+      {stages.length > 0 && onStageChange && (
         <div className="px-5 py-2 border-b border-slate-100 bg-slate-50/60 flex items-center gap-2">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider shrink-0">Etapa</span>
           <select

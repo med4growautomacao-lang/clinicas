@@ -1642,15 +1642,7 @@ export function AISecretary() {
         >
           {activeTab === "chats" && <ChatsView />}
           {activeTab === "leads" && <LeadKanban />}
-          {activeTab === "dashboard" && (
-            <ComercialDashboard
-              onOpenLead={(leadId) => {
-                sessionStorage.setItem("open_lead_id", leadId);
-                setActiveTab("chats");
-                localStorage.setItem("aiSecretaryTab", "chats");
-              }}
-            />
-          )}
+          {activeTab === "dashboard" && <ComercialDashboard />}
           {activeTab === "followups" && <AllFollowupsView />}
 
           {activeTab === "config" && <ConfigView />}
@@ -1710,7 +1702,7 @@ function ChatsView() {
     }
   }, [leads, selectedLeadId]);
 
-  // Atalho de outros módulos (ex.: Dashboard Comercial): abre o lead de open_lead_id.
+  // Atalho de outros módulos (ex.: Financeiro): abre o lead de open_lead_id.
   // O lead pode não estar na 1ª página carregada — nesse caso busca por id e injeta.
   useEffect(() => {
     const pendingId = sessionStorage.getItem('open_lead_id');

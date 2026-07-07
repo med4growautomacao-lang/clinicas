@@ -28,7 +28,6 @@ import {
   ChevronLeft,
   Settings as SettingsIcon,
   Phone,
-  ExternalLink,
   Inbox,
   FileText,
   Download,
@@ -42,6 +41,8 @@ import { ptBR } from "date-fns/locale";
 import { useAuth } from "../contexts/AuthContext";
 import { supabase } from "../lib/supabase";
 import { cn } from "../lib/utils";
+import { LeadChat } from "./LeadChat";
+import type { Lead } from "../hooks/useSupabase";
 import { TrendBarChart, fmtByType } from "./TrendBarChart";
 import { Button } from "./ui/button";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
@@ -91,9 +92,13 @@ interface LeadRow {
   stageColor: string | null;
   isConversion: boolean | null;
   outcome: "ganho" | "perdido" | null;
+  apptStatus: string | null;
+  apptDate: string | null;
 }
 
 type AgentFilter = "todos" | "ia" | "humano";
+// Filtro por métrica de agendamento na lista "Leads do filtro"
+type LeadMetricFilter = "todos" | "gerados" | "realizadas" | "marcados";
 type OriginFilter = "todos" | "meta" | "google" | "sem_origem";
 type ChannelFilter = "todos" | "forms" | "whatsapp" | "balcao";
 type ChartMetric = "humanMessages" | "aiMessages" | "leads" | "appointments" | "realizadas" | "ganhos" | "faturamento" | "faturamentoProjetado" | "handoffs" | "followups" | "convAgend" | "convConsulta" | "custoAgend" | "cac" | "roasReal" | "roasProj" | "ticketMedio";
@@ -205,6 +210,28 @@ function fmtDateShort(iso: string | null): string {
   if (!iso) return "—";
   try { return format(parseISO(iso), "dd/MM/yy"); } catch { return "—"; }
 }
+
+// Badge da consulta do lead (status do agendamento mais recente na janela)
+function apptStatusBadge(status: string | null): { label: string; cls: string } | null {
+  if (!status) return null;
+  switch (status) {
+    case "realizado":
+    case "compareceu": return { label: "Realizada", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+    case "confirmado": return { label: "Confirmada", cls: "bg-sky-50 text-sky-700 border-sky-200" };
+    case "pendente":   return { label: "Marcada", cls: "bg-amber-50 text-amber-700 border-amber-200" };
+    case "faltou":     return { label: "Faltou", cls: "bg-rose-50 text-rose-600 border-rose-200" };
+    case "cancelado":  return { label: "Cancelada", cls: "bg-slate-50 text-slate-400 border-slate-200" };
+    default:           return { label: status, cls: "bg-slate-50 text-slate-500 border-slate-200" };
+  }
+}
+
+// Opções do filtro de métrica da lista de leads (drill-down das métricas do topo)
+const LEAD_METRIC_OPTIONS: { id: LeadMetricFilter; label: string; icon: any }[] = [
+  { id: "todos", label: "Todos", icon: Users },
+  { id: "gerados", label: "Agend. gerados", icon: CalendarCheck },
+  { id: "realizadas", label: "Realizadas", icon: CheckCircle2 },
+  { id: "marcados", label: "Marcados", icon: Hourglass },
+];
 
 const LEADS_PAGE_SIZE = 20;
 
@@ -354,7 +381,7 @@ function buildReportText(
 // ==========================================
 // Componente principal
 // ==========================================
-export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: string) => void } = {}) {
+export function ComercialDashboard() {
   const { profile, activeClinicId } = useAuth();
   const [data, setData] = useState<CommercialData | null>(null);
   const [clinicFeatures, setClinicFeatures] = useState<{ feature_followup?: boolean; feature_ia?: boolean } | null>(null);
@@ -522,9 +549,19 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
   const [leadsTotal, setLeadsTotal] = useState(0);
   const [leadsPage, setLeadsPage] = useState(0);
   const [leadsLoading, setLeadsLoading] = useState(true);
+  // Filtro por métrica de agendamento da lista (todos / gerados / realizadas / marcados)
+  const [leadsMetric, setLeadsMetric] = useState<LeadMetricFilter>("todos");
+  // Conversa aberta no drawer (abre no lugar, sem sair da tela — igual ao Kanban)
+  const [chatLead, setChatLead] = useState<Lead | null>(null);
 
   // Volta para a 1ª página sempre que um filtro muda
-  useEffect(() => { setLeadsPage(0); }, [convRange, entryRange, agent, origin, channel]);
+  useEffect(() => { setLeadsPage(0); }, [convRange, entryRange, apptRange, agent, origin, channel, leadsMetric]);
+
+  // Abre a conversa do lead no drawer (carrega o lead completo p/ o LeadChat)
+  const openLeadChat = useCallback(async (leadId: string) => {
+    const { data, error } = await supabase.from("leads").select("*").eq("id", leadId).single();
+    if (!error && data) setChatLead(data as Lead);
+  }, []);
 
   const fetchLeads = useCallback(async () => {
     const clinicId = activeClinicId || profile?.clinic_id;
@@ -542,6 +579,10 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
         p_channel: channel.length ? channel.join(",") : "todos",
         p_limit: LEADS_PAGE_SIZE,
         p_offset: leadsPage * LEADS_PAGE_SIZE,
+        // Recorte por métrica de agendamento; Agenda (created_at) = apptRange
+        p_metric: leadsMetric,
+        p_agenda_from: apptRange ? format(apptRange.start, "yyyy-MM-dd") : null,
+        p_agenda_to: apptRange ? format(apptRange.end, "yyyy-MM-dd") : null,
       });
       if (error) throw error;
       const r = res as { total: number; rows: LeadRow[] } | null;
@@ -552,7 +593,7 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
     } finally {
       setLeadsLoading(false);
     }
-  }, [activeClinicId, profile?.clinic_id, convRange, entryRange, agent, origin, channel, leadsPage]);
+  }, [activeClinicId, profile?.clinic_id, convRange, entryRange, apptRange, agent, origin, channel, leadsPage, leadsMetric]);
 
   useEffect(() => { fetchLeads(); }, [fetchLeads]);
 
@@ -974,14 +1015,22 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
   const leadsScopeLabel = agent === "ia" ? "atendidos pela IA" : agent === "humano" ? "atendidos por humano" : "na coorte de entrada";
   const sectionLeads = (
     <Card key="leads" className="border border-slate-200 shadow-sm overflow-hidden">
-      <CardHeader className="bg-slate-50 border-b border-slate-100 py-3 flex flex-row items-center justify-between">
-        <CardTitle className="text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
-          <Users className="w-4 h-4 text-cyan-600" />
-          Leads do filtro
-        </CardTitle>
-        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-          {leadsTotal} {leadsTotal === 1 ? "lead" : "leads"} · {leadsScopeLabel}
-        </span>
+      <CardHeader className="bg-slate-50 border-b border-slate-100 py-3 space-y-3">
+        <div className="flex flex-row items-center justify-between">
+          <CardTitle className="text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+            <Users className="w-4 h-4 text-cyan-600" />
+            Leads do filtro
+          </CardTitle>
+          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            {leadsTotal} {leadsTotal === 1 ? "lead" : "leads"} · {leadsMetric === "todos" ? leadsScopeLabel : LEAD_METRIC_OPTIONS.find((o) => o.id === leadsMetric)?.label.toLowerCase()}
+          </span>
+        </div>
+        {/* Recorte por métrica de agendamento (drill-down das métricas do topo) */}
+        <FilterChips
+          value={leadsMetric}
+          onChange={(id) => setLeadsMetric(id as LeadMetricFilter)}
+          options={LEAD_METRIC_OPTIONS}
+        />
       </CardHeader>
       <CardContent className="p-0">
         {leadsLoading ? (
@@ -1002,24 +1051,22 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
                     <th className="text-left font-bold px-3 py-2.5">Origem</th>
                     <th className="text-left font-bold px-3 py-2.5">Etapa</th>
                     <th className="text-left font-bold px-3 py-2.5">Status</th>
+                    <th className="text-left font-bold px-3 py-2.5">Consulta</th>
                     <th className="text-left font-bold px-3 py-2.5">Entrada</th>
                     <th className="text-left font-bold px-3 py-2.5">Última msg</th>
                     <th className="text-right font-bold px-3 py-2.5">Valor</th>
-                    {onOpenLead && <th className="px-3 py-2.5 w-8" />}
+                    <th className="px-3 py-2.5 w-8" />
                   </tr>
                 </thead>
                 <tbody>
                   {leadsList.map((lead) => {
                     const badge = leadStatusBadge(lead.outcome);
-                    const clickable = !!onOpenLead;
+                    const appt = apptStatusBadge(lead.apptStatus);
                     return (
                       <tr
                         key={lead.id}
-                        onClick={clickable ? () => onOpenLead!(lead.id) : undefined}
-                        className={cn(
-                          "border-b border-slate-50 transition-colors",
-                          clickable ? "cursor-pointer hover:bg-teal-50/40" : ""
-                        )}
+                        onClick={() => openLeadChat(lead.id)}
+                        className="border-b border-slate-50 transition-colors cursor-pointer hover:bg-teal-50/40"
                       >
                         <td className="px-4 py-2.5">
                           <p className="font-semibold text-slate-700 truncate max-w-[180px]">{lead.name || "Sem nome"}</p>
@@ -1041,14 +1088,20 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
                         <td className="px-3 py-2.5">
                           <span className={cn("inline-block text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border", badge.cls)}>{badge.label}</span>
                         </td>
+                        <td className="px-3 py-2.5 whitespace-nowrap">
+                          {appt ? (
+                            <span className="inline-flex items-center gap-1.5">
+                              <span className={cn("inline-block text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border", appt.cls)}>{appt.label}</span>
+                              {lead.apptDate && <span className="text-[11px] text-slate-400 font-medium">{fmtDateShort(lead.apptDate)}</span>}
+                            </span>
+                          ) : <span className="text-slate-300">—</span>}
+                        </td>
                         <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">{fmtDateShort(lead.createdAt)}</td>
                         <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">{fmtDateShort(lead.lastMessageAt)}</td>
                         <td className="px-3 py-2.5 text-right font-semibold text-slate-700 whitespace-nowrap">
                           {lead.estimatedValue ? fmtBRL(Number(lead.estimatedValue)) : "—"}
                         </td>
-                        {onOpenLead && (
-                          <td className="px-3 py-2.5 text-slate-300"><ExternalLink className="w-3.5 h-3.5" /></td>
-                        )}
+                        <td className="px-3 py-2.5 text-slate-300" title="Abrir conversa"><MessageSquare className="w-3.5 h-3.5" /></td>
                       </tr>
                     );
                   })}
@@ -1199,6 +1252,13 @@ export function ComercialDashboard({ onOpenLead }: { onOpenLead?: (leadId: strin
 
       {/* Seções ordenadas por público */}
       {orderedSections}
+
+      {/* Conversa do lead — drawer no lugar (não sai da tela), igual ao Kanban */}
+      <AnimatePresence>
+        {chatLead && (
+          <LeadChat lead={chatLead} onClose={() => setChatLead(null)} />
+        )}
+      </AnimatePresence>
 
       {/* Modal de preview do relatório */}
       <AnimatePresence>

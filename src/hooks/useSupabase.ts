@@ -2646,7 +2646,7 @@ export interface Product {
   created_at: string;
 }
 
-export type ProductInput = Pick<Product, 'name' | 'description' | 'unit' | 'unit_price' | 'attributes' | 'is_active' | 'charge_by_area'>;
+export type ProductInput = Pick<Product, 'name' | 'description' | 'unit' | 'unit_price' | 'attributes' | 'is_active' | 'charge_by_area' | 'quote_image_ids'>;
 
 export function useProducts() {
   const { activeClinicId } = useAuth();

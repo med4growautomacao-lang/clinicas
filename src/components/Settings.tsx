@@ -105,6 +105,33 @@ export function Settings() {
         if (quoteImgInputRef.current) quoteImgInputRef.current.value = '';
     };
 
+    // Fotos do orçamento POR PRODUTO (configuradas na edição do produto → products.quote_image_ids).
+    // Semente = a seleção salva do produto, ou (se nunca configurado) as marcadas por padrão no banco.
+    const productPhotoInputRef = useRef<HTMLInputElement>(null);
+    const [uploadingProductPhoto, setUploadingProductPhoto] = useState(false);
+    const productPhotoSeed = () => quoteImages.filter(i => i.send_by_default).map(i => i.id);
+    const toggleProductPhoto = (id: string) => setProductModal(prev => {
+        if (!prev.item) return prev;
+        const current = Array.isArray(prev.item.quote_image_ids) ? prev.item.quote_image_ids : productPhotoSeed();
+        const next = current.includes(id) ? current.filter(x => x !== id) : [...current, id];
+        return { ...prev, item: { ...prev.item, quote_image_ids: next } };
+    });
+    const handleProductPhotoUpload = async (files: FileList | null) => {
+        if (!files || !files.length) return;
+        setUploadingProductPhoto(true);
+        const newIds: string[] = [];
+        for (const f of Array.from(files)) {
+            if (!f.type.startsWith('image/')) continue;
+            const row = await uploadQuoteImage(f);
+            if (row) newIds.push(row.id);
+        }
+        if (newIds.length) setProductModal(prev => prev.item
+            ? { ...prev, item: { ...prev.item, quote_image_ids: [...(Array.isArray(prev.item.quote_image_ids) ? prev.item.quote_image_ids : productPhotoSeed()), ...newIds] } }
+            : prev);
+        setUploadingProductPhoto(false);
+        if (productPhotoInputRef.current) productPhotoInputRef.current.value = '';
+    };
+
     const loadedClinicId = useRef<string | null>(null);
 
     useEffect(() => {
@@ -337,6 +364,7 @@ export function Settings() {
             attributes: cleanAttrs,
             is_active: item.is_active ?? true,
             charge_by_area: true,
+            quote_image_ids: item.quote_image_ids ?? null,
         };
         if (item.id) {
             await updateProduct(item.id, payload);
@@ -746,7 +774,7 @@ export function Settings() {
                                         <div className="flex items-center justify-between gap-3 mb-2">
                                             <div>
                                                 <label className="block text-sm font-bold text-slate-700">Fotos enviadas com o orçamento</label>
-                                                <p className="text-[11px] text-slate-400 max-w-md">As fotos marcadas com ✓ vão junto no envio por WhatsApp (você ajusta por orçamento na hora do envio).</p>
+                                                <p className="text-[11px] text-slate-400 max-w-md">Banco de fotos do orçamento. Em cada produto você escolhe daqui quais fotos vão junto (aba Produtos › editar). O ✓ aqui é só o padrão para produtos sem seleção própria.</p>
                                             </div>
                                             <input ref={quoteImgInputRef} type="file" accept="image/*" multiple className="hidden" onChange={e => handleQuoteImageUpload(e.target.files)} />
                                             <Button variant="outline" onClick={() => quoteImgInputRef.current?.click()} disabled={uploadingImg} className="gap-2 shrink-0">
@@ -915,6 +943,36 @@ export function Settings() {
                                             ))}
                                         </div>
                                     )}
+                                </div>
+
+                                <div className="pt-1">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide">Fotos do orçamento</label>
+                                        <input ref={productPhotoInputRef} type="file" accept="image/*" multiple className="hidden" onChange={e => handleProductPhotoUpload(e.target.files)} />
+                                        <button type="button" onClick={() => productPhotoInputRef.current?.click()} disabled={uploadingProductPhoto} className="text-xs font-bold text-teal-600 hover:text-teal-700 flex items-center gap-1 disabled:opacity-50">
+                                            {uploadingProductPhoto ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />} Adicionar foto
+                                        </button>
+                                    </div>
+                                    <p className="text-[11px] text-slate-400 mb-2">Fotos enviadas junto no orçamento deste produto. No envio, o vendedor ainda pode ajustar.</p>
+                                    {quoteImages.length === 0 ? (
+                                        <p className="text-xs text-slate-400 bg-slate-50 border border-dashed border-slate-200 rounded-xl px-3 py-3 text-center">Nenhuma foto ainda. Adicione fotos (ex.: modelos de tela, obras feitas).</p>
+                                    ) : (() => {
+                                        const q = productModal.item!.quote_image_ids;
+                                        const sel = Array.isArray(q) ? q : quoteImages.filter(i => i.send_by_default).map(i => i.id);
+                                        return (
+                                            <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
+                                                {quoteImages.map(img => {
+                                                    const on = sel.includes(img.id);
+                                                    return (
+                                                        <button key={img.id} type="button" onClick={() => toggleProductPhoto(img.id)} className={cn("relative aspect-square rounded-lg overflow-hidden border-2 transition-all", on ? "border-teal-500" : "border-slate-200 opacity-50")}>
+                                                            <img src={img.url} className="w-full h-full object-cover" />
+                                                            {on && <span className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-teal-600 text-white flex items-center justify-center"><Check className="w-2.5 h-2.5" /></span>}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        );
+                                    })()}
                                 </div>
                             </div>
 

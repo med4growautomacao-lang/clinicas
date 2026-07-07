@@ -983,7 +983,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   const iq: any = initialQuote ?? null; // orçamento salvo (editar) — tem prioridade sobre o modelo
   const { activeClinicId } = useAuth();
   const { clinic } = useSettings();
-  const { data: products, create: createProduct, update: updateProduct } = useProducts();
+  const { data: products, create: createProduct } = useProducts();
   const { data: protocols } = useProtocols();
   const { data: quoteImages } = useQuoteImages();
   const logoDataUrl = useImageDataUrl(clinic?.logo_url);
@@ -1091,8 +1091,9 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
     setImgChecked(map);
   }, [quoteImages]);
 
-  // Semeia a seleção de fotos pela memória POR PRODUTO (última seleção enviada daquele produto).
-  // Se nenhum produto da linha tem seleção salva, cai no padrão global "send_by_default".
+  // Semeia a seleção de fotos pela CONFIGURAÇÃO de cada produto (definida na edição do produto).
+  // Com vários produtos = UNIÃO das fotos (Set dedup: foto repetida entre produtos entra 1x só).
+  // Se nenhum produto da linha tem seleção própria, cai no padrão global "send_by_default".
   // Para de semear assim que o usuário mexe manualmente (imgTouchedRef).
   useEffect(() => {
     if (imgTouchedRef.current || quoteImages.length === 0) return;
@@ -1304,12 +1305,6 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
     setSaving(false);
   };
 
-  // Lembra a seleção atual de fotos em CADA produto do orçamento (p/ pré-marcar no próximo envio).
-  const rememberProductImages = async () => {
-    const ids = selectedImages.map(i => i.id);
-    await Promise.all(productUuids.map(uuid => updateProduct(uuid, { quote_image_ids: ids }).catch(() => false)));
-  };
-
   const finishSend = async (data: any, error: any) => {
     const code = error ? 'send_failed' : (data && data.ok === false ? String(data.error || '') : null);
     if (code) { setSending(false); setSendError(mapSendError(code)); return; }
@@ -1326,7 +1321,6 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
         if (pe || (pd && pd.ok === false)) photoFails++;
       } catch (_e) { photoFails++; }
     }
-    await rememberProductImages();
     setSending(false);
     if (photoFails > 0) {
       // O orçamento FOI enviado; só algumas fotos falharam. Marca como enviado (bloqueia
@@ -1708,7 +1702,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
                       );
                     })}
                   </div>
-                  <p className="text-[10px] text-slate-400">As marcadas são enviadas como imagem logo após o orçamento. A seleção fica salva por produto.</p>
+                  <p className="text-[10px] text-slate-400">As marcadas são enviadas como imagem logo após o orçamento. As fotos padrão de cada produto são definidas na edição do produto.</p>
                 </div>
               )}
 

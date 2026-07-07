@@ -949,6 +949,27 @@ const waitForPublicUrl = async (url: string, tries = 5) => {
   return false;
 };
 
+// Token de acesso FRESCO: o access token do Supabase vence (~1h) e com o modal aberto muito tempo
+// a `send-quote` voltava 401 (Unauthorized). Renova se estiver ausente ou perto de expirar (<60s).
+async function ensureFreshToken(): Promise<string | null> {
+  const { data } = await supabase.auth.getSession();
+  const s = data.session;
+  const expMs = (s?.expires_at ?? 0) * 1000;
+  if (s?.access_token && expMs > Date.now() + 60_000) return s.access_token;
+  const { data: r } = await supabase.auth.refreshSession();
+  return r.session?.access_token ?? s?.access_token ?? null;
+}
+// Invoca a edge `send-quote` com Authorization fresco; devolve também o status HTTP (p/ tratar 401).
+async function callSendQuote(payload: any): Promise<{ data: any; error: any; status?: number }> {
+  const token = await ensureFreshToken();
+  const { data, error } = await supabase.functions.invoke('send-quote', {
+    body: payload,
+    ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+  });
+  const status = (error as any)?.context?.status as number | undefined;
+  return { data, error, status };
+}
+
 // Produtos vendidos por m²: a área = quantidade (comprimento) × altura. A altura vem do
 // campo personalizado "altura" do produto. Multiplicador = altura (>0) quando a unidade é m².
 const isM2Unit = (unit?: string) => /m²|m2/i.test(unit || '');
@@ -1305,7 +1326,8 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
     setSaving(false);
   };
 
-  const finishSend = async (data: any, error: any) => {
+  const finishSend = async (data: any, error: any, status?: number) => {
+    if (status === 401) { setSending(false); setSendError('Sessão expirada. Recarregue a página (F5) e envie de novo.'); return; }
     const code = error ? 'send_failed' : (data && data.ok === false ? String(data.error || '') : null);
     if (code) { setSending(false); setSendError(mapSendError(code)); return; }
     // Envia as fotos marcadas (cada uma como imagem), DEPOIS do orçamento. Usa o `delay`
@@ -1315,9 +1337,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
     let photoFails = 0;
     for (const img of selectedImages) {
       try {
-        const { data: pd, error: pe } = await supabase.functions.invoke('send-quote', {
-          body: { clinic_id: activeClinicId, lead_id: lead.id, phone: lead.phone, media_url: img.url, media_type: 'image', delay: PHOTO_SEND_DELAY_MS },
-        });
+        const { data: pd, error: pe } = await callSendQuote({ clinic_id: activeClinicId, lead_id: lead.id, phone: lead.phone, media_url: img.url, media_type: 'image', delay: PHOTO_SEND_DELAY_MS });
         if (pe || (pd && pd.ok === false)) photoFails++;
       } catch (_e) { photoFails++; }
     }
@@ -1343,10 +1363,8 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
 
     try {
       if (format === 'texto') {
-        const { data, error } = await supabase.functions.invoke('send-quote', {
-          body: { clinic_id: activeClinicId, lead_id: lead.id, phone: lead.phone, text: messageText.trim() },
-        });
-        await finishSend(data, error);
+        const { data, error, status } = await callSendQuote({ clinic_id: activeClinicId, lead_id: lead.id, phone: lead.phone, text: messageText.trim() });
+        await finishSend(data, error, status);
         return;
       }
       // imagem/PDF: renderiza o documento, sobe no Storage (bucket quotes) e envia como mídia.
@@ -1377,16 +1395,14 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
       // busca a mídia pela URL e às vezes ela ainda não propagou logo após o upload (=> recusa).
       await waitForPublicUrl(pub.publicUrl);
       const caption = [saudacao.trim(), rodape.trim()].filter(Boolean).join('\n\n');
-      const { data, error } = await supabase.functions.invoke('send-quote', {
-        body: {
-          clinic_id: activeClinicId, lead_id: lead.id, phone: lead.phone,
-          text: caption, media_url: pub.publicUrl,
-          media_type: isPdf ? 'document' : 'image',
-          filename: `Orcamento-${quoteMeta.number}.${ext}`,
-          delay: DOC_SEND_DELAY_MS,
-        },
+      const { data, error, status } = await callSendQuote({
+        clinic_id: activeClinicId, lead_id: lead.id, phone: lead.phone,
+        text: caption, media_url: pub.publicUrl,
+        media_type: isPdf ? 'document' : 'image',
+        filename: `Orcamento-${quoteMeta.number}.${ext}`,
+        delay: DOC_SEND_DELAY_MS,
       });
-      await finishSend(data, error);
+      await finishSend(data, error, status);
     } catch (_e) {
       setSending(false);
       setSendError('Erro ao gerar o documento. Tente enviar como texto.');

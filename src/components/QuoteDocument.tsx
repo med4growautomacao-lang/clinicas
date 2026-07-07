@@ -46,6 +46,7 @@ export function QuoteDocument({ docRef, clinicName, clinicPhone, clinicEmail, cl
   const P_PHONE = <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />;
   const P_MAIL = <><rect x="2" y="4" width="20" height="16" rx="2" /><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" /></>;
   const P_IG = <><rect x="2" y="2" width="20" height="20" rx="5" /><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" /><line x1="17.5" x2="17.51" y1="6.5" y2="6.5" /></>;
+  const P_CNPJ = <><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z" /><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2" /><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2" /><path d="M10 6h4" /><path d="M10 10h4" /><path d="M10 14h4" /></>;
   const contactRow = (key: string, text: string, glyph: React.ReactNode) => (
     <div key={key} style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 7, marginBottom: 5 }}>
       <span>{text}</span>
@@ -80,7 +81,7 @@ export function QuoteDocument({ docRef, clinicName, clinicPhone, clinicEmail, cl
             {clinicPhone ? contactRow("ph", clinicPhone, P_PHONE) : null}
             {clinicEmail ? contactRow("em", clinicEmail, P_MAIL) : null}
             {clinicInstagram ? contactRow("ig", igText, P_IG) : null}
-            {clinicCnpj ? <div style={{ textAlign: "right", marginTop: 2 }}>CNPJ: {clinicCnpj}</div> : null}
+            {clinicCnpj ? contactRow("cn", `CNPJ: ${clinicCnpj}`, P_CNPJ) : null}
           </div>
         </div>
 

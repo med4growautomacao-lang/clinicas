@@ -5,7 +5,7 @@ import { DocumentChrome, SectionBlock, formatBRL, formatValidade } from "./Quote
 // Nº da OP + datas (no cabeçalho/título), DADOS DO CLIENTE, e por item TIPO DE PRODUTO +
 // ESPECIFICAÇÕES (bitola/comprimento/altura/malha) com caixas marcadas a partir do orçamento.
 
-export type ProdItem = { name: string; attrs: { label: string; value: string }[]; qty: string; value: number };
+export type ProdItem = { name: string; attrs: { label: string; value: string }[]; comprimento?: string; altura?: string; qty: string; value: number };
 
 const attrVal = (attrs: { label: string; value: string }[], keys: string[]) => {
   const a = attrs.find(x => keys.some(k => (x.label || "").toLowerCase().includes(k)));
@@ -90,13 +90,7 @@ export function ProductionOrderDocument({ docRef, clinicName, clinicLegalName, c
       {/* Itens */}
       {items.map((it, idx) => {
         const bit = digits(attrVal(it.attrs, ["fio", "bitola", "arame"]));
-        const comp = attrVal(it.attrs, ["comprimento", "comp"]);
-        const alt = attrVal(it.attrs, ["altura"]);
         const malha = digits(attrVal(it.attrs, ["malha"]));
-        const n = it.name.toLowerCase();
-        const isTela = n.includes("tela");
-        const isAlambrado = n.includes("alambrado");
-        const isConcertina = n.includes("concertina") || n.includes("lança") || n.includes("lanca");
         return (
           <div key={idx} style={{ marginTop: 20, border: "1px solid #e2e8f0", borderRadius: 10, padding: "14px 16px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
@@ -105,18 +99,13 @@ export function ProductionOrderDocument({ docRef, clinicName, clinicLegalName, c
             </div>
 
             <div style={{ marginTop: 12 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 800, color: accent, marginBottom: 6 }}>TIPO DE PRODUTO</div>
-              <div>{cbox(isTela, "TELA")}{cbox(isAlambrado, "ALAMBRADO")}{cbox(isConcertina, "CONCERTINAS / LANÇAS")}</div>
-            </div>
-
-            <div style={{ marginTop: 12 }}>
               <div style={{ fontSize: 12.5, fontWeight: 800, color: accent, marginBottom: 6 }}>ESPECIFICAÇÕES DO PEDIDO</div>
               <div style={{ fontSize: 12.5, marginBottom: 7, display: "flex", alignItems: "center", flexWrap: "wrap" }}>
                 <span style={{ fontWeight: 700, marginRight: 10 }}>Bitola do Arame:</span>
                 {["12", "14", "16", "18"].map(o => <React.Fragment key={o}>{cbox(bit === o, o)}</React.Fragment>)}
               </div>
-              {field("Comprimento (m)", comp)}
-              {field("Altura (m)", alt)}
+              {field("Comprimento (m)", it.comprimento || "")}
+              {field("Altura (m)", it.altura || "")}
               <div style={{ fontSize: 12.5, marginTop: 3, display: "flex", alignItems: "center", flexWrap: "wrap" }}>
                 <span style={{ fontWeight: 700, marginRight: 10 }}>Malha:</span>
                 {cbox(malha === "3", '3"')}{cbox(malha === "2.5", '2.5"')}{cbox(malha === "2", '2"')}

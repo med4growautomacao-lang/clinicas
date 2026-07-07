@@ -1932,16 +1932,21 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
       const it = itemById[l.productId];
       const q = Number(String(l.qty).replace(',', '.'));
       if (!it || !q || q <= 0) return null;
+      const area = isAreaItem(it);
+      const hasAlt = String(l.altura ?? '').trim() !== '' || alturaOf(it.attributes) > 0;
       return {
         name: it.name,
         attrs: (it.attributes ?? []).map((a: any) => {
-          const isAlt = isAreaItem(it) && (a.label || '').toLowerCase().includes('altura') && String(l.altura ?? '').trim() !== '';
+          const isAlt = area && (a.label || '').toLowerCase().includes('altura') && String(l.altura ?? '').trim() !== '';
           return { label: a.label, value: isAlt ? String(l.altura) : a.value };
         }),
+        // Comprimento e altura vêm do ORÇAMENTO (linha): comprimento = quantidade digitada; altura = a da linha.
+        comprimento: area ? formatQty(q) : '',
+        altura: area && hasAlt ? formatQty(lineAlturaFor(true, it.attributes, l.altura)) : '',
         qty: `${formatQty(q)} ${it.unit}`,
         value: lineValue(l),
       };
-    }).filter(Boolean) as { name: string; attrs: { label: string; value: string }[]; qty: string; value: number }[];
+    }).filter(Boolean) as { name: string; attrs: { label: string; value: string }[]; comprimento: string; altura: string; qty: string; value: number }[];
   }, [quoteData, itemById]);
   const total = prodItems.reduce((s, it) => s + it.value, 0);
 

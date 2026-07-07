@@ -1933,7 +1933,6 @@ function QuickProductModal({ create, onClose, onCreated }: {
   onCreated: (p: Product) => void;
 }) {
   const [name, setName] = useState('');
-  const [unit, setUnit] = useState('metro');
   const [price, setPrice] = useState('');
   const [attrs, setAttrs] = useState<{ label: string; value: string }[]>([]);
   const [saving, setSaving] = useState(false);
@@ -1949,10 +1948,11 @@ function QuickProductModal({ create, onClose, onCreated }: {
     const p = await create({
       name: name.trim(),
       description: null,
-      unit: unit.trim() || 'un',
+      unit: 'm²',
       unit_price: Number(price || 0),
       attributes: attrs.filter(a => a.label.trim() || a.value.trim()),
       is_active: true,
+      charge_by_area: true,
     });
     setSaving(false);
     if (p) onCreated(p);
@@ -1971,10 +1971,6 @@ function QuickProductModal({ create, onClose, onCreated }: {
           <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4 text-slate-400" /></button>
         </div>
 
-        <datalist id="quick-product-units">
-          {['metro', 'm²', 'unidade', 'hora', 'kg', 'litro', 'peça', 'pacote', 'caixa', 'rolo', 'dia', 'm³'].map(u => <option key={u} value={u} />)}
-        </datalist>
-
         <div className="space-y-3">
           <div>
             <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Nome *</label>
@@ -1987,22 +1983,9 @@ function QuickProductModal({ create, onClose, onCreated }: {
               className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Unidade</label>
-              <input
-                type="text"
-                list="quick-product-units"
-                placeholder="metro"
-                value={unit}
-                onChange={e => setUnit(e.target.value)}
-                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Valor / unidade</label>
-              <CurrencyInput value={price} onChange={setPrice} className="focus:ring-blue-500/20 focus:border-blue-500" />
-            </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Valor por m²</label>
+            <CurrencyInput value={price} onChange={setPrice} className="focus:ring-blue-500/20 focus:border-blue-500" />
           </div>
 
           <div>

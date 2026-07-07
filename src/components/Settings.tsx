@@ -34,7 +34,6 @@ import {
     ToggleLeft,
     ToggleRight,
     Package,
-    Ruler,
     FileText,
     Maximize2,
 } from "lucide-react";
@@ -319,11 +318,11 @@ export function Settings() {
         const payload = {
             name: item.name.trim(),
             description: item.description?.trim() || null,
-            unit: item.unit?.trim() || 'un',
+            unit: 'm²',
             unit_price: item.unit_price ?? 0,
             attributes: cleanAttrs,
             is_active: item.is_active ?? true,
-            charge_by_area: item.charge_by_area ?? false,
+            charge_by_area: true,
         };
         if (item.id) {
             await updateProduct(item.id, payload);
@@ -617,7 +616,7 @@ export function Settings() {
                                         </CardTitle>
                                         <p className="text-xs text-slate-400 mt-1 max-w-md">Cadastre produtos com unidade, valor e campos personalizados. No orçamento, basta escolher o produto e a quantidade — o total é calculado automaticamente.</p>
                                     </div>
-                                    <Button onClick={() => setProductModal({ open: true, item: { name: '', description: '', unit: 'metro', unit_price: 0, attributes: [], is_active: true } })} className="gap-2 shrink-0">
+                                    <Button onClick={() => setProductModal({ open: true, item: { name: '', description: '', unit: 'm²', unit_price: 0, attributes: [], is_active: true, charge_by_area: true } })} className="gap-2 shrink-0">
                                         <Plus className="w-4 h-4" /> Novo Produto
                                     </Button>
                                 </CardHeader>
@@ -777,9 +776,6 @@ export function Settings() {
                                 <button onClick={() => setProductModal({ open: false, item: null })} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
                             </div>
 
-                            <datalist id="product-unit-suggestions">
-                                {['metro', 'm²', 'unidade', 'hora', 'kg', 'litro', 'peça', 'pacote', 'caixa', 'rolo', 'dia', 'm³'].map(u => <option key={u} value={u} />)}
-                            </datalist>
 
                             <div className="space-y-3">
                                 <div>
@@ -803,41 +799,14 @@ export function Settings() {
                                         className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
                                     />
                                 </div>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div>
-                                        <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Unidade de medida</label>
-                                        <div className="relative">
-                                            <Ruler className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300 pointer-events-none" />
-                                            <input
-                                                type="text"
-                                                list="product-unit-suggestions"
-                                                placeholder="metro"
-                                                value={productModal.item.unit ?? ''}
-                                                onChange={e => setProductModal(prev => ({ ...prev, item: { ...prev.item!, unit: e.target.value } }))}
-                                                className="w-full border border-slate-200 rounded-xl pl-9 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-                                            />
-                                        </div>
-                                        <p className="text-[10px] text-slate-400 mt-1">Base do cálculo (ex.: valor por metro)</p>
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Valor por {productModal.item.charge_by_area ? 'm²' : 'unidade'}</label>
-                                        <MoneyInput
-                                            value={productModal.item.unit_price ?? 0}
-                                            onChange={v => setProductModal(prev => ({ ...prev, item: { ...prev.item!, unit_price: v || 0 } }))}
-                                        />
-                                    </div>
-                                </div>
-
-                                <label className="flex items-center gap-2 text-sm font-medium text-slate-600 cursor-pointer select-none">
-                                    <input
-                                        type="checkbox"
-                                        checked={!!productModal.item.charge_by_area}
-                                        onChange={e => setProductModal(prev => ({ ...prev, item: { ...prev.item!, charge_by_area: e.target.checked } }))}
-                                        className="w-4 h-4 accent-teal-600"
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Valor por m²</label>
+                                    <MoneyInput
+                                        value={productModal.item.unit_price ?? 0}
+                                        onChange={v => setProductModal(prev => ({ ...prev, item: { ...prev.item!, unit_price: v || 0 } }))}
                                     />
-                                    Cobrar por m² (área = comprimento × altura)
-                                </label>
-                                <p className="text-[10px] text-slate-400 -mt-1">No orçamento aparece um campo de <b>altura</b> ao lado da quantidade; o valor acima passa a ser por m². Crie um campo "altura" para já vir preenchido.</p>
+                                    <p className="text-[10px] text-slate-400 mt-1">Cobrado por m² (área = comprimento × altura). No orçamento o vendedor digita o comprimento e a altura. Crie um campo "altura" se quiser um valor padrão.</p>
+                                </div>
 
                                 <div className="pt-1">
                                     <div className="flex items-center justify-between mb-2">

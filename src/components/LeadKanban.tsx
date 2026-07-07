@@ -1143,8 +1143,9 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
       if (includeSpecs && (p.attributes?.length ?? 0) > 0) {
         out.push((p.attributes ?? []).map(a => `${a.label}${a.value ? `: ${a.value}` : ''}`).join(' | '));
       }
-      // Sem o cálculo/valor unitário: só a quantidade e o total do item.
-      out.push(`${formatQty(q)} ${isAreaItem(p) ? 'm²' : p.unit}: ${formatBRL(lineTotal(l))}`);
+      // Sem o valor por m²/unitário: só a quantidade/dimensões e o total do item.
+      const dims = isAreaItem(p) ? `${formatQty(q)}m × ${formatQty(lineAltura(l))}m` : `${formatQty(q)} ${p.unit}`;
+      out.push(`${dims}: ${formatBRL(lineTotal(l))}`);
     });
     out.push('');
     out.push(`*TOTAL: ${formatBRL(total)}*`);
@@ -1165,8 +1166,9 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
       const p = itemById[l.productId]!;
       const q = Number(String(l.qty).replace(',', '.'));
       const isArea = isAreaItem(p);
-      const altTxt = isArea ? ` × ${formatQty(lineAltura(l))}m alt` : '';
-      const meta = [`${formatQty(q)} ${isArea ? 'm²' : p.unit}${altTxt} × ${formatBRL(unitPrice(l))}`];
+      // Sem o valor por m²/unitário no documento: só a quantidade/dimensões (o total vai na coluna VALOR).
+      const dims = isArea ? `${formatQty(q)}m × ${formatQty(lineAltura(l))}m` : `${formatQty(q)} ${p.unit}`;
+      const meta = [dims];
       if (linePct(l) > 0) meta.push(`desc ${formatQty(linePct(l))}%`);
       if (lineFeeValue(l) > 0) meta.push(`frete ${formatBRL(lineFeeValue(l))}`);
       return {
@@ -1363,54 +1365,65 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
                     </div>
                     {p && (
                       <>
-                        <div className="flex items-center gap-2">
-                          <input
-                            ref={el => { qtyRefs.current[i] = el; }}
-                            type="number"
-                            min="0"
-                            step="any"
-                            inputMode="decimal"
-                            placeholder={isM2 ? 'Compr.' : 'Qtd'}
-                            value={l.qty}
-                            onChange={e => updateLine(i, 'qty', e.target.value)}
-                            className={cn("shrink-0 px-2.5 py-2 border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500", isM2 ? "w-16" : "w-24")}
-                          />
-                          {isM2 && (
-                            <>
-                              <span className="text-xs font-bold text-slate-400 shrink-0">×</span>
-                              <input
-                                type="number"
-                                min="0"
-                                step="any"
-                                inputMode="decimal"
-                                placeholder="Alt."
-                                value={l.altura ?? ''}
-                                onChange={e => updateLine(i, 'altura', e.target.value)}
-                                className="w-16 shrink-0 px-2.5 py-2 border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                              />
-                            </>
-                          )}
-                          {editPrices ? (
-                            <div className="flex items-center gap-1 flex-1 min-w-0">
-                              {!isM2 && <span className="text-xs font-medium text-slate-400 shrink-0">{p.unit} ×</span>}
-                              <div className="relative flex-1 min-w-0">
-                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] font-bold text-slate-400 pointer-events-none">R$</span>
+                        {isM2 ? (
+                          <div className="space-y-2">
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Quantidade (m)</label>
                                 <input
-                                  type="number"
-                                  min="0"
-                                  step="any"
-                                  inputMode="decimal"
-                                  value={l.price}
-                                  onChange={e => updateLine(i, 'price', e.target.value)}
-                                  className="w-full pl-7 pr-2 py-2 border border-blue-200 bg-blue-50/40 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                                  ref={el => { qtyRefs.current[i] = el; }}
+                                  type="number" min="0" step="any" inputMode="decimal"
+                                  value={l.qty}
+                                  onChange={e => updateLine(i, 'qty', e.target.value)}
+                                  className="w-full px-2.5 py-2 border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Altura (m)</label>
+                                <input
+                                  type="number" min="0" step="any" inputMode="decimal"
+                                  value={l.altura ?? ''}
+                                  onChange={e => updateLine(i, 'altura', e.target.value)}
+                                  className="w-full px-2.5 py-2 border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                                 />
                               </div>
                             </div>
-                          ) : (
-                            <span className="text-xs font-medium text-slate-500 flex-1 min-w-0 truncate">{isM2 ? 'm²' : p.unit} × {formatBRL(unitPrice(l))}</span>
-                          )}
-                          <span className="text-sm font-black text-slate-800 shrink-0">{formatBRL(base)}</span>
-                        </div>
+                            <div className="flex items-center justify-between gap-2">
+                              {editPrices ? (
+                                <div className="relative flex-1 min-w-0">
+                                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] font-bold text-slate-400 pointer-events-none">R$</span>
+                                  <input type="number" min="0" step="any" inputMode="decimal" value={l.price} onChange={e => updateLine(i, 'price', e.target.value)} className="w-full pl-7 pr-2 py-2 border border-blue-200 bg-blue-50/40 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500" />
+                                </div>
+                              ) : (
+                                <span className="text-xs font-medium text-slate-500 truncate">m² × {formatBRL(unitPrice(l))}</span>
+                              )}
+                              <span className="text-sm font-black text-slate-800 shrink-0">{formatBRL(base)}</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <input
+                              ref={el => { qtyRefs.current[i] = el; }}
+                              type="number" min="0" step="any" inputMode="decimal"
+                              placeholder="Qtd"
+                              value={l.qty}
+                              onChange={e => updateLine(i, 'qty', e.target.value)}
+                              className="w-24 shrink-0 px-2.5 py-2 border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                            />
+                            {editPrices ? (
+                              <div className="flex items-center gap-1 flex-1 min-w-0">
+                                <span className="text-xs font-medium text-slate-400 shrink-0">{p.unit} ×</span>
+                                <div className="relative flex-1 min-w-0">
+                                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] font-bold text-slate-400 pointer-events-none">R$</span>
+                                  <input type="number" min="0" step="any" inputMode="decimal" value={l.price} onChange={e => updateLine(i, 'price', e.target.value)} className="w-full pl-7 pr-2 py-2 border border-blue-200 bg-blue-50/40 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500" />
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="text-xs font-medium text-slate-500 flex-1 min-w-0 truncate">{p.unit} × {formatBRL(unitPrice(l))}</span>
+                            )}
+                            <span className="text-sm font-black text-slate-800 shrink-0">{formatBRL(base)}</span>
+                          </div>
+                        )}
                         {(p.description || (p.attributes?.length ?? 0) > 0) && (
                           <div className="flex flex-wrap gap-1.5 pt-0.5">
                             {p.description && (

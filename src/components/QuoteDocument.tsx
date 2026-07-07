@@ -135,18 +135,18 @@ export function QuoteDocument({ docRef, clinicName, clinicPhone, clinicEmail, cl
         </div>
 
         {/* pagamento + termos */}
-        <div style={{ marginTop: 44, display: "flex", flexDirection: "column", gap: 24 }}>
+        <div style={{ marginTop: 44, marginLeft: "auto", width: "56%", display: "flex", flexDirection: "column", gap: 26 }}>
           {pagamento ? (
             <div>
-              <div style={{ width: 36, height: 3, background: accent, borderRadius: 2, marginBottom: 7 }} />
-              <div style={{ fontSize: 13, fontWeight: 800, color: accent }}>FORMA DE PAGAMENTO</div>
-              <div style={{ fontSize: 12, color: "#334155", marginTop: 8, lineHeight: 1.6 }}>{pagamento}</div>
+              <div style={{ width: 42, height: 3, background: accent, borderRadius: 2, marginBottom: 9 }} />
+              <div style={{ fontSize: 16, fontWeight: 800, color: accent }}>FORMA DE PAGAMENTO</div>
+              <div style={{ fontSize: 13.5, color: "#334155", marginTop: 9, lineHeight: 1.6 }}>{pagamento}</div>
             </div>
           ) : null}
           <div>
-            <div style={{ width: 36, height: 3, background: accent, borderRadius: 2, marginBottom: 7 }} />
-            <div style={{ fontSize: 13, fontWeight: 800, color: accent }}>TERMOS E CONDIÇÕES</div>
-            <div style={{ fontSize: 12, color: "#334155", marginTop: 8, lineHeight: 1.6 }}>
+            <div style={{ width: 42, height: 3, background: accent, borderRadius: 2, marginBottom: 9 }} />
+            <div style={{ fontSize: 16, fontWeight: 800, color: accent }}>TERMOS E CONDIÇÕES</div>
+            <div style={{ fontSize: 13.5, color: "#334155", marginTop: 9, lineHeight: 1.6 }}>
               {validade ? `Este orçamento é válido por ${formatValidade(validade)}.` : "Orçamento sujeito a confirmação de disponibilidade."}
             </div>
           </div>

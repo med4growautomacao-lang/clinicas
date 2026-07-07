@@ -968,6 +968,11 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
   }, [catalogItems]);
   const hasCatalog = catalogItems.length > 0;
 
+  // Rótulos adaptados às fontes ativas na Configuração do Orçamento.
+  const onlyProt = useProt && !useProd;
+  const sourceNoun = (useProd && useProt) ? 'item' : (onlyProt ? 'protocolo' : 'produto');
+  const sectionLabel = (useProd && useProt) ? 'Itens' : (onlyProt ? 'Protocolos' : 'Produtos');
+
   type Line = { productId: string; qty: string; price: string; discount: string; fee: string };
   const [lines, setLines] = useState<Line[]>([{ productId: '', qty: '', price: '', discount: '', fee: '' }]);
   const [manualValue, setManualValue] = useState('');
@@ -1276,7 +1281,7 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
           {hasCatalog ? (
             <div className="space-y-2.5">
               <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Produtos</label>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">{sectionLabel}</label>
                 <button
                   type="button"
                   onClick={() => setEditPrices(v => !v)}
@@ -1302,7 +1307,7 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
                         onChange={e => selectProduct(i, e.target.value)}
                         className="flex-1 min-w-0 px-2.5 py-2 border border-slate-200 rounded-lg text-sm font-medium bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                       >
-                        <option value="">Selecione…</option>
+                        <option value="">Selecione um {sourceNoun}…</option>
                         {useProd && activeProducts.length > 0 && (
                           <optgroup label="Produtos">
                             {activeProducts.map(op => <option key={op.id} value={`p:${op.id}`}>{op.name}</option>)}
@@ -1331,7 +1336,7 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
                             placeholder="Qtd"
                             value={l.qty}
                             onChange={e => updateLine(i, 'qty', e.target.value)}
-                            className="w-16 shrink-0 px-2.5 py-2 border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                            className="w-24 shrink-0 px-2.5 py-2 border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                           />
                           {editPrices ? (
                             <div className="flex items-center gap-1 flex-1 min-w-0">
@@ -1416,7 +1421,7 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
                 );
               })}
               <button onClick={addLine} className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1">
-                <Plus className="w-3.5 h-3.5" /> Adicionar produto
+                <Plus className="w-3.5 h-3.5" /> Adicionar {sourceNoun}
               </button>
             </div>
           ) : (

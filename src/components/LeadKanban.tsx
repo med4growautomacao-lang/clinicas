@@ -1343,21 +1343,32 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
     else showToast('Fotos do orçamento enviadas ✓', 'success');
   };
 
-  const finishSend = async (data: any, error: any, status?: number) => {
-    if (status === 401) { setSending(false); setSendError('Sessão expirada. Recarregue a página (F5) e envie de novo.'); return; }
-    const code = error ? 'send_failed' : (data && data.ok === false ? String(data.error || '') : null);
-    if (code) { setSending(false); setSendError(mapSendError(code)); return; }
-    // Orçamento entregue. As fotos (parte lenta) vão em SEGUNDO PLANO e o modal fecha na hora.
-    const photoUrls = selectedImages.map(i => i.url);
+  // Fecha o modal e conclui TODO o envio em SEGUNDO PLANO. `primaryFn` envia o orçamento
+  // principal (texto pronto, ou upload+envio do documento a partir do blob JÁ gerado) e devolve
+  // o resultado; em seguida as fotos. Tudo por toast — sobrevive ao modal fechar, tela não trava.
+  const handoffBackground = (
+    primaryFn: () => Promise<{ data: any; error: any; status?: number; uploadFailed?: boolean }>,
+    photoUrls: string[],
+  ) => {
     setSending(false);
     setDone(true);
-    if (photoUrls.length > 0) {
-      showToast(`Orçamento enviado ✓ Enviando ${photoUrls.length} foto(s) em segundo plano…`, 'info');
-      void sendPhotosInBackground(photoUrls); // não-awaited: continua mesmo após fechar o modal
-    } else {
-      showToast('Orçamento enviado ✓', 'success');
-    }
-    setTimeout(onClose, 700);
+    showToast('Enviando orçamento em segundo plano…', 'info');
+    setTimeout(onClose, 500);
+    void (async () => {
+      let res: { data: any; error: any; status?: number; uploadFailed?: boolean };
+      try { res = await primaryFn(); }
+      catch (_e) { showToast('Erro ao enviar o orçamento. Tente de novo.', 'error'); return; }
+      if (res.uploadFailed) { showToast('Não foi possível subir o documento do orçamento.', 'error'); return; }
+      if (res.status === 401) { showToast('Sessão expirada — recarregue a página (F5) e reenvie o orçamento.', 'error'); return; }
+      const code = res.error ? 'send_failed' : (res.data && res.data.ok === false ? String(res.data.error || '') : null);
+      if (code) { showToast(`Não foi possível enviar o orçamento: ${mapSendError(code)}`, 'error'); return; }
+      if (photoUrls.length > 0) {
+        showToast(`Orçamento enviado ✓ Enviando ${photoUrls.length} foto(s)…`, 'info');
+        await sendPhotosInBackground(photoUrls);
+      } else {
+        showToast('Orçamento enviado ✓', 'success');
+      }
+    })();
   };
 
   // Etapa 2: registra o orçamento E envia pelo WhatsApp (texto, imagem ou PDF).
@@ -1369,13 +1380,20 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
     const ok = await onConfirm(total, buildDescription().trim(), buildQuoteSnapshot());
     if (!ok) { setSending(false); setSendError('Falha ao registrar o orçamento.'); return; }
 
+    const clinicId = activeClinicId;
+    const leadId = lead.id;
+    const phone = lead.phone;
+    const photoUrls = selectedImages.map(i => i.url);
+
     try {
       if (format === 'texto') {
-        const { data, error, status } = await callSendQuote({ clinic_id: activeClinicId, lead_id: lead.id, phone: lead.phone, text: messageText.trim() });
-        await finishSend(data, error, status);
+        // Sem DOM: manda tudo em segundo plano e fecha na hora.
+        const text = messageText.trim();
+        handoffBackground(() => callSendQuote({ clinic_id: clinicId, lead_id: leadId, phone, text }), photoUrls);
         return;
       }
-      // imagem/PDF: renderiza o documento, sobe no Storage (bucket quotes) e envia como mídia.
+      // imagem/PDF: a ÚNICA parte que precisa do DOM é gerar o blob do documento. Faz isso
+      // in-modal e solta upload + envio + fotos pro segundo plano (o modal fecha logo depois).
       const node = docRef.current;
       if (!node) { setSending(false); setSendError('Falha ao gerar o documento.'); return; }
       const html2canvas = (await import('html2canvas-pro')).default;
@@ -1395,22 +1413,22 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
         blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(new Error('blob')), 'image/jpeg', 0.92));
         ext = 'jpg'; contentType = 'image/jpeg';
       }
-      const path = `${activeClinicId}/${crypto.randomUUID()}.${ext}`;
-      const { error: upErr } = await supabase.storage.from('quotes').upload(path, blob, { contentType, upsert: false });
-      if (upErr) { setSending(false); setSendError('Falha ao subir o documento.'); return; }
-      const { data: pub } = supabase.storage.from('quotes').getPublicUrl(path);
-      // Garante que o documento já responde publicamente antes de pedir o envio: o uazapi
-      // busca a mídia pela URL e às vezes ela ainda não propagou logo após o upload (=> recusa).
-      await waitForPublicUrl(pub.publicUrl);
       const caption = [saudacao.trim(), rodape.trim()].filter(Boolean).join('\n\n');
-      const { data, error, status } = await callSendQuote({
-        clinic_id: activeClinicId, lead_id: lead.id, phone: lead.phone,
-        text: caption, media_url: pub.publicUrl,
-        media_type: isPdf ? 'document' : 'image',
-        filename: `Orcamento-${quoteMeta.number}.${ext}`,
-        delay: DOC_SEND_DELAY_MS,
-      });
-      await finishSend(data, error, status);
+      const filename = `Orcamento-${quoteMeta.number}.${ext}`;
+      const mediaType: 'document' | 'image' = isPdf ? 'document' : 'image';
+      // Blob pronto → o resto (subir no Storage, esperar propagar, enviar) vai pro background.
+      handoffBackground(async () => {
+        const path = `${clinicId}/${crypto.randomUUID()}.${ext}`;
+        const { error: upErr } = await supabase.storage.from('quotes').upload(path, blob, { contentType, upsert: false });
+        if (upErr) return { data: null, error: null, uploadFailed: true };
+        const { data: pub } = supabase.storage.from('quotes').getPublicUrl(path);
+        await waitForPublicUrl(pub.publicUrl);
+        return await callSendQuote({
+          clinic_id: clinicId, lead_id: leadId, phone,
+          text: caption, media_url: pub.publicUrl, media_type: mediaType,
+          filename, delay: DOC_SEND_DELAY_MS,
+        });
+      }, photoUrls);
     } catch (_e) {
       setSending(false);
       setSendError('Erro ao gerar o documento. Tente enviar como texto.');

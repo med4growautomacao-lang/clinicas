@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
+import { useToast } from "./ui/toast";
 import { matchesSearch, leadSearchOrFilter } from "../lib/search";
 import {
   Settings,
@@ -1002,6 +1003,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   onConfirm: (value: number, description: string, quoteData?: any) => Promise<boolean>;
 }) {
   const iq: any = initialQuote ?? null; // orçamento salvo (editar) — tem prioridade sobre o modelo
+  const showToast = useToast();
   const { activeClinicId } = useAuth();
   const { clinic } = useSettings();
   const { data: products, create: createProduct } = useProducts();
@@ -1326,30 +1328,36 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
     setSaving(false);
   };
 
+  // Envia as fotos marcadas EM SEGUNDO PLANO (parte lenta: cada uma tem o delay nativo da
+  // uazapi). Roda solto (não-awaited) e reporta por toast — sobrevive ao fechamento do modal,
+  // então a tela não trava e o usuário pode continuar trabalhando. Espelha o envio sequencial.
+  const sendPhotosInBackground = async (photoUrls: string[]) => {
+    let fails = 0;
+    for (const url of photoUrls) {
+      try {
+        const { data: pd, error: pe } = await callSendQuote({ clinic_id: activeClinicId, lead_id: lead.id, phone: lead.phone, media_url: url, media_type: 'image', delay: PHOTO_SEND_DELAY_MS });
+        if (pe || (pd && pd.ok === false)) fails++;
+      } catch (_e) { fails++; }
+    }
+    if (fails > 0) showToast(`Orçamento enviado, mas ${fails} foto(s) não foram. Reabra e reenvie.`, 'error');
+    else showToast('Fotos do orçamento enviadas ✓', 'success');
+  };
+
   const finishSend = async (data: any, error: any, status?: number) => {
     if (status === 401) { setSending(false); setSendError('Sessão expirada. Recarregue a página (F5) e envie de novo.'); return; }
     const code = error ? 'send_failed' : (data && data.ok === false ? String(data.error || '') : null);
     if (code) { setSending(false); setSendError(mapSendError(code)); return; }
-    // Envia as fotos marcadas (cada uma como imagem), DEPOIS do orçamento. Usa o `delay`
-    // NATIVO da uazapi: awaited + sequencial, cada envio espera no servidor e mostra presença,
-    // serializando as mídias (evita a rajada que o WhatsApp rejeita — o que passou a falhar
-    // às vezes depois que o banco de fotos foi ligado).
-    let photoFails = 0;
-    for (const img of selectedImages) {
-      try {
-        const { data: pd, error: pe } = await callSendQuote({ clinic_id: activeClinicId, lead_id: lead.id, phone: lead.phone, media_url: img.url, media_type: 'image', delay: PHOTO_SEND_DELAY_MS });
-        if (pe || (pd && pd.ok === false)) photoFails++;
-      } catch (_e) { photoFails++; }
-    }
+    // Orçamento entregue. As fotos (parte lenta) vão em SEGUNDO PLANO e o modal fecha na hora.
+    const photoUrls = selectedImages.map(i => i.url);
     setSending(false);
-    if (photoFails > 0) {
-      // O orçamento FOI enviado; só algumas fotos falharam. Marca como enviado (bloqueia
-      // reenvio duplicado) e mostra o aviso por mais tempo antes de fechar.
-      setSendError(`Orçamento enviado, mas ${photoFails} foto(s) não foram. Reabra o orçamento e reenvie.`);
-      setDone(true); setTimeout(onClose, 3500);
-      return;
+    setDone(true);
+    if (photoUrls.length > 0) {
+      showToast(`Orçamento enviado ✓ Enviando ${photoUrls.length} foto(s) em segundo plano…`, 'info');
+      void sendPhotosInBackground(photoUrls); // não-awaited: continua mesmo após fechar o modal
+    } else {
+      showToast('Orçamento enviado ✓', 'success');
     }
-    setDone(true); setTimeout(onClose, 1300);
+    setTimeout(onClose, 700);
   };
 
   // Etapa 2: registra o orçamento E envia pelo WhatsApp (texto, imagem ou PDF).

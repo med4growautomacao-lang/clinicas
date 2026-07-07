@@ -1052,6 +1052,7 @@ function ProductionOrderTemplateModal({ initial, clinic, onClose, onSave }: {
         clinicPhone: clinic.phone ?? null,
         clinicEmail: clinic.email ?? null,
         clinicInstagram: clinic.instagram ?? null,
+        clinicAddress: clinic.address ?? null,
         clinicCnpj: clinic.cnpj ?? null,
         logoDataUrl: useImageDataUrl(clinic.logo_url),
         clientName: 'Cliente Exemplo',

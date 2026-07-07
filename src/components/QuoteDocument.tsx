@@ -57,12 +57,13 @@ export function SectionBlock({ accent, title, children }: { accent: string; titl
 
 // Esqueleto A4: formas decorativas, cabeçalho (nome + contatos c/ ícones), título e A/C; o
 // corpo (tabela, total, seções) vem como children.
-export function DocumentChrome({ docRef, clinicName, clinicPhone, clinicEmail, clinicInstagram, clinicCnpj, logoDataUrl, clientName, clientPhone, title, number, dateStr, accent, hideClient, children }: {
+export function DocumentChrome({ docRef, clinicName, clinicPhone, clinicEmail, clinicInstagram, clinicAddress, clinicCnpj, logoDataUrl, clientName, clientPhone, title, number, dateStr, accent, hideClient, children }: {
   docRef?: React.RefObject<HTMLDivElement | null>;
   clinicName: string;
   clinicPhone: string | null;
   clinicEmail?: string | null;
   clinicInstagram?: string | null;
+  clinicAddress?: string | null;
   clinicCnpj: string | null;
   logoDataUrl?: string | null;
   clientName: string;
@@ -78,15 +79,17 @@ export function DocumentChrome({ docRef, clinicName, clinicPhone, clinicEmail, c
   const P_MAIL = <><rect x="2" y="4" width="20" height="16" rx="2" /><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" /></>;
   const P_IG = <><rect x="2" y="2" width="20" height="20" rx="5" /><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" /><line x1="17.5" x2="17.51" y1="6.5" y2="6.5" /></>;
   const P_CNPJ = <><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z" /><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2" /><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2" /><path d="M10 6h4" /><path d="M10 10h4" /><path d="M10 14h4" /></>;
-  const contactRow = (key: string, text: string, glyph: React.ReactNode) => (
+  const P_ADDR = <><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></>;
+  const contactRow = (key: string, text: string, glyph: React.ReactNode, maxWidth?: number) => (
     <div key={key} style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 7, marginBottom: 5 }}>
-      <span>{text}</span>
+      <span style={maxWidth ? { maxWidth, textAlign: "right", lineHeight: 1.4 } : undefined}>{text}</span>
       <span style={{ width: 20, height: 20, borderRadius: "50%", background: accent, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">{glyph}</svg>
       </span>
     </div>
   );
   const igText = clinicInstagram ? (clinicInstagram.trim().startsWith("@") || clinicInstagram.includes("/") ? clinicInstagram.trim() : `@${clinicInstagram.trim()}`) : "";
+  const addrText = clinicAddress ? clinicAddress.replace(/\s*\n+\s*/g, ", ").trim() : "";
 
   return (
     <div ref={docRef} style={{ width: 794, minHeight: 1040, background: "#ffffff", color: "#0f172a", fontFamily: "Arial, Helvetica, sans-serif", position: "relative", overflow: "hidden" }}>
@@ -116,6 +119,7 @@ export function DocumentChrome({ docRef, clinicName, clinicPhone, clinicEmail, c
             {clinicPhone ? contactRow("ph", clinicPhone, P_PHONE) : null}
             {clinicEmail ? contactRow("em", clinicEmail, P_MAIL) : null}
             {clinicInstagram ? contactRow("ig", igText, P_IG) : null}
+            {addrText ? contactRow("ad", addrText, P_ADDR, 230) : null}
             {clinicCnpj ? contactRow("cn", `CNPJ: ${clinicCnpj}`, P_CNPJ) : null}
           </div>
         </div>
@@ -143,7 +147,7 @@ export function DocumentChrome({ docRef, clinicName, clinicPhone, clinicEmail, c
   );
 }
 
-export function QuoteDocument({ docRef, clinicName, clinicPhone, clinicEmail, clinicInstagram, clinicCnpj, logoDataUrl, clientName, clientPhone, number, dateStr, items, total, pagamento, validade, accent }: {
+export function QuoteDocument({ docRef, clinicName, clinicPhone, clinicEmail, clinicInstagram, clinicAddress, clinicCnpj, logoDataUrl, clientName, clientPhone, number, dateStr, items, total, pagamento, validade, accent }: {
   docRef?: React.RefObject<HTMLDivElement | null>;
   clinicName: string;
   clinicPhone: string | null;
@@ -171,6 +175,7 @@ export function QuoteDocument({ docRef, clinicName, clinicPhone, clinicEmail, cl
       clinicPhone={clinicPhone}
       clinicEmail={clinicEmail}
       clinicInstagram={clinicInstagram}
+      clinicAddress={clinicAddress}
       clinicCnpj={clinicCnpj}
       logoDataUrl={logoDataUrl}
       clientName={clientName}

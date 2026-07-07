@@ -135,15 +135,15 @@ export function QuoteDocument({ docRef, clinicName, clinicPhone, clinicEmail, cl
         </div>
 
         {/* pagamento + termos */}
-        <div style={{ marginTop: 44, display: "flex", gap: 56 }}>
+        <div style={{ marginTop: 44, display: "flex", flexDirection: "column", gap: 24 }}>
           {pagamento ? (
-            <div style={{ flex: 1 }}>
+            <div>
               <div style={{ width: 36, height: 3, background: accent, borderRadius: 2, marginBottom: 7 }} />
               <div style={{ fontSize: 13, fontWeight: 800, color: accent }}>FORMA DE PAGAMENTO</div>
               <div style={{ fontSize: 12, color: "#334155", marginTop: 8, lineHeight: 1.6 }}>{pagamento}</div>
             </div>
           ) : null}
-          <div style={{ flex: 1 }}>
+          <div>
             <div style={{ width: 36, height: 3, background: accent, borderRadius: 2, marginBottom: 7 }} />
             <div style={{ fontSize: 13, fontWeight: 800, color: accent }}>TERMOS E CONDIÇÕES</div>
             <div style={{ fontSize: 12, color: "#334155", marginTop: 8, lineHeight: 1.6 }}>

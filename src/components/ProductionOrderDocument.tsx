@@ -1,12 +1,19 @@
 import React from "react";
 import { DocumentChrome, SectionBlock, formatBRL, formatValidade } from "./QuoteDocument";
 
-// Ordem de Produção (documento interno p/ a fábrica): foco em especificações + quantidade.
-// Preços são opcionais (show_prices). Reaproveita o esqueleto do orçamento (DocumentChrome).
+// Ordem de Produção (documento interno p/ a fábrica). Segue o formulário de fábrica de telas:
+// Nº da OP + datas (no cabeçalho/título), DADOS DO CLIENTE, e por item TIPO DE PRODUTO +
+// ESPECIFICAÇÕES (bitola/comprimento/altura/malha) com caixas marcadas a partir do orçamento.
 
-export type ProdItem = { name: string; specs: string[]; qty: string; value: number };
+export type ProdItem = { name: string; attrs: { label: string; value: string }[]; qty: string; value: number };
 
-export function ProductionOrderDocument({ docRef, clinicName, clinicPhone, clinicEmail, clinicInstagram, clinicCnpj, clientName, clientPhone, number, dateStr, items, total, showPrices, prazo, responsavel, observacoes, accent }: {
+const attrVal = (attrs: { label: string; value: string }[], keys: string[]) => {
+  const a = attrs.find(x => keys.some(k => (x.label || "").toLowerCase().includes(k)));
+  return a ? (a.value || "") : "";
+};
+const digits = (s: string) => (s || "").replace(",", ".").replace(/[^\d.]/g, "");
+
+export function ProductionOrderDocument({ docRef, clinicName, clinicPhone, clinicEmail, clinicInstagram, clinicCnpj, clientName, clientPhone, cidade, vendedor, number, dateStr, prazo, items, total, showPrices, observacoes, accent }: {
   docRef?: React.RefObject<HTMLDivElement | null>;
   clinicName: string;
   clinicPhone: string | null;
@@ -15,18 +22,38 @@ export function ProductionOrderDocument({ docRef, clinicName, clinicPhone, clini
   clinicCnpj: string | null;
   clientName: string;
   clientPhone: string | null;
+  cidade: string;
+  vendedor: string;
   number: string;
   dateStr: string;
+  prazo: string;
   items: ProdItem[];
   total: number;
   showPrices: boolean;
-  prazo: string;
-  responsavel: string;
   observacoes: string;
   accent: string;
 }) {
-  const rowLight = "#e6ecf5";
-  const rowAlt = "#f2f4f8";
+  const heading = (text: string) => (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ width: 42, height: 3, background: accent, borderRadius: 2, marginBottom: 7 }} />
+      <div style={{ fontSize: 15, fontWeight: 800, color: accent }}>{text}</div>
+    </div>
+  );
+  const field = (label: string, value: string) => (
+    <div style={{ fontSize: 13, marginBottom: 7, display: "flex", gap: 6 }}>
+      <span style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{label}:</span>
+      <span style={{ borderBottom: "1px solid #cbd5e1", flex: 1, minWidth: 0, paddingBottom: 1 }}>{value || " "}</span>
+    </div>
+  );
+  const cbox = (on: boolean, label: string) => (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, marginRight: 18, fontSize: 12.5, fontWeight: on ? 700 : 400 }}>
+      <span style={{ width: 15, height: 15, border: `1.6px solid ${on ? accent : "#94a3b8"}`, borderRadius: 3, background: on ? accent : "#ffffff", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+        {on ? <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg> : null}
+      </span>
+      {label}
+    </span>
+  );
+
   return (
     <DocumentChrome
       docRef={docRef}
@@ -41,33 +68,57 @@ export function ProductionOrderDocument({ docRef, clinicName, clinicPhone, clini
       number={number}
       dateStr={dateStr}
       accent={accent}
+      hideClient
     >
-      <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 30 }}>
-        <thead>
-          <tr style={{ borderBottom: `3px solid ${accent}` }}>
-            <th style={{ textAlign: "left", color: accent, fontSize: 13, fontWeight: 800, padding: "0 14px 9px" }}>PRODUTO</th>
-            <th style={{ textAlign: "left", color: accent, fontSize: 13, fontWeight: 800, padding: "0 14px 9px" }}>ESPECIFICAÇÕES</th>
-            <th style={{ textAlign: "center", color: accent, fontSize: 13, fontWeight: 800, padding: "0 14px 9px" }}>QTD</th>
-            {showPrices ? <th style={{ textAlign: "right", color: accent, fontSize: 13, fontWeight: 800, padding: "0 14px 9px" }}>VALOR</th> : null}
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((it, i) => (
-            <tr key={i} style={{ background: i % 2 === 0 ? rowLight : rowAlt }}>
-              <td style={{ padding: "14px", fontWeight: 700, fontSize: 12.5, verticalAlign: "top", width: showPrices ? "24%" : "30%" }}>{it.name}</td>
-              <td style={{ padding: "14px", fontSize: 12, color: "#334155", verticalAlign: "top" }}>
-                {it.specs.length > 0 ? (
-                  <ul style={{ margin: 0, paddingLeft: 18 }}>
-                    {it.specs.map((s, j) => <li key={j} style={{ marginBottom: 2 }}>{s}</li>)}
-                  </ul>
-                ) : <span style={{ color: "#94a3b8" }}>—</span>}
-              </td>
-              <td style={{ padding: "14px", textAlign: "center", fontWeight: 700, fontSize: 12.5, verticalAlign: "top", width: "16%", whiteSpace: "nowrap" }}>{it.qty || "—"}</td>
-              {showPrices ? <td style={{ padding: "14px", textAlign: "right", fontWeight: 700, fontSize: 12.5, verticalAlign: "top", width: "18%", whiteSpace: "nowrap" }}>{formatBRL(it.value)}</td> : null}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div style={{ fontSize: 12, fontWeight: 700, marginTop: 6 }}>Data prevista para entrega: {prazo ? formatValidade(prazo) : "____________"}</div>
+
+      {/* DADOS DO CLIENTE */}
+      <div style={{ marginTop: 24 }}>
+        {heading("DADOS DO CLIENTE")}
+        {field("Cliente", clientName)}
+        {field("Cidade", cidade)}
+        {field("Telefone", clientPhone || "")}
+        {field("Vendedor", vendedor)}
+      </div>
+
+      {/* Itens */}
+      {items.map((it, idx) => {
+        const bit = digits(attrVal(it.attrs, ["fio", "bitola", "arame"]));
+        const comp = attrVal(it.attrs, ["comprimento", "comp"]);
+        const alt = attrVal(it.attrs, ["altura"]);
+        const malha = digits(attrVal(it.attrs, ["malha"]));
+        const n = it.name.toLowerCase();
+        const isTela = n.includes("tela");
+        const isAlambrado = n.includes("alambrado");
+        const isConcertina = n.includes("concertina") || n.includes("lança") || n.includes("lanca");
+        return (
+          <div key={idx} style={{ marginTop: 20, border: "1px solid #e2e8f0", borderRadius: 10, padding: "14px 16px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+              <div style={{ fontSize: 14, fontWeight: 800 }}>{it.name}</div>
+              <div style={{ fontSize: 12.5, fontWeight: 700, whiteSpace: "nowrap" }}>Qtd: {it.qty || "—"}{showPrices ? ` · ${formatBRL(it.value)}` : ""}</div>
+            </div>
+
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 800, color: accent, marginBottom: 6 }}>TIPO DE PRODUTO</div>
+              <div>{cbox(isTela, "TELA")}{cbox(isAlambrado, "ALAMBRADO")}{cbox(isConcertina, "CONCERTINAS / LANÇAS")}</div>
+            </div>
+
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 800, color: accent, marginBottom: 6 }}>ESPECIFICAÇÕES DO PEDIDO</div>
+              <div style={{ fontSize: 12.5, marginBottom: 7, display: "flex", alignItems: "center", flexWrap: "wrap" }}>
+                <span style={{ fontWeight: 700, marginRight: 10 }}>Bitola do Arame:</span>
+                {["12", "14", "16", "18"].map(o => <React.Fragment key={o}>{cbox(bit === o, o)}</React.Fragment>)}
+              </div>
+              {field("Comprimento (m)", comp)}
+              {field("Altura (m)", alt)}
+              <div style={{ fontSize: 12.5, marginTop: 3, display: "flex", alignItems: "center", flexWrap: "wrap" }}>
+                <span style={{ fontWeight: 700, marginRight: 10 }}>Malha:</span>
+                {cbox(malha === "3", '3"')}{cbox(malha === "2.5", '2.5"')}{cbox(malha === "2", '2"')}
+              </div>
+            </div>
+          </div>
+        );
+      })}
 
       {showPrices ? (
         <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}>
@@ -77,11 +128,11 @@ export function ProductionOrderDocument({ docRef, clinicName, clinicPhone, clini
         </div>
       ) : null}
 
-      <div style={{ marginTop: 44, marginLeft: "auto", width: "56%", display: "flex", flexDirection: "column", gap: 26 }}>
-        {prazo.trim() ? <SectionBlock accent={accent} title="PRAZO DE ENTREGA">{formatValidade(prazo)}</SectionBlock> : null}
-        {responsavel.trim() ? <SectionBlock accent={accent} title="RESPONSÁVEL">{responsavel}</SectionBlock> : null}
-        {observacoes.trim() ? <SectionBlock accent={accent} title="OBSERVAÇÕES DE PRODUÇÃO">{observacoes}</SectionBlock> : null}
-      </div>
+      {observacoes.trim() ? (
+        <div style={{ marginTop: 30 }}>
+          <SectionBlock accent={accent} title="OBSERVAÇÕES DE PRODUÇÃO">{observacoes}</SectionBlock>
+        </div>
+      ) : null}
     </DocumentChrome>
   );
 }

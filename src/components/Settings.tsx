@@ -1020,16 +1020,17 @@ function ProductionOrderTemplateModal({ initial, clinic, onClose, onSave }: {
         clinicCnpj: clinic.cnpj ?? null,
         clientName: 'Cliente Exemplo',
         clientPhone: '(11) 90000-0000',
+        cidade: 'Cidade Exemplo',
+        vendedor: responsavel,
         number: '01234',
         dateStr: new Date().toLocaleDateString('pt-BR'),
+        prazo,
         items: [
-            { name: 'Alambrado 14-1.80-3', specs: ['malha: 3', 'fio: 14', 'altura: 1,80'], qty: '200 metros', value: 5400 },
-            { name: 'Instalação', specs: [], qty: '1 serviço', value: 150 },
+            { name: 'Alambrado 14-1.80-3', attrs: [{ label: 'malha', value: '3' }, { label: 'fio', value: '14' }, { label: 'altura', value: '1,80' }, { label: 'comprimento', value: '30' }], qty: '200 metros', value: 5400 },
+            { name: 'Tela Mosquiteira', attrs: [{ label: 'malha', value: '2' }, { label: 'fio', value: '16' }], qty: '1 rolo', value: 150 },
         ],
         total: 5550,
         showPrices,
-        prazo,
-        responsavel,
         observacoes,
         accent: clinic.primary_color || '#1d4ed8',
     };
@@ -1062,7 +1063,7 @@ function ProductionOrderTemplateModal({ initial, clinic, onClose, onSave }: {
                     <div className="space-y-3">
                         <div className="grid grid-cols-2 gap-3">
                             <div>
-                                <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Responsável</label>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Vendedor / Responsável</label>
                                 <input type="text" value={responsavel} onChange={e => setResponsavel(e.target.value)} className={inputCls} placeholder="Ex: João" />
                             </div>
                             <div>

@@ -1672,7 +1672,8 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
 
   const tpl: any = clinic?.production_order_template ?? {};
   const [prazo, setPrazo] = useState(String(tpl.prazo ?? ''));
-  const [responsavel, setResponsavel] = useState(String(tpl.responsavel ?? ''));
+  const [vendedor, setVendedor] = useState(String(tpl.responsavel ?? ''));
+  const [cidade, setCidade] = useState('');
   const [observacoes, setObservacoes] = useState(String(tpl.observacoes ?? ''));
   const [showPrices, setShowPrices] = useState<boolean>(tpl.show_prices ?? true);
   const [format, setFormat] = useState<'imagem' | 'pdf'>(tpl.format ?? 'pdf');
@@ -1686,7 +1687,7 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
     if (!t) return;
     appliedRef.current = true;
     if (t.prazo != null) setPrazo(String(t.prazo));
-    if (t.responsavel != null) setResponsavel(String(t.responsavel));
+    if (t.responsavel != null) setVendedor(String(t.responsavel));
     if (t.observacoes != null) setObservacoes(String(t.observacoes));
     if (t.show_prices != null) setShowPrices(!!t.show_prices);
     if (t.format != null) setFormat(t.format);
@@ -1712,11 +1713,11 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
       if (!it || !q || q <= 0) return null;
       return {
         name: it.name,
-        specs: (it.attributes ?? []).map((a: any) => `${a.label}${a.value ? `: ${a.value}` : ''}`),
+        attrs: (it.attributes ?? []).map((a: any) => ({ label: a.label, value: a.value })),
         qty: `${formatQty(q)} ${it.unit}`,
         value: lineValue(l),
       };
-    }).filter(Boolean) as { name: string; specs: string[]; qty: string; value: number }[];
+    }).filter(Boolean) as { name: string; attrs: { label: string; value: string }[]; qty: string; value: number }[];
   }, [quoteData, itemById]);
   const total = prodItems.reduce((s, it) => s + it.value, 0);
 
@@ -1732,7 +1733,7 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
     const s = wrap.clientWidth / 794;
     setScale(s);
     setPh(Math.round(el.offsetHeight * s));
-  }, [prazo, responsavel, observacoes, showPrices, prodItems.length]);
+  }, [prazo, vendedor, cidade, observacoes, showPrices, prodItems.length]);
 
   const docProps = {
     clinicName: clinic?.name ?? '',
@@ -1742,13 +1743,14 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
     clinicCnpj: clinic?.cnpj ?? null,
     clientName: lead.name,
     clientPhone: lead.phone ?? null,
+    cidade,
+    vendedor,
     number: meta.number,
     dateStr: meta.date,
+    prazo,
     items: prodItems,
     total,
     showPrices,
-    prazo,
-    responsavel,
     observacoes,
     accent: clinic?.primary_color || '#1d4ed8',
   };
@@ -1829,10 +1831,14 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Responsável</label>
-              <input type="text" value={responsavel} onChange={e => setResponsavel(e.target.value)} placeholder="Ex: João" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" />
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Vendedor</label>
+              <input type="text" value={vendedor} onChange={e => setVendedor(e.target.value)} placeholder="Ex: João" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" />
             </div>
             <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Cidade</label>
+              <input type="text" value={cidade} onChange={e => setCidade(e.target.value)} placeholder="Cidade do cliente" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" />
+            </div>
+            <div className="space-y-1.5 col-span-2">
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Prazo de entrega</label>
               <input type="text" value={prazo} onChange={e => setPrazo(e.target.value)} placeholder="Ex: 15 dias" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" />
             </div>

@@ -1948,7 +1948,24 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
       };
     }).filter(Boolean) as { name: string; attrs: { label: string; value: string }[]; comprimento: string; altura: string; qty: string; value: number }[];
   }, [quoteData, itemById]);
-  const total = prodItems.reduce((s, it) => s + it.value, 0);
+
+  // Seleção + edição por item antes de imprimir/baixar. Semeado 1x quando os itens carregam
+  // (products vêm async). include = vai pra produção; comprimento/altura editáveis (pré do orçamento).
+  const [itemState, setItemState] = useState<{ include: boolean; comprimento: string; altura: string }[]>([]);
+  const seededRef = useRef(false);
+  useEffect(() => {
+    if (seededRef.current || prodItems.length === 0) return;
+    seededRef.current = true;
+    setItemState(prodItems.map(it => ({ include: true, comprimento: it.comprimento, altura: it.altura })));
+  }, [prodItems]);
+  const setItem = (i: number, patch: Partial<{ include: boolean; comprimento: string; altura: string }>) =>
+    setItemState(prev => prev.map((s, idx) => idx === i ? { ...s, ...patch } : s));
+
+  // Só os itens INCLUÍDOS, com comprimento/altura editados, vão pro documento.
+  const docItems = prodItems
+    .map((it, i) => itemState[i] ? { ...it, comprimento: itemState[i].comprimento, altura: itemState[i].altura } : it)
+    .filter((_, i) => itemState[i] ? itemState[i].include : true);
+  const total = prodItems.reduce((s, it, i) => (itemState[i] && !itemState[i].include) ? s : s + it.value, 0);
 
   const [meta] = useState(() => ({ number: String(Date.now() % 100000).padStart(5, '0'), date: new Date().toLocaleDateString('pt-BR') }));
 
@@ -1962,7 +1979,7 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
     const s = wrap.clientWidth / 794;
     setScale(s);
     setPh(Math.round(el.offsetHeight * s));
-  }, [prazo, vendedor, cidade, observacoes, showPrices, prodItems.length]);
+  }, [prazo, vendedor, cidade, observacoes, showPrices, docItems.length, itemState]);
 
   const docProps = {
     clinicName: clinic?.name ?? '',
@@ -1980,7 +1997,7 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
     number: meta.number,
     dateStr: meta.date,
     prazo,
-    items: prodItems,
+    items: docItems,
     total,
     showPrices,
     observacoes,
@@ -2084,6 +2101,37 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
             Mostrar preços/valores
           </label>
 
+          {prodItems.length > 0 && (
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block">Produtos a produzir</label>
+              <p className="text-[11px] text-slate-400 -mt-1">Marque os que vão para a produção e ajuste as medidas, se precisar.</p>
+              {prodItems.map((it, i) => {
+                const st = itemState[i] ?? { include: true, comprimento: it.comprimento, altura: it.altura };
+                return (
+                  <div key={i} className={cn("rounded-xl border p-3 transition-all", st.include ? "border-slate-200 bg-white" : "border-slate-100 bg-slate-50")}>
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input type="checkbox" checked={st.include} onChange={e => setItem(i, { include: e.target.checked })} className="w-4 h-4 accent-teal-600 shrink-0" />
+                      <span className={cn("text-sm font-bold flex-1 min-w-0 truncate", st.include ? "text-slate-800" : "text-slate-400")}>{it.name}</span>
+                      <span className="text-[11px] font-semibold text-slate-400 shrink-0">{it.qty}</span>
+                    </label>
+                    {st.include && (
+                      <div className="grid grid-cols-2 gap-2 mt-2 pl-6">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block mb-0.5">Comprimento (m)</label>
+                          <input value={st.comprimento} onChange={e => setItem(i, { comprimento: e.target.value })} placeholder="—" className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block mb-0.5">Altura (m)</label>
+                          <input value={st.altura} onChange={e => setItem(i, { altura: e.target.value })} placeholder="—" className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           {/* Cópia offscreen (tamanho real, sem transform) capturada pelo html2canvas */}
           <div style={{ position: 'fixed', left: -99999, top: 0, width: 794, pointerEvents: 'none' }} aria-hidden>
             <ProductionOrderDocument docRef={docRef} {...docProps} />
@@ -2099,10 +2147,10 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
 
           <div className="flex gap-2 pt-1">
             <button onClick={onClose} className="py-2.5 px-3 rounded-xl text-sm font-bold border border-slate-200 text-slate-500 hover:bg-slate-50 transition-all">Fechar</button>
-            <button onClick={handlePrint} disabled={busy} className={cn("flex-1 py-2.5 rounded-xl text-sm font-bold border transition-all flex items-center justify-center gap-2", busy ? "border-slate-200 text-slate-400" : "border-teal-200 text-teal-700 hover:bg-teal-50")}>
+            <button onClick={handlePrint} disabled={busy || docItems.length === 0} className={cn("flex-1 py-2.5 rounded-xl text-sm font-bold border transition-all flex items-center justify-center gap-2", (busy || docItems.length === 0) ? "border-slate-200 text-slate-400" : "border-teal-200 text-teal-700 hover:bg-teal-50")}>
               <Printer className="w-4 h-4" /> Imprimir
             </button>
-            <button onClick={handleDownload} disabled={busy} className={cn("flex-1 py-2.5 rounded-xl text-sm font-black transition-all flex items-center justify-center gap-2", busy ? "bg-slate-100 text-slate-400" : "bg-teal-600 hover:bg-teal-700 text-white")}>
+            <button onClick={handleDownload} disabled={busy || docItems.length === 0} className={cn("flex-1 py-2.5 rounded-xl text-sm font-black transition-all flex items-center justify-center gap-2", (busy || docItems.length === 0) ? "bg-slate-100 text-slate-400" : "bg-teal-600 hover:bg-teal-700 text-white")}>
               {busy ? <><Loader2 className="w-4 h-4 animate-spin" /></> : <><Download className="w-4 h-4" /> Baixar</>}
             </button>
           </div>

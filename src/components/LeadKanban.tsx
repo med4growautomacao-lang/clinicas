@@ -968,12 +968,13 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   const iq: any = initialQuote ?? null; // orçamento salvo (editar) — tem prioridade sobre o modelo
   const { activeClinicId } = useAuth();
   const { clinic } = useSettings();
-  const { data: products, create: createProduct } = useProducts();
+  const { data: products, create: createProduct, update: updateProduct } = useProducts();
   const { data: protocols } = useProtocols();
   const { data: quoteImages } = useQuoteImages();
   const logoDataUrl = useImageDataUrl(clinic?.logo_url);
   const [imgChecked, setImgChecked] = useState<Record<string, boolean>>({});
-  const imgSeededRef = useRef(false);
+  const imgTouchedRef = useRef(false);       // usuário mexeu na seleção manualmente → não re-semear
+  const iqImgSeededRef = useRef(false);       // restauração da seleção do orçamento salvo (1x)
   const [quickNewFor, setQuickNewFor] = useState<number | null>(null); // linha que está cadastrando produto novo
   const qtyRefs = useRef<Record<number, HTMLInputElement | null>>({}); // foca a quantidade ao selecionar o item
 
@@ -1054,15 +1055,56 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
     if (qt.format != null) setFormat(qt.format);
   }, [clinic]);
 
-  // Semeia a seleção de fotos a partir do "send_by_default" (1x, quando as fotos carregarem).
+  // Produtos (uuid, sem prefixo) presentes nas linhas do orçamento.
+  const productUuids = useMemo(() => {
+    const s = new Set<string>();
+    lines.forEach(l => { if (l.productId.startsWith('p:')) s.add(l.productId.slice(2)); });
+    return Array.from(s);
+  }, [lines]);
+
+  // Restaura a seleção de fotos salva no orçamento (ao editar) — tem prioridade e trava a re-semeadura.
   useEffect(() => {
-    if (imgSeededRef.current || quoteImages.length === 0) return;
-    imgSeededRef.current = true;
-    const init: Record<string, boolean> = {};
-    quoteImages.forEach(i => { init[i.id] = i.send_by_default; });
-    setImgChecked(init);
+    if (iqImgSeededRef.current) return;
+    if (!Array.isArray(iq?.imageIds)) { iqImgSeededRef.current = true; return; }
+    if (quoteImages.length === 0) return;
+    iqImgSeededRef.current = true;
+    imgTouchedRef.current = true;
+    const set = new Set<string>(iq.imageIds);
+    const map: Record<string, boolean> = {};
+    quoteImages.forEach(i => { map[i.id] = set.has(i.id); });
+    setImgChecked(map);
   }, [quoteImages]);
+
+  // Semeia a seleção de fotos pela memória POR PRODUTO (última seleção enviada daquele produto).
+  // Se nenhum produto da linha tem seleção salva, cai no padrão global "send_by_default".
+  // Para de semear assim que o usuário mexe manualmente (imgTouchedRef).
+  useEffect(() => {
+    if (imgTouchedRef.current || quoteImages.length === 0) return;
+    const chosen = productUuids
+      .map(id => products.find(p => p.id === id))
+      .filter((p): p is Product => !!p);
+    const configured = chosen.filter(p => Array.isArray(p.quote_image_ids));
+    let selectedIds: Set<string>;
+    if (configured.length > 0) {
+      selectedIds = new Set<string>();
+      configured.forEach(p => (p.quote_image_ids || []).forEach(id => selectedIds.add(id)));
+    } else {
+      selectedIds = new Set(quoteImages.filter(i => i.send_by_default).map(i => i.id));
+    }
+    const map: Record<string, boolean> = {};
+    quoteImages.forEach(i => { map[i.id] = selectedIds.has(i.id); });
+    setImgChecked(map);
+  }, [quoteImages, products, productUuids]);
+
   const selectedImages = quoteImages.filter(i => imgChecked[i.id] ?? i.send_by_default);
+  const allImagesOn = quoteImages.length > 0 && quoteImages.every(i => imgChecked[i.id] ?? i.send_by_default);
+  const toggleAllImages = () => {
+    imgTouchedRef.current = true;
+    const next = !allImagesOn;
+    const map: Record<string, boolean> = {};
+    quoteImages.forEach(i => { map[i.id] = next; });
+    setImgChecked(map);
+  };
 
   // Valor unitario efetivo: o preco editado na linha, ou o cadastrado no produto.
   const unitPrice = (l: Line) => {
@@ -1234,7 +1276,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   } as Record<string, string>)[code] || 'Não foi possível enviar. Tente novamente.');
 
   // Snapshot estruturado p/ reabrir o orçamento depois (persistido em tickets.quote_data).
-  const buildQuoteSnapshot = () => ({ lines, manualValue, notes, saudacao, rodape, validade, pagamento, includeSpecs, format });
+  const buildQuoteSnapshot = () => ({ lines, manualValue, notes, saudacao, rodape, validade, pagamento, includeSpecs, format, imageIds: selectedImages.map(i => i.id) });
 
   // Etapa 1: registra o orçamento sem enviar (fluxo antigo — o WhatsApp é opcional).
   const handleRegisterOnly = async () => {
@@ -1243,6 +1285,12 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
     const ok = await onConfirm(total, buildDescription().trim(), buildQuoteSnapshot());
     if (ok) { setDone(true); setTimeout(onClose, 900); }
     setSaving(false);
+  };
+
+  // Lembra a seleção atual de fotos em CADA produto do orçamento (p/ pré-marcar no próximo envio).
+  const rememberProductImages = async () => {
+    const ids = selectedImages.map(i => i.id);
+    await Promise.all(productUuids.map(uuid => updateProduct(uuid, { quote_image_ids: ids }).catch(() => false)));
   };
 
   const finishSend = async (data: any, error: any) => {
@@ -1256,6 +1304,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
         });
       } catch (_e) { /* ignora falha de foto individual */ }
     }
+    await rememberProductImages();
     setSending(false);
     setDone(true); setTimeout(onClose, 1300);
   };
@@ -1607,19 +1656,24 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
 
               {quoteImages.length > 0 && (
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Fotos que vão junto</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Fotos que vão junto</label>
+                    <button type="button" onClick={toggleAllImages} className="text-[11px] font-bold text-blue-600 hover:text-blue-700">
+                      {allImagesOn ? 'Desmarcar todas' : 'Marcar todas'}
+                    </button>
+                  </div>
                   <div className="flex flex-wrap gap-2">
                     {quoteImages.map(img => {
                       const on = imgChecked[img.id] ?? img.send_by_default;
                       return (
-                        <button key={img.id} type="button" onClick={() => setImgChecked(prev => ({ ...prev, [img.id]: !on }))} className={cn("relative w-14 h-14 rounded-lg overflow-hidden border-2 transition-all", on ? "border-blue-500" : "border-slate-200 opacity-50")}>
+                        <button key={img.id} type="button" onClick={() => { imgTouchedRef.current = true; setImgChecked(prev => ({ ...prev, [img.id]: !on })); }} className={cn("relative w-14 h-14 rounded-lg overflow-hidden border-2 transition-all", on ? "border-blue-500" : "border-slate-200 opacity-50")}>
                           <img src={img.url} className="w-full h-full object-cover" />
                           {on && <span className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-blue-600 text-white flex items-center justify-center"><Check className="w-2.5 h-2.5" /></span>}
                         </button>
                       );
                     })}
                   </div>
-                  <p className="text-[10px] text-slate-400">As marcadas são enviadas como imagem logo após o orçamento.</p>
+                  <p className="text-[10px] text-slate-400">As marcadas são enviadas como imagem logo após o orçamento. A seleção fica salva por produto.</p>
                 </div>
               )}
 

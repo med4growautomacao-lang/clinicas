@@ -1202,6 +1202,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
     clinicInstagram: clinic?.instagram ?? null,
     clinicAddress: clinic?.address ?? null,
     clinicCnpj: clinic?.cnpj ?? null,
+    logoDataUrl,
     clientName: lead.name,
     clientPhone: lead.phone ?? null,
     number: quoteMeta.number,
@@ -1756,6 +1757,7 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
   const { clinic } = useSettings();
   const { data: products } = useProducts();
   const { data: protocols } = useProtocols();
+  const logoDataUrl = useImageDataUrl(clinic?.logo_url);
 
   const itemById = useMemo(() => {
     const m: Record<string, { name: string; unit: string; unit_price: number; attributes: { label: string; value: string; unit?: string | null }[]; charge_by_area?: boolean }> = {};
@@ -1838,6 +1840,7 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
     clinicEmail: clinic?.email ?? null,
     clinicInstagram: clinic?.instagram ?? null,
     clinicCnpj: clinic?.cnpj ?? null,
+    logoDataUrl,
     clientName: lead.name,
     clientPhone: lead.phone ?? null,
     cidade,

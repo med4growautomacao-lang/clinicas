@@ -44,7 +44,7 @@ import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "./ui/toast";
 import { MoneyInput } from "./ui/money-input";
-import { QuoteDocument, formatValidade } from "./QuoteDocument";
+import { QuoteDocument, formatValidade, useImageDataUrl } from "./QuoteDocument";
 import { ProductionOrderDocument } from "./ProductionOrderDocument";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
@@ -1053,6 +1053,7 @@ function ProductionOrderTemplateModal({ initial, clinic, onClose, onSave }: {
         clinicEmail: clinic.email ?? null,
         clinicInstagram: clinic.instagram ?? null,
         clinicCnpj: clinic.cnpj ?? null,
+        logoDataUrl: useImageDataUrl(clinic.logo_url),
         clientName: 'Cliente Exemplo',
         clientPhone: '(11) 90000-0000',
         cidade: 'Cidade Exemplo',
@@ -1203,6 +1204,7 @@ function QuoteTemplateModal({ initial, clinic, onClose, onSave }: {
         clinicInstagram: clinic.instagram ?? null,
         clinicAddress: clinic.address ?? null,
         clinicCnpj: clinic.cnpj ?? null,
+        logoDataUrl: useImageDataUrl(clinic.logo_url),
         clientName: sampleName,
         clientPhone: '(11) 90000-0000',
         number: '01234',
@@ -1391,6 +1393,22 @@ function BrandingSettings({ data, onChange }: { data: Partial<Clinic>, onChange:
 }
 
 function ClinicSettings({ data, onChange }: { data: Partial<Clinic>, onChange: (updates: Partial<Clinic>) => void }) {
+    const { activeClinicId } = useAuth();
+    const logoInputRef = useRef<HTMLInputElement>(null);
+    const [uploadingLogo, setUploadingLogo] = useState(false);
+    const handleLogoUpload = async (file: File | null) => {
+        if (!file || !activeClinicId) return;
+        setUploadingLogo(true);
+        const ext = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
+        const path = `${activeClinicId}/logo/${crypto.randomUUID()}.${ext}`;
+        const { error } = await supabase.storage.from('quotes').upload(path, file, { contentType: file.type || 'image/png', upsert: false });
+        if (!error) {
+            const { data: pub } = supabase.storage.from('quotes').getPublicUrl(path);
+            onChange({ logo_url: pub.publicUrl });
+        }
+        setUploadingLogo(false);
+        if (logoInputRef.current) logoInputRef.current.value = '';
+    };
     return (
         <Card className="border border-slate-200 shadow-sm max-w-4xl mx-auto">
             <CardContent className="p-8">
@@ -1453,6 +1471,45 @@ function ClinicSettings({ data, onChange }: { data: Partial<Clinic>, onChange: (
                                 className="w-full px-4 py-2 border border-slate-200 rounded-lg font-medium text-slate-700 h-[210px]"
                             />
                         </div>
+                    </div>
+                </div>
+
+                <div className="mt-8 pt-6 border-t border-slate-100">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Logo</label>
+                    <p className="text-[11px] text-slate-400 mb-2.5">Aparece no cabeçalho do orçamento (imagem e PDF). Use PNG com fundo transparente para melhor resultado.</p>
+                    <div className="flex items-center gap-4">
+                        <div className="w-32 h-16 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden shrink-0">
+                            {data.logo_url
+                                ? <img src={data.logo_url} alt="Logo" className="max-w-full max-h-full object-contain" />
+                                : <span className="text-[10px] text-slate-400">sem logo</span>}
+                        </div>
+                        <input
+                            ref={logoInputRef}
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => handleLogoUpload(e.target.files?.[0] ?? null)}
+                        />
+                        <Button
+                            variant="outline"
+                            onClick={() => logoInputRef.current?.click()}
+                            disabled={uploadingLogo}
+                            className="gap-2"
+                        >
+                            {uploadingLogo
+                                ? <Loader2 className="w-4 h-4 animate-spin" />
+                                : <CloudUpload className="w-4 h-4" />}
+                            {data.logo_url ? 'Trocar logo' : 'Enviar logo'}
+                        </Button>
+                        {data.logo_url && (
+                            <button
+                                type="button"
+                                onClick={() => onChange({ logo_url: null })}
+                                className="text-xs font-semibold text-rose-500 hover:text-rose-700"
+                            >
+                                Remover
+                            </button>
+                        )}
                     </div>
                 </div>
 

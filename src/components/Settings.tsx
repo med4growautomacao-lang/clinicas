@@ -45,7 +45,7 @@ import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "./ui/toast";
 import { MoneyInput } from "./ui/money-input";
-import { QuoteDocument } from "./QuoteDocument";
+import { QuoteDocument, formatValidade } from "./QuoteDocument";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import WhatsappLogo from "../assets/logos/Logo Whatsapp.png";
@@ -1005,7 +1005,7 @@ function QuoteTemplateModal({ initial, clinic, onClose, onSave }: {
         p.push('*Orçamento*', '', '*Produto exemplo*');
         if (includeSpecs) p.push('malha: 18 | fio: 0,30 mm');
         p.push(`10 metro × ${brl(27)} = ${brl(270)}`, '', '*Instalação*', `1 serviço × ${brl(150)} = ${brl(150)}`, '', `*TOTAL: ${brl(sampleTotal)}*`);
-        if (validade.trim()) p.push(`Validade: ${validade.trim()}`);
+        if (validade.trim()) p.push(`Validade: ${formatValidade(validade)}`);
         if (pagamento.trim()) p.push(`Pagamento: ${pagamento.trim()}`);
         if (rodape.trim()) { p.push(''); p.push(rodape.trim()); }
         return p.join('\n');

@@ -14,6 +14,12 @@ const formatBRL = (val: number | string) => {
   }).format(n || 0);
 };
 
+// Validade para exibição: se for só número, vira "N dias"; senão mantém o texto (ex.: "7 dias", "1 mês").
+export const formatValidade = (v: string | null | undefined) => {
+  const s = String(v ?? "").trim();
+  return s && /^\d+$/.test(s) ? `${s} dias` : s;
+};
+
 export type QuoteDocItem = { name: string; description: string | null; specs: string[]; qtyLine: string; value: number };
 
 export function QuoteDocument({ docRef, clinicName, clinicPhone, clinicAddress, clinicCnpj, clientName, clientPhone, number, dateStr, items, total, pagamento, validade, accent }: {
@@ -114,7 +120,7 @@ export function QuoteDocument({ docRef, clinicName, clinicPhone, clinicAddress, 
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 13, fontWeight: 800, color: accent, borderBottom: `2px solid ${accent}`, paddingBottom: 4, display: "inline-block" }}>TERMOS E CONDIÇÕES</div>
             <div style={{ fontSize: 12, color: "#334155", marginTop: 8, lineHeight: 1.6 }}>
-              {validade ? `Este orçamento é válido por ${validade}.` : "Orçamento sujeito a confirmação de disponibilidade."}
+              {validade ? `Este orçamento é válido por ${formatValidade(validade)}.` : "Orçamento sujeito a confirmação de disponibilidade."}
             </div>
           </div>
         </div>

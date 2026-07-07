@@ -45,7 +45,7 @@ import SemOrigemLogo from "../assets/logos/Logo Sem origem.png";
 import { Share2, Globe, Layout, Smartphone, Sparkles, Instagram, PhoneOff, RotateCcw } from "lucide-react";
 import { DateRangePicker } from "./DateRangePicker";
 import { UtmLeadFilter, leadUtmKey, NO_UTM_KEY } from "./filters/UtmLeadFilter";
-import { QuoteDocument } from "./QuoteDocument";
+import { QuoteDocument, formatValidade } from "./QuoteDocument";
 
 const SOURCE_LABELS: Record<string, string> = {
   'meta_ads': 'Meta Ads',
@@ -936,12 +936,14 @@ const formatQty = (n: number) => Number(n).toLocaleString('pt-BR', { maximumFrac
 // NÃO gera conversão — só grava metadados no lead (estimated_value = total) e no ticket
 // (notes = resumo itemizado em texto). Se a clínica ainda não tem catálogo, cai no modo
 // manual (digita o valor), preservando o comportamento anterior.
-function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
+function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   lead: { id: string; name: string; phone?: string | null };
+  initialQuote?: any;
   onClose: () => void;
   onCancel: () => void;
-  onConfirm: (value: number, description: string) => Promise<boolean>;
+  onConfirm: (value: number, description: string, quoteData?: any) => Promise<boolean>;
 }) {
+  const iq: any = initialQuote ?? null; // orçamento salvo (editar) — tem prioridade sobre o modelo
   const { activeClinicId } = useAuth();
   const { clinic } = useSettings();
   const { data: products, create: createProduct } = useProducts();
@@ -974,10 +976,10 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
   const sectionLabel = (useProd && useProt) ? 'Itens' : (onlyProt ? 'Protocolos' : 'Produtos');
 
   type Line = { productId: string; qty: string; price: string; discount: string; fee: string };
-  const [lines, setLines] = useState<Line[]>([{ productId: '', qty: '', price: '', discount: '', fee: '' }]);
-  const [manualValue, setManualValue] = useState('');
+  const [lines, setLines] = useState<Line[]>(Array.isArray(iq?.lines) && iq.lines.length ? iq.lines : [{ productId: '', qty: '', price: '', discount: '', fee: '' }]);
+  const [manualValue, setManualValue] = useState(iq?.manualValue ?? '');
   const [editPrices, setEditPrices] = useState(false);  // destrava a edicao do valor unitario (antes de x qtd)
-  const [notes, setNotes] = useState('');
+  const [notes, setNotes] = useState(iq?.notes ?? '');
 
   // Etapa 2 (opcional): configuracao da mensagem enviada por WhatsApp.
   // Valores iniciais vêm do "modelo do orçamento" da clínica (clinic.quote_template).
@@ -985,18 +987,18 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
   const tpl: any = clinic?.quote_template ?? {};
   const initSaudacao = String(tpl.saudacao ?? 'Olá {nome}! 👋').split('{nome}').join(firstName).replace(/\s+([!?.,])/g, '$1');
   const [step, setStep] = useState<1 | 2>(1);
-  const [saudacao, setSaudacao] = useState(initSaudacao);
-  const [rodape, setRodape] = useState(String(tpl.rodape ?? 'Qualquer dúvida, estou à disposição! 😊'));
-  const [validade, setValidade] = useState(String(tpl.validade ?? ''));
-  const [pagamento, setPagamento] = useState(String(tpl.pagamento ?? ''));
-  const [includeSpecs, setIncludeSpecs] = useState<boolean>(tpl.include_specs ?? true);
+  const [saudacao, setSaudacao] = useState(iq?.saudacao ?? initSaudacao);
+  const [rodape, setRodape] = useState(iq?.rodape ?? String(tpl.rodape ?? 'Qualquer dúvida, estou à disposição! 😊'));
+  const [validade, setValidade] = useState(iq?.validade ?? String(tpl.validade ?? ''));
+  const [pagamento, setPagamento] = useState(iq?.pagamento ?? String(tpl.pagamento ?? ''));
+  const [includeSpecs, setIncludeSpecs] = useState<boolean>(iq?.includeSpecs ?? (tpl.include_specs ?? true));
   const [messageText, setMessageText] = useState('');
   const [msgTouched, setMsgTouched] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
 
   // Formato de envio (texto | imagem | pdf) + documento formal. Padrão vem do modelo da clínica.
-  const [format, setFormat] = useState<'texto' | 'imagem' | 'pdf'>(tpl.format ?? 'imagem');
+  const [format, setFormat] = useState<'texto' | 'imagem' | 'pdf'>(iq?.format ?? (tpl.format ?? 'imagem'));
   const docRef = useRef<HTMLDivElement>(null);
   const previewWrapRef = useRef<HTMLDivElement>(null);
   const [previewScale, setPreviewScale] = useState(0.45);
@@ -1011,7 +1013,8 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
 
   // clinic.quote_template chega de forma assíncrona (useSettings). Quando chegar, aplica o
   // modelo aos campos 1x (antes do usuário mexer) — os useState iniciais só pegam os defaults.
-  const templateAppliedRef = useRef(false);
+  // Ao EDITAR um orçamento salvo (iq), o modelo não sobrescreve (já vem marcado como aplicado).
+  const templateAppliedRef = useRef(!!iq);
   useEffect(() => {
     if (templateAppliedRef.current) return;
     const qt = clinic?.quote_template;
@@ -1119,7 +1122,7 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
     });
     out.push('');
     out.push(`*TOTAL: ${formatBRL(total)}*`);
-    if (validade.trim()) out.push(`Validade: ${validade.trim()}`);
+    if (validade.trim()) out.push(`Validade: ${formatValidade(validade)}`);
     if (pagamento.trim()) out.push(`Pagamento: ${pagamento.trim()}`);
     if (notes.trim()) { out.push(''); out.push(notes.trim()); }
     if (rodape.trim()) { out.push(''); out.push(rodape.trim()); }
@@ -1183,11 +1186,14 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
     missing_params: 'Dados insuficientes para enviar.',
   } as Record<string, string>)[code] || 'Não foi possível enviar. Tente novamente.');
 
+  // Snapshot estruturado p/ reabrir o orçamento depois (persistido em tickets.quote_data).
+  const buildQuoteSnapshot = () => ({ lines, manualValue, notes, saudacao, rodape, validade, pagamento, includeSpecs, format });
+
   // Etapa 1: registra o orçamento sem enviar (fluxo antigo — o WhatsApp é opcional).
   const handleRegisterOnly = async () => {
     if (!total || total <= 0 || saving) return;
     setSaving(true);
-    const ok = await onConfirm(total, buildDescription().trim());
+    const ok = await onConfirm(total, buildDescription().trim(), buildQuoteSnapshot());
     if (ok) { setDone(true); setTimeout(onClose, 900); }
     setSaving(false);
   };
@@ -1205,7 +1211,7 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
     if (!activeClinicId || !lead.phone) { setSendError('Lead sem telefone cadastrado.'); return; }
     if (format === 'texto' && !messageText.trim()) { setSendError('Mensagem vazia.'); return; }
     setSending(true); setSendError(null);
-    const ok = await onConfirm(total, buildDescription().trim());
+    const ok = await onConfirm(total, buildDescription().trim(), buildQuoteSnapshot());
     if (!ok) { setSending(false); setSendError('Falha ao registrar o orçamento.'); return; }
 
     try {
@@ -1893,7 +1899,7 @@ export function LeadKanban() {
   const { aiConfig, updateAI } = useSettings();
   const [ganhoLead, setGanhoLead] = useState<{ id: string; name: string; phone: string | null; patientId: string | null; prevStageId: string | null; ticketId: string } | null>(null);
   const [lossLead, setLossLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
-  const [orcamentoLead, setOrcamentoLead] = useState<{ id: string; name: string; phone: string | null; prevStageId: string | null; ticketId: string } | null>(null);
+  const [orcamentoLead, setOrcamentoLead] = useState<{ id: string; name: string; phone: string | null; prevStageId: string | null; ticketId: string; initialQuote?: any } | null>(null);
   // Aviso ao arrastar um card já resolvido (venda/perda) para uma etapa ativa: manter (novo
   // ciclo, card único) ou cancelar (reabre o mesmo ticket). Guarda o ticket p/ o fluxo "Manter".
   const [reopenLead, setReopenLead] = useState<{ ticket: Ticket; outcome: 'ganho' | 'perdido'; targetStageId: string } | null>(null);
@@ -3502,6 +3508,22 @@ export function LeadKanban() {
                     <input type="text" value={formData.avatar_url} onChange={e => setFormData(p => ({ ...p, avatar_url: e.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 font-medium text-sm" placeholder="https://..." />
                   </div>
                 </div>
+                {(() => {
+                  const et = tickets.find(t => t.id === selectedLead?._ticketId);
+                  if (!et?.quote_data) return null;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowModal(false);
+                        setOrcamentoLead({ id: selectedLead.id, name: selectedLead.name, phone: selectedLead.phone ?? null, prevStageId: null, ticketId: et.id, initialQuote: et.quote_data });
+                      }}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 font-bold text-sm hover:bg-blue-100 transition-colors"
+                    >
+                      <FileText className="w-4 h-4" /> Ver / editar orçamento criado
+                    </button>
+                  );
+                })()}
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Etapa do Funil</label>
                   <select value={formData.stage_id} onChange={e => setFormData(p => ({ ...p, stage_id: e.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 font-medium text-sm">
@@ -3869,17 +3891,22 @@ export function LeadKanban() {
       {orcamentoLead && (
         <OrcamentoModal
           lead={orcamentoLead}
+          initialQuote={orcamentoLead.initialQuote}
           onClose={() => setOrcamentoLead(null)}
           onCancel={() => {
             const { ticketId, prevStageId } = orcamentoLead;
             setOrcamentoLead(null);
             if (prevStageId) moveTicket(ticketId, prevStageId);
           }}
-          onConfirm={async (value, description) => {
+          onConfirm={async (value, description, quoteData) => {
             await update(orcamentoLead.id, { estimated_value: value });
-            if (description) {
-              await supabase.from('tickets').update({ notes: description }).eq('id', orcamentoLead.ticketId);
+            const patch: any = {};
+            if (description) patch.notes = description;
+            if (quoteData !== undefined) patch.quote_data = quoteData;
+            if (Object.keys(patch).length) {
+              await supabase.from('tickets').update(patch).eq('id', orcamentoLead.ticketId);
             }
+            await refetchTickets(true);
             return true;
           }}
         />

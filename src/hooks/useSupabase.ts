@@ -930,6 +930,7 @@ export interface Ticket {
   notes: string | null;
   created_at: string;
   lead_phone: string | null;
+  quote_data?: any | null;
   lead?: Lead;
 }
 

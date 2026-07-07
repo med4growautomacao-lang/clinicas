@@ -45,11 +45,11 @@ export const formatValidade = (v: string | null | undefined) => {
 export type QuoteDocItem = { name: string; description: string | null; specs: string[]; qtyLine: string; value: number };
 
 // Bloco de seção com traço curto na cor da clínica + título + conteúdo (pagamento, termos, obs...).
-export function SectionBlock({ accent, title, children, align = "left" }: { accent: string; title: string; children: React.ReactNode; align?: "left" | "center" }) {
-  const centered = align === "center";
+export function SectionBlock({ accent, title, children, align = "left" }: { accent: string; title: string; children: React.ReactNode; align?: "left" | "center" | "right" }) {
+  const barAlign = align === "center" ? { marginLeft: "auto", marginRight: "auto" } : align === "right" ? { marginLeft: "auto" } : {};
   return (
-    <div style={centered ? { textAlign: "center" } : undefined}>
-      <div style={{ width: 42, height: 3, background: accent, borderRadius: 2, marginBottom: 9, ...(centered ? { marginLeft: "auto", marginRight: "auto" } : {}) }} />
+    <div style={{ textAlign: align }}>
+      <div style={{ width: 42, height: 3, background: accent, borderRadius: 2, marginBottom: 9, ...barAlign }} />
       <div style={{ fontSize: 16, fontWeight: 800, color: accent }}>{title}</div>
       <div style={{ fontSize: 13.5, color: "#334155", marginTop: 9, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{children}</div>
     </div>
@@ -113,9 +113,9 @@ export function DocumentChrome({ docRef, clinicName, clinicLegalName, clinicPhon
       <div style={{ position: "relative", padding: "46px 54px 130px" }}>
         {/* cabeçalho */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 24, paddingRight: 50 }}>
-          <div style={{ maxWidth: 340 }}>
+          <div style={{ maxWidth: 340, textAlign: "center" }}>
             {logoDataUrl
-              ? <img src={logoDataUrl} alt={companyName} style={{ maxHeight: 58, maxWidth: 300, objectFit: "contain", display: "block", marginBottom: 8 }} />
+              ? <img src={logoDataUrl} alt={companyName} style={{ maxHeight: 58, maxWidth: 300, objectFit: "contain", display: "block", margin: "0 auto 8px" }} />
               : null}
             {companyName
               ? <div style={{ fontSize: logoDataUrl ? 15 : 21, fontWeight: 800, color: accent, lineHeight: 1.25 }}>{companyName}</div>
@@ -229,9 +229,9 @@ export function QuoteDocument({ docRef, clinicName, clinicLegalName, clinicPhone
         </div>
       ) : null}
 
-      <div style={{ margin: "44px auto 0", width: "72%", display: "flex", flexDirection: "column", gap: 26 }}>
-        {pagamento ? <SectionBlock accent={accent} title="FORMA DE PAGAMENTO" align="center">{pagamento}</SectionBlock> : null}
-        <SectionBlock accent={accent} title="TERMOS E CONDIÇÕES" align="center">
+      <div style={{ marginTop: 44, marginLeft: "auto", width: "56%", display: "flex", flexDirection: "column", gap: 26 }}>
+        {pagamento ? <SectionBlock accent={accent} title="FORMA DE PAGAMENTO" align="right">{pagamento}</SectionBlock> : null}
+        <SectionBlock accent={accent} title="TERMOS E CONDIÇÕES" align="right">
           {validade ? `Este orçamento é válido por ${formatValidade(validade)}.` : "Orçamento sujeito a confirmação de disponibilidade."}
         </SectionBlock>
       </div>

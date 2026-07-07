@@ -716,6 +716,25 @@ export function Settings() {
                                     })}
                                     <p className="text-[11px] text-slate-400 pt-1">Deixe pelo menos um marcado. Com os dois desmarcados, o orçamento usa entrada manual de valor.</p>
 
+                                    {(() => {
+                                        const on = (localClinic as any).quote_show_total !== false; // padrão: ligado
+                                        return (
+                                            <button
+                                                type="button"
+                                                onClick={() => setLocalClinic(prev => ({ ...prev, quote_show_total: !on }))}
+                                                className="w-full flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-100 hover:border-slate-200 bg-white transition-all text-left mt-2"
+                                            >
+                                                <div className="min-w-0">
+                                                    <p className="font-semibold text-sm text-slate-800">Mostrar valor total</p>
+                                                    <p className="text-xs text-slate-400">Mostra e envia o total da soma no orçamento (documento, mensagem e resumo). Desligado, some o total geral — os itens seguem com valor.</p>
+                                                </div>
+                                                {on
+                                                    ? <ToggleRight className="w-7 h-7 text-teal-500 shrink-0" />
+                                                    : <ToggleLeft className="w-7 h-7 text-slate-300 shrink-0" />}
+                                            </button>
+                                        );
+                                    })()}
+
                                     <div className="pt-3 border-t border-slate-100 mt-2">
                                         <Button variant="outline" onClick={() => setQuoteTplOpen(true)} className="w-full gap-2">
                                             <FileText className="w-4 h-4 text-teal-600" /> Configurar modelo do orçamento
@@ -1214,16 +1233,19 @@ function QuoteTemplateModal({ initial, clinic, onClose, onSave }: {
         dateStr: new Date().toLocaleDateString('pt-BR'),
         items: sampleDocItems,
         total: sampleTotal,
+        showTotal: clinic.quote_show_total !== false,
         pagamento: pagamento.trim(),
         validade: validade.trim(),
         accent: clinic.primary_color || '#1d4ed8',
     };
+    const showTotalSample = clinic.quote_show_total !== false;
     const sampleMessage = (() => {
         const p: string[] = [];
         if (saudPreview.trim()) { p.push(saudPreview.trim()); p.push(''); }
         p.push('*Orçamento*', '', '*Produto exemplo*');
         if (includeSpecs) p.push('malha: 18 | fio: 0,30 mm');
-        p.push(`10 metro × ${brl(27)} = ${brl(270)}`, '', '*Instalação*', `1 serviço × ${brl(150)} = ${brl(150)}`, '', `*TOTAL: ${brl(sampleTotal)}*`);
+        p.push(`10 metro × ${brl(27)} = ${brl(270)}`, '', '*Instalação*', `1 serviço × ${brl(150)} = ${brl(150)}`);
+        if (showTotalSample) p.push('', `*TOTAL: ${brl(sampleTotal)}*`);
         if (validade.trim()) p.push(`Validade: ${formatValidade(validade)}`);
         if (pagamento.trim()) p.push(`Pagamento: ${pagamento.trim()}`);
         if (rodape.trim()) { p.push(''); p.push(rodape.trim()); }

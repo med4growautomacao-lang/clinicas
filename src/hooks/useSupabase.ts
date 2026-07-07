@@ -1495,6 +1495,7 @@ export interface Clinic {
   forms_status?: 'none' | 'inactive' | 'active';
   quote_use_products?: boolean;
   quote_use_protocols?: boolean;
+  quote_show_total?: boolean;  // mostra/envia o valor total da soma no orçamento (default true)
   quote_template?: {
     saudacao?: string;
     rodape?: string;

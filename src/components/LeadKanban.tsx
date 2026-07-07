@@ -996,6 +996,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   // Fontes de item conforme a Configuração do Orçamento da clínica (padrão: ambas ligadas).
   const useProd = clinic?.quote_use_products !== false;
   const useProt = clinic?.quote_use_protocols !== false;
+  const showTotal = clinic?.quote_show_total !== false; // mostra/envia a soma total (config da clínica)
   const activeProducts = useMemo(() => useProd ? products.filter(p => p.is_active) : [], [products, useProd]);
   const activeProtocols = useMemo(() => useProt ? protocols.filter(p => p.is_active) : [], [protocols, useProt]);
 
@@ -1218,8 +1219,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
       const dims = isAreaItem(p) ? `${formatQty(q)}m × ${formatQty(lineAltura(l))}m` : `${formatQty(q)} ${p.unit}`;
       out.push(`${dims}: ${formatBRL(lineTotal(l))}`);
     });
-    out.push('');
-    out.push(`*TOTAL: ${formatBRL(total)}*`);
+    if (showTotal) { out.push(''); out.push(`*TOTAL: ${formatBRL(total)}*`); }
     if (validade.trim()) out.push(`Validade: ${formatValidade(validade)}`);
     if (pagamento.trim()) out.push(`Pagamento: ${pagamento.trim()}`);
     if (notes.trim()) { out.push(''); out.push(notes.trim()); }
@@ -1267,6 +1267,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
     dateStr: quoteMeta.date,
     items: docItemsFinal,
     total,
+    showTotal,
     pagamento: pagamento.trim(),
     validade: validade.trim(),
     accent: clinic?.primary_color || '#1d4ed8',
@@ -1601,11 +1602,13 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
             </div>
           )}
 
-          {/* Total geral: soma dos itens, cada um já com seu desconto e frete */}
-          <div className="flex items-center justify-between rounded-xl bg-slate-50 border border-slate-100 p-3">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Total</span>
-            <span className="text-lg font-black text-blue-600">{formatBRL(total)}</span>
-          </div>
+          {/* Total geral: soma dos itens, cada um já com seu desconto e frete (oculto se a clínica desligar "Mostrar valor total") */}
+          {showTotal && (
+            <div className="flex items-center justify-between rounded-xl bg-slate-50 border border-slate-100 p-3">
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Total</span>
+              <span className="text-lg font-black text-blue-600">{formatBRL(total)}</span>
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Observações</label>

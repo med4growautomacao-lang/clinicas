@@ -153,7 +153,7 @@ export function DocumentChrome({ docRef, clinicName, clinicLegalName, clinicPhon
   );
 }
 
-export function QuoteDocument({ docRef, clinicName, clinicLegalName, clinicPhone, clinicEmail, clinicInstagram, clinicAddress, clinicCnpj, logoDataUrl, clientName, clientPhone, number, dateStr, items, total, pagamento, validade, accent }: {
+export function QuoteDocument({ docRef, clinicName, clinicLegalName, clinicPhone, clinicEmail, clinicInstagram, clinicAddress, clinicCnpj, logoDataUrl, clientName, clientPhone, number, dateStr, items, total, showTotal = true, pagamento, validade, accent }: {
   docRef?: React.RefObject<HTMLDivElement | null>;
   clinicName: string;
   clinicLegalName?: string | null;
@@ -169,6 +169,7 @@ export function QuoteDocument({ docRef, clinicName, clinicLegalName, clinicPhone
   dateStr: string;
   items: QuoteDocItem[];
   total: number;
+  showTotal?: boolean;
   pagamento: string;
   validade: string;
   accent: string;
@@ -220,11 +221,13 @@ export function QuoteDocument({ docRef, clinicName, clinicLegalName, clinicPhone
         </tbody>
       </table>
 
-      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}>
-        <div style={{ background: accent, color: "#ffffff", fontWeight: 800, fontSize: 16, padding: "11px 26px", borderRadius: 6 }}>
-          TOTAL: {formatBRL(total)}
+      {showTotal ? (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}>
+          <div style={{ background: accent, color: "#ffffff", fontWeight: 800, fontSize: 16, padding: "11px 26px", borderRadius: 6 }}>
+            TOTAL: {formatBRL(total)}
+          </div>
         </div>
-      </div>
+      ) : null}
 
       <div style={{ margin: "44px auto 0", width: "72%", display: "flex", flexDirection: "column", gap: 26 }}>
         {pagamento ? <SectionBlock accent={accent} title="FORMA DE PAGAMENTO" align="center">{pagamento}</SectionBlock> : null}

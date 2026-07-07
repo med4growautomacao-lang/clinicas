@@ -13,9 +13,10 @@ const attrVal = (attrs: { label: string; value: string }[], keys: string[]) => {
 };
 const digits = (s: string) => (s || "").replace(",", ".").replace(/[^\d.]/g, "");
 
-export function ProductionOrderDocument({ docRef, clinicName, clinicPhone, clinicEmail, clinicInstagram, clinicAddress, clinicCnpj, logoDataUrl, clientName, clientPhone, cidade, vendedor, number, dateStr, prazo, items, total, showPrices, observacoes, accent }: {
+export function ProductionOrderDocument({ docRef, clinicName, clinicLegalName, clinicPhone, clinicEmail, clinicInstagram, clinicAddress, clinicCnpj, logoDataUrl, clientName, clientPhone, cidade, vendedor, number, dateStr, prazo, items, total, showPrices, observacoes, accent }: {
   docRef?: React.RefObject<HTMLDivElement | null>;
   clinicName: string;
+  clinicLegalName?: string | null;
   clinicPhone: string | null;
   clinicEmail?: string | null;
   clinicInstagram?: string | null;
@@ -60,6 +61,7 @@ export function ProductionOrderDocument({ docRef, clinicName, clinicPhone, clini
     <DocumentChrome
       docRef={docRef}
       clinicName={clinicName}
+      clinicLegalName={clinicLegalName}
       clinicPhone={clinicPhone}
       clinicEmail={clinicEmail}
       clinicInstagram={clinicInstagram}

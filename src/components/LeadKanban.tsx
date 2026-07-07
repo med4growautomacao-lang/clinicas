@@ -1239,6 +1239,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
 
   const quoteDocProps = {
     clinicName: clinic?.name ?? '',
+    clinicLegalName: clinic?.legal_name ?? null,
     clinicPhone: clinic?.phone ?? null,
     clinicEmail: clinic?.email ?? null,
     clinicInstagram: clinic?.instagram ?? null,
@@ -1890,6 +1891,7 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
 
   const docProps = {
     clinicName: clinic?.name ?? '',
+    clinicLegalName: clinic?.legal_name ?? null,
     clinicPhone: clinic?.phone ?? null,
     clinicEmail: clinic?.email ?? null,
     clinicInstagram: clinic?.instagram ?? null,

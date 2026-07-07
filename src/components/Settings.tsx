@@ -1049,6 +1049,7 @@ function ProductionOrderTemplateModal({ initial, clinic, onClose, onSave }: {
 
     const sampleDocProps = {
         clinicName: clinic.name ?? '',
+        clinicLegalName: clinic.legal_name ?? null,
         clinicPhone: clinic.phone ?? null,
         clinicEmail: clinic.email ?? null,
         clinicInstagram: clinic.instagram ?? null,
@@ -1200,6 +1201,7 @@ function QuoteTemplateModal({ initial, clinic, onClose, onSave }: {
     const sampleTotal = 420;
     const sampleDocProps = {
         clinicName: clinic.name ?? '',
+        clinicLegalName: clinic.legal_name ?? null,
         clinicPhone: clinic.phone ?? null,
         clinicEmail: clinic.email ?? null,
         clinicInstagram: clinic.instagram ?? null,
@@ -1417,11 +1419,21 @@ function ClinicSettings({ data, onChange }: { data: Partial<Clinic>, onChange: (
                     <div className="space-y-6">
                         <div className="space-y-2">
                             <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Nome da Clínica</label>
-                            <input 
-                                type="text" 
-                                value={data.name || ''} 
+                            <input
+                                type="text"
+                                value={data.name || ''}
                                 onChange={(e) => onChange({ name: e.target.value })}
-                                className="w-full px-4 py-2 border border-slate-200 rounded-lg font-medium text-slate-700" 
+                                className="w-full px-4 py-2 border border-slate-200 rounded-lg font-medium text-slate-700"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Nome completo da empresa</label>
+                            <input
+                                type="text"
+                                value={data.legal_name || ''}
+                                onChange={(e) => onChange({ legal_name: e.target.value })}
+                                placeholder="Razão social — aparece no orçamento junto da logo"
+                                className="w-full px-4 py-2 border border-slate-200 rounded-lg font-medium text-slate-700"
                             />
                         </div>
                         <div className="space-y-2">

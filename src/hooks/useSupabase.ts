@@ -1467,6 +1467,7 @@ export function useMedicalRecords(patientId: string | null) {
 export interface Clinic {
   id: string;
   name: string;
+  legal_name?: string | null;  // nome completo/razão social (cabeçalho do orçamento, junto da logo)
   cnpj: string | null;
   phone: string | null;
   email: string | null;

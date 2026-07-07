@@ -45,10 +45,11 @@ export const formatValidade = (v: string | null | undefined) => {
 export type QuoteDocItem = { name: string; description: string | null; specs: string[]; qtyLine: string; value: number };
 
 // Bloco de seção com traço curto na cor da clínica + título + conteúdo (pagamento, termos, obs...).
-export function SectionBlock({ accent, title, children }: { accent: string; title: string; children: React.ReactNode }) {
+export function SectionBlock({ accent, title, children, align = "left" }: { accent: string; title: string; children: React.ReactNode; align?: "left" | "center" }) {
+  const centered = align === "center";
   return (
-    <div>
-      <div style={{ width: 42, height: 3, background: accent, borderRadius: 2, marginBottom: 9 }} />
+    <div style={centered ? { textAlign: "center" } : undefined}>
+      <div style={{ width: 42, height: 3, background: accent, borderRadius: 2, marginBottom: 9, ...(centered ? { marginLeft: "auto", marginRight: "auto" } : {}) }} />
       <div style={{ fontSize: 16, fontWeight: 800, color: accent }}>{title}</div>
       <div style={{ fontSize: 13.5, color: "#334155", marginTop: 9, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{children}</div>
     </div>
@@ -57,9 +58,10 @@ export function SectionBlock({ accent, title, children }: { accent: string; titl
 
 // Esqueleto A4: formas decorativas, cabeçalho (nome + contatos c/ ícones), título e A/C; o
 // corpo (tabela, total, seções) vem como children.
-export function DocumentChrome({ docRef, clinicName, clinicPhone, clinicEmail, clinicInstagram, clinicAddress, clinicCnpj, logoDataUrl, clientName, clientPhone, title, number, dateStr, accent, hideClient, children }: {
+export function DocumentChrome({ docRef, clinicName, clinicLegalName, clinicPhone, clinicEmail, clinicInstagram, clinicAddress, clinicCnpj, logoDataUrl, clientName, clientPhone, title, number, dateStr, accent, hideClient, children }: {
   docRef?: React.RefObject<HTMLDivElement | null>;
   clinicName: string;
+  clinicLegalName?: string | null;
   clinicPhone: string | null;
   clinicEmail?: string | null;
   clinicInstagram?: string | null;
@@ -90,6 +92,7 @@ export function DocumentChrome({ docRef, clinicName, clinicPhone, clinicEmail, c
   );
   const igText = clinicInstagram ? (clinicInstagram.trim().startsWith("@") || clinicInstagram.includes("/") ? clinicInstagram.trim() : `@${clinicInstagram.trim()}`) : "";
   const addrText = clinicAddress ? clinicAddress.replace(/\s*\n+\s*/g, ", ").trim() : "";
+  const companyName = (clinicLegalName || clinicName || "").trim();
 
   return (
     <div ref={docRef} style={{ width: 794, minHeight: 1040, background: "#ffffff", color: "#0f172a", fontFamily: "Arial, Helvetica, sans-serif", position: "relative", overflow: "hidden" }}>
@@ -112,8 +115,11 @@ export function DocumentChrome({ docRef, clinicName, clinicPhone, clinicEmail, c
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 24, paddingRight: 50 }}>
           <div style={{ maxWidth: 340 }}>
             {logoDataUrl
-              ? <img src={logoDataUrl} alt={clinicName} style={{ maxHeight: 60, maxWidth: 300, objectFit: "contain", display: "block" }} />
-              : <div style={{ fontSize: 21, fontWeight: 800, color: accent }}>{clinicName || "Sua Empresa"}</div>}
+              ? <img src={logoDataUrl} alt={companyName} style={{ maxHeight: 58, maxWidth: 300, objectFit: "contain", display: "block", marginBottom: 8 }} />
+              : null}
+            {companyName
+              ? <div style={{ fontSize: logoDataUrl ? 15 : 21, fontWeight: 800, color: accent, lineHeight: 1.25 }}>{companyName}</div>
+              : (!logoDataUrl ? <div style={{ fontSize: 21, fontWeight: 800, color: accent }}>Sua Empresa</div> : null)}
           </div>
           <div style={{ fontSize: 11, color: "#475569" }}>
             {clinicPhone ? contactRow("ph", clinicPhone, P_PHONE) : null}
@@ -147,9 +153,10 @@ export function DocumentChrome({ docRef, clinicName, clinicPhone, clinicEmail, c
   );
 }
 
-export function QuoteDocument({ docRef, clinicName, clinicPhone, clinicEmail, clinicInstagram, clinicAddress, clinicCnpj, logoDataUrl, clientName, clientPhone, number, dateStr, items, total, pagamento, validade, accent }: {
+export function QuoteDocument({ docRef, clinicName, clinicLegalName, clinicPhone, clinicEmail, clinicInstagram, clinicAddress, clinicCnpj, logoDataUrl, clientName, clientPhone, number, dateStr, items, total, pagamento, validade, accent }: {
   docRef?: React.RefObject<HTMLDivElement | null>;
   clinicName: string;
+  clinicLegalName?: string | null;
   clinicPhone: string | null;
   clinicEmail?: string | null;
   clinicInstagram?: string | null;
@@ -172,6 +179,7 @@ export function QuoteDocument({ docRef, clinicName, clinicPhone, clinicEmail, cl
     <DocumentChrome
       docRef={docRef}
       clinicName={clinicName}
+      clinicLegalName={clinicLegalName}
       clinicPhone={clinicPhone}
       clinicEmail={clinicEmail}
       clinicInstagram={clinicInstagram}
@@ -218,9 +226,9 @@ export function QuoteDocument({ docRef, clinicName, clinicPhone, clinicEmail, cl
         </div>
       </div>
 
-      <div style={{ marginTop: 44, marginLeft: "auto", width: "56%", display: "flex", flexDirection: "column", gap: 26 }}>
-        {pagamento ? <SectionBlock accent={accent} title="FORMA DE PAGAMENTO">{pagamento}</SectionBlock> : null}
-        <SectionBlock accent={accent} title="TERMOS E CONDIÇÕES">
+      <div style={{ margin: "44px auto 0", width: "72%", display: "flex", flexDirection: "column", gap: 26 }}>
+        {pagamento ? <SectionBlock accent={accent} title="FORMA DE PAGAMENTO" align="center">{pagamento}</SectionBlock> : null}
+        <SectionBlock accent={accent} title="TERMOS E CONDIÇÕES" align="center">
           {validade ? `Este orçamento é válido por ${formatValidade(validade)}.` : "Orçamento sujeito a confirmação de disponibilidade."}
         </SectionBlock>
       </div>

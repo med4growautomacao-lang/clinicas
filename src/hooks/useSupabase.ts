@@ -1469,6 +1469,8 @@ export interface Clinic {
   name: string;
   cnpj: string | null;
   phone: string | null;
+  email: string | null;
+  instagram: string | null;
   address: string | null;
   logo_url: string | null;
   primary_color: string | null;

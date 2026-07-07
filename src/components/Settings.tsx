@@ -987,6 +987,8 @@ function QuoteTemplateModal({ initial, clinic, onClose, onSave }: {
     const sampleDocProps = {
         clinicName: clinic.name ?? '',
         clinicPhone: clinic.phone ?? null,
+        clinicEmail: clinic.email ?? null,
+        clinicInstagram: clinic.instagram ?? null,
         clinicAddress: clinic.address ?? null,
         clinicCnpj: clinic.cnpj ?? null,
         clientName: sampleName,
@@ -1202,11 +1204,31 @@ function ClinicSettings({ data, onChange }: { data: Partial<Clinic>, onChange: (
                         </div>
                         <div className="space-y-2">
                             <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Telefone de Contato</label>
-                            <input 
-                                type="text" 
-                                value={data.phone || ''} 
+                            <input
+                                type="text"
+                                value={data.phone || ''}
                                 onChange={(e) => onChange({ phone: e.target.value })}
-                                className="w-full px-4 py-2 border border-slate-200 rounded-lg font-medium text-slate-700" 
+                                className="w-full px-4 py-2 border border-slate-200 rounded-lg font-medium text-slate-700"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">E-mail</label>
+                            <input
+                                type="text"
+                                value={data.email || ''}
+                                onChange={(e) => onChange({ email: e.target.value })}
+                                placeholder="contato@suaclinica.com.br"
+                                className="w-full px-4 py-2 border border-slate-200 rounded-lg font-medium text-slate-700"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Instagram</label>
+                            <input
+                                type="text"
+                                value={data.instagram || ''}
+                                onChange={(e) => onChange({ instagram: e.target.value })}
+                                placeholder="@suaclinica"
+                                className="w-full px-4 py-2 border border-slate-200 rounded-lg font-medium text-slate-700"
                             />
                         </div>
                     </div>

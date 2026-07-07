@@ -1154,6 +1154,8 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   const quoteDocProps = {
     clinicName: clinic?.name ?? '',
     clinicPhone: clinic?.phone ?? null,
+    clinicEmail: clinic?.email ?? null,
+    clinicInstagram: clinic?.instagram ?? null,
     clinicAddress: clinic?.address ?? null,
     clinicCnpj: clinic?.cnpj ?? null,
     clientName: lead.name,

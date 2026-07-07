@@ -937,14 +937,16 @@ const formatQty = (n: number) => Number(n).toLocaleString('pt-BR', { maximumFrac
 // Produtos vendidos por m²: a área = quantidade (comprimento) × altura. A altura vem do
 // campo personalizado "altura" do produto. Multiplicador = altura (>0) quando a unidade é m².
 const isM2Unit = (unit?: string) => /m²|m2/i.test(unit || '');
+// Item cobrado por área: toggle explícito do produto OU unidade m².
+const isAreaItem = (item?: { unit?: string; charge_by_area?: boolean }) => !!item && (item.charge_by_area === true || isM2Unit(item.unit));
 const alturaOf = (attributes?: { label: string; value: string }[]) => {
   const a = (attributes || []).find(x => (x.label || '').toLowerCase().includes('altura'));
   const n = a ? Number(String(a.value).replace(',', '.').replace(/[^\d.]/g, '')) : 0;
   return n > 0 ? n : 0;
 };
-// Altura efetiva p/ m²: valor digitado na linha (l.altura) tem prioridade sobre o campo do produto.
-const lineAlturaFor = (unit: string | undefined, attributes: { label: string; value: string }[] | undefined, lineAltura?: string) => {
-  if (!isM2Unit(unit)) return 1;
+// Altura efetiva p/ itens por área: valor digitado na linha (l.altura) tem prioridade sobre o campo do produto.
+const lineAlturaFor = (byArea: boolean, attributes: { label: string; value: string }[] | undefined, lineAltura?: string) => {
+  if (!byArea) return 1;
   const typed = Number(String(lineAltura ?? '').replace(',', '.'));
   if (String(lineAltura ?? '').trim() !== '' && !isNaN(typed) && typed > 0) return typed;
   const fb = alturaOf(attributes);
@@ -978,10 +980,10 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   const activeProtocols = useMemo(() => useProt ? protocols.filter(p => p.is_active) : [], [protocols, useProt]);
 
   // Item unificado (produto OU protocolo). Protocolo = valor fixo, sem unidade/especificações.
-  type CatItem = { id: string; kind: 'product' | 'protocol'; name: string; description: string | null; unit: string; unit_price: number; attributes: ProductAttribute[] };
+  type CatItem = { id: string; kind: 'product' | 'protocol'; name: string; description: string | null; unit: string; unit_price: number; attributes: ProductAttribute[]; charge_by_area?: boolean };
   const catalogItems = useMemo<CatItem[]>(() => [
-    ...activeProducts.map(p => ({ id: `p:${p.id}`, kind: 'product' as const, name: p.name, description: p.description, unit: p.unit, unit_price: Number(p.unit_price), attributes: p.attributes ?? [] })),
-    ...activeProtocols.map(t => ({ id: `t:${t.id}`, kind: 'protocol' as const, name: t.name, description: t.description, unit: 'serviço', unit_price: Number(t.price ?? 0), attributes: [] as ProductAttribute[] })),
+    ...activeProducts.map(p => ({ id: `p:${p.id}`, kind: 'product' as const, name: p.name, description: p.description, unit: p.unit, unit_price: Number(p.unit_price), attributes: p.attributes ?? [], charge_by_area: !!p.charge_by_area })),
+    ...activeProtocols.map(t => ({ id: `t:${t.id}`, kind: 'protocol' as const, name: t.name, description: t.description, unit: 'serviço', unit_price: Number(t.price ?? 0), attributes: [] as ProductAttribute[], charge_by_area: false })),
   ], [activeProducts, activeProtocols]);
   const itemById = useMemo(() => {
     const m: Record<string, CatItem> = {};
@@ -1055,8 +1057,8 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
     const edited = Number(String(l.price).replace(',', '.'));
     return (l.price !== '' && !isNaN(edited) && edited >= 0) ? edited : Number(p.unit_price);
   };
-  // Altura efetiva da linha (só p/ m²): valor digitado na linha, ou o "altura" do produto, ou 1.
-  const lineAltura = (l: Line) => lineAlturaFor(itemById[l.productId]?.unit, itemById[l.productId]?.attributes, l.altura);
+  // Altura efetiva da linha (só p/ itens por área): valor digitado na linha, ou o "altura" do produto, ou 1.
+  const lineAltura = (l: Line) => lineAlturaFor(isAreaItem(itemById[l.productId]), itemById[l.productId]?.attributes, l.altura);
   // Desconto (%) e frete (R$) sao POR PRODUTO (por linha).
   // Em m², a base = quantidade (comprimento) × altura × valor/m² (área).
   const lineBase = (l: Line) => {
@@ -1089,7 +1091,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
     if (productId === '__new__') { setQuickNewFor(i); return; }
     const it = itemById[productId];
     const altAttr = (it?.attributes ?? []).find(a => (a.label || '').toLowerCase().includes('altura'));
-    const altSeed = it && isM2Unit(it.unit) && altAttr ? String(altAttr.value) : '';
+    const altSeed = isAreaItem(it) && altAttr ? String(altAttr.value) : '';
     setLines(prev => prev.map((l, idx) => idx === i
       ? { ...l, productId, price: productId ? String(it?.unit_price ?? '') : '', altura: altSeed }
       : l));
@@ -1142,7 +1144,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
         out.push((p.attributes ?? []).map(a => `${a.label}${a.value ? `: ${a.value}` : ''}`).join(' | '));
       }
       // Sem o cálculo/valor unitário: só a quantidade e o total do item.
-      out.push(`${formatQty(q)} ${p.unit}: ${formatBRL(lineTotal(l))}`);
+      out.push(`${formatQty(q)} ${isAreaItem(p) ? 'm²' : p.unit}: ${formatBRL(lineTotal(l))}`);
     });
     out.push('');
     out.push(`*TOTAL: ${formatBRL(total)}*`);
@@ -1162,8 +1164,9 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
     .map(l => {
       const p = itemById[l.productId]!;
       const q = Number(String(l.qty).replace(',', '.'));
-      const altTxt = isM2Unit(p.unit) ? ` × ${formatQty(lineAltura(l))}m alt` : '';
-      const meta = [`${formatQty(q)} ${p.unit}${altTxt} × ${formatBRL(unitPrice(l))}`];
+      const isArea = isAreaItem(p);
+      const altTxt = isArea ? ` × ${formatQty(lineAltura(l))}m alt` : '';
+      const meta = [`${formatQty(q)} ${isArea ? 'm²' : p.unit}${altTxt} × ${formatBRL(unitPrice(l))}`];
       if (linePct(l) > 0) meta.push(`desc ${formatQty(linePct(l))}%`);
       if (lineFeeValue(l) > 0) meta.push(`frete ${formatBRL(lineFeeValue(l))}`);
       return {
@@ -1332,7 +1335,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
                 const base = lineBase(l);
                 const pct = linePct(l);
                 const fee = lineFeeValue(l);
-                const isM2 = !!p && isM2Unit(p.unit);
+                const isM2 = isAreaItem(p);
                 return (
                   <div key={i} className="rounded-xl border border-slate-200 p-2.5 space-y-2">
                     <div className="flex items-center gap-2">
@@ -1404,7 +1407,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
                               </div>
                             </div>
                           ) : (
-                            <span className="text-xs font-medium text-slate-500 flex-1 min-w-0 truncate">{p.unit} × {formatBRL(unitPrice(l))}</span>
+                            <span className="text-xs font-medium text-slate-500 flex-1 min-w-0 truncate">{isM2 ? 'm²' : p.unit} × {formatBRL(unitPrice(l))}</span>
                           )}
                           <span className="text-sm font-black text-slate-800 shrink-0">{formatBRL(base)}</span>
                         </div>
@@ -1702,9 +1705,9 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
   const { data: protocols } = useProtocols();
 
   const itemById = useMemo(() => {
-    const m: Record<string, { name: string; unit: string; unit_price: number; attributes: { label: string; value: string; unit?: string | null }[] }> = {};
-    products.forEach(p => { m[`p:${p.id}`] = { name: p.name, unit: p.unit, unit_price: Number(p.unit_price), attributes: (p.attributes ?? []) }; });
-    protocols.forEach(t => { m[`t:${t.id}`] = { name: t.name, unit: 'serviço', unit_price: Number((t as any).price ?? 0), attributes: [] }; });
+    const m: Record<string, { name: string; unit: string; unit_price: number; attributes: { label: string; value: string; unit?: string | null }[]; charge_by_area?: boolean }> = {};
+    products.forEach(p => { m[`p:${p.id}`] = { name: p.name, unit: p.unit, unit_price: Number(p.unit_price), attributes: (p.attributes ?? []), charge_by_area: !!p.charge_by_area }; });
+    protocols.forEach(t => { m[`t:${t.id}`] = { name: t.name, unit: 'serviço', unit_price: Number((t as any).price ?? 0), attributes: [], charge_by_area: false }; });
     return m;
   }, [products, protocols]);
 
@@ -1738,7 +1741,7 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
     if (!q || q <= 0) return 0;
     const edited = Number(String(l.price).replace(',', '.'));
     const up = (l.price !== '' && !isNaN(edited) && edited >= 0) ? edited : it.unit_price;
-    const base = q * lineAlturaFor(it.unit, it.attributes, l.altura) * up;
+    const base = q * lineAlturaFor(isAreaItem(it), it.attributes, l.altura) * up;
     const pct = Math.min(100, Math.max(0, Number(String(l.discount).replace(',', '.')) || 0));
     const fee = Number(l.fee || 0);
     return Math.max(0, base - base * (pct / 100)) + fee;
@@ -1752,7 +1755,7 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
       return {
         name: it.name,
         attrs: (it.attributes ?? []).map((a: any) => {
-          const isAlt = isM2Unit(it.unit) && (a.label || '').toLowerCase().includes('altura') && String(l.altura ?? '').trim() !== '';
+          const isAlt = isAreaItem(it) && (a.label || '').toLowerCase().includes('altura') && String(l.altura ?? '').trim() !== '';
           return { label: a.label, value: isAlt ? String(l.altura) : a.value };
         }),
         qty: `${formatQty(q)} ${it.unit}`,

@@ -2639,10 +2639,11 @@ export interface Product {
   unit_price: number;        // valor por unidade
   attributes: ProductAttribute[];
   is_active: boolean;
+  charge_by_area?: boolean;  // cobra por m² (área = comprimento × altura)
   created_at: string;
 }
 
-export type ProductInput = Pick<Product, 'name' | 'description' | 'unit' | 'unit_price' | 'attributes' | 'is_active'>;
+export type ProductInput = Pick<Product, 'name' | 'description' | 'unit' | 'unit_price' | 'attributes' | 'is_active' | 'charge_by_area'>;
 
 export function useProducts() {
   const { activeClinicId } = useAuth();

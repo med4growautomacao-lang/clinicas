@@ -323,6 +323,7 @@ export function Settings() {
             unit_price: item.unit_price ?? 0,
             attributes: cleanAttrs,
             is_active: item.is_active ?? true,
+            charge_by_area: item.charge_by_area ?? false,
         };
         if (item.id) {
             await updateProduct(item.id, payload);
@@ -819,13 +820,24 @@ export function Settings() {
                                         <p className="text-[10px] text-slate-400 mt-1">Base do cálculo (ex.: valor por metro)</p>
                                     </div>
                                     <div>
-                                        <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Valor por unidade</label>
+                                        <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Valor por {productModal.item.charge_by_area ? 'm²' : 'unidade'}</label>
                                         <MoneyInput
                                             value={productModal.item.unit_price ?? 0}
                                             onChange={v => setProductModal(prev => ({ ...prev, item: { ...prev.item!, unit_price: v || 0 } }))}
                                         />
                                     </div>
                                 </div>
+
+                                <label className="flex items-center gap-2 text-sm font-medium text-slate-600 cursor-pointer select-none">
+                                    <input
+                                        type="checkbox"
+                                        checked={!!productModal.item.charge_by_area}
+                                        onChange={e => setProductModal(prev => ({ ...prev, item: { ...prev.item!, charge_by_area: e.target.checked } }))}
+                                        className="w-4 h-4 accent-teal-600"
+                                    />
+                                    Cobrar por m² (área = comprimento × altura)
+                                </label>
+                                <p className="text-[10px] text-slate-400 -mt-1">No orçamento aparece um campo de <b>altura</b> ao lado da quantidade; o valor acima passa a ser por m². Crie um campo "altura" para já vir preenchido.</p>
 
                                 <div className="pt-1">
                                     <div className="flex items-center justify-between mb-2">

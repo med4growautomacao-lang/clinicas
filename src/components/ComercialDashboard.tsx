@@ -554,6 +554,8 @@ export function ComercialDashboard() {
   // ===== Lista de leads do filtro (drill-down) =====
   const [leadsList, setLeadsList] = useState<LeadRow[]>([]);
   const [leadsTotal, setLeadsTotal] = useState(0);
+  // Total de AGENDAMENTOS por trás do recorte de métrica (reconcilia com os cards do topo)
+  const [leadsMetricCount, setLeadsMetricCount] = useState(0);
   const [leadsPage, setLeadsPage] = useState(0);
   const [leadsLoading, setLeadsLoading] = useState(true);
   // Filtro por métrica de agendamento da lista (todos / gerados / realizadas / marcados)
@@ -604,9 +606,10 @@ export function ComercialDashboard() {
         p_sort_dir: leadsSortDir,
       });
       if (error) throw error;
-      const r = res as { total: number; rows: LeadRow[] } | null;
+      const r = res as { total: number; rows: LeadRow[]; metricCount?: number } | null;
       setLeadsList(r?.rows || []);
       setLeadsTotal(r?.total || 0);
+      setLeadsMetricCount(r?.metricCount || 0);
     } catch (err) {
       console.error("ComercialDashboard leads fetch error:", err);
     } finally {
@@ -1041,7 +1044,10 @@ export function ComercialDashboard() {
             Leads do filtro
           </CardTitle>
           <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-            {leadsTotal} {leadsTotal === 1 ? "lead" : "leads"} · {leadsMetric === "todos" ? leadsScopeLabel : LEAD_METRIC_OPTIONS.find((o) => o.id === leadsMetric)?.label.toLowerCase()}
+            {leadsTotal} {leadsTotal === 1 ? "lead" : "leads"}
+            {leadsMetric === "todos"
+              ? ` · ${leadsScopeLabel}`
+              : ` · ${leadsMetricCount} ${LEAD_METRIC_OPTIONS.find((o) => o.id === leadsMetric)?.label.toLowerCase()}`}
           </span>
         </div>
         {/* Recorte por métrica de agendamento (drill-down das métricas do topo) */}

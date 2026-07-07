@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { useFunnelStages, useLeads, useNotLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useProducts, Product, ProductInput, useAppointments, useDoctors, usePatients, useConsultationTypes, Conversion, Lead, Ticket, TransitionRule } from "../hooks/useSupabase";
+import { useFunnelStages, useLeads, useNotLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useProducts, Product, ProductInput, ProductAttribute, useAppointments, useDoctors, usePatients, useConsultationTypes, Conversion, Lead, Ticket, TransitionRule } from "../hooks/useSupabase";
 import { NotLeadPanel } from "./NotLeadPanel";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -45,6 +45,7 @@ import SemOrigemLogo from "../assets/logos/Logo Sem origem.png";
 import { Share2, Globe, Layout, Smartphone, Sparkles, Instagram, PhoneOff, RotateCcw } from "lucide-react";
 import { DateRangePicker } from "./DateRangePicker";
 import { UtmLeadFilter, leadUtmKey, NO_UTM_KEY } from "./filters/UtmLeadFilter";
+import { QuoteDocument } from "./QuoteDocument";
 
 const SOURCE_LABELS: Record<string, string> = {
   'meta_ads': 'Meta Ads',
@@ -942,15 +943,30 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
   onConfirm: (value: number, description: string) => Promise<boolean>;
 }) {
   const { activeClinicId } = useAuth();
+  const { clinic } = useSettings();
   const { data: products, create: createProduct } = useProducts();
+  const { data: protocols } = useProtocols();
   const [quickNewFor, setQuickNewFor] = useState<number | null>(null); // linha que está cadastrando produto novo
-  const activeProducts = useMemo(() => products.filter(p => p.is_active), [products]);
-  const hasCatalog = activeProducts.length > 0;
-  const productById = useMemo(() => {
-    const m: Record<string, Product> = {};
-    activeProducts.forEach(p => { m[p.id] = p; });
+  const qtyRefs = useRef<Record<number, HTMLInputElement | null>>({}); // foca a quantidade ao selecionar o item
+
+  // Fontes de item conforme a Configuração do Orçamento da clínica (padrão: ambas ligadas).
+  const useProd = clinic?.quote_use_products !== false;
+  const useProt = clinic?.quote_use_protocols !== false;
+  const activeProducts = useMemo(() => useProd ? products.filter(p => p.is_active) : [], [products, useProd]);
+  const activeProtocols = useMemo(() => useProt ? protocols.filter(p => p.is_active) : [], [protocols, useProt]);
+
+  // Item unificado (produto OU protocolo). Protocolo = valor fixo, sem unidade/especificações.
+  type CatItem = { id: string; kind: 'product' | 'protocol'; name: string; description: string | null; unit: string; unit_price: number; attributes: ProductAttribute[] };
+  const catalogItems = useMemo<CatItem[]>(() => [
+    ...activeProducts.map(p => ({ id: `p:${p.id}`, kind: 'product' as const, name: p.name, description: p.description, unit: p.unit, unit_price: Number(p.unit_price), attributes: p.attributes ?? [] })),
+    ...activeProtocols.map(t => ({ id: `t:${t.id}`, kind: 'protocol' as const, name: t.name, description: t.description, unit: 'serviço', unit_price: Number(t.price ?? 0), attributes: [] as ProductAttribute[] })),
+  ], [activeProducts, activeProtocols]);
+  const itemById = useMemo(() => {
+    const m: Record<string, CatItem> = {};
+    catalogItems.forEach(it => { m[it.id] = it; });
     return m;
-  }, [activeProducts]);
+  }, [catalogItems]);
+  const hasCatalog = catalogItems.length > 0;
 
   type Line = { productId: string; qty: string; price: string; discount: string; fee: string };
   const [lines, setLines] = useState<Line[]>([{ productId: '', qty: '', price: '', discount: '', fee: '' }]);
@@ -959,31 +975,61 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
   const [notes, setNotes] = useState('');
 
   // Etapa 2 (opcional): configuracao da mensagem enviada por WhatsApp.
+  // Valores iniciais vêm do "modelo do orçamento" da clínica (clinic.quote_template).
   const firstName = (lead.name || '').trim().split(/\s+/)[0] || '';
+  const tpl: any = clinic?.quote_template ?? {};
+  const initSaudacao = String(tpl.saudacao ?? 'Olá {nome}! 👋').split('{nome}').join(firstName).replace(/\s+([!?.,])/g, '$1');
   const [step, setStep] = useState<1 | 2>(1);
-  const [saudacao, setSaudacao] = useState(firstName ? `Olá ${firstName}! 👋` : 'Olá! 👋');
-  const [rodape, setRodape] = useState('Qualquer dúvida, estou à disposição! 😊');
-  const [validade, setValidade] = useState('');
-  const [pagamento, setPagamento] = useState('');
-  const [includeSpecs, setIncludeSpecs] = useState(true);
+  const [saudacao, setSaudacao] = useState(initSaudacao);
+  const [rodape, setRodape] = useState(String(tpl.rodape ?? 'Qualquer dúvida, estou à disposição! 😊'));
+  const [validade, setValidade] = useState(String(tpl.validade ?? ''));
+  const [pagamento, setPagamento] = useState(String(tpl.pagamento ?? ''));
+  const [includeSpecs, setIncludeSpecs] = useState<boolean>(tpl.include_specs ?? true);
   const [messageText, setMessageText] = useState('');
   const [msgTouched, setMsgTouched] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
 
+  // Formato de envio (texto | imagem | pdf) + documento formal. Padrão vem do modelo da clínica.
+  const [format, setFormat] = useState<'texto' | 'imagem' | 'pdf'>(tpl.format ?? 'imagem');
+  const docRef = useRef<HTMLDivElement>(null);
+  const previewWrapRef = useRef<HTMLDivElement>(null);
+  const [previewScale, setPreviewScale] = useState(0.45);
+  const [docHeight, setDocHeight] = useState(520);
+  const [quoteMeta] = useState(() => ({
+    number: String(Date.now() % 100000).padStart(5, '0'),
+    date: new Date().toLocaleDateString('pt-BR'),
+  }));
+
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
 
+  // clinic.quote_template chega de forma assíncrona (useSettings). Quando chegar, aplica o
+  // modelo aos campos 1x (antes do usuário mexer) — os useState iniciais só pegam os defaults.
+  const templateAppliedRef = useRef(false);
+  useEffect(() => {
+    if (templateAppliedRef.current) return;
+    const qt = clinic?.quote_template;
+    if (!qt) return;
+    templateAppliedRef.current = true;
+    if (qt.saudacao != null) setSaudacao(String(qt.saudacao).split('{nome}').join(firstName).replace(/\s+([!?.,])/g, '$1'));
+    if (qt.rodape != null) setRodape(String(qt.rodape));
+    if (qt.validade != null) setValidade(String(qt.validade));
+    if (qt.pagamento != null) setPagamento(String(qt.pagamento));
+    if (qt.include_specs != null) setIncludeSpecs(!!qt.include_specs);
+    if (qt.format != null) setFormat(qt.format);
+  }, [clinic]);
+
   // Valor unitario efetivo: o preco editado na linha, ou o cadastrado no produto.
   const unitPrice = (l: Line) => {
-    const p = productById[l.productId];
+    const p = itemById[l.productId];
     if (!p) return 0;
     const edited = Number(String(l.price).replace(',', '.'));
     return (l.price !== '' && !isNaN(edited) && edited >= 0) ? edited : Number(p.unit_price);
   };
   // Desconto (%) e frete (R$) sao POR PRODUTO (por linha).
   const lineBase = (l: Line) => {
-    const p = productById[l.productId];
+    const p = itemById[l.productId];
     const q = Number(String(l.qty).replace(',', '.'));
     if (!p || !q || q <= 0) return 0;
     return q * unitPrice(l);
@@ -998,7 +1044,7 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
   };
   const computedTotal = useMemo(
     () => lines.reduce((s, l) => s + lineTotal(l), 0),
-    [lines, productById]
+    [lines, itemById]
   );
   const total = hasCatalog ? computedTotal : Number(manualValue || 0);
 
@@ -1011,22 +1057,25 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
   const selectProduct = (i: number, productId: string) => {
     if (productId === '__new__') { setQuickNewFor(i); return; }
     setLines(prev => prev.map((l, idx) => idx === i
-      ? { ...l, productId, price: productId ? String(productById[productId]?.unit_price ?? '') : '' }
+      ? { ...l, productId, price: productId ? String(itemById[productId]?.unit_price ?? '') : '' }
       : l));
+    if (productId) requestAnimationFrame(() => qtyRefs.current[i]?.focus());
   };
   // Produto recém-criado no mini-modal: seleciona na linha que disparou o cadastro.
   const handleProductCreated = (p: Product) => {
-    setLines(prev => prev.map((l, idx) => idx === quickNewFor
-      ? { ...l, productId: p.id, price: String(p.unit_price ?? '') }
+    const idx = quickNewFor;
+    setLines(prev => prev.map((l, i) => i === idx
+      ? { ...l, productId: `p:${p.id}`, price: String(p.unit_price ?? '') }
       : l));
     setQuickNewFor(null);
+    if (idx != null) requestAnimationFrame(() => qtyRefs.current[idx]?.focus());
   };
 
   const buildDescription = () => {
     const parts: string[] = [];
     if (hasCatalog) {
       lines.forEach(l => {
-        const p = productById[l.productId];
+        const p = itemById[l.productId];
         const base = lineBase(l);
         if (!p || base <= 0) return;
         const q = Number(String(l.qty).replace(',', '.'));
@@ -1049,7 +1098,7 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
     if (saudacao.trim()) { out.push(saudacao.trim()); out.push(''); }
     out.push('*Orçamento*');
     lines.forEach(l => {
-      const p = productById[l.productId];
+      const p = itemById[l.productId];
       const base = lineBase(l);
       if (!p || base <= 0) return;
       const q = Number(String(l.qty).replace(',', '.'));
@@ -1075,6 +1124,51 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
   // Enquanto o usuário não editar manualmente, o preview acompanha os campos.
   useEffect(() => { if (!msgTouched) setMessageText(generatedMessage); }, [generatedMessage, msgTouched]);
 
+  // Itens do documento formal (imagem/PDF).
+  const docItems = lines
+    .filter(l => itemById[l.productId] && lineBase(l) > 0)
+    .map(l => {
+      const p = itemById[l.productId]!;
+      const q = Number(String(l.qty).replace(',', '.'));
+      const meta = [`${formatQty(q)} ${p.unit} × ${formatBRL(unitPrice(l))}`];
+      if (linePct(l) > 0) meta.push(`desc ${formatQty(linePct(l))}%`);
+      if (lineFeeValue(l) > 0) meta.push(`frete ${formatBRL(lineFeeValue(l))}`);
+      return {
+        name: p.name,
+        description: p.description || null,
+        specs: includeSpecs ? (p.attributes ?? []).map(a => `${a.label}${a.value ? `: ${a.value}` : ''}`) : [],
+        qtyLine: meta.join(' · '),
+        value: lineTotal(l),
+      };
+    });
+  const docItemsFinal = docItems.length ? docItems : [{ name: notes.trim() || 'Serviço', description: null, specs: [] as string[], qtyLine: '', value: total }];
+
+  const quoteDocProps = {
+    clinicName: clinic?.name ?? '',
+    clinicPhone: clinic?.phone ?? null,
+    clinicAddress: clinic?.address ?? null,
+    clinicCnpj: clinic?.cnpj ?? null,
+    clientName: lead.name,
+    clientPhone: lead.phone ?? null,
+    number: quoteMeta.number,
+    dateStr: quoteMeta.date,
+    items: docItemsFinal,
+    total,
+    pagamento: pagamento.trim(),
+    validade: validade.trim(),
+    accent: clinic?.primary_color || '#1d4ed8',
+  };
+
+  // Mede a prévia do documento (escala p/ largura do modal) quando na etapa 2 em imagem/PDF.
+  useEffect(() => {
+    if (step !== 2 || format === 'texto') return;
+    const el = docRef.current, wrap = previewWrapRef.current;
+    if (!el || !wrap) return;
+    const scale = wrap.clientWidth / 794;
+    setPreviewScale(scale);
+    setDocHeight(Math.round(el.offsetHeight * scale));
+  }, [step, format, saudacao, rodape, validade, pagamento, includeSpecs, notes, total, lines]);
+
   const mapSendError = (code: string) => (({
     whatsapp_nao_conectado: 'WhatsApp da clínica não está conectado.',
     telefone_invalido: 'Telefone do lead inválido.',
@@ -1093,20 +1187,68 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
     setSaving(false);
   };
 
-  // Etapa 2: registra o orçamento E envia a mensagem pelo WhatsApp do lead.
-  const handleSend = async () => {
-    if (!messageText.trim() || sending) return;
-    if (!activeClinicId || !lead.phone) { setSendError('Lead sem telefone cadastrado.'); return; }
-    setSending(true); setSendError(null);
-    const ok = await onConfirm(total, buildDescription().trim());
-    if (!ok) { setSending(false); setSendError('Falha ao registrar o orçamento.'); return; }
-    const { data, error } = await supabase.functions.invoke('send-quote', {
-      body: { clinic_id: activeClinicId, lead_id: lead.id, phone: lead.phone, text: messageText.trim() },
-    });
+  const finishSend = (data: any, error: any) => {
     setSending(false);
     const code = error ? 'send_failed' : (data && data.ok === false ? String(data.error || '') : null);
     if (code) { setSendError(mapSendError(code)); return; }
     setDone(true); setTimeout(onClose, 1300);
+  };
+
+  // Etapa 2: registra o orçamento E envia pelo WhatsApp (texto, imagem ou PDF).
+  const handleSend = async () => {
+    if (sending || done) return;
+    if (!activeClinicId || !lead.phone) { setSendError('Lead sem telefone cadastrado.'); return; }
+    if (format === 'texto' && !messageText.trim()) { setSendError('Mensagem vazia.'); return; }
+    setSending(true); setSendError(null);
+    const ok = await onConfirm(total, buildDescription().trim());
+    if (!ok) { setSending(false); setSendError('Falha ao registrar o orçamento.'); return; }
+
+    try {
+      if (format === 'texto') {
+        const { data, error } = await supabase.functions.invoke('send-quote', {
+          body: { clinic_id: activeClinicId, lead_id: lead.id, phone: lead.phone, text: messageText.trim() },
+        });
+        finishSend(data, error);
+        return;
+      }
+      // imagem/PDF: renderiza o documento, sobe no Storage (bucket quotes) e envia como mídia.
+      const node = docRef.current;
+      if (!node) { setSending(false); setSendError('Falha ao gerar o documento.'); return; }
+      const html2canvas = (await import('html2canvas-pro')).default;
+      const canvas = await html2canvas(node, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
+      const isPdf = format === 'pdf';
+      let blob: Blob;
+      let ext: string;
+      let contentType: string;
+      if (isPdf) {
+        const { jsPDF } = await import('jspdf');
+        const imgData = canvas.toDataURL('image/jpeg', 0.92);
+        const pdf = new jsPDF({ orientation: 'portrait', unit: 'px', format: [canvas.width, canvas.height] });
+        pdf.addImage(imgData, 'JPEG', 0, 0, canvas.width, canvas.height);
+        blob = pdf.output('blob');
+        ext = 'pdf'; contentType = 'application/pdf';
+      } else {
+        blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(new Error('blob')), 'image/jpeg', 0.92));
+        ext = 'jpg'; contentType = 'image/jpeg';
+      }
+      const path = `${activeClinicId}/${crypto.randomUUID()}.${ext}`;
+      const { error: upErr } = await supabase.storage.from('quotes').upload(path, blob, { contentType, upsert: false });
+      if (upErr) { setSending(false); setSendError('Falha ao subir o documento.'); return; }
+      const { data: pub } = supabase.storage.from('quotes').getPublicUrl(path);
+      const caption = [saudacao.trim(), rodape.trim()].filter(Boolean).join('\n\n');
+      const { data, error } = await supabase.functions.invoke('send-quote', {
+        body: {
+          clinic_id: activeClinicId, lead_id: lead.id, phone: lead.phone,
+          text: caption, media_url: pub.publicUrl,
+          media_type: isPdf ? 'document' : 'image',
+          filename: `Orcamento-${quoteMeta.number}.${ext}`,
+        },
+      });
+      finishSend(data, error);
+    } catch (_e) {
+      setSending(false);
+      setSendError('Erro ao gerar o documento. Tente enviar como texto.');
+    }
   };
 
   const canWhatsapp = total > 0 && !!lead.phone;
@@ -1148,7 +1290,7 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
                 </button>
               </div>
               {lines.map((l, i) => {
-                const p = productById[l.productId];
+                const p = itemById[l.productId];
                 const base = lineBase(l);
                 const pct = linePct(l);
                 const fee = lineFeeValue(l);
@@ -1160,9 +1302,18 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
                         onChange={e => selectProduct(i, e.target.value)}
                         className="flex-1 min-w-0 px-2.5 py-2 border border-slate-200 rounded-lg text-sm font-medium bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                       >
-                        <option value="">Selecione um produto…</option>
-                        {activeProducts.map(op => <option key={op.id} value={op.id}>{op.name}</option>)}
-                        <option value="__new__">➕ Cadastrar novo produto…</option>
+                        <option value="">Selecione…</option>
+                        {useProd && activeProducts.length > 0 && (
+                          <optgroup label="Produtos">
+                            {activeProducts.map(op => <option key={op.id} value={`p:${op.id}`}>{op.name}</option>)}
+                          </optgroup>
+                        )}
+                        {useProt && activeProtocols.length > 0 && (
+                          <optgroup label="Protocolos">
+                            {activeProtocols.map(op => <option key={op.id} value={`t:${op.id}`}>{op.name}</option>)}
+                          </optgroup>
+                        )}
+                        {useProd && <option value="__new__">➕ Cadastrar novo produto…</option>}
                       </select>
                       {lines.length > 1 && (
                         <button onClick={() => removeLine(i)} className="p-1.5 shrink-0 text-slate-300 hover:text-rose-500 transition-colors"><Trash2 className="w-4 h-4" /></button>
@@ -1172,6 +1323,7 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
                       <>
                         <div className="flex items-center gap-2">
                           <input
+                            ref={el => { qtyRefs.current[i] = el; }}
                             type="number"
                             min="0"
                             step="any"
@@ -1271,7 +1423,7 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Valor do Orçamento (R$)</label>
               <CurrencyInput autoFocus value={manualValue} onChange={setManualValue} className="focus:ring-blue-500/20 focus:border-blue-500" />
-              <p className="text-[11px] text-slate-400">Cadastre produtos em Configurações › Produtos para calcular automaticamente.</p>
+              <p className="text-[11px] text-slate-400">Cadastre produtos/protocolos e habilite-os em Configurações › Dados da Clínica › Configuração do Orçamento para calcular automaticamente.</p>
             </div>
           )}
 
@@ -1295,6 +1447,24 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
 
           {step === 2 && (
             <div className="space-y-3">
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-1.5">Enviar como</label>
+                <div className="flex bg-slate-100 rounded-xl p-1">
+                  {(['texto', 'imagem', 'pdf'] as const).map(f => (
+                    <button
+                      key={f}
+                      type="button"
+                      onClick={() => setFormat(f)}
+                      className={cn(
+                        "flex-1 py-1.5 rounded-lg text-xs font-bold transition-all",
+                        format === f ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                      )}
+                    >
+                      {f === 'texto' ? 'Texto' : f === 'imagem' ? 'Imagem' : 'PDF'}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Saudação</label>
                 <input
@@ -1341,26 +1511,52 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
                 <input type="checkbox" checked={includeSpecs} onChange={e => setIncludeSpecs(e.target.checked)} className="w-4 h-4 accent-blue-600" />
                 Incluir especificações dos produtos (malha, fio…)
               </label>
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Mensagem</label>
-                  {msgTouched && (
-                    <button type="button" onClick={() => setMsgTouched(false)} className="text-[11px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1">
-                      <RotateCcw className="w-3 h-3" /> Regenerar
-                    </button>
-                  )}
+
+              {format === 'texto' ? (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Mensagem</label>
+                    {msgTouched && (
+                      <button type="button" onClick={() => setMsgTouched(false)} className="text-[11px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1">
+                        <RotateCcw className="w-3 h-3" /> Regenerar
+                      </button>
+                    )}
+                  </div>
+                  <textarea
+                    value={messageText}
+                    onChange={e => { setMessageText(e.target.value); setMsgTouched(true); }}
+                    rows={10}
+                    className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-[13px] leading-relaxed font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none"
+                  />
+                  <p className="text-[10px] text-slate-400">
+                    {lead.phone ? <>Será enviada ao WhatsApp <span className="font-semibold">{lead.phone}</span>. </> : 'Lead sem telefone cadastrado. '}
+                    No WhatsApp, texto entre *asteriscos* fica em negrito.
+                  </p>
                 </div>
-                <textarea
-                  value={messageText}
-                  onChange={e => { setMessageText(e.target.value); setMsgTouched(true); }}
-                  rows={10}
-                  className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-[13px] leading-relaxed font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none"
-                />
-                <p className="text-[10px] text-slate-400">
-                  {lead.phone ? <>Será enviada ao WhatsApp <span className="font-semibold">{lead.phone}</span>. </> : 'Lead sem telefone cadastrado. '}
-                  No WhatsApp, texto entre *asteriscos* fica em negrito.
-                </p>
-              </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Prévia do documento</label>
+                  {/* Cópia offscreen em tamanho real (SEM transform): é esta que o html2canvas captura.
+                      Capturar a versão escalada faz o texto duplicar/sobrepor. */}
+                  <div style={{ position: 'fixed', left: -99999, top: 0, width: 794, pointerEvents: 'none' }} aria-hidden>
+                    <QuoteDocument docRef={docRef} {...quoteDocProps} />
+                  </div>
+                  {/* Prévia visual (escalada só para exibição) */}
+                  <div
+                    ref={previewWrapRef}
+                    style={{ height: docHeight }}
+                    className="relative w-full overflow-hidden border border-slate-200 rounded-xl bg-slate-100"
+                  >
+                    <div style={{ position: 'absolute', top: 0, left: 0, width: 794, transform: `scale(${previewScale})`, transformOrigin: 'top left' }}>
+                      <QuoteDocument {...quoteDocProps} />
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-slate-400">
+                    {lead.phone ? <>Será enviado ao WhatsApp <span className="font-semibold">{lead.phone}</span> como {format === 'pdf' ? 'PDF' : 'imagem'}. </> : 'Lead sem telefone cadastrado. '}
+                    A saudação e o rodapé vão como legenda.
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
@@ -1407,17 +1603,17 @@ function OrcamentoModal({ lead, onClose, onCancel, onConfirm }: {
               )}
               <button
                 onClick={handleSend}
-                disabled={sending || done || !messageText.trim()}
+                disabled={sending || done || (format === 'texto' && !messageText.trim())}
                 className={cn(
                   "w-full py-2.5 rounded-xl text-sm font-black transition-all flex items-center justify-center gap-2",
                   done ? "bg-emerald-500 text-white" :
-                    (sending || !messageText.trim()) ? "bg-slate-100 text-slate-400" :
+                    (sending || (format === 'texto' && !messageText.trim())) ? "bg-slate-100 text-slate-400" :
                       "bg-blue-600 hover:bg-blue-700 text-white"
                 )}
               >
                 {done ? <><Check className="w-4 h-4" /> Enviado!</> :
-                  sending ? <><Loader2 className="w-4 h-4 animate-spin" /> Enviando…</> :
-                    <><Send className="w-4 h-4" /> Enviar pelo WhatsApp</>}
+                  sending ? <><Loader2 className="w-4 h-4 animate-spin" /> {format === 'texto' ? 'Enviando…' : 'Gerando e enviando…'}</> :
+                    <><Send className="w-4 h-4" /> {format === 'texto' ? 'Enviar pelo WhatsApp' : `Enviar ${format === 'pdf' ? 'PDF' : 'imagem'}`}</>}
               </button>
               <button onClick={() => setStep(1)} disabled={sending} className="w-full py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-500 hover:bg-slate-50 transition-all">
                 ← Voltar

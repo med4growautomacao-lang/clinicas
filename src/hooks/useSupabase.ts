@@ -1489,6 +1489,16 @@ export interface Clinic {
   google_status?: 'none' | 'inactive' | 'active';
   site_status?: 'none' | 'inactive' | 'active';
   forms_status?: 'none' | 'inactive' | 'active';
+  quote_use_products?: boolean;
+  quote_use_protocols?: boolean;
+  quote_template?: {
+    saudacao?: string;
+    rodape?: string;
+    validade?: string;
+    pagamento?: string;
+    include_specs?: boolean;
+    format?: 'texto' | 'imagem' | 'pdf';
+  } | null;
 }
 
 export interface CompanyPrompt {

@@ -35,6 +35,8 @@ import {
     ToggleRight,
     Package,
     Ruler,
+    FileText,
+    Maximize2,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -43,6 +45,7 @@ import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "./ui/toast";
 import { MoneyInput } from "./ui/money-input";
+import { QuoteDocument } from "./QuoteDocument";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import WhatsappLogo from "../assets/logos/Logo Whatsapp.png";
@@ -82,6 +85,9 @@ export function Settings() {
     const { data: products, create: createProduct, update: updateProduct, remove: removeProduct } = useProducts();
     const [productModal, setProductModal] = useState<{ open: boolean; item: Partial<Product> | null }>({ open: false, item: null });
     const [savingProduct, setSavingProduct] = useState(false);
+
+    // Modelo padrao do orcamento (pre-preenche o modal do Kanban)
+    const [quoteTplOpen, setQuoteTplOpen] = useState(false);
 
     const loadedClinicId = useRef<string | null>(null);
 
@@ -239,13 +245,14 @@ export function Settings() {
         }
     }, [restrictedIntegrations, activeIntTab]);
 
-    // Aba de Produtos e restrita (config de catalogo); secretaria cai de volta em "clinic".
+    // "Produtos" deixou de ser aba (virou card dentro de "Dados da Clínica").
+    // Redireciona qualquer settingsTab='products' antigo do localStorage.
     useEffect(() => {
-        if (isSecretaria && activeTab === 'products') {
+        if (activeTab === 'products') {
             setActiveTab('clinic');
             localStorage.setItem('settingsTab', 'clinic');
         }
-    }, [isSecretaria, activeTab]);
+    }, [activeTab]);
 
     // Deep-link vindo do banner global (WhatsApp desconectado): leva direto
     // para Integracoes > WhatsApp.
@@ -276,7 +283,6 @@ export function Settings() {
     const tabs = [
         { id: "clinic", label: "Dados da Clínica", icon: Building2, color: "text-emerald-600" },
         { id: "integrations", label: "Integrações", icon: Plug, color: "text-violet-600" },
-        ...(!isSecretaria ? [{ id: "products", label: "Produtos", icon: Package, color: "text-amber-600" }] : []),
     ];
 
     const handleSaveProtocol = async () => {
@@ -597,7 +603,7 @@ export function Settings() {
                             />
                         )}
 
-                        {activeTab === "products" && !isSecretaria && (
+                        {activeTab === "clinic" && !isSecretaria && (
                             <Card className="border border-slate-200 shadow-sm max-w-4xl mx-auto">
                                 <CardHeader className="flex flex-row items-start justify-between gap-4">
                                     <div>
@@ -659,9 +665,69 @@ export function Settings() {
                             </Card>
                         )}
 
+                        {activeTab === "clinic" && !isSecretaria && (
+                            <Card className="border border-slate-200 shadow-sm max-w-4xl mx-auto">
+                                <CardHeader>
+                                    <CardTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                                        <FileText className="w-5 h-5 text-teal-600" />
+                                        Configuração do Orçamento
+                                    </CardTitle>
+                                    <p className="text-xs text-slate-400 mt-1">Escolha o que fica disponível para seleção ao montar um orçamento no Kanban.</p>
+                                </CardHeader>
+                                <CardContent className="space-y-2">
+                                    {[
+                                        { key: 'quote_use_products' as const, label: 'Usar Produtos', desc: 'Itens do catálogo de produtos (unidade, valor e especificações).' },
+                                        { key: 'quote_use_protocols' as const, label: 'Usar Protocolos', desc: 'Protocolos de atendimento (nome + valor).' },
+                                    ].map(opt => {
+                                        const on = (localClinic as any)[opt.key] !== false; // padrão: ligado
+                                        return (
+                                            <button
+                                                key={opt.key}
+                                                type="button"
+                                                onClick={() => setLocalClinic(prev => ({ ...prev, [opt.key]: !on }))}
+                                                className="w-full flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-100 hover:border-slate-200 bg-white transition-all text-left"
+                                            >
+                                                <div className="min-w-0">
+                                                    <p className="font-semibold text-sm text-slate-800">{opt.label}</p>
+                                                    <p className="text-xs text-slate-400">{opt.desc}</p>
+                                                </div>
+                                                {on
+                                                    ? <ToggleRight className="w-7 h-7 text-teal-500 shrink-0" />
+                                                    : <ToggleLeft className="w-7 h-7 text-slate-300 shrink-0" />}
+                                            </button>
+                                        );
+                                    })}
+                                    <p className="text-[11px] text-slate-400 pt-1">Deixe pelo menos um marcado. Com os dois desmarcados, o orçamento usa entrada manual de valor.</p>
+
+                                    <div className="pt-3 border-t border-slate-100 mt-2">
+                                        <Button variant="outline" onClick={() => setQuoteTplOpen(true)} className="w-full gap-2">
+                                            <FileText className="w-4 h-4 text-teal-600" /> Configurar modelo do orçamento
+                                        </Button>
+                                        <p className="text-[11px] text-slate-400 mt-2">Define a saudação, rodapé, validade, forma de pagamento e o formato que já vêm preenchidos no modal do Kanban.</p>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        )}
+
                     </motion.div>
                 </AnimatePresence>
             </div>
+
+            {/* Modal: Modelo do Orçamento */}
+            <AnimatePresence>
+                {quoteTplOpen && (
+                    <QuoteTemplateModal
+                        initial={(localClinic as any).quote_template}
+                        clinic={localClinic}
+                        onClose={() => setQuoteTplOpen(false)}
+                        onSave={async (tpl) => {
+                            await updateClinic({ quote_template: tpl });
+                            setLocalClinic(prev => ({ ...prev, quote_template: tpl }));
+                            setQuoteTplOpen(false);
+                        }}
+                    />
+                )}
+            </AnimatePresence>
 
             {/* Modal: Produto */}
             <AnimatePresence>
@@ -887,6 +953,175 @@ export function Settings() {
     );
 }
 
+// Modelo padrao do orcamento: pre-preenche o modal do Kanban (etapa 2 / documento).
+type QuoteTemplate = NonNullable<Clinic['quote_template']>;
+function QuoteTemplateModal({ initial, clinic, onClose, onSave }: {
+    initial?: QuoteTemplate | null;
+    clinic: Partial<Clinic>;
+    onClose: () => void;
+    onSave: (tpl: QuoteTemplate) => Promise<void>;
+}) {
+    const t = initial || {};
+    const [saudacao, setSaudacao] = useState<string>(t.saudacao ?? 'Olá {nome}! 👋');
+    const [rodape, setRodape] = useState<string>(t.rodape ?? 'Qualquer dúvida, estou à disposição! 😊');
+    const [validade, setValidade] = useState<string>(t.validade ?? '');
+    const [pagamento, setPagamento] = useState<string>(t.pagamento ?? '');
+    const [includeSpecs, setIncludeSpecs] = useState<boolean>(t.include_specs ?? true);
+    const [format, setFormat] = useState<'texto' | 'imagem' | 'pdf'>(t.format ?? 'imagem');
+    const [saving, setSaving] = useState(false);
+    const [expanded, setExpanded] = useState(false);
+
+    // Prévia (dados de exemplo). O documento pode usar transform scale à vontade — aqui não há captura.
+    const docRef = useRef<HTMLDivElement>(null);
+    const previewWrapRef = useRef<HTMLDivElement>(null);
+    const [scale, setScale] = useState(0.4);
+    const [ph, setPh] = useState(520);
+    const sampleName = 'Cliente Exemplo';
+    const saudPreview = saudacao.split('{nome}').join(sampleName).replace(/\s+([!?.,])/g, '$1');
+    const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    const sampleDocItems = [
+        { name: 'Produto exemplo', description: null, specs: includeSpecs ? ['malha: 18', 'fio: 0,30 mm'] : [], qtyLine: '10 metro × R$ 27,00', value: 270 },
+        { name: 'Instalação', description: null, specs: [], qtyLine: '1 serviço × R$ 150,00', value: 150 },
+    ];
+    const sampleTotal = 420;
+    const sampleDocProps = {
+        clinicName: clinic.name ?? '',
+        clinicPhone: clinic.phone ?? null,
+        clinicAddress: clinic.address ?? null,
+        clinicCnpj: clinic.cnpj ?? null,
+        clientName: sampleName,
+        clientPhone: '(11) 90000-0000',
+        number: '01234',
+        dateStr: new Date().toLocaleDateString('pt-BR'),
+        items: sampleDocItems,
+        total: sampleTotal,
+        pagamento: pagamento.trim(),
+        validade: validade.trim(),
+        accent: clinic.primary_color || '#1d4ed8',
+    };
+    const sampleMessage = (() => {
+        const p: string[] = [];
+        if (saudPreview.trim()) { p.push(saudPreview.trim()); p.push(''); }
+        p.push('*Orçamento*', '', '*Produto exemplo*');
+        if (includeSpecs) p.push('malha: 18 | fio: 0,30 mm');
+        p.push(`10 metro × ${brl(27)} = ${brl(270)}`, '', '*Instalação*', `1 serviço × ${brl(150)} = ${brl(150)}`, '', `*TOTAL: ${brl(sampleTotal)}*`);
+        if (validade.trim()) p.push(`Validade: ${validade.trim()}`);
+        if (pagamento.trim()) p.push(`Pagamento: ${pagamento.trim()}`);
+        if (rodape.trim()) { p.push(''); p.push(rodape.trim()); }
+        return p.join('\n');
+    })();
+
+    useEffect(() => {
+        if (format === 'texto') return;
+        const el = docRef.current, wrap = previewWrapRef.current;
+        if (!el || !wrap) return;
+        const s = wrap.clientWidth / 794;
+        setScale(s);
+        setPh(Math.round(el.offsetHeight * s));
+    }, [format, saudacao, rodape, validade, pagamento, includeSpecs]);
+
+    const handleSave = async () => {
+        setSaving(true);
+        await onSave({ saudacao, rodape, validade, pagamento, include_specs: includeSpecs, format });
+        setSaving(false);
+    };
+
+    const inputCls = "w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500";
+    return (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl p-6 space-y-4 max-h-[90vh] overflow-y-auto custom-scrollbar" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between">
+                    <h3 className="font-bold text-slate-900 text-base">Modelo do Orçamento</h3>
+                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+                </div>
+                <p className="text-xs text-slate-400 -mt-2">Estes valores já vêm preenchidos ao registrar um orçamento no Kanban (você ainda pode ajustar na hora).</p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    {/* Campos */}
+                    <div className="space-y-3">
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Saudação</label>
+                            <input type="text" value={saudacao} onChange={e => setSaudacao(e.target.value)} className={inputCls} placeholder="Olá {nome}! 👋" />
+                            <p className="text-[10px] text-slate-400 mt-1"><span className="font-mono">{'{nome}'}</span> é trocado pelo primeiro nome do lead.</p>
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Rodapé</label>
+                            <input type="text" value={rodape} onChange={e => setRodape(e.target.value)} className={inputCls} placeholder="Qualquer dúvida, estou à disposição!" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Validade</label>
+                                <input type="text" value={validade} onChange={e => setValidade(e.target.value)} className={inputCls} placeholder="Ex: 7 dias" />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Pagamento</label>
+                                <input type="text" value={pagamento} onChange={e => setPagamento(e.target.value)} className={inputCls} placeholder="Ex: PIX ou cartão" />
+                            </div>
+                        </div>
+                        <label className="flex items-center gap-2 text-sm font-medium text-slate-600 cursor-pointer select-none">
+                            <input type="checkbox" checked={includeSpecs} onChange={e => setIncludeSpecs(e.target.checked)} className="w-4 h-4 accent-teal-600" />
+                            Incluir especificações dos produtos por padrão
+                        </label>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Formato padrão de envio</label>
+                            <div className="flex bg-slate-100 rounded-xl p-1">
+                                {(['texto', 'imagem', 'pdf'] as const).map(f => (
+                                    <button key={f} type="button" onClick={() => setFormat(f)} className={cn("flex-1 py-1.5 rounded-lg text-xs font-bold transition-all", format === f ? "bg-white text-teal-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>
+                                        {f === 'texto' ? 'Texto' : f === 'imagem' ? 'Imagem' : 'PDF'}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Prévia */}
+                    <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                            <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide">Prévia</label>
+                            <button type="button" onClick={() => setExpanded(true)} className="text-[11px] font-bold text-teal-600 hover:text-teal-700 flex items-center gap-1">
+                                <Maximize2 className="w-3 h-3" /> Expandir
+                            </button>
+                        </div>
+                        {format === 'texto' ? (
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[13px] leading-relaxed whitespace-pre-wrap text-slate-700 max-h-[440px] overflow-y-auto">{sampleMessage}</div>
+                        ) : (
+                            <div ref={previewWrapRef} style={{ height: ph }} className="relative w-full overflow-hidden border border-slate-200 rounded-xl bg-slate-100 cursor-zoom-in" onClick={() => setExpanded(true)}>
+                                <div style={{ position: 'absolute', top: 0, left: 0, width: 794, transform: `scale(${scale})`, transformOrigin: 'top left' }}>
+                                    <QuoteDocument docRef={docRef} {...sampleDocProps} />
+                                </div>
+                            </div>
+                        )}
+                        <p className="text-[10px] text-slate-400 mt-1">Prévia com dados de exemplo.</p>
+                    </div>
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                    <Button variant="outline" className="flex-1" onClick={onClose}>Cancelar</Button>
+                    <Button className="flex-1" onClick={handleSave} disabled={saving}>
+                        {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Check className="w-4 h-4 mr-2" />}
+                        Salvar modelo
+                    </Button>
+                </div>
+            </motion.div>
+
+            {expanded && (
+                <div className="fixed inset-0 z-[60] bg-black/80 flex items-start justify-center overflow-auto p-4 sm:p-8" onClick={(e) => { e.stopPropagation(); setExpanded(false); }}>
+                    <div className="relative my-auto" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => setExpanded(false)} className="absolute -top-3 -right-3 z-10 bg-white rounded-full p-1.5 shadow-lg text-slate-500 hover:text-slate-800"><X className="w-5 h-5" /></button>
+                        {format === 'texto' ? (
+                            <div className="bg-white rounded-2xl shadow-2xl p-8 w-[90vw] max-w-lg text-[15px] leading-relaxed whitespace-pre-wrap text-slate-700">{sampleMessage}</div>
+                        ) : (
+                            <div className="bg-white rounded-lg shadow-2xl overflow-hidden">
+                                <QuoteDocument {...sampleDocProps} />
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+        </motion.div>
+    );
+}
+
 function BrandingSettings({ data, onChange }: { data: Partial<Clinic>, onChange: (updates: Partial<Clinic>) => void }) {
     return (
         <div className="grid gap-8 md:grid-cols-2">
@@ -978,12 +1213,32 @@ function ClinicSettings({ data, onChange }: { data: Partial<Clinic>, onChange: (
                     <div className="space-y-6">
                         <div className="space-y-2">
                             <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Endereço</label>
-                            <textarea 
+                            <textarea
                                 value={data.address || ''}
                                 onChange={(e) => onChange({ address: e.target.value })}
-                                className="w-full px-4 py-2 border border-slate-200 rounded-lg font-medium text-slate-700 h-[210px]" 
+                                className="w-full px-4 py-2 border border-slate-200 rounded-lg font-medium text-slate-700 h-[210px]"
                             />
                         </div>
+                    </div>
+                </div>
+
+                <div className="mt-8 pt-6 border-t border-slate-100">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Cor da Clínica</label>
+                    <p className="text-[11px] text-slate-400 mb-2.5">Usada no orçamento formal (imagem/PDF) e em destaques do sistema.</p>
+                    <div className="flex items-center gap-3">
+                        <input
+                            type="color"
+                            value={data.primary_color || '#0d9488'}
+                            onChange={(e) => onChange({ primary_color: e.target.value })}
+                            className="w-12 h-10 rounded-lg border border-slate-200 cursor-pointer bg-white p-1"
+                        />
+                        <input
+                            type="text"
+                            value={data.primary_color || '#0d9488'}
+                            onChange={(e) => onChange({ primary_color: e.target.value })}
+                            placeholder="#0d9488"
+                            className="w-32 px-3 py-2 border border-slate-200 rounded-lg font-mono text-sm text-slate-700"
+                        />
                     </div>
                 </div>
 

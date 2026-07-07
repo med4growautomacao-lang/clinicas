@@ -45,8 +45,10 @@ serve(async (req) => {
 
   let body: any;
   try { body = await req.json(); } catch { body = {}; }
-  const { clinic_id, lead_id, phone, text } = body ?? {};
-  if (!clinic_id || !phone || !text || !String(text).trim()) {
+  const { clinic_id, lead_id, phone, text, media_url, media_type, filename } = body ?? {};
+  const hasMedia = !!media_url;
+  const hasText = !!(text && String(text).trim());
+  if (!clinic_id || !phone || (!hasMedia && !hasText)) {
     return json({ ok: false, error: "missing_params" }, 400);
   }
 
@@ -85,12 +87,22 @@ serve(async (req) => {
   const number = normalizeBrazilianPhone(String(phone));
   if (!number) return json({ ok: false, error: "telefone_invalido" }, 400);
 
-  // (4) Envio via uazapi.
+  // (4) Envio via uazapi. Texto -> /send/text; imagem/PDF -> /send/media (file = URL publica).
+  const endpoint = hasMedia ? "/send/media" : "/send/text";
+  const payload = hasMedia
+    ? {
+        number,
+        type: media_type === "document" ? "document" : "image",
+        file: String(media_url),
+        text: hasText ? String(text) : "",
+        docName: filename ? String(filename) : "orcamento",
+      }
+    : { number, text: String(text), delay: 0 };
   try {
-    const resp = await fetch(`${UAZAPI_BASE}/send/text`, {
+    const resp = await fetch(`${UAZAPI_BASE}${endpoint}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Accept": "application/json", "token": token },
-      body: JSON.stringify({ number, text: String(text), delay: 0 }),
+      body: JSON.stringify(payload),
     });
     if (!resp.ok) {
       const detail = await resp.text().catch(() => "");
@@ -102,6 +114,9 @@ serve(async (req) => {
 
   // (5) Registra na conversa do lead (mesma forma das mensagens humanas outbound).
   //     Nao falha o envio se o log falhar. session_id/clinic_name/seq vem por trigger.
+  const logContent = hasMedia
+    ? `${hasText ? String(text).trim() + "\n\n" : ""}📎 Orçamento (${media_type === "document" ? "PDF" : "imagem"}): ${media_url}`
+    : String(text);
   try {
     await supabase.from("chat_messages").insert({
       clinic_id,
@@ -110,7 +125,7 @@ serve(async (req) => {
       user_id: uid,
       sender: "human",
       direction: "outbound",
-      message: { type: "human", content: String(text), additional_kwargs: {}, response_metadata: {} },
+      message: { type: "human", content: logContent, additional_kwargs: {}, response_metadata: {} },
     });
   } catch (_e) {
     // ignore

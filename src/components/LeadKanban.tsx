@@ -31,6 +31,7 @@ import {
   UserX,
   Store,
   Package,
+  Printer,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -1781,6 +1782,27 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
     setBusy(false);
   };
 
+  // Imprime o documento: renderiza p/ imagem e abre uma janela de impressão (A4 sem margem).
+  const handlePrint = async () => {
+    if (busy) return;
+    const node = docRef.current;
+    if (!node) return;
+    setBusy(true);
+    try {
+      const html2canvas = (await import('html2canvas-pro')).default;
+      const canvas = await html2canvas(node, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+      const w = window.open('', '_blank');
+      if (w) {
+        w.document.write(`<html><head><title>Ordem de Produção ${meta.number}</title><style>@page{size:A4;margin:0}html,body{margin:0;padding:0}img{width:100%;display:block}</style></head><body><img src="${dataUrl}" onload="window.focus();window.print();" /></body></html>`);
+        w.document.close();
+      }
+    } catch (_e) {
+      // ignore
+    }
+    setBusy(false);
+  };
+
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
       <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
@@ -1838,9 +1860,12 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
           </div>
 
           <div className="flex gap-2 pt-1">
-            <button onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-500 hover:bg-slate-50 transition-all">Fechar</button>
+            <button onClick={onClose} className="py-2.5 px-3 rounded-xl text-sm font-bold border border-slate-200 text-slate-500 hover:bg-slate-50 transition-all">Fechar</button>
+            <button onClick={handlePrint} disabled={busy} className={cn("flex-1 py-2.5 rounded-xl text-sm font-bold border transition-all flex items-center justify-center gap-2", busy ? "border-slate-200 text-slate-400" : "border-teal-200 text-teal-700 hover:bg-teal-50")}>
+              <Printer className="w-4 h-4" /> Imprimir
+            </button>
             <button onClick={handleDownload} disabled={busy} className={cn("flex-1 py-2.5 rounded-xl text-sm font-black transition-all flex items-center justify-center gap-2", busy ? "bg-slate-100 text-slate-400" : "bg-teal-600 hover:bg-teal-700 text-white")}>
-              {busy ? <><Loader2 className="w-4 h-4 animate-spin" /> Gerando…</> : <><Download className="w-4 h-4" /> Baixar {format === 'pdf' ? 'PDF' : 'imagem'}</>}
+              {busy ? <><Loader2 className="w-4 h-4 animate-spin" /></> : <><Download className="w-4 h-4" /> Baixar</>}
             </button>
           </div>
         </div>

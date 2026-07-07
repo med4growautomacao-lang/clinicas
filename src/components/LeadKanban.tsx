@@ -934,6 +934,16 @@ function GanhoModal({ lead, onClose, onCancel, onCreate, createPatient, updateLe
 // Quantidade "bonita": sem casas decimais forçadas (30, 1,5, 12,25...).
 const formatQty = (n: number) => Number(n).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
 
+// Produtos vendidos por m²: a área = quantidade (comprimento) × altura. A altura vem do
+// campo personalizado "altura" do produto. Multiplicador = altura (>0) quando a unidade é m².
+const isM2Unit = (unit?: string) => /m²|m2/i.test(unit || '');
+const alturaOf = (attributes?: { label: string; value: string }[]) => {
+  const a = (attributes || []).find(x => (x.label || '').toLowerCase().includes('altura'));
+  const n = a ? Number(String(a.value).replace(',', '.').replace(/[^\d.]/g, '')) : 0;
+  return n > 0 ? n : 0;
+};
+const areaMult = (unit?: string, attributes?: { label: string; value: string }[]) => (isM2Unit(unit) && alturaOf(attributes) ? alturaOf(attributes) : 1);
+
 // Modal ao mover para "Orçamento Enviado": monta o orçamento selecionando produtos do
 // catálogo (produto + quantidade => subtotal = qtd × valor/unidade) e soma o total.
 // NÃO gera conversão — só grava metadados no lead (estimated_value = total) e no ticket
@@ -1039,11 +1049,12 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
     return (l.price !== '' && !isNaN(edited) && edited >= 0) ? edited : Number(p.unit_price);
   };
   // Desconto (%) e frete (R$) sao POR PRODUTO (por linha).
+  // Em m², a base = quantidade × altura × valor/m² (área).
   const lineBase = (l: Line) => {
     const p = itemById[l.productId];
     const q = Number(String(l.qty).replace(',', '.'));
     if (!p || !q || q <= 0) return 0;
-    return q * unitPrice(l);
+    return q * areaMult(p.unit, p.attributes) * unitPrice(l);
   };
   const linePct = (l: Line) => Math.min(100, Math.max(0, Number(String(l.discount).replace(',', '.')) || 0));
   const lineDiscountValue = (l: Line) => lineBase(l) * (linePct(l) / 100);
@@ -1118,10 +1129,8 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
       if (includeSpecs && (p.attributes?.length ?? 0) > 0) {
         out.push((p.attributes ?? []).map(a => `${a.label}${a.value ? `: ${a.value}` : ''}`).join(' | '));
       }
-      out.push(`${formatQty(q)} ${p.unit} × ${formatBRL(unitPrice(l))} = ${formatBRL(base)}`);
-      if (linePct(l) > 0) out.push(`Desconto ${formatQty(linePct(l))}%: -${formatBRL(lineDiscountValue(l))}`);
-      if (lineFeeValue(l) > 0) out.push(`Frete: +${formatBRL(lineFeeValue(l))}`);
-      if (linePct(l) > 0 || lineFeeValue(l) > 0) out.push(`Subtotal do item: ${formatBRL(lineTotal(l))}`);
+      // Sem o cálculo/valor unitário: só a quantidade e o total do item.
+      out.push(`${formatQty(q)} ${p.unit}: ${formatBRL(lineTotal(l))}`);
     });
     out.push('');
     out.push(`*TOTAL: ${formatBRL(total)}*`);
@@ -1141,7 +1150,8 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
     .map(l => {
       const p = itemById[l.productId]!;
       const q = Number(String(l.qty).replace(',', '.'));
-      const meta = [`${formatQty(q)} ${p.unit} × ${formatBRL(unitPrice(l))}`];
+      const altTxt = isM2Unit(p.unit) && alturaOf(p.attributes) ? ` × ${formatQty(alturaOf(p.attributes))}m alt` : '';
+      const meta = [`${formatQty(q)} ${p.unit}${altTxt} × ${formatBRL(unitPrice(l))}`];
       if (linePct(l) > 0) meta.push(`desc ${formatQty(linePct(l))}%`);
       if (lineFeeValue(l) > 0) meta.push(`frete ${formatBRL(lineFeeValue(l))}`);
       return {
@@ -1366,7 +1376,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
                               </div>
                             </div>
                           ) : (
-                            <span className="text-xs font-medium text-slate-500 flex-1 min-w-0 truncate">{p.unit} × {formatBRL(unitPrice(l))}</span>
+                            <span className="text-xs font-medium text-slate-500 flex-1 min-w-0 truncate">{p.unit}{isM2Unit(p.unit) && alturaOf(p.attributes) ? ` · alt ${formatQty(alturaOf(p.attributes))}m` : ''} × {formatBRL(unitPrice(l))}</span>
                           )}
                           <span className="text-sm font-black text-slate-800 shrink-0">{formatBRL(base)}</span>
                         </div>
@@ -1700,7 +1710,7 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
     if (!q || q <= 0) return 0;
     const edited = Number(String(l.price).replace(',', '.'));
     const up = (l.price !== '' && !isNaN(edited) && edited >= 0) ? edited : it.unit_price;
-    const base = q * up;
+    const base = q * areaMult(it.unit, it.attributes) * up;
     const pct = Math.min(100, Math.max(0, Number(String(l.discount).replace(',', '.')) || 0));
     const fee = Number(l.fee || 0);
     return Math.max(0, base - base * (pct / 100)) + fee;

@@ -1951,21 +1951,29 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
 
   // Seleção + edição por item antes de imprimir/baixar. Semeado 1x quando os itens carregam
   // (products vêm async). include = vai pra produção; comprimento/altura editáveis (pré do orçamento).
-  const [itemState, setItemState] = useState<{ include: boolean; comprimento: string; altura: string }[]>([]);
+  type ItemSt = { include: boolean; comprimento: string; altura: string; mode: 'produzir' | 'separar' };
+  const [itemState, setItemState] = useState<ItemSt[]>([]);
   const seededRef = useRef(false);
   useEffect(() => {
     if (seededRef.current || prodItems.length === 0) return;
     seededRef.current = true;
-    setItemState(prodItems.map(it => ({ include: true, comprimento: it.comprimento, altura: it.altura })));
+    setItemState(prodItems.map(it => ({ include: true, comprimento: it.comprimento, altura: it.altura, mode: 'produzir' as const })));
   }, [prodItems]);
-  const setItem = (i: number, patch: Partial<{ include: boolean; comprimento: string; altura: string }>) =>
+  const setItem = (i: number, patch: Partial<ItemSt>) =>
     setItemState(prev => prev.map((s, idx) => idx === i ? { ...s, ...patch } : s));
 
-  // Só os itens INCLUÍDOS, com comprimento/altura editados, vão pro documento.
+  // Só os itens INCLUÍDOS, com comprimento/altura editados e o modo (produzir/separar), vão pro documento.
   const docItems = prodItems
-    .map((it, i) => itemState[i] ? { ...it, comprimento: itemState[i].comprimento, altura: itemState[i].altura } : it)
+    .map((it, i) => itemState[i] ? { ...it, comprimento: itemState[i].comprimento, altura: itemState[i].altura, mode: itemState[i].mode } : { ...it, mode: 'produzir' as const })
     .filter((_, i) => itemState[i] ? itemState[i].include : true);
   const total = prodItems.reduce((s, it, i) => (itemState[i] && !itemState[i].include) ? s : s + it.value, 0);
+
+  // Título e nome do arquivo conforme os modos dos itens incluídos (só produção / só separação / misto).
+  const modes = docItems.map(it => it.mode ?? 'produzir');
+  const allSep = modes.length > 0 && modes.every(m => m === 'separar');
+  const allProd = modes.every(m => m === 'produzir');
+  const docTitle = allSep ? 'ORDEM DE SEPARAÇÃO' : (allProd ? 'ORDEM DE PRODUÇÃO' : 'ORDEM DE PRODUÇÃO / SEPARAÇÃO');
+  const fileBase = allSep ? 'Ordem-Separacao' : (allProd ? 'Ordem-Producao' : 'Ordem-Producao-Separacao');
 
   const [meta] = useState(() => ({ number: String(Date.now() % 100000).padStart(5, '0'), date: new Date().toLocaleDateString('pt-BR') }));
 
@@ -1982,6 +1990,7 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
   }, [prazo, vendedor, cidade, observacoes, showPrices, docItems.length, itemState]);
 
   const docProps = {
+    title: docTitle,
     clinicName: clinic?.name ?? '',
     clinicLegalName: clinic?.legal_name ?? null,
     clinicPhone: clinic?.phone ?? null,
@@ -2012,7 +2021,7 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
     try {
       const html2canvas = (await import('html2canvas-pro')).default;
       const canvas = await html2canvas(node, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
-      const filename = `Ordem-Producao-${meta.number}`;
+      const filename = `${fileBase}-${meta.number}`;
       if (format === 'pdf') {
         const { jsPDF } = await import('jspdf');
         const imgData = canvas.toDataURL('image/jpeg', 0.92);
@@ -2045,7 +2054,7 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
       const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
       const w = window.open('', '_blank');
       if (w) {
-        w.document.write(`<html><head><title>Ordem de Produção ${meta.number}</title><style>@page{size:A4;margin:0}html,body{margin:0;padding:0}img{width:100%;display:block}</style></head><body><img src="${dataUrl}" onload="window.focus();window.print();" /></body></html>`);
+        w.document.write(`<html><head><title>${docTitle} ${meta.number}</title><style>@page{size:A4;margin:0}html,body{margin:0;padding:0}img{width:100%;display:block}</style></head><body><img src="${dataUrl}" onload="window.focus();window.print();" /></body></html>`);
         w.document.close();
       }
     } catch (_e) {
@@ -2061,7 +2070,7 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
         <div className="p-6 space-y-4 overflow-y-auto">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-base font-black text-slate-900">Ordem de Produção</h3>
+              <h3 className="text-base font-black text-slate-900">Ordem de Produção / Separação</h3>
               <p className="text-xs text-slate-500 font-medium mt-0.5">{lead.name}</p>
             </div>
             <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4 text-slate-400" /></button>
@@ -2106,7 +2115,7 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block">Produtos a produzir</label>
               <p className="text-[11px] text-slate-400 -mt-1">Marque os que vão para a produção e ajuste as medidas, se precisar.</p>
               {prodItems.map((it, i) => {
-                const st = itemState[i] ?? { include: true, comprimento: it.comprimento, altura: it.altura };
+                const st = itemState[i] ?? { include: true, comprimento: it.comprimento, altura: it.altura, mode: 'produzir' as const };
                 return (
                   <div key={i} className={cn("rounded-xl border p-3 transition-all", st.include ? "border-slate-200 bg-white" : "border-slate-100 bg-slate-50")}>
                     <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -2115,14 +2124,23 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
                       <span className="text-[11px] font-semibold text-slate-400 shrink-0">{it.qty}</span>
                     </label>
                     {st.include && (
-                      <div className="grid grid-cols-2 gap-2 mt-2 pl-6">
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block mb-0.5">Comprimento (m)</label>
-                          <input value={st.comprimento} onChange={e => setItem(i, { comprimento: e.target.value })} placeholder="—" className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" />
+                      <div className="mt-2 pl-6 space-y-2">
+                        <div className="flex bg-slate-100 rounded-lg p-0.5 w-max">
+                          {(['produzir', 'separar'] as const).map(m => (
+                            <button key={m} type="button" onClick={() => setItem(i, { mode: m })} className={cn("px-3 py-1 rounded-md text-[11px] font-bold transition-all", (st.mode ?? 'produzir') === m ? "bg-white text-teal-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>
+                              {m === 'produzir' ? 'Produzir' : 'Separar (estoque)'}
+                            </button>
+                          ))}
                         </div>
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block mb-0.5">Altura (m)</label>
-                          <input value={st.altura} onChange={e => setItem(i, { altura: e.target.value })} placeholder="—" className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" />
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block mb-0.5">Comprimento (m)</label>
+                            <input value={st.comprimento} onChange={e => setItem(i, { comprimento: e.target.value })} placeholder="—" className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block mb-0.5">Altura (m)</label>
+                            <input value={st.altura} onChange={e => setItem(i, { altura: e.target.value })} placeholder="—" className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" />
+                          </div>
                         </div>
                       </div>
                     )}
@@ -4029,7 +4047,7 @@ export function LeadKanban() {
                         }}
                         className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-teal-200 bg-teal-50 text-teal-700 font-bold text-sm hover:bg-teal-100 transition-colors"
                       >
-                        <Package className="w-4 h-4" /> Gerar ordem de produção
+                        <Package className="w-4 h-4" /> Gerar ordem de produção / separação
                       </button>
                     </div>
                   );

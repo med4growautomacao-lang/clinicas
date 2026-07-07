@@ -39,7 +39,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { useSettings, useProtocols, Protocol, useProducts, Product, ProductAttribute, Clinic, AIConfig, WhatsappInstance } from "../hooks/useSupabase";
+import { useSettings, useProtocols, Protocol, useProducts, Product, ProductAttribute, useQuoteImages, Clinic, AIConfig, WhatsappInstance } from "../hooks/useSupabase";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "./ui/toast";
@@ -90,6 +90,20 @@ export function Settings() {
     const [quoteTplOpen, setQuoteTplOpen] = useState(false);
     // Modelo da ordem de producao
     const [poTplOpen, setPoTplOpen] = useState(false);
+
+    // Banco de fotos enviadas com o orcamento
+    const { data: quoteImages, upload: uploadQuoteImage, toggleSend: toggleQuoteImage, remove: removeQuoteImage } = useQuoteImages();
+    const quoteImgInputRef = useRef<HTMLInputElement>(null);
+    const [uploadingImg, setUploadingImg] = useState(false);
+    const handleQuoteImageUpload = async (files: FileList | null) => {
+        if (!files || !files.length) return;
+        setUploadingImg(true);
+        for (const f of Array.from(files)) {
+            if (f.type.startsWith('image/')) await uploadQuoteImage(f);
+        }
+        setUploadingImg(false);
+        if (quoteImgInputRef.current) quoteImgInputRef.current.value = '';
+    };
 
     const loadedClinicId = useRef<string | null>(null);
 
@@ -707,6 +721,46 @@ export function Settings() {
                                             <FileText className="w-4 h-4 text-teal-600" /> Configurar modelo do orçamento
                                         </Button>
                                         <p className="text-[11px] text-slate-400 mt-2">Define a saudação, rodapé, validade, forma de pagamento e o formato que já vêm preenchidos no modal do Kanban.</p>
+                                    </div>
+
+                                    <div className="pt-4 border-t border-slate-100 mt-4">
+                                        <div className="flex items-center justify-between gap-3 mb-2">
+                                            <div>
+                                                <label className="block text-sm font-bold text-slate-700">Fotos enviadas com o orçamento</label>
+                                                <p className="text-[11px] text-slate-400 max-w-md">As fotos marcadas com ✓ vão junto no envio por WhatsApp (você ajusta por orçamento na hora do envio).</p>
+                                            </div>
+                                            <input ref={quoteImgInputRef} type="file" accept="image/*" multiple className="hidden" onChange={e => handleQuoteImageUpload(e.target.files)} />
+                                            <Button variant="outline" onClick={() => quoteImgInputRef.current?.click()} disabled={uploadingImg} className="gap-2 shrink-0">
+                                                {uploadingImg ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Adicionar fotos
+                                            </Button>
+                                        </div>
+                                        {quoteImages.length === 0 ? (
+                                            <p className="text-xs text-slate-400 bg-slate-50 border border-dashed border-slate-200 rounded-xl px-3 py-4 text-center">Nenhuma foto. Adicione fotos para enviar junto com o orçamento (ex.: modelos de tela, obras feitas).</p>
+                                        ) : (
+                                            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                                                {quoteImages.map(img => (
+                                                    <div key={img.id} className="relative group rounded-xl overflow-hidden border border-slate-200 aspect-square bg-slate-100">
+                                                        <img src={img.url} alt={img.name ?? ''} className={cn("w-full h-full object-cover transition-opacity", !img.send_by_default && "opacity-40")} />
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => toggleQuoteImage(img.id, !img.send_by_default)}
+                                                            title={img.send_by_default ? 'Enviando — clique para não enviar' : 'Não enviando — clique para enviar'}
+                                                            className={cn("absolute top-1 left-1 w-6 h-6 rounded-full flex items-center justify-center text-white shadow", img.send_by_default ? "bg-teal-600" : "bg-slate-400")}
+                                                        >
+                                                            {img.send_by_default ? <Check className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => removeQuoteImage(img)}
+                                                            title="Remover"
+                                                            className="absolute top-1 right-1 w-6 h-6 rounded-full bg-rose-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow"
+                                                        >
+                                                            <Trash2 className="w-3.5 h-3.5" />
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
                                     </div>
                                 </CardContent>
                             </Card>

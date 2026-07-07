@@ -13,13 +13,14 @@ const attrVal = (attrs: { label: string; value: string }[], keys: string[]) => {
 };
 const digits = (s: string) => (s || "").replace(",", ".").replace(/[^\d.]/g, "");
 
-export function ProductionOrderDocument({ docRef, clinicName, clinicPhone, clinicEmail, clinicInstagram, clinicCnpj, clientName, clientPhone, cidade, vendedor, number, dateStr, prazo, items, total, showPrices, observacoes, accent }: {
+export function ProductionOrderDocument({ docRef, clinicName, clinicPhone, clinicEmail, clinicInstagram, clinicCnpj, logoDataUrl, clientName, clientPhone, cidade, vendedor, number, dateStr, prazo, items, total, showPrices, observacoes, accent }: {
   docRef?: React.RefObject<HTMLDivElement | null>;
   clinicName: string;
   clinicPhone: string | null;
   clinicEmail?: string | null;
   clinicInstagram?: string | null;
   clinicCnpj: string | null;
+  logoDataUrl?: string | null;
   clientName: string;
   clientPhone: string | null;
   cidade: string;
@@ -62,6 +63,7 @@ export function ProductionOrderDocument({ docRef, clinicName, clinicPhone, clini
       clinicEmail={clinicEmail}
       clinicInstagram={clinicInstagram}
       clinicCnpj={clinicCnpj}
+      logoDataUrl={logoDataUrl}
       clientName={clientName}
       clientPhone={clientPhone}
       title="ORDEM DE PRODUÇÃO"

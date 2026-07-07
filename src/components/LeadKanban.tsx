@@ -35,7 +35,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { useFunnelStages, useLeads, useNotLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useProducts, Product, ProductInput, ProductAttribute, useAppointments, useDoctors, usePatients, useConsultationTypes, Conversion, Lead, Ticket, TransitionRule } from "../hooks/useSupabase";
+import { useFunnelStages, useLeads, useNotLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useProducts, Product, ProductInput, ProductAttribute, useQuoteImages, useAppointments, useDoctors, usePatients, useConsultationTypes, Conversion, Lead, Ticket, TransitionRule } from "../hooks/useSupabase";
 import { NotLeadPanel } from "./NotLeadPanel";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -47,7 +47,7 @@ import SemOrigemLogo from "../assets/logos/Logo Sem origem.png";
 import { Share2, Globe, Layout, Smartphone, Sparkles, Instagram, PhoneOff, RotateCcw } from "lucide-react";
 import { DateRangePicker } from "./DateRangePicker";
 import { UtmLeadFilter, leadUtmKey, NO_UTM_KEY } from "./filters/UtmLeadFilter";
-import { QuoteDocument, formatValidade } from "./QuoteDocument";
+import { QuoteDocument, formatValidade, useImageDataUrl } from "./QuoteDocument";
 import { ProductionOrderDocument } from "./ProductionOrderDocument";
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -970,6 +970,10 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   const { clinic } = useSettings();
   const { data: products, create: createProduct } = useProducts();
   const { data: protocols } = useProtocols();
+  const { data: quoteImages } = useQuoteImages();
+  const logoDataUrl = useImageDataUrl(clinic?.logo_url);
+  const [imgChecked, setImgChecked] = useState<Record<string, boolean>>({});
+  const imgSeededRef = useRef(false);
   const [quickNewFor, setQuickNewFor] = useState<number | null>(null); // linha que está cadastrando produto novo
   const qtyRefs = useRef<Record<number, HTMLInputElement | null>>({}); // foca a quantidade ao selecionar o item
 
@@ -1049,6 +1053,16 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
     if (qt.include_specs != null) setIncludeSpecs(!!qt.include_specs);
     if (qt.format != null) setFormat(qt.format);
   }, [clinic]);
+
+  // Semeia a seleção de fotos a partir do "send_by_default" (1x, quando as fotos carregarem).
+  useEffect(() => {
+    if (imgSeededRef.current || quoteImages.length === 0) return;
+    imgSeededRef.current = true;
+    const init: Record<string, boolean> = {};
+    quoteImages.forEach(i => { init[i.id] = i.send_by_default; });
+    setImgChecked(init);
+  }, [quoteImages]);
+  const selectedImages = quoteImages.filter(i => imgChecked[i.id] ?? i.send_by_default);
 
   // Valor unitario efetivo: o preco editado na linha, ou o cadastrado no produto.
   const unitPrice = (l: Line) => {
@@ -1230,10 +1244,18 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
     setSaving(false);
   };
 
-  const finishSend = (data: any, error: any) => {
-    setSending(false);
+  const finishSend = async (data: any, error: any) => {
     const code = error ? 'send_failed' : (data && data.ok === false ? String(data.error || '') : null);
-    if (code) { setSendError(mapSendError(code)); return; }
+    if (code) { setSending(false); setSendError(mapSendError(code)); return; }
+    // Envia as fotos marcadas (cada uma como imagem), depois do orçamento.
+    for (const img of selectedImages) {
+      try {
+        await supabase.functions.invoke('send-quote', {
+          body: { clinic_id: activeClinicId, lead_id: lead.id, phone: lead.phone, media_url: img.url, media_type: 'image' },
+        });
+      } catch (_e) { /* ignora falha de foto individual */ }
+    }
+    setSending(false);
     setDone(true); setTimeout(onClose, 1300);
   };
 
@@ -1251,7 +1273,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
         const { data, error } = await supabase.functions.invoke('send-quote', {
           body: { clinic_id: activeClinicId, lead_id: lead.id, phone: lead.phone, text: messageText.trim() },
         });
-        finishSend(data, error);
+        await finishSend(data, error);
         return;
       }
       // imagem/PDF: renderiza o documento, sobe no Storage (bucket quotes) e envia como mídia.
@@ -1581,6 +1603,24 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
                 <input type="checkbox" checked={includeSpecs} onChange={e => setIncludeSpecs(e.target.checked)} className="w-4 h-4 accent-blue-600" />
                 Incluir especificações dos produtos (malha, fio…)
               </label>
+
+              {quoteImages.length > 0 && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Fotos que vão junto</label>
+                  <div className="flex flex-wrap gap-2">
+                    {quoteImages.map(img => {
+                      const on = imgChecked[img.id] ?? img.send_by_default;
+                      return (
+                        <button key={img.id} type="button" onClick={() => setImgChecked(prev => ({ ...prev, [img.id]: !on }))} className={cn("relative w-14 h-14 rounded-lg overflow-hidden border-2 transition-all", on ? "border-blue-500" : "border-slate-200 opacity-50")}>
+                          <img src={img.url} className="w-full h-full object-cover" />
+                          {on && <span className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-blue-600 text-white flex items-center justify-center"><Check className="w-2.5 h-2.5" /></span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[10px] text-slate-400">As marcadas são enviadas como imagem logo após o orçamento.</p>
+                </div>
+              )}
 
               {format === 'texto' ? (
                 <div className="space-y-1.5">

@@ -2704,6 +2704,74 @@ export function useProducts() {
 }
 
 // ==========================================
+// QUOTE IMAGES (banco de fotos enviadas com o orçamento)
+// ==========================================
+
+export interface QuoteImage {
+  id: string;
+  clinic_id: string;
+  url: string;
+  path: string;
+  name: string | null;
+  send_by_default: boolean;
+  created_at: string;
+}
+
+export function useQuoteImages() {
+  const { activeClinicId } = useAuth();
+  const [data, setData] = useState<QuoteImage[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = useCallback(async () => {
+    if (!activeClinicId) return;
+    setLoading(true);
+    const { data } = await supabase
+      .from('quote_images')
+      .select('*')
+      .eq('clinic_id', activeClinicId)
+      .order('created_at');
+    setData((data as QuoteImage[]) || []);
+    setLoading(false);
+  }, [activeClinicId]);
+
+  useEffect(() => { fetch(); }, [fetch]);
+
+  const upload = async (file: File) => {
+    if (!activeClinicId) return null;
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+    const path = `${activeClinicId}/gallery/${crypto.randomUUID()}.${ext}`;
+    const { error: upErr } = await supabase.storage.from('quotes').upload(path, file, { contentType: file.type || 'image/jpeg', upsert: false });
+    if (upErr) return null;
+    const { data: pub } = supabase.storage.from('quotes').getPublicUrl(path);
+    const { data: row, error } = await supabase
+      .from('quote_images')
+      .insert({ clinic_id: activeClinicId, url: pub.publicUrl, path, name: file.name, send_by_default: true })
+      .select()
+      .single();
+    if (error) return null;
+    setData(prev => [...prev, row as QuoteImage]);
+    return row as QuoteImage;
+  };
+
+  const toggleSend = async (id: string, send: boolean) => {
+    const { error } = await supabase.from('quote_images').update({ send_by_default: send }).eq('id', id);
+    if (!error) setData(prev => prev.map(x => x.id === id ? { ...x, send_by_default: send } : x));
+    return !error;
+  };
+
+  const remove = async (img: QuoteImage) => {
+    const { error } = await supabase.from('quote_images').delete().eq('id', img.id);
+    if (!error) {
+      setData(prev => prev.filter(x => x.id !== img.id));
+      supabase.storage.from('quotes').remove([img.path]).then(() => {}, () => {});
+    }
+    return !error;
+  };
+
+  return { data, loading, upload, toggleSend, remove, refetch: fetch };
+}
+
+// ==========================================
 // PRESCRIPTIONS
 // ==========================================
 export interface PrescriptionMed {

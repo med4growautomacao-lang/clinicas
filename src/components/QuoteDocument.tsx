@@ -1,4 +1,26 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
+
+// Converte uma imagem (URL) em data URI base64, p/ o html2canvas capturar sem problema de CORS.
+export function useImageDataUrl(url: string | null | undefined) {
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!url) { setDataUrl(null); return; }
+    (async () => {
+      try {
+        const res = await fetch(url, { mode: "cors" });
+        const blob = await res.blob();
+        const reader = new FileReader();
+        reader.onloadend = () => { if (!cancelled) setDataUrl(reader.result as string); };
+        reader.readAsDataURL(blob);
+      } catch {
+        if (!cancelled) setDataUrl(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [url]);
+  return dataUrl;
+}
 
 // Documentos formais A4 (orçamento e ordem de produção). Estilos INLINE com cores hex
 // (não usar classe Tailwind: o oklch quebra o html2canvas na captura p/ imagem/PDF).
@@ -35,13 +57,14 @@ export function SectionBlock({ accent, title, children }: { accent: string; titl
 
 // Esqueleto A4: formas decorativas, cabeçalho (nome + contatos c/ ícones), título e A/C; o
 // corpo (tabela, total, seções) vem como children.
-export function DocumentChrome({ docRef, clinicName, clinicPhone, clinicEmail, clinicInstagram, clinicCnpj, clientName, clientPhone, title, number, dateStr, accent, hideClient, children }: {
+export function DocumentChrome({ docRef, clinicName, clinicPhone, clinicEmail, clinicInstagram, clinicCnpj, logoDataUrl, clientName, clientPhone, title, number, dateStr, accent, hideClient, children }: {
   docRef?: React.RefObject<HTMLDivElement | null>;
   clinicName: string;
   clinicPhone: string | null;
   clinicEmail?: string | null;
   clinicInstagram?: string | null;
   clinicCnpj: string | null;
+  logoDataUrl?: string | null;
   clientName: string;
   clientPhone: string | null;
   title: string;
@@ -84,7 +107,11 @@ export function DocumentChrome({ docRef, clinicName, clinicPhone, clinicEmail, c
       <div style={{ position: "relative", padding: "46px 54px 130px" }}>
         {/* cabeçalho */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 24, paddingRight: 50 }}>
-          <div style={{ fontSize: 21, fontWeight: 800, color: accent, maxWidth: 340 }}>{clinicName || "Sua Empresa"}</div>
+          <div style={{ maxWidth: 340 }}>
+            {logoDataUrl
+              ? <img src={logoDataUrl} alt={clinicName} style={{ maxHeight: 60, maxWidth: 300, objectFit: "contain", display: "block" }} />
+              : <div style={{ fontSize: 21, fontWeight: 800, color: accent }}>{clinicName || "Sua Empresa"}</div>}
+          </div>
           <div style={{ fontSize: 11, color: "#475569" }}>
             {clinicPhone ? contactRow("ph", clinicPhone, P_PHONE) : null}
             {clinicEmail ? contactRow("em", clinicEmail, P_MAIL) : null}
@@ -116,7 +143,7 @@ export function DocumentChrome({ docRef, clinicName, clinicPhone, clinicEmail, c
   );
 }
 
-export function QuoteDocument({ docRef, clinicName, clinicPhone, clinicEmail, clinicInstagram, clinicCnpj, clientName, clientPhone, number, dateStr, items, total, pagamento, validade, accent }: {
+export function QuoteDocument({ docRef, clinicName, clinicPhone, clinicEmail, clinicInstagram, clinicCnpj, logoDataUrl, clientName, clientPhone, number, dateStr, items, total, pagamento, validade, accent }: {
   docRef?: React.RefObject<HTMLDivElement | null>;
   clinicName: string;
   clinicPhone: string | null;
@@ -124,6 +151,7 @@ export function QuoteDocument({ docRef, clinicName, clinicPhone, clinicEmail, cl
   clinicInstagram?: string | null;
   clinicAddress?: string | null;
   clinicCnpj: string | null;
+  logoDataUrl?: string | null;
   clientName: string;
   clientPhone: string | null;
   number: string;
@@ -144,6 +172,7 @@ export function QuoteDocument({ docRef, clinicName, clinicPhone, clinicEmail, cl
       clinicEmail={clinicEmail}
       clinicInstagram={clinicInstagram}
       clinicCnpj={clinicCnpj}
+      logoDataUrl={logoDataUrl}
       clientName={clientName}
       clientPhone={clientPhone}
       title="ORÇAMENTO"

@@ -45,7 +45,7 @@ serve(async (req) => {
 
   let body: any;
   try { body = await req.json(); } catch { body = {}; }
-  const { clinic_id, lead_id, phone, text, media_url, media_type, filename } = body ?? {};
+  const { clinic_id, lead_id, phone, text, media_url, media_type, filename, delay } = body ?? {};
   const hasMedia = !!media_url;
   const hasText = !!(text && String(text).trim());
   if (!clinic_id || !phone || (!hasMedia && !hasText)) {
@@ -88,6 +88,10 @@ serve(async (req) => {
   if (!number) return json({ ok: false, error: "telefone_invalido" }, 400);
 
   // (4) Envio via uazapi. Texto -> /send/text; imagem/PDF -> /send/media (file = URL publica).
+  //     `delay` (ms) e o mecanismo NATIVO da uazapi: espera no servidor E mostra presenca
+  //     ("digitando/enviando") antes de disparar. Awaited + sequencial => serializa os envios
+  //     (evita rajada que o WhatsApp rejeita). Mesma abordagem do forms-welcome-followup.
+  const uaDelay = Math.max(0, Math.min(60000, Number(delay) || 0));
   const endpoint = hasMedia ? "/send/media" : "/send/text";
   const payload = hasMedia
     ? {
@@ -96,8 +100,9 @@ serve(async (req) => {
         file: String(media_url),
         text: hasText ? String(text) : "",
         docName: filename ? String(filename) : "orcamento",
+        delay: uaDelay,
       }
-    : { number, text: String(text), delay: 0 };
+    : { number, text: String(text), delay: uaDelay };
   try {
     const resp = await fetch(`${UAZAPI_BASE}${endpoint}`, {
       method: "POST",

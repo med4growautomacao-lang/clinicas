@@ -934,6 +934,21 @@ function GanhoModal({ lead, onClose, onCancel, onCreate, createPatient, updateLe
 // Quantidade "bonita": sem casas decimais forçadas (30, 1,5, 12,25...).
 const formatQty = (n: number) => Number(n).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
 
+// Pequena pausa (usada só na espera de propagação da URL do Storage).
+const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+// `delay` nativo da uazapi (ms): espaça os envios NO SERVIDOR e mostra "enviando…" (presença).
+// Awaited + sequencial => serializa e evita a rajada que o WhatsApp rejeita.
+const DOC_SEND_DELAY_MS = 1000;   // documento do orçamento
+const PHOTO_SEND_DELAY_MS = 1500; // cada foto do banco
+// Espera o arquivo recém-subido ficar acessível publicamente antes de o uazapi buscá-lo pela URL.
+const waitForPublicUrl = async (url: string, tries = 5) => {
+  for (let i = 0; i < tries; i++) {
+    try { const r = await fetch(url, { method: 'HEAD', cache: 'no-store' }); if (r.ok) return true; } catch { /* rede */ }
+    await sleep(500);
+  }
+  return false;
+};
+
 // Produtos vendidos por m²: a área = quantidade (comprimento) × altura. A altura vem do
 // campo personalizado "altura" do produto. Multiplicador = altura (>0) quando a unidade é m².
 const isM2Unit = (unit?: string) => /m²|m2/i.test(unit || '');
@@ -1297,16 +1312,28 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   const finishSend = async (data: any, error: any) => {
     const code = error ? 'send_failed' : (data && data.ok === false ? String(data.error || '') : null);
     if (code) { setSending(false); setSendError(mapSendError(code)); return; }
-    // Envia as fotos marcadas (cada uma como imagem), depois do orçamento.
+    // Envia as fotos marcadas (cada uma como imagem), DEPOIS do orçamento. Usa o `delay`
+    // NATIVO da uazapi: awaited + sequencial, cada envio espera no servidor e mostra presença,
+    // serializando as mídias (evita a rajada que o WhatsApp rejeita — o que passou a falhar
+    // às vezes depois que o banco de fotos foi ligado).
+    let photoFails = 0;
     for (const img of selectedImages) {
       try {
-        await supabase.functions.invoke('send-quote', {
-          body: { clinic_id: activeClinicId, lead_id: lead.id, phone: lead.phone, media_url: img.url, media_type: 'image' },
+        const { data: pd, error: pe } = await supabase.functions.invoke('send-quote', {
+          body: { clinic_id: activeClinicId, lead_id: lead.id, phone: lead.phone, media_url: img.url, media_type: 'image', delay: PHOTO_SEND_DELAY_MS },
         });
-      } catch (_e) { /* ignora falha de foto individual */ }
+        if (pe || (pd && pd.ok === false)) photoFails++;
+      } catch (_e) { photoFails++; }
     }
     await rememberProductImages();
     setSending(false);
+    if (photoFails > 0) {
+      // O orçamento FOI enviado; só algumas fotos falharam. Marca como enviado (bloqueia
+      // reenvio duplicado) e mostra o aviso por mais tempo antes de fechar.
+      setSendError(`Orçamento enviado, mas ${photoFails} foto(s) não foram. Reabra o orçamento e reenvie.`);
+      setDone(true); setTimeout(onClose, 3500);
+      return;
+    }
     setDone(true); setTimeout(onClose, 1300);
   };
 
@@ -1351,6 +1378,9 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
       const { error: upErr } = await supabase.storage.from('quotes').upload(path, blob, { contentType, upsert: false });
       if (upErr) { setSending(false); setSendError('Falha ao subir o documento.'); return; }
       const { data: pub } = supabase.storage.from('quotes').getPublicUrl(path);
+      // Garante que o documento já responde publicamente antes de pedir o envio: o uazapi
+      // busca a mídia pela URL e às vezes ela ainda não propagou logo após o upload (=> recusa).
+      await waitForPublicUrl(pub.publicUrl);
       const caption = [saudacao.trim(), rodape.trim()].filter(Boolean).join('\n\n');
       const { data, error } = await supabase.functions.invoke('send-quote', {
         body: {
@@ -1358,9 +1388,10 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
           text: caption, media_url: pub.publicUrl,
           media_type: isPdf ? 'document' : 'image',
           filename: `Orcamento-${quoteMeta.number}.${ext}`,
+          delay: DOC_SEND_DELAY_MS,
         },
       });
-      finishSend(data, error);
+      await finishSend(data, error);
     } catch (_e) {
       setSending(false);
       setSendError('Erro ao gerar o documento. Tente enviar como texto.');

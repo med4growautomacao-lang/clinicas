@@ -1,10 +1,10 @@
 import React from "react";
 
-// Documento formal do orçamento (layout A4). Estilos INLINE com cores hex (não usar classe
-// Tailwind: o oklch quebra o html2canvas na captura para imagem/PDF). Reutilizado no modal
-// de Orçamento do Kanban (LeadKanban) e na prévia do modelo (Settings).
+// Documentos formais A4 (orçamento e ordem de produção). Estilos INLINE com cores hex
+// (não usar classe Tailwind: o oklch quebra o html2canvas na captura p/ imagem/PDF).
+// DocumentChrome = esqueleto compartilhado (formas, cabeçalho com contatos, título, A/C).
 
-const formatBRL = (val: number | string) => {
+export const formatBRL = (val: number | string) => {
   const n = typeof val === "string" ? Number(val) : val;
   return new Intl.NumberFormat("pt-BR", {
     style: "currency",
@@ -14,7 +14,7 @@ const formatBRL = (val: number | string) => {
   }).format(n || 0);
 };
 
-// Validade para exibição: se for só número, vira "N dias"; senão mantém o texto (ex.: "7 dias", "1 mês").
+// Validade/prazo p/ exibição: se for só número, vira "N dias"; senão mantém (ex.: "7 dias", "1 mês").
 export const formatValidade = (v: string | null | undefined) => {
   const s = String(v ?? "").trim();
   return s && /^\d+$/.test(s) ? `${s} dias` : s;
@@ -22,29 +22,34 @@ export const formatValidade = (v: string | null | undefined) => {
 
 export type QuoteDocItem = { name: string; description: string | null; specs: string[]; qtyLine: string; value: number };
 
-export function QuoteDocument({ docRef, clinicName, clinicPhone, clinicEmail, clinicInstagram, clinicAddress, clinicCnpj, clientName, clientPhone, number, dateStr, items, total, pagamento, validade, accent }: {
+// Bloco de seção com traço curto na cor da clínica + título + conteúdo (pagamento, termos, obs...).
+export function SectionBlock({ accent, title, children }: { accent: string; title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div style={{ width: 42, height: 3, background: accent, borderRadius: 2, marginBottom: 9 }} />
+      <div style={{ fontSize: 16, fontWeight: 800, color: accent }}>{title}</div>
+      <div style={{ fontSize: 13.5, color: "#334155", marginTop: 9, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{children}</div>
+    </div>
+  );
+}
+
+// Esqueleto A4: formas decorativas, cabeçalho (nome + contatos c/ ícones), título e A/C; o
+// corpo (tabela, total, seções) vem como children.
+export function DocumentChrome({ docRef, clinicName, clinicPhone, clinicEmail, clinicInstagram, clinicCnpj, clientName, clientPhone, title, number, dateStr, accent, children }: {
   docRef?: React.RefObject<HTMLDivElement | null>;
   clinicName: string;
   clinicPhone: string | null;
   clinicEmail?: string | null;
   clinicInstagram?: string | null;
-  clinicAddress: string | null;
   clinicCnpj: string | null;
   clientName: string;
   clientPhone: string | null;
+  title: string;
   number: string;
   dateStr: string;
-  items: QuoteDocItem[];
-  total: number;
-  pagamento: string;
-  validade: string;
   accent: string;
+  children: React.ReactNode;
 }) {
-  // Duas tonalidades claras (nenhuma branca) p/ a tabela se destacar do fundo e alternar visível.
-  const rowLight = "#e6ecf5";
-  const rowAlt = "#f2f4f8";
-
-  // Ícones (SVG inline, estilo Lucide) em um círculo na cor da clínica, à direita do texto.
   const P_PHONE = <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />;
   const P_MAIL = <><rect x="2" y="4" width="20" height="16" rx="2" /><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" /></>;
   const P_IG = <><rect x="2" y="2" width="20" height="20" rx="5" /><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" /><line x1="17.5" x2="17.51" y1="6.5" y2="6.5" /></>;
@@ -89,7 +94,7 @@ export function QuoteDocument({ docRef, clinicName, clinicPhone, clinicEmail, cl
 
         {/* título */}
         <div style={{ marginTop: 36 }}>
-          <div style={{ fontSize: 32, fontWeight: 800, color: accent }}>ORÇAMENTO #{number}</div>
+          <div style={{ fontSize: 32, fontWeight: 800, color: accent }}>{title} #{number}</div>
           <div style={{ fontSize: 12, fontWeight: 700, marginTop: 3 }}>Data: {dateStr}</div>
         </div>
 
@@ -102,59 +107,86 @@ export function QuoteDocument({ docRef, clinicName, clinicPhone, clinicEmail, cl
           </div>
         </div>
 
-        {/* tabela */}
-        <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 30 }}>
-          <thead>
-            <tr style={{ borderBottom: `3px solid ${accent}` }}>
-              <th style={{ textAlign: "left", color: accent, fontSize: 13, fontWeight: 800, padding: "0 14px 9px" }}>SERVIÇO</th>
-              <th style={{ textAlign: "center", color: accent, fontSize: 13, fontWeight: 800, padding: "0 14px 9px" }}>DESCRIÇÃO</th>
-              <th style={{ textAlign: "right", color: accent, fontSize: 13, fontWeight: 800, padding: "0 14px 9px" }}>VALOR</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((it, i) => (
-              <tr key={i} style={{ background: i % 2 === 0 ? rowLight : rowAlt }}>
-                <td style={{ padding: "14px", fontWeight: 700, fontSize: 12.5, verticalAlign: "top", width: "26%" }}>{it.name}</td>
-                <td style={{ padding: "14px", fontSize: 12, color: "#334155", verticalAlign: "top" }}>
-                  {it.description ? <div style={{ marginBottom: 4 }}>{it.description}</div> : null}
-                  {it.specs.length > 0 ? (
-                    <ol style={{ margin: 0, paddingLeft: 18 }}>
-                      {it.specs.map((s, j) => <li key={j} style={{ marginBottom: 2 }}>{s}</li>)}
-                    </ol>
-                  ) : null}
-                  {it.qtyLine ? <div style={{ marginTop: 6, fontSize: 11.5, color: "#64748b" }}>{it.qtyLine}</div> : null}
-                </td>
-                <td style={{ padding: "14px", textAlign: "right", fontWeight: 700, fontSize: 12.5, verticalAlign: "top", width: "20%", whiteSpace: "nowrap" }}>{formatBRL(it.value)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        {/* total */}
-        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}>
-          <div style={{ background: accent, color: "#ffffff", fontWeight: 800, fontSize: 16, padding: "11px 26px", borderRadius: 6 }}>
-            TOTAL: {formatBRL(total)}
-          </div>
-        </div>
-
-        {/* pagamento + termos */}
-        <div style={{ marginTop: 44, marginLeft: "auto", width: "56%", display: "flex", flexDirection: "column", gap: 26 }}>
-          {pagamento ? (
-            <div>
-              <div style={{ width: 42, height: 3, background: accent, borderRadius: 2, marginBottom: 9 }} />
-              <div style={{ fontSize: 16, fontWeight: 800, color: accent }}>FORMA DE PAGAMENTO</div>
-              <div style={{ fontSize: 13.5, color: "#334155", marginTop: 9, lineHeight: 1.6 }}>{pagamento}</div>
-            </div>
-          ) : null}
-          <div>
-            <div style={{ width: 42, height: 3, background: accent, borderRadius: 2, marginBottom: 9 }} />
-            <div style={{ fontSize: 16, fontWeight: 800, color: accent }}>TERMOS E CONDIÇÕES</div>
-            <div style={{ fontSize: 13.5, color: "#334155", marginTop: 9, lineHeight: 1.6 }}>
-              {validade ? `Este orçamento é válido por ${formatValidade(validade)}.` : "Orçamento sujeito a confirmação de disponibilidade."}
-            </div>
-          </div>
-        </div>
+        {children}
       </div>
     </div>
+  );
+}
+
+export function QuoteDocument({ docRef, clinicName, clinicPhone, clinicEmail, clinicInstagram, clinicCnpj, clientName, clientPhone, number, dateStr, items, total, pagamento, validade, accent }: {
+  docRef?: React.RefObject<HTMLDivElement | null>;
+  clinicName: string;
+  clinicPhone: string | null;
+  clinicEmail?: string | null;
+  clinicInstagram?: string | null;
+  clinicAddress?: string | null;
+  clinicCnpj: string | null;
+  clientName: string;
+  clientPhone: string | null;
+  number: string;
+  dateStr: string;
+  items: QuoteDocItem[];
+  total: number;
+  pagamento: string;
+  validade: string;
+  accent: string;
+}) {
+  const rowLight = "#e6ecf5";
+  const rowAlt = "#f2f4f8";
+  return (
+    <DocumentChrome
+      docRef={docRef}
+      clinicName={clinicName}
+      clinicPhone={clinicPhone}
+      clinicEmail={clinicEmail}
+      clinicInstagram={clinicInstagram}
+      clinicCnpj={clinicCnpj}
+      clientName={clientName}
+      clientPhone={clientPhone}
+      title="ORÇAMENTO"
+      number={number}
+      dateStr={dateStr}
+      accent={accent}
+    >
+      <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 30 }}>
+        <thead>
+          <tr style={{ borderBottom: `3px solid ${accent}` }}>
+            <th style={{ textAlign: "left", color: accent, fontSize: 13, fontWeight: 800, padding: "0 14px 9px" }}>SERVIÇO</th>
+            <th style={{ textAlign: "center", color: accent, fontSize: 13, fontWeight: 800, padding: "0 14px 9px" }}>DESCRIÇÃO</th>
+            <th style={{ textAlign: "right", color: accent, fontSize: 13, fontWeight: 800, padding: "0 14px 9px" }}>VALOR</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((it, i) => (
+            <tr key={i} style={{ background: i % 2 === 0 ? rowLight : rowAlt }}>
+              <td style={{ padding: "14px", fontWeight: 700, fontSize: 12.5, verticalAlign: "top", width: "26%" }}>{it.name}</td>
+              <td style={{ padding: "14px", fontSize: 12, color: "#334155", verticalAlign: "top" }}>
+                {it.description ? <div style={{ marginBottom: 4 }}>{it.description}</div> : null}
+                {it.specs.length > 0 ? (
+                  <ol style={{ margin: 0, paddingLeft: 18 }}>
+                    {it.specs.map((s, j) => <li key={j} style={{ marginBottom: 2 }}>{s}</li>)}
+                  </ol>
+                ) : null}
+                {it.qtyLine ? <div style={{ marginTop: 6, fontSize: 11.5, color: "#64748b" }}>{it.qtyLine}</div> : null}
+              </td>
+              <td style={{ padding: "14px", textAlign: "right", fontWeight: 700, fontSize: 12.5, verticalAlign: "top", width: "20%", whiteSpace: "nowrap" }}>{formatBRL(it.value)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}>
+        <div style={{ background: accent, color: "#ffffff", fontWeight: 800, fontSize: 16, padding: "11px 26px", borderRadius: 6 }}>
+          TOTAL: {formatBRL(total)}
+        </div>
+      </div>
+
+      <div style={{ marginTop: 44, marginLeft: "auto", width: "56%", display: "flex", flexDirection: "column", gap: 26 }}>
+        {pagamento ? <SectionBlock accent={accent} title="FORMA DE PAGAMENTO">{pagamento}</SectionBlock> : null}
+        <SectionBlock accent={accent} title="TERMOS E CONDIÇÕES">
+          {validade ? `Este orçamento é válido por ${formatValidade(validade)}.` : "Orçamento sujeito a confirmação de disponibilidade."}
+        </SectionBlock>
+      </div>
+    </DocumentChrome>
   );
 }

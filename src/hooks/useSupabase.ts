@@ -1502,6 +1502,13 @@ export interface Clinic {
     include_specs?: boolean;
     format?: 'texto' | 'imagem' | 'pdf';
   } | null;
+  production_order_template?: {
+    responsavel?: string;
+    prazo?: string;
+    observacoes?: string;
+    show_prices?: boolean;
+    format?: 'imagem' | 'pdf';
+  } | null;
 }
 
 export interface CompanyPrompt {

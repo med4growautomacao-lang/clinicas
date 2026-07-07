@@ -46,6 +46,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "./ui/toast";
 import { MoneyInput } from "./ui/money-input";
 import { QuoteDocument, formatValidade } from "./QuoteDocument";
+import { ProductionOrderDocument } from "./ProductionOrderDocument";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import WhatsappLogo from "../assets/logos/Logo Whatsapp.png";
@@ -88,6 +89,8 @@ export function Settings() {
 
     // Modelo padrao do orcamento (pre-preenche o modal do Kanban)
     const [quoteTplOpen, setQuoteTplOpen] = useState(false);
+    // Modelo da ordem de producao
+    const [poTplOpen, setPoTplOpen] = useState(false);
 
     const loadedClinicId = useRef<string | null>(null);
 
@@ -709,9 +712,43 @@ export function Settings() {
                             </Card>
                         )}
 
+                        {activeTab === "clinic" && !isSecretaria && (
+                            <Card className="border border-slate-200 shadow-sm max-w-4xl mx-auto">
+                                <CardHeader>
+                                    <CardTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                                        <Package className="w-5 h-5 text-teal-600" />
+                                        Ordem de Produção
+                                    </CardTitle>
+                                    <p className="text-xs text-slate-400 mt-1">Documento interno para a produção, gerado a partir do orçamento do lead (botão no Editar do card).</p>
+                                </CardHeader>
+                                <CardContent>
+                                    <Button variant="outline" onClick={() => setPoTplOpen(true)} className="w-full gap-2">
+                                        <FileText className="w-4 h-4 text-teal-600" /> Configurar modelo da ordem de produção
+                                    </Button>
+                                    <p className="text-[11px] text-slate-400 mt-2">Define responsável, prazo de entrega, observações, se mostra preços e o formato padrão.</p>
+                                </CardContent>
+                            </Card>
+                        )}
+
                     </motion.div>
                 </AnimatePresence>
             </div>
+
+            {/* Modal: Modelo da Ordem de Produção */}
+            <AnimatePresence>
+                {poTplOpen && (
+                    <ProductionOrderTemplateModal
+                        initial={(localClinic as any).production_order_template}
+                        clinic={localClinic}
+                        onClose={() => setPoTplOpen(false)}
+                        onSave={async (tpl) => {
+                            await updateClinic({ production_order_template: tpl });
+                            setLocalClinic(prev => ({ ...prev, production_order_template: tpl }));
+                            setPoTplOpen(false);
+                        }}
+                    />
+                )}
+            </AnimatePresence>
 
             {/* Modal: Modelo do Orçamento */}
             <AnimatePresence>
@@ -950,6 +987,145 @@ export function Settings() {
                 </Button>
             </div>
         </div>
+    );
+}
+
+// Modelo da Ordem de Produção (documento interno; pré-preenche o modal de gerar no Kanban).
+type PoTemplate = NonNullable<Clinic['production_order_template']>;
+function ProductionOrderTemplateModal({ initial, clinic, onClose, onSave }: {
+    initial?: PoTemplate | null;
+    clinic: Partial<Clinic>;
+    onClose: () => void;
+    onSave: (tpl: PoTemplate) => Promise<void>;
+}) {
+    const t = initial || {};
+    const [responsavel, setResponsavel] = useState<string>(t.responsavel ?? '');
+    const [prazo, setPrazo] = useState<string>(t.prazo ?? '');
+    const [observacoes, setObservacoes] = useState<string>(t.observacoes ?? '');
+    const [showPrices, setShowPrices] = useState<boolean>(t.show_prices ?? true);
+    const [format, setFormat] = useState<'imagem' | 'pdf'>(t.format ?? 'pdf');
+    const [saving, setSaving] = useState(false);
+    const [expanded, setExpanded] = useState(false);
+
+    const docRef = useRef<HTMLDivElement>(null);
+    const previewWrapRef = useRef<HTMLDivElement>(null);
+    const [scale, setScale] = useState(0.4);
+    const [ph, setPh] = useState(520);
+
+    const sampleDocProps = {
+        clinicName: clinic.name ?? '',
+        clinicPhone: clinic.phone ?? null,
+        clinicEmail: clinic.email ?? null,
+        clinicInstagram: clinic.instagram ?? null,
+        clinicCnpj: clinic.cnpj ?? null,
+        clientName: 'Cliente Exemplo',
+        clientPhone: '(11) 90000-0000',
+        number: '01234',
+        dateStr: new Date().toLocaleDateString('pt-BR'),
+        items: [
+            { name: 'Alambrado 14-1.80-3', specs: ['malha: 3', 'fio: 14', 'altura: 1,80'], qty: '200 metros', value: 5400 },
+            { name: 'Instalação', specs: [], qty: '1 serviço', value: 150 },
+        ],
+        total: 5550,
+        showPrices,
+        prazo,
+        responsavel,
+        observacoes,
+        accent: clinic.primary_color || '#1d4ed8',
+    };
+
+    useEffect(() => {
+        const el = docRef.current, wrap = previewWrapRef.current;
+        if (!el || !wrap) return;
+        const s = wrap.clientWidth / 794;
+        setScale(s);
+        setPh(Math.round(el.offsetHeight * s));
+    }, [responsavel, prazo, observacoes, showPrices]);
+
+    const handleSave = async () => {
+        setSaving(true);
+        await onSave({ responsavel, prazo, observacoes, show_prices: showPrices, format });
+        setSaving(false);
+    };
+
+    const inputCls = "w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500";
+    return (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl p-6 space-y-4 max-h-[90vh] overflow-y-auto custom-scrollbar" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between">
+                    <h3 className="font-bold text-slate-900 text-base">Modelo da Ordem de Produção</h3>
+                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+                </div>
+                <p className="text-xs text-slate-400 -mt-2">Estes valores já vêm preenchidos ao gerar a ordem de produção de um lead (você ainda pode ajustar na hora).</p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <div className="space-y-3">
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Responsável</label>
+                                <input type="text" value={responsavel} onChange={e => setResponsavel(e.target.value)} className={inputCls} placeholder="Ex: João" />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Prazo de entrega</label>
+                                <input type="text" value={prazo} onChange={e => setPrazo(e.target.value)} className={inputCls} placeholder="Ex: 15 dias" />
+                            </div>
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Observações de produção</label>
+                            <textarea value={observacoes} onChange={e => setObservacoes(e.target.value)} rows={4} className={inputCls + " resize-none"} placeholder="Instruções para a produção…" />
+                        </div>
+                        <label className="flex items-center gap-2 text-sm font-medium text-slate-600 cursor-pointer select-none">
+                            <input type="checkbox" checked={showPrices} onChange={e => setShowPrices(e.target.checked)} className="w-4 h-4 accent-teal-600" />
+                            Mostrar preços/valores no documento
+                        </label>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Formato padrão</label>
+                            <div className="flex bg-slate-100 rounded-xl p-1">
+                                {(['imagem', 'pdf'] as const).map(f => (
+                                    <button key={f} type="button" onClick={() => setFormat(f)} className={cn("flex-1 py-1.5 rounded-lg text-xs font-bold transition-all", format === f ? "bg-white text-teal-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>
+                                        {f === 'imagem' ? 'Imagem' : 'PDF'}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                            <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide">Prévia</label>
+                            <button type="button" onClick={() => setExpanded(true)} className="text-[11px] font-bold text-teal-600 hover:text-teal-700 flex items-center gap-1">
+                                <Maximize2 className="w-3 h-3" /> Expandir
+                            </button>
+                        </div>
+                        <div ref={previewWrapRef} style={{ height: ph }} className="relative w-full overflow-hidden border border-slate-200 rounded-xl bg-slate-100 cursor-zoom-in" onClick={() => setExpanded(true)}>
+                            <div style={{ position: 'absolute', top: 0, left: 0, width: 794, transform: `scale(${scale})`, transformOrigin: 'top left' }}>
+                                <ProductionOrderDocument docRef={docRef} {...sampleDocProps} />
+                            </div>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1">Prévia com dados de exemplo.</p>
+                    </div>
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                    <Button variant="outline" className="flex-1" onClick={onClose}>Cancelar</Button>
+                    <Button className="flex-1" onClick={handleSave} disabled={saving}>
+                        {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Check className="w-4 h-4 mr-2" />}
+                        Salvar modelo
+                    </Button>
+                </div>
+            </motion.div>
+
+            {expanded && (
+                <div className="fixed inset-0 z-[60] bg-black/80 flex items-start justify-center overflow-auto p-4 sm:p-8" onClick={(e) => { e.stopPropagation(); setExpanded(false); }}>
+                    <div className="relative my-auto" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => setExpanded(false)} className="absolute -top-3 -right-3 z-10 bg-white rounded-full p-1.5 shadow-lg text-slate-500 hover:text-slate-800"><X className="w-5 h-5" /></button>
+                        <div className="bg-white rounded-lg shadow-2xl overflow-hidden">
+                            <ProductionOrderDocument {...sampleDocProps} />
+                        </div>
+                    </div>
+                </div>
+            )}
+        </motion.div>
     );
 }
 

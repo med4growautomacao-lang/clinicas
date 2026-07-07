@@ -30,6 +30,7 @@ import {
   EyeOff,
   UserX,
   Store,
+  Package,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -46,6 +47,7 @@ import { Share2, Globe, Layout, Smartphone, Sparkles, Instagram, PhoneOff, Rotat
 import { DateRangePicker } from "./DateRangePicker";
 import { UtmLeadFilter, leadUtmKey, NO_UTM_KEY } from "./filters/UtmLeadFilter";
 import { QuoteDocument, formatValidade } from "./QuoteDocument";
+import { ProductionOrderDocument } from "./ProductionOrderDocument";
 
 const SOURCE_LABELS: Record<string, string> = {
   'meta_ads': 'Meta Ads',
@@ -1648,6 +1650,205 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   );
 }
 
+// Modal de Ordem de Produção: monta o documento a partir do orçamento salvo do lead
+// (quoteData.lines resolvidas no catálogo atual), pré-preenche do modelo da clínica e
+// gera imagem/PDF para download. Documento interno (não envia por WhatsApp).
+function ProductionOrderModal({ lead, quoteData, onClose }: {
+  lead: { id: string; name: string; phone?: string | null };
+  quoteData: any;
+  onClose: () => void;
+}) {
+  const { clinic } = useSettings();
+  const { data: products } = useProducts();
+  const { data: protocols } = useProtocols();
+
+  const itemById = useMemo(() => {
+    const m: Record<string, { name: string; unit: string; unit_price: number; attributes: { label: string; value: string; unit?: string | null }[] }> = {};
+    products.forEach(p => { m[`p:${p.id}`] = { name: p.name, unit: p.unit, unit_price: Number(p.unit_price), attributes: (p.attributes ?? []) }; });
+    protocols.forEach(t => { m[`t:${t.id}`] = { name: t.name, unit: 'serviço', unit_price: Number((t as any).price ?? 0), attributes: [] }; });
+    return m;
+  }, [products, protocols]);
+
+  const tpl: any = clinic?.production_order_template ?? {};
+  const [prazo, setPrazo] = useState(String(tpl.prazo ?? ''));
+  const [responsavel, setResponsavel] = useState(String(tpl.responsavel ?? ''));
+  const [observacoes, setObservacoes] = useState(String(tpl.observacoes ?? ''));
+  const [showPrices, setShowPrices] = useState<boolean>(tpl.show_prices ?? true);
+  const [format, setFormat] = useState<'imagem' | 'pdf'>(tpl.format ?? 'pdf');
+  const [busy, setBusy] = useState(false);
+
+  // Aplica o modelo quando o clinic carregar (assíncrono), 1x antes de editar.
+  const appliedRef = useRef(false);
+  useEffect(() => {
+    if (appliedRef.current) return;
+    const t = clinic?.production_order_template;
+    if (!t) return;
+    appliedRef.current = true;
+    if (t.prazo != null) setPrazo(String(t.prazo));
+    if (t.responsavel != null) setResponsavel(String(t.responsavel));
+    if (t.observacoes != null) setObservacoes(String(t.observacoes));
+    if (t.show_prices != null) setShowPrices(!!t.show_prices);
+    if (t.format != null) setFormat(t.format);
+  }, [clinic]);
+
+  const lineValue = (l: any) => {
+    const it = itemById[l.productId];
+    if (!it) return 0;
+    const q = Number(String(l.qty).replace(',', '.'));
+    if (!q || q <= 0) return 0;
+    const edited = Number(String(l.price).replace(',', '.'));
+    const up = (l.price !== '' && !isNaN(edited) && edited >= 0) ? edited : it.unit_price;
+    const base = q * up;
+    const pct = Math.min(100, Math.max(0, Number(String(l.discount).replace(',', '.')) || 0));
+    const fee = Number(l.fee || 0);
+    return Math.max(0, base - base * (pct / 100)) + fee;
+  };
+  const prodItems = useMemo(() => {
+    const lines = Array.isArray(quoteData?.lines) ? quoteData.lines : [];
+    return lines.map((l: any) => {
+      const it = itemById[l.productId];
+      const q = Number(String(l.qty).replace(',', '.'));
+      if (!it || !q || q <= 0) return null;
+      return {
+        name: it.name,
+        specs: (it.attributes ?? []).map((a: any) => `${a.label}${a.value ? `: ${a.value}` : ''}`),
+        qty: `${formatQty(q)} ${it.unit}`,
+        value: lineValue(l),
+      };
+    }).filter(Boolean) as { name: string; specs: string[]; qty: string; value: number }[];
+  }, [quoteData, itemById]);
+  const total = prodItems.reduce((s, it) => s + it.value, 0);
+
+  const [meta] = useState(() => ({ number: String(Date.now() % 100000).padStart(5, '0'), date: new Date().toLocaleDateString('pt-BR') }));
+
+  const docRef = useRef<HTMLDivElement>(null);
+  const previewWrapRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(0.45);
+  const [ph, setPh] = useState(520);
+  useEffect(() => {
+    const el = docRef.current, wrap = previewWrapRef.current;
+    if (!el || !wrap) return;
+    const s = wrap.clientWidth / 794;
+    setScale(s);
+    setPh(Math.round(el.offsetHeight * s));
+  }, [prazo, responsavel, observacoes, showPrices, prodItems.length]);
+
+  const docProps = {
+    clinicName: clinic?.name ?? '',
+    clinicPhone: clinic?.phone ?? null,
+    clinicEmail: clinic?.email ?? null,
+    clinicInstagram: clinic?.instagram ?? null,
+    clinicCnpj: clinic?.cnpj ?? null,
+    clientName: lead.name,
+    clientPhone: lead.phone ?? null,
+    number: meta.number,
+    dateStr: meta.date,
+    items: prodItems,
+    total,
+    showPrices,
+    prazo,
+    responsavel,
+    observacoes,
+    accent: clinic?.primary_color || '#1d4ed8',
+  };
+
+  const handleDownload = async () => {
+    if (busy) return;
+    const node = docRef.current;
+    if (!node) return;
+    setBusy(true);
+    try {
+      const html2canvas = (await import('html2canvas-pro')).default;
+      const canvas = await html2canvas(node, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
+      const filename = `Ordem-Producao-${meta.number}`;
+      if (format === 'pdf') {
+        const { jsPDF } = await import('jspdf');
+        const imgData = canvas.toDataURL('image/jpeg', 0.92);
+        const pdf = new jsPDF({ orientation: 'portrait', unit: 'px', format: [canvas.width, canvas.height] });
+        pdf.addImage(imgData, 'JPEG', 0, 0, canvas.width, canvas.height);
+        pdf.save(`${filename}.pdf`);
+      } else {
+        const a = document.createElement('a');
+        a.href = canvas.toDataURL('image/jpeg', 0.92);
+        a.download = `${filename}.jpg`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+    } catch (_e) {
+      // ignore
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
+      <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="h-1.5 bg-teal-500 shrink-0" />
+        <div className="p-6 space-y-4 overflow-y-auto">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-black text-slate-900">Ordem de Produção</h3>
+              <p className="text-xs text-slate-500 font-medium mt-0.5">{lead.name}</p>
+            </div>
+            <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4 text-slate-400" /></button>
+          </div>
+
+          <div>
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-1.5">Baixar como</label>
+            <div className="flex bg-slate-100 rounded-xl p-1">
+              {(['imagem', 'pdf'] as const).map(f => (
+                <button key={f} type="button" onClick={() => setFormat(f)} className={cn("flex-1 py-1.5 rounded-lg text-xs font-bold transition-all", format === f ? "bg-white text-teal-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>
+                  {f === 'imagem' ? 'Imagem' : 'PDF'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Responsável</label>
+              <input type="text" value={responsavel} onChange={e => setResponsavel(e.target.value)} placeholder="Ex: João" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Prazo de entrega</label>
+              <input type="text" value={prazo} onChange={e => setPrazo(e.target.value)} placeholder="Ex: 15 dias" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Observações de produção</label>
+            <textarea value={observacoes} onChange={e => setObservacoes(e.target.value)} rows={2} placeholder="Instruções para a produção…" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 resize-none" />
+          </div>
+          <label className="flex items-center gap-2 text-sm font-medium text-slate-600 cursor-pointer select-none">
+            <input type="checkbox" checked={showPrices} onChange={e => setShowPrices(e.target.checked)} className="w-4 h-4 accent-teal-600" />
+            Mostrar preços/valores
+          </label>
+
+          {/* Cópia offscreen (tamanho real, sem transform) capturada pelo html2canvas */}
+          <div style={{ position: 'fixed', left: -99999, top: 0, width: 794, pointerEvents: 'none' }} aria-hidden>
+            <ProductionOrderDocument docRef={docRef} {...docProps} />
+          </div>
+          <div>
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-1.5">Prévia</label>
+            <div ref={previewWrapRef} style={{ height: ph }} className="relative w-full overflow-hidden border border-slate-200 rounded-xl bg-slate-100">
+              <div style={{ position: 'absolute', top: 0, left: 0, width: 794, transform: `scale(${scale})`, transformOrigin: 'top left' }}>
+                <ProductionOrderDocument {...docProps} />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex gap-2 pt-1">
+            <button onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-500 hover:bg-slate-50 transition-all">Fechar</button>
+            <button onClick={handleDownload} disabled={busy} className={cn("flex-1 py-2.5 rounded-xl text-sm font-black transition-all flex items-center justify-center gap-2", busy ? "bg-slate-100 text-slate-400" : "bg-teal-600 hover:bg-teal-700 text-white")}>
+              {busy ? <><Loader2 className="w-4 h-4 animate-spin" /> Gerando…</> : <><Download className="w-4 h-4" /> Baixar {format === 'pdf' ? 'PDF' : 'imagem'}</>}
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 // Mini-modal de cadastro rápido de produto, acionado pela opção "Cadastrar novo produto…"
 // do seletor no Orçamento. Cria o produto no catálogo (useProducts.create) e devolve o produto
 // criado para ser selecionado na linha que abriu o cadastro.
@@ -1902,6 +2103,7 @@ export function LeadKanban() {
   const [ganhoLead, setGanhoLead] = useState<{ id: string; name: string; phone: string | null; patientId: string | null; prevStageId: string | null; ticketId: string } | null>(null);
   const [lossLead, setLossLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
   const [orcamentoLead, setOrcamentoLead] = useState<{ id: string; name: string; phone: string | null; prevStageId: string | null; ticketId: string; initialQuote?: any } | null>(null);
+  const [poLead, setPoLead] = useState<{ id: string; name: string; phone: string | null; quoteData: any } | null>(null);
   // Aviso ao arrastar um card já resolvido (venda/perda) para uma etapa ativa: manter (novo
   // ciclo, card único) ou cancelar (reabre o mesmo ticket). Guarda o ticket p/ o fluxo "Manter".
   const [reopenLead, setReopenLead] = useState<{ ticket: Ticket; outcome: 'ganho' | 'perdido'; targetStageId: string } | null>(null);
@@ -3514,16 +3716,28 @@ export function LeadKanban() {
                   const et = tickets.find(t => t.id === selectedLead?._ticketId);
                   if (!et?.quote_data) return null;
                   return (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowModal(false);
-                        setOrcamentoLead({ id: selectedLead.id, name: selectedLead.name, phone: selectedLead.phone ?? null, prevStageId: null, ticketId: et.id, initialQuote: et.quote_data });
-                      }}
-                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 font-bold text-sm hover:bg-blue-100 transition-colors"
-                    >
-                      <FileText className="w-4 h-4" /> Ver / editar orçamento criado
-                    </button>
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowModal(false);
+                          setOrcamentoLead({ id: selectedLead.id, name: selectedLead.name, phone: selectedLead.phone ?? null, prevStageId: null, ticketId: et.id, initialQuote: et.quote_data });
+                        }}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 font-bold text-sm hover:bg-blue-100 transition-colors"
+                      >
+                        <FileText className="w-4 h-4" /> Ver / editar orçamento criado
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowModal(false);
+                          setPoLead({ id: selectedLead.id, name: selectedLead.name, phone: selectedLead.phone ?? null, quoteData: et.quote_data });
+                        }}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-teal-200 bg-teal-50 text-teal-700 font-bold text-sm hover:bg-teal-100 transition-colors"
+                      >
+                        <Package className="w-4 h-4" /> Gerar ordem de produção
+                      </button>
+                    </div>
                   );
                 })()}
                 <div>
@@ -3911,6 +4125,15 @@ export function LeadKanban() {
             await refetchTickets(true);
             return true;
           }}
+        />
+      )}
+
+      {/* Modal: Gerar Ordem de Produção (documento p/ a fábrica, a partir do orçamento salvo) */}
+      {poLead && (
+        <ProductionOrderModal
+          lead={poLead}
+          quoteData={poLead.quoteData}
+          onClose={() => setPoLead(null)}
         />
       )}
 

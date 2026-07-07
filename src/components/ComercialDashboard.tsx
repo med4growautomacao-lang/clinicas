@@ -26,6 +26,9 @@ import {
   Percent,
   ChevronRight,
   ChevronLeft,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
   Settings as SettingsIcon,
   Phone,
   Inbox,
@@ -99,6 +102,8 @@ interface LeadRow {
 type AgentFilter = "todos" | "ia" | "humano";
 // Filtro por métrica de agendamento na lista "Leads do filtro"
 type LeadMetricFilter = "todos" | "gerados" | "realizadas" | "marcados";
+// Coluna de ordenação da lista "Leads do filtro"
+type LeadSortKey = "nome" | "consulta" | "entrada" | "ultima_msg" | "valor";
 type OriginFilter = "todos" | "meta" | "google" | "sem_origem";
 type ChannelFilter = "todos" | "forms" | "whatsapp" | "balcao";
 type ChartMetric = "humanMessages" | "aiMessages" | "leads" | "appointments" | "realizadas" | "ganhos" | "faturamento" | "faturamentoProjetado" | "handoffs" | "followups" | "convAgend" | "convConsulta" | "custoAgend" | "cac" | "roasReal" | "roasProj" | "ticketMedio";
@@ -553,11 +558,21 @@ export function ComercialDashboard() {
   const [leadsLoading, setLeadsLoading] = useState(true);
   // Filtro por métrica de agendamento da lista (todos / gerados / realizadas / marcados)
   const [leadsMetric, setLeadsMetric] = useState<LeadMetricFilter>("todos");
+  // Ordenação da lista (coluna + direção)
+  const [leadsSort, setLeadsSort] = useState<LeadSortKey>("entrada");
+  const [leadsSortDir, setLeadsSortDir] = useState<"asc" | "desc">("desc");
   // Conversa aberta no drawer (abre no lugar, sem sair da tela — igual ao Kanban)
   const [chatLead, setChatLead] = useState<Lead | null>(null);
 
-  // Volta para a 1ª página sempre que um filtro muda
-  useEffect(() => { setLeadsPage(0); }, [convRange, entryRange, apptRange, agent, origin, channel, leadsMetric]);
+  // Volta para a 1ª página sempre que um filtro/ordenação muda
+  useEffect(() => { setLeadsPage(0); }, [convRange, entryRange, apptRange, agent, origin, channel, leadsMetric, leadsSort, leadsSortDir]);
+
+  // Clique no cabeçalho: alterna a direção se já for a coluna ativa; senão troca de coluna
+  // (datas/valor começam em desc = mais novo/maior; nome começa em asc = A→Z)
+  const handleSort = (key: LeadSortKey) => {
+    if (leadsSort === key) setLeadsSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setLeadsSort(key); setLeadsSortDir(key === "nome" ? "asc" : "desc"); }
+  };
 
   // Abre a conversa do lead no drawer (carrega o lead completo p/ o LeadChat)
   const openLeadChat = useCallback(async (leadId: string) => {
@@ -585,6 +600,8 @@ export function ComercialDashboard() {
         p_metric: leadsMetric,
         p_agenda_from: apptRange ? format(apptRange.start, "yyyy-MM-dd") : null,
         p_agenda_to: apptRange ? format(apptRange.end, "yyyy-MM-dd") : null,
+        p_sort: leadsSort,
+        p_sort_dir: leadsSortDir,
       });
       if (error) throw error;
       const r = res as { total: number; rows: LeadRow[] } | null;
@@ -595,7 +612,7 @@ export function ComercialDashboard() {
     } finally {
       setLeadsLoading(false);
     }
-  }, [activeClinicId, profile?.clinic_id, convRange, entryRange, apptRange, agent, origin, channel, leadsPage, leadsMetric]);
+  }, [activeClinicId, profile?.clinic_id, convRange, entryRange, apptRange, agent, origin, channel, leadsPage, leadsMetric, leadsSort, leadsSortDir]);
 
   useEffect(() => { fetchLeads(); }, [fetchLeads]);
 
@@ -1049,14 +1066,14 @@ export function ComercialDashboard() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-100 bg-slate-50/50 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                    <th className="text-left font-bold px-4 py-2.5">Lead</th>
+                    <SortHeader label="Lead" sortKey="nome" sort={leadsSort} dir={leadsSortDir} onSort={handleSort} className="px-4" />
                     <th className="text-left font-bold px-3 py-2.5">Origem</th>
                     <th className="text-left font-bold px-3 py-2.5">Etapa</th>
                     <th className="text-left font-bold px-3 py-2.5">Status</th>
-                    <th className="text-left font-bold px-3 py-2.5">Consulta</th>
-                    <th className="text-left font-bold px-3 py-2.5">Entrada</th>
-                    <th className="text-left font-bold px-3 py-2.5">Última msg</th>
-                    <th className="text-right font-bold px-3 py-2.5">Valor</th>
+                    <SortHeader label="Consulta" sortKey="consulta" sort={leadsSort} dir={leadsSortDir} onSort={handleSort} />
+                    <SortHeader label="Entrada" sortKey="entrada" sort={leadsSort} dir={leadsSortDir} onSort={handleSort} />
+                    <SortHeader label="Última msg" sortKey="ultima_msg" sort={leadsSort} dir={leadsSortDir} onSort={handleSort} />
+                    <SortHeader label="Valor" sortKey="valor" sort={leadsSort} dir={leadsSortDir} onSort={handleSort} align="right" />
                     <th className="px-3 py-2.5 w-8" />
                   </tr>
                 </thead>
@@ -1334,6 +1351,34 @@ function DatePill({ label, valueLabel, rangeText, open, setOpen, presets, active
         presetsTitle={label}
       />
     </div>
+  );
+}
+
+// ==========================================
+// Subcomponente: cabeçalho ordenável da lista de leads
+// ==========================================
+function SortHeader({ label, sortKey, sort, dir, onSort, className, align = "left" }: {
+  label: string; sortKey: LeadSortKey; sort: LeadSortKey; dir: "asc" | "desc";
+  onSort: (k: LeadSortKey) => void; className?: string; align?: "left" | "right";
+}) {
+  const active = sort === sortKey;
+  const Icon = active ? (dir === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
+  return (
+    <th className={cn("font-bold py-2.5", align === "right" ? "text-right" : "text-left", className || "px-3")}>
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        title={`Ordenar por ${label.toLowerCase()}`}
+        className={cn(
+          "inline-flex items-center gap-1 uppercase tracking-wider transition-colors hover:text-slate-600",
+          active ? "text-teal-600" : "text-slate-400",
+          align === "right" ? "flex-row-reverse" : ""
+        )}
+      >
+        {label}
+        <Icon className={cn("w-3 h-3", active ? "opacity-100" : "opacity-40")} />
+      </button>
+    </th>
   );
 }
 

@@ -392,7 +392,7 @@ export function ComercialDashboard() {
   // Conversão) e "Todos" em agente/origem/canal (sempre abre nesse baseline).
   const initMonth = computeRange("month");
   // Conversão = DATA DA CONSULTA (appointments.date). Alimenta p_appt no backend.
-  const [convRange, setConvRange] = useState<{ start: Date; end: Date }>(() => ({ start: initMonth.start, end: initMonth.end }));
+  const [convRange, setConvRange] = useState<{ start: Date; end: Date } | null>(() => ({ start: initMonth.start, end: initMonth.end }));
   const [convLabel, setConvLabel] = useState(initMonth.label);
   const [isConvOpen, setIsConvOpen] = useState(false);
   const [convCal1, setConvCal1] = useState<Date>(() => initMonth.start);
@@ -434,13 +434,15 @@ export function ComercialDashboard() {
   const dropdownRef = React.useRef<HTMLDivElement>(null);
 
   const setConvById = (id: string) => {
+    if (id === "todos") { setConvRange(null); setConvLabel("TODOS"); setIsConvOpen(false); return; }
     const r = computeRange(id);
     setConvRange({ start: r.start, end: r.end }); setConvLabel(r.label);
     setConvCal1(r.start); setConvCal2(addMonths(r.start, 1)); setIsConvOpen(false);
   };
   const onConvSelect = (r: { from?: Date; to?: Date } | undefined) => {
-    if (r?.from) { setConvRange((d) => ({ ...d, start: r.from! })); setConvLabel("PERSONALIZADO"); }
-    if (r?.to) { setConvRange((d) => ({ ...d, end: r.to! })); }
+    if (!r) return;
+    setConvRange((d) => ({ start: r.from ?? d?.start ?? r.to!, end: r.to ?? d?.end ?? r.from! }));
+    setConvLabel("PERSONALIZADO");
   };
   const setEntryById = (id: string) => {
     if (id === "todos") { setEntryRange(null); setEntryLabel("TODOS"); setIsEntryOpen(false); return; }
@@ -505,8 +507,8 @@ export function ComercialDashboard() {
         p_agent: agent,
         p_origin: origin.length ? origin.join(",") : "todos",
         p_channel: channel.length ? channel.join(",") : "todos",
-        p_appt_from: format(convRange.start, "yyyy-MM-dd"),
-        p_appt_to: format(convRange.end, "yyyy-MM-dd"),
+        p_appt_from: convRange ? format(convRange.start, "yyyy-MM-dd") : null,
+        p_appt_to: convRange ? format(convRange.end, "yyyy-MM-dd") : null,
       });
       if (error) throw error;
       setData(res as CommercialData);
@@ -572,8 +574,8 @@ export function ComercialDashboard() {
         p_clinic_id: clinicId,
         p_entry_from: entryRange ? format(entryRange.start, "yyyy-MM-dd") : null,
         p_entry_to: entryRange ? format(entryRange.end, "yyyy-MM-dd") : null,
-        p_conv_from: format(convRange.start, "yyyy-MM-dd"),
-        p_conv_to: format(convRange.end, "yyyy-MM-dd"),
+        p_conv_from: convRange ? format(convRange.start, "yyyy-MM-dd") : null,
+        p_conv_to: convRange ? format(convRange.end, "yyyy-MM-dd") : null,
         p_agent: agent,
         p_origin: origin.length ? origin.join(",") : "todos",
         p_channel: channel.length ? channel.join(",") : "todos",
@@ -625,8 +627,8 @@ export function ComercialDashboard() {
       // Ignora os filtros de origem/canal/agente da tela para não distorcer o que foi pedido.
       p_origin: "todos",
       p_channel: "todos",
-      p_appt_from: format(convRange.start, "yyyy-MM-dd"),
-      p_appt_to: format(convRange.end, "yyyy-MM-dd"),
+      p_appt_from: convRange ? format(convRange.start, "yyyy-MM-dd") : null,
+      p_appt_to: convRange ? format(convRange.end, "yyyy-MM-dd") : null,
     });
     if (error) throw error;
     return res as CommercialData;
@@ -641,7 +643,7 @@ export function ComercialDashboard() {
       const meta = {
         clinicName,
         entryPeriod: entryRange ? fmtRange(entryRange) : "Todos os leads",
-        convPeriod: fmtRange(convRange),
+        convPeriod: convRange ? fmtRange(convRange) : "Todas as datas",
         scopeLine: null,
       };
       let text = "";
@@ -1171,10 +1173,10 @@ export function ComercialDashboard() {
           {/* Conversão = data da CONSULTA (appointments.date): rege realizadas / comparecimento / faturamento real */}
           <DatePill
             label="Conversão" valueLabel={convLabel}
-            rangeText={`${format(convRange.start, "dd/MM")} - ${format(convRange.end, "dd/MM")}`}
+            rangeText={convRange ? `${format(convRange.start, "dd/MM")} - ${format(convRange.end, "dd/MM")}` : "todas as datas"}
             open={isConvOpen} setOpen={setIsConvOpen}
-            presets={RANGE_PRESETS} activeLabel={convLabel} onPreset={setConvById}
-            selected={{ from: convRange.start, to: convRange.end }} onSelect={onConvSelect}
+            presets={[{ id: "todos", label: "Todos" }, ...RANGE_PRESETS]} activeLabel={convLabel} onPreset={setConvById}
+            selected={convRange ? { from: convRange.start, to: convRange.end } : undefined} onSelect={onConvSelect}
             cal1={convCal1} setCal1={setConvCal1} cal2={convCal2} setCal2={setConvCal2}
           />
         </div>

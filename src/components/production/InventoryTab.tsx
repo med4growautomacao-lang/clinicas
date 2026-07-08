@@ -354,7 +354,7 @@ function ItemModal({
             <Field label="Cód. / SKU"><input className={inputCls} value={form.sku} onChange={e => set({ sku: e.target.value })} placeholder="opcional" /></Field>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Estoque mínimo"><input type="number" min={0} step="any" className={inputCls} value={form.min_qty} onChange={e => set({ min_qty: parseFloat(e.target.value) || 0 })} /></Field>
+            <Field label="Estoque mínimo"><input type="number" min={0} step="any" className={inputCls} value={form.min_qty || ""} onChange={e => set({ min_qty: parseFloat(e.target.value) || 0 })} /></Field>
             <Field label="Custo unitário"><MoneyInput value={form.unit_cost} onChange={v => set({ unit_cost: v })} /></Field>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -415,7 +415,7 @@ function BomEditor({ productItemId, productUnit, materials }: { productItemId: s
             <input
               type="number" min={0} step="any"
               className="w-20 px-2 py-1 text-sm text-right bg-white border border-slate-200 rounded-lg"
-              value={b.qty_per_unit}
+              value={b.qty_per_unit || ""}
               onChange={e => update(b.id, parseFloat(e.target.value) || 0)}
             />
             <span className="text-xs text-slate-400 whitespace-nowrap w-14">{b.material?.unit ?? ""}/{unit}</span>
@@ -431,7 +431,7 @@ function BomEditor({ productItemId, productUnit, materials }: { productItemId: s
               <option value="">Adicionar matéria-prima…</option>
               {available.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
-            <input type="number" min={0} step="any" title={`Quantidade por ${unit}`} className="w-20 px-2 py-2 text-sm text-right bg-slate-50 border border-slate-200 rounded-xl" value={qty} onChange={e => setQty(parseFloat(e.target.value) || 0)} />
+            <input type="number" min={0} step="any" title={`Quantidade por ${unit}`} className="w-20 px-2 py-2 text-sm text-right bg-slate-50 border border-slate-200 rounded-xl" value={qty || ""} onChange={e => setQty(parseFloat(e.target.value) || 0)} />
             <Button size="sm" variant="secondary" disabled={!pick || qty <= 0} onClick={async () => { await add(pick, qty); setPick(""); setQty(1); }}>Add</Button>
           </div>
           <p className="text-[11px] text-slate-400 mt-1">Quantidade de matéria-prima por <b className="text-slate-500">1 {unit}</b> produzido (ex.: <b className="text-slate-500">kg/{unit}</b>).</p>
@@ -553,9 +553,9 @@ function MovementModal({
         {byMedidas ? (
           <>
             <div className="grid grid-cols-3 gap-3">
-              <Field label="Comprimento (m)"><input type="number" min={0} step="any" className={inputCls} value={comp} onChange={e => setComp(parseFloat(e.target.value) || 0)} autoFocus /></Field>
-              <Field label="Altura (m)"><input type="number" min={0} step="any" className={inputCls} value={alt} onChange={e => setAlt(parseFloat(e.target.value) || 0)} /></Field>
-              <Field label="Peças"><input type="number" min={1} step="1" className={inputCls} value={pcs} onChange={e => setPcs(parseFloat(e.target.value) || 0)} /></Field>
+              <Field label="Comprimento (m)"><input type="number" min={0} step="any" className={inputCls} value={comp || ""} onChange={e => setComp(parseFloat(e.target.value) || 0)} autoFocus /></Field>
+              <Field label="Altura (m)"><input type="number" min={0} step="any" className={inputCls} value={alt || ""} onChange={e => setAlt(parseFloat(e.target.value) || 0)} /></Field>
+              <Field label="Peças"><input type="number" min={1} step="1" className={inputCls} value={pcs || ""} onChange={e => setPcs(parseFloat(e.target.value) || 0)} /></Field>
             </div>
             <div className="flex items-center justify-between bg-slate-50 rounded-xl px-4 py-2.5 text-sm">
               <span className="font-semibold text-slate-500">{kind === "ajuste" ? "Saldo real contado" : "Quantidade"}</span>
@@ -565,15 +565,15 @@ function MovementModal({
         ) : isArea ? (
           <div className="grid grid-cols-2 gap-3">
             <Field label={kind === "ajuste" ? `Saldo (${item.unit})` : `Quantidade (${item.unit})`}>
-              <input type="number" min={0} step="any" className={inputCls} value={qty} onChange={e => setQty(parseFloat(e.target.value) || 0)} autoFocus />
+              <input type="number" min={0} step="any" className={inputCls} value={qty || ""} onChange={e => setQty(parseFloat(e.target.value) || 0)} autoFocus />
             </Field>
             <Field label="Altura (m)">
-              <input type="number" min={0} step="any" className={inputCls} value={alturaOnly} onChange={e => setAlturaOnly(parseFloat(e.target.value) || 0)} placeholder="ex.: 1,5" />
+              <input type="number" min={0} step="any" className={inputCls} value={alturaOnly || ""} onChange={e => setAlturaOnly(parseFloat(e.target.value) || 0)} placeholder="ex.: 1,5" />
             </Field>
           </div>
         ) : (
           <Field label={kind === "ajuste" ? `Saldo real contado (${item.unit})` : `Quantidade (${item.unit})`}>
-            <input type="number" min={0} step="any" className={inputCls} value={qty} onChange={e => setQty(parseFloat(e.target.value) || 0)} autoFocus />
+            <input type="number" min={0} step="any" className={inputCls} value={qty || ""} onChange={e => setQty(parseFloat(e.target.value) || 0)} autoFocus />
           </Field>
         )}
         <Field label="Motivo">
@@ -750,9 +750,9 @@ function RegisterProductionModal({ item, items, onClose, onDone }: {
     >
       <div className="space-y-3">
         <div className="grid grid-cols-3 gap-3">
-          <Field label="Comprimento (m)"><input type="number" min={0} step="any" className={inputCls} value={comp} onChange={e => setComp(parseFloat(e.target.value) || 0)} autoFocus /></Field>
-          <Field label="Altura (m)"><input type="number" min={0} step="any" className={inputCls} value={alt} onChange={e => setAlt(parseFloat(e.target.value) || 0)} /></Field>
-          <Field label="Peças"><input type="number" min={1} step="1" className={inputCls} value={pcs} onChange={e => setPcs(parseFloat(e.target.value) || 0)} /></Field>
+          <Field label="Comprimento (m)"><input type="number" min={0} step="any" className={inputCls} value={comp || ""} onChange={e => setComp(parseFloat(e.target.value) || 0)} autoFocus /></Field>
+          <Field label="Altura (m)"><input type="number" min={0} step="any" className={inputCls} value={alt || ""} onChange={e => setAlt(parseFloat(e.target.value) || 0)} /></Field>
+          <Field label="Peças"><input type="number" min={1} step="1" className={inputCls} value={pcs || ""} onChange={e => setPcs(parseFloat(e.target.value) || 0)} /></Field>
         </div>
         <div className="flex items-center justify-between bg-slate-50 rounded-xl px-4 py-2.5 text-sm">
           <span className="font-semibold text-slate-500">Total produzido</span>

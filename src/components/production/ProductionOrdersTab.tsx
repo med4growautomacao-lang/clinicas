@@ -255,8 +255,8 @@ function OrderModal({ order, finished, onClose, onSave }: {
         </Field>
 
         <div className="grid grid-cols-3 gap-3">
-          <Field label="Quantidade"><input type="number" min={0} step="any" className={inputCls} value={form.qty_planned} onChange={e => set({ qty_planned: parseFloat(e.target.value) || 0 })} /></Field>
-          <Field label="Altura (m)"><input type="number" min={0} step="any" className={inputCls} value={form.altura} onChange={e => set({ altura: parseFloat(e.target.value) || 0 })} placeholder="telas" /></Field>
+          <Field label="Quantidade"><input type="number" min={0} step="any" className={inputCls} value={form.qty_planned || ""} onChange={e => set({ qty_planned: parseFloat(e.target.value) || 0 })} /></Field>
+          <Field label="Altura (m)"><input type="number" min={0} step="any" className={inputCls} value={form.altura || ""} onChange={e => set({ altura: parseFloat(e.target.value) || 0 })} placeholder="telas" /></Field>
           <Field label="Prazo"><input type="date" className={inputCls} value={form.due_date} onChange={e => set({ due_date: e.target.value })} /></Field>
         </div>
         <div className="grid grid-cols-2 gap-3">
@@ -310,10 +310,10 @@ function CompleteModal({ order, items, onClose, onConfirm }: {
     >
       <div className="grid grid-cols-2 gap-3">
         <Field label={`Quantidade produzida (${order.product?.unit ?? "un"})`}>
-          <input type="number" min={0} step="any" className={inputCls} value={qty} onChange={e => setQty(parseFloat(e.target.value) || 0)} autoFocus />
+          <input type="number" min={0} step="any" className={inputCls} value={qty || ""} onChange={e => setQty(parseFloat(e.target.value) || 0)} autoFocus />
         </Field>
         <Field label="Altura (m)">
-          <input type="number" min={0} step="any" className={inputCls} value={altura} onChange={e => setAltura(parseFloat(e.target.value) || 0)} placeholder="telas" />
+          <input type="number" min={0} step="any" className={inputCls} value={altura || ""} onChange={e => setAltura(parseFloat(e.target.value) || 0)} placeholder="telas" />
         </Field>
       </div>
 

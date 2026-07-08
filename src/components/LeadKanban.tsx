@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import { useToast } from "./ui/toast";
@@ -990,6 +991,127 @@ const lineAlturaFor = (byArea: boolean, attributes: { label: string; value: stri
   return fb > 0 ? fb : 1;
 };
 
+// Texto legível sobre um fundo colorido (hex #rrggbb): claro→escuro, escuro→branco.
+const contrastText = (hex?: string | null) => {
+  if (!hex) return '#334155';
+  const h = hex.replace('#', '');
+  if (h.length !== 6) return '#334155';
+  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.62 ? '#0f172a' : '#ffffff';
+};
+
+// Seletor de produto/protocolo estilizado (substitui o <select> nativo, seguindo o design do
+// sistema): cada produto aparece PREENCHIDO com a sua cor configurada. O dropdown é renderizado
+// via portal (position:fixed no rect do botão) p/ não ser cortado pelo scroll/overflow do modal.
+function ProductPicker({ value, products, protocols, useProd, useProt, sourceNoun, onSelect }: {
+  value: string;
+  products: { id: string; name: string; color?: string | null }[];
+  protocols: { id: string; name: string }[];
+  useProd: boolean;
+  useProt: boolean;
+  sourceNoun: string;
+  onSelect: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [rect, setRect] = useState<{ left: number; top: number; width: number } | null>(null);
+
+  const selProd = value.startsWith('p:') ? products.find(p => `p:${p.id}` === value) : null;
+  const selProt = value.startsWith('t:') ? protocols.find(p => `t:${p.id}` === value) : null;
+  const selName = selProd?.name ?? selProt?.name ?? '';
+  const selColor = selProd?.color ?? null;
+
+  useEffect(() => {
+    if (!open) return;
+    const place = () => { const r = btnRef.current?.getBoundingClientRect(); if (r) setRect({ left: r.left, top: r.bottom + 4, width: r.width }); };
+    place();
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!btnRef.current?.contains(t) && !menuRef.current?.contains(t)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
+  }, [open]);
+
+  const pick = (v: string) => { setOpen(false); onSelect(v); };
+
+  return (
+    <div className="flex-1 min-w-0">
+      <button
+        type="button"
+        ref={btnRef}
+        onClick={() => setOpen(o => !o)}
+        className="w-full min-w-0 px-2.5 py-2 border border-slate-200 rounded-lg text-sm font-medium bg-white flex items-center gap-2 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+      >
+        {selColor && <span className="w-3.5 h-3.5 rounded-[3px] shrink-0 border border-black/10" style={{ backgroundColor: selColor }} />}
+        <span className={cn("flex-1 min-w-0 truncate text-left", !selName && "text-slate-400")}>{selName || `Selecione um ${sourceNoun}…`}</span>
+        <ChevronDown className={cn("w-4 h-4 text-slate-400 shrink-0 transition-transform", open && "rotate-180")} />
+      </button>
+      {open && rect && createPortal(
+        <div
+          ref={menuRef}
+          style={{ position: 'fixed', left: rect.left, top: rect.top, width: rect.width, zIndex: 200 }}
+          className="max-h-64 overflow-auto rounded-xl border border-slate-200 bg-white shadow-xl py-1"
+        >
+          <button type="button" onClick={() => pick('')} className="w-full text-left px-3 py-2 text-sm font-medium text-slate-400 hover:bg-slate-50">Selecione um {sourceNoun}…</button>
+          {useProd && products.length > 0 && (
+            <>
+              <div className="px-3 pt-1.5 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Produtos</div>
+              {products.map(op => {
+                const on = value === `p:${op.id}`;
+                const colored = !!op.color;
+                return (
+                  <button
+                    key={op.id}
+                    type="button"
+                    onClick={() => pick(`p:${op.id}`)}
+                    style={colored ? { backgroundColor: op.color as string, color: contrastText(op.color) } : undefined}
+                    className={cn("w-full text-left px-3 py-2 text-sm font-medium flex items-center justify-between gap-2", colored ? "hover:opacity-90" : "text-slate-700 hover:bg-slate-50")}
+                  >
+                    <span className="truncate">{op.name}</span>
+                    {on && <Check className="w-4 h-4 shrink-0" />}
+                  </button>
+                );
+              })}
+            </>
+          )}
+          {useProt && protocols.length > 0 && (
+            <>
+              <div className="px-3 pt-1.5 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Protocolos</div>
+              {protocols.map(op => {
+                const on = value === `t:${op.id}`;
+                return (
+                  <button key={op.id} type="button" onClick={() => pick(`t:${op.id}`)} className="w-full text-left px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 flex items-center justify-between gap-2">
+                    <span className="truncate">{op.name}</span>
+                    {on && <Check className="w-4 h-4 shrink-0 text-blue-600" />}
+                  </button>
+                );
+              })}
+            </>
+          )}
+          {useProd && (
+            <>
+              <div className="border-t border-slate-100 my-1" />
+              <button type="button" onClick={() => pick('__new__')} className="w-full text-left px-3 py-2 text-sm font-bold text-teal-600 hover:bg-teal-50">➕ Cadastrar novo produto…</button>
+            </>
+          )}
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+}
+
 // Modal ao mover para "Orçamento Enviado": monta o orçamento selecionando produtos do
 // catálogo (produto + quantidade => subtotal = qtd × valor/unidade) e soma o total.
 // NÃO gera conversão — só grava metadados no lead (estimated_value = total) e no ticket
@@ -1468,24 +1590,15 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
                 return (
                   <div key={i} className="rounded-xl border border-slate-200 p-2.5 space-y-2">
                     <div className="flex items-center gap-2">
-                      <select
+                      <ProductPicker
                         value={l.productId}
-                        onChange={e => selectProduct(i, e.target.value)}
-                        className="flex-1 min-w-0 px-2.5 py-2 border border-slate-200 rounded-lg text-sm font-medium bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                      >
-                        <option value="">Selecione um {sourceNoun}…</option>
-                        {useProd && activeProducts.length > 0 && (
-                          <optgroup label="Produtos">
-                            {activeProducts.map(op => <option key={op.id} value={`p:${op.id}`}>{op.name}</option>)}
-                          </optgroup>
-                        )}
-                        {useProt && activeProtocols.length > 0 && (
-                          <optgroup label="Protocolos">
-                            {activeProtocols.map(op => <option key={op.id} value={`t:${op.id}`}>{op.name}</option>)}
-                          </optgroup>
-                        )}
-                        {useProd && <option value="__new__">➕ Cadastrar novo produto…</option>}
-                      </select>
+                        products={activeProducts}
+                        protocols={activeProtocols}
+                        useProd={useProd}
+                        useProt={useProt}
+                        sourceNoun={sourceNoun}
+                        onSelect={v => selectProduct(i, v)}
+                      />
                       {lines.length > 1 && (
                         <button onClick={() => removeLine(i)} className="p-1.5 shrink-0 text-slate-300 hover:text-rose-500 transition-colors"><Trash2 className="w-4 h-4" /></button>
                       )}

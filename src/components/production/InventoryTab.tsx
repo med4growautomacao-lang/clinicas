@@ -124,9 +124,11 @@ export function InventoryTab() {
                           {it.name}
                           {!it.is_active && <StatusBadge label="inativo" tone="slate" />}
                         </div>
-                        <div className={cn("text-xs text-slate-400", it.kind === "produto_acabado" && "pl-5")}>
-                          {[it.sku, it.category, it.location].filter(Boolean).join(" · ") || "—"}
-                        </div>
+                        {[it.sku, it.category, it.location].filter(Boolean).length > 0 && (
+                          <div className={cn("text-xs text-slate-400", it.kind === "produto_acabado" && "pl-5")}>
+                            {[it.sku, it.category, it.location].filter(Boolean).join(" · ")}
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3"><StatusBadge label={INVENTORY_KIND_LABEL[it.kind]} tone={KIND_TONE[it.kind]} /></td>
                       <td className={cn("px-4 py-3 text-right font-bold tabular-nums", low ? "text-rose-600" : "text-slate-800")}>

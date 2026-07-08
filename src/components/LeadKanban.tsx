@@ -1165,6 +1165,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
 
   type Line = { productId: string; qty: string; price: string; discount: string; fee: string; altura?: string };
   const [lines, setLines] = useState<Line[]>(Array.isArray(iq?.lines) && iq.lines.length ? iq.lines : [{ productId: '', qty: '', price: '', discount: '', fee: '', altura: '' }]);
+  const [feeOpen, setFeeOpen] = useState<Record<number, boolean>>({}); // desconto/frete por linha (ocultos por padrão; setinha p/ mostrar)
   const [manualValue, setManualValue] = useState(iq?.manualValue ?? '');
   const [notes, setNotes] = useState(iq?.notes ?? '');
 
@@ -1587,6 +1588,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
                 const pct = linePct(l);
                 const fee = lineFeeValue(l);
                 const isM2 = isAreaItem(p);
+                const feeOpenFor = feeOpen[i] ?? (pct > 0 || fee > 0); // aberto se o vendedor mostrou ou já há desconto/frete
                 return (
                   <div key={i} className="rounded-xl border border-slate-200 p-2.5 space-y-2">
                     <div className="flex items-center gap-2">
@@ -1671,41 +1673,52 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
                             ))}
                           </div>
                         )}
-                        {/* Desconto (%) e frete (R$) deste produto */}
-                        <div className="grid grid-cols-2 gap-2 pt-0.5">
-                          <div>
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Desconto</label>
-                            <div className="relative">
-                              <input
-                                type="number"
-                                min="0"
-                                max="100"
-                                step="any"
-                                inputMode="decimal"
-                                placeholder="0"
-                                value={l.discount}
-                                onChange={e => updateLine(i, 'discount', e.target.value)}
-                                className="w-full pl-2.5 pr-6 py-1.5 border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                              />
-                              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 pointer-events-none">%</span>
+                        {/* Desconto (%) e frete (R$) deste produto — ocultos por padrão, setinha p/ mostrar */}
+                        <div className="pt-0.5">
+                          <button
+                            type="button"
+                            onClick={() => setFeeOpen(prev => ({ ...prev, [i]: !feeOpenFor }))}
+                            className={cn("flex items-center gap-1 text-[11px] font-bold transition-colors", feeOpenFor ? "text-blue-600 hover:text-blue-700" : "text-slate-400 hover:text-blue-600")}
+                          >
+                            <ChevronDown className={cn("w-3.5 h-3.5 transition-transform", feeOpenFor && "rotate-180")} /> Desconto e frete
+                          </button>
+                          {feeOpenFor && (
+                            <div className="grid grid-cols-2 gap-2 mt-1.5">
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Desconto</label>
+                                <div className="relative">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max="100"
+                                    step="any"
+                                    inputMode="decimal"
+                                    placeholder="0"
+                                    value={l.discount}
+                                    onChange={e => updateLine(i, 'discount', e.target.value)}
+                                    className="w-full pl-2.5 pr-6 py-1.5 border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                                  />
+                                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 pointer-events-none">%</span>
+                                </div>
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Frete</label>
+                                <div className="relative">
+                                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] font-bold text-slate-400 pointer-events-none">R$</span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="any"
+                                    inputMode="decimal"
+                                    placeholder="0,00"
+                                    value={l.fee}
+                                    onChange={e => updateLine(i, 'fee', e.target.value)}
+                                    className="w-full pl-7 pr-2 py-1.5 border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                                  />
+                                </div>
+                              </div>
                             </div>
-                          </div>
-                          <div>
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Frete</label>
-                            <div className="relative">
-                              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] font-bold text-slate-400 pointer-events-none">R$</span>
-                              <input
-                                type="number"
-                                min="0"
-                                step="any"
-                                inputMode="decimal"
-                                placeholder="0,00"
-                                value={l.fee}
-                                onChange={e => updateLine(i, 'fee', e.target.value)}
-                                className="w-full pl-7 pr-2 py-1.5 border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                              />
-                            </div>
-                          </div>
+                          )}
                         </div>
                         {(pct > 0 || fee > 0) && (
                           <div className="flex items-center justify-between pt-1 border-t border-slate-100">

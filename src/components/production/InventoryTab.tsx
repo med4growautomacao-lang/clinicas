@@ -2,9 +2,10 @@ import React, { useMemo, useState } from "react";
 import { AnimatePresence } from "framer-motion";
 import {
   Plus, Package, ArrowDownUp, Pencil, Trash2, ScrollText, Boxes,
-  AlertTriangle, Layers, FileStack,
+  AlertTriangle, Layers, FileStack, Factory,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
+import { supabase } from "../../lib/supabase";
 import {
   useInventoryItems, useInventoryMovements, useProductBom, useProducts, useProtocols,
   InventoryItem, InventoryKind, INVENTORY_KIND_LABEL,
@@ -21,12 +22,13 @@ const KIND_TONE: Record<InventoryKind, "amber" | "emerald" | "sky"> = {
 
 export function InventoryTab() {
   const showToast = useToast();
-  const { data: items, loading, create, update, remove, lowStock, totalValue } = useInventoryItems();
+  const { data: items, loading, create, update, remove, refetch, lowStock, totalValue } = useInventoryItems();
   const { register } = useInventoryMovements(null);
 
   const [kindFilter, setKindFilter] = useState<InventoryKind | "todos">("todos");
   const [itemModal, setItemModal] = useState<{ item: InventoryItem | null } | null>(null);
   const [movItem, setMovItem] = useState<InventoryItem | null>(null);
+  const [prodItem, setProdItem] = useState<InventoryItem | null>(null);
   const [extratoItem, setExtratoItem] = useState<InventoryItem | null>(null);
   const [delItem, setDelItem] = useState<InventoryItem | null>(null);
 
@@ -121,6 +123,9 @@ export function InventoryTab() {
                       <td className="px-4 py-3 text-right text-slate-700 font-semibold tabular-nums">{fmtBRL(Number(it.current_qty) * Number(it.unit_cost))}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {it.kind === "produto_acabado" && (
+                            <IconBtn title="Registrar produção (baixa a matéria-prima)" onClick={() => setProdItem(it)}><Factory className="w-4 h-4" /></IconBtn>
+                          )}
                           <IconBtn title="Movimentar" onClick={() => setMovItem(it)}><ArrowDownUp className="w-4 h-4" /></IconBtn>
                           <IconBtn title="Extrato" onClick={() => setExtratoItem(it)}><ScrollText className="w-4 h-4" /></IconBtn>
                           <IconBtn title="Editar" onClick={() => setItemModal({ item: it })}><Pencil className="w-4 h-4" /></IconBtn>
@@ -165,6 +170,15 @@ export function InventoryTab() {
               if (ok) { showToast("Movimentação registrada.", "success"); setMovItem(null); }
               else showToast("Erro ao registrar movimentação.", "error");
             }}
+          />
+        )}
+        {prodItem && (
+          <RegisterProductionModal
+            key="prod"
+            item={prodItem}
+            items={items}
+            onClose={() => setProdItem(null)}
+            onDone={() => { refetch(true); setProdItem(null); }}
           />
         )}
         {extratoItem && <ExtratoModal key="ext" item={extratoItem} onClose={() => setExtratoItem(null)} />}
@@ -420,19 +434,26 @@ function MovementModal({
   const [reason, setReason] = useState("");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
+  // Telas (m²): permite informar por medidas (comprimento × altura × peças).
+  const isArea = /m²|m2/i.test(item.unit);
+  const [mode, setMode] = useState<"valor" | "medidas">("valor");
+  const [comp, setComp] = useState<number>(0);
+  const [alt, setAlt] = useState<number>(0);
+  const [pcs, setPcs] = useState<number>(1);
+  const byMedidas = isArea && mode === "medidas";
+  const q = byMedidas ? Number(comp) * Number(alt) * Number(pcs) : Number(qty);
 
   const current = Number(item.current_qty);
-  const target = kind === "ajuste" ? qty : null;
-  const delta = kind === "ajuste" ? qty - current : (kind === "entrada" ? qty : -qty);
-  const resultBalance = current + (kind === "ajuste" ? (qty - current) : (kind === "entrada" ? qty : -qty));
-  const invalid = kind === "ajuste" ? qty < 0 || delta === 0 : qty <= 0;
+  const delta = kind === "ajuste" ? q - current : (kind === "entrada" ? q : -q);
+  const resultBalance = current + delta;
+  const invalid = kind === "ajuste" ? q < 0 || delta === 0 : q <= 0;
 
   const submit = async () => {
     if (invalid) return;
     setSaving(true);
     // Ajuste vira entrada/saida pela diferenca ate o saldo alvo, com reason='ajuste'.
     const moveType: "entrada" | "saida" = kind === "ajuste" ? (delta >= 0 ? "entrada" : "saida") : (kind === "entrada" ? "entrada" : "saida");
-    const moveQty = kind === "ajuste" ? Math.abs(delta) : qty;
+    const moveQty = kind === "ajuste" ? Math.abs(delta) : q;
     await onSubmit({
       item_id: item.id,
       type: moveType,
@@ -469,9 +490,33 @@ function MovementModal({
       </div>
 
       <div className="space-y-4">
-        <Field label={kind === "ajuste" ? `Saldo real contado (${item.unit})` : `Quantidade (${item.unit})`}>
-          <input type="number" min={0} step="any" className={inputCls} value={qty} onChange={e => setQty(parseFloat(e.target.value) || 0)} autoFocus />
-        </Field>
+        {isArea && (
+          <div className="flex bg-slate-100 rounded-xl p-1">
+            {(["valor", "medidas"] as const).map(m => (
+              <button key={m} onClick={() => setMode(m)}
+                className={cn("flex-1 py-1.5 rounded-lg text-xs font-bold transition-all", mode === m ? "bg-white shadow-sm text-slate-900" : "text-slate-500")}>
+                {m === "valor" ? "Informar m²" : "Por medidas (C × A × peças)"}
+              </button>
+            ))}
+          </div>
+        )}
+        {byMedidas ? (
+          <>
+            <div className="grid grid-cols-3 gap-3">
+              <Field label="Comprimento (m)"><input type="number" min={0} step="any" className={inputCls} value={comp} onChange={e => setComp(parseFloat(e.target.value) || 0)} autoFocus /></Field>
+              <Field label="Altura (m)"><input type="number" min={0} step="any" className={inputCls} value={alt} onChange={e => setAlt(parseFloat(e.target.value) || 0)} /></Field>
+              <Field label="Peças"><input type="number" min={1} step="1" className={inputCls} value={pcs} onChange={e => setPcs(parseFloat(e.target.value) || 0)} /></Field>
+            </div>
+            <div className="flex items-center justify-between bg-slate-50 rounded-xl px-4 py-2.5 text-sm">
+              <span className="font-semibold text-slate-500">{kind === "ajuste" ? "Saldo real contado" : "Quantidade"}</span>
+              <span className="font-black text-slate-900 tabular-nums">{fmtQty(q)} {item.unit}</span>
+            </div>
+          </>
+        ) : (
+          <Field label={kind === "ajuste" ? `Saldo real contado (${item.unit})` : `Quantidade (${item.unit})`}>
+            <input type="number" min={0} step="any" className={inputCls} value={qty} onChange={e => setQty(parseFloat(e.target.value) || 0)} autoFocus />
+          </Field>
+        )}
         <Field label="Motivo">
           <input className={inputCls} value={reason} onChange={e => setReason(e.target.value)}
             placeholder={kind === "entrada" ? "compra, devolução…" : kind === "saida" ? "venda, perda, consumo…" : "contagem de inventário"} />
@@ -482,7 +527,7 @@ function MovementModal({
           <span className="font-semibold text-slate-500">Saldo após</span>
           <span className={cn("font-black tabular-nums", resultBalance < 0 ? "text-rose-600" : "text-slate-900")}>
             {fmtQty(resultBalance)} {item.unit}
-            {kind !== "ajuste" && qty > 0 && <span className="text-xs font-medium text-slate-400 ml-1">({delta >= 0 ? "+" : ""}{fmtQty(delta)})</span>}
+            {kind !== "ajuste" && q > 0 && <span className="text-xs font-medium text-slate-400 ml-1">({delta >= 0 ? "+" : ""}{fmtQty(delta)})</span>}
           </span>
         </div>
         {resultBalance < 0 && <p className="text-xs text-rose-500 font-semibold">Atenção: o saldo ficará negativo.</p>}
@@ -528,6 +573,113 @@ function ExtratoModal({ item, onClose }: { item: InventoryItem; onClose: () => v
           </table>
         </div>
       )}
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Registrar produção de uma tela: entrada do produto acabado (m²) + baixa da
+// matéria-prima pela ficha técnica (via RPC register_production). Aceita m² direto
+// ou calcula por comprimento × altura × peças.
+// ---------------------------------------------------------------------------
+function RegisterProductionModal({ item, items, onClose, onDone }: {
+  item: InventoryItem;
+  items: InventoryItem[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const showToast = useToast();
+  const { data: bom } = useProductBom(item.id);
+  const itemById = useMemo(() => new Map(items.map(i => [i.id, i])), [items]);
+  const [mode, setMode] = useState<"m2" | "medidas">("m2");
+  const [m2, setM2] = useState<number>(0);
+  const [comp, setComp] = useState<number>(0);
+  const [alt, setAlt] = useState<number>(0);
+  const [pcs, setPcs] = useState<number>(1);
+  const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const produced = mode === "m2" ? Number(m2) : (Number(comp) * Number(alt) * Number(pcs));
+  const rows = bom.map(b => {
+    const mat = itemById.get(b.material_item_id);
+    const need = Number(b.qty_per_unit) * produced;
+    const have = Number(mat?.current_qty ?? 0);
+    return { id: b.id, name: b.material?.name ?? mat?.name ?? "—", unit: b.material?.unit ?? mat?.unit ?? "", need, have, short: need > have };
+  });
+  const anyShort = rows.some(r => r.short);
+
+  const submit = async () => {
+    if (produced <= 0) return;
+    setSaving(true);
+    const { data, error } = await supabase.rpc("register_production", {
+      p_clinic_id: item.clinic_id,
+      p_product_item_id: item.id,
+      p_qty: produced,
+      p_notes: notes.trim() || null,
+    });
+    setSaving(false);
+    if (error || !(data as any)?.success) { showToast("Erro ao registrar produção.", "error"); return; }
+    showToast(`Produção registrada: ${fmtQty(produced)} ${item.unit}. Matéria-prima baixada.`, "success");
+    onDone();
+  };
+
+  return (
+    <Modal
+      title="Registrar produção"
+      subtitle={item.name}
+      onClose={onClose}
+      footer={<>
+        <Button variant="outline" size="sm" onClick={onClose}>Cancelar</Button>
+        <Button size="sm" onClick={submit} disabled={saving || produced <= 0}>{saving ? "Registrando…" : "Registrar e baixar estoque"}</Button>
+      </>}
+    >
+      <div className="flex bg-slate-100 rounded-xl p-1 mb-4">
+        {(["m2", "medidas"] as const).map(m => (
+          <button key={m} onClick={() => setMode(m)}
+            className={cn("flex-1 py-1.5 rounded-lg text-sm font-bold transition-all", mode === m ? "bg-white shadow-sm text-slate-900" : "text-slate-500")}>
+            {m === "m2" ? "Informar m²" : "Calcular por medidas"}
+          </button>
+        ))}
+      </div>
+
+      {mode === "m2" ? (
+        <Field label={`Quantidade produzida (${item.unit})`}>
+          <input type="number" min={0} step="any" className={inputCls} value={m2} onChange={e => setM2(parseFloat(e.target.value) || 0)} autoFocus />
+        </Field>
+      ) : (
+        <div className="space-y-3">
+          <div className="grid grid-cols-3 gap-3">
+            <Field label="Comprimento (m)"><input type="number" min={0} step="any" className={inputCls} value={comp} onChange={e => setComp(parseFloat(e.target.value) || 0)} autoFocus /></Field>
+            <Field label="Altura (m)"><input type="number" min={0} step="any" className={inputCls} value={alt} onChange={e => setAlt(parseFloat(e.target.value) || 0)} /></Field>
+            <Field label="Peças"><input type="number" min={1} step="1" className={inputCls} value={pcs} onChange={e => setPcs(parseFloat(e.target.value) || 0)} /></Field>
+          </div>
+          <div className="flex items-center justify-between bg-slate-50 rounded-xl px-4 py-2.5 text-sm">
+            <span className="font-semibold text-slate-500">Total produzido</span>
+            <span className="font-black text-slate-900 tabular-nums">{fmtQty(produced)} {item.unit}</span>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-4">
+        <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Baixa de matéria-prima</p>
+        {rows.length === 0 ? (
+          <p className="text-sm text-slate-400 italic">Sem ficha técnica — dá entrada da tela mas não baixa matéria-prima automaticamente.</p>
+        ) : (
+          <div className="space-y-1.5">
+            {rows.map(r => (
+              <div key={r.id} className={cn("flex items-center justify-between text-sm rounded-lg px-3 py-2", r.short ? "bg-rose-50" : "bg-slate-50")}>
+                <span className="font-semibold text-slate-700">{r.name}</span>
+                <span className={cn("tabular-nums font-bold", r.short ? "text-rose-600" : "text-slate-600")}>
+                  −{fmtQty(r.need)} {r.unit} <span className="text-xs font-medium text-slate-400">(estoque {fmtQty(r.have)})</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        {anyShort && <p className="text-xs text-rose-500 font-semibold mt-2 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> Matéria-prima insuficiente — o saldo ficará negativo.</p>}
+      </div>
+
+      <Field label="Observações" className="mt-4"><input className={inputCls} value={notes} onChange={e => setNotes(e.target.value)} placeholder="opcional (ex.: cliente, nº do pedido)" /></Field>
     </Modal>
   );
 }

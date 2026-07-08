@@ -481,15 +481,13 @@ function MovementModal({
     setAddingResp(false);
   };
   // Telas (m²): permite informar por medidas (comprimento × altura × peças).
+  // Telas (m²): sempre por medidas (comprimento × altura × peças). Demais itens: quantidade direta.
   const isArea = /m²|m2/i.test(item.unit);
-  const [mode, setMode] = useState<"valor" | "medidas">("valor");
   const [comp, setComp] = useState<number>(0);
   const [alt, setAlt] = useState<number>(0);
   const [pcs, setPcs] = useState<number>(1);
-  const [alturaOnly, setAlturaOnly] = useState<number>(0);  // altura quando informa em m² direto
-  const byMedidas = isArea && mode === "medidas";
-  const q = byMedidas ? Number(comp) * Number(alt) * Number(pcs) : Number(qty);
-  const efAltura = isArea ? (byMedidas ? Number(alt) : Number(alturaOnly)) : 0;
+  const q = isArea ? Number(comp) * Number(alt) * Number(pcs) : Number(qty);
+  const efAltura = isArea ? Number(alt) : 0;
 
   const current = Number(item.current_qty);
   const delta = kind === "ajuste" ? q - current : (kind === "entrada" ? q : -q);
@@ -540,17 +538,7 @@ function MovementModal({
       </div>
 
       <div className="space-y-4">
-        {isArea && (
-          <div className="flex bg-slate-100 rounded-xl p-1">
-            {(["valor", "medidas"] as const).map(m => (
-              <button key={m} onClick={() => setMode(m)}
-                className={cn("flex-1 py-1.5 rounded-lg text-xs font-bold transition-all", mode === m ? "bg-white shadow-sm text-slate-900" : "text-slate-500")}>
-                {m === "valor" ? "Informar m²" : "Por medidas (C × A × peças)"}
-              </button>
-            ))}
-          </div>
-        )}
-        {byMedidas ? (
+        {isArea ? (
           <>
             <div className="grid grid-cols-3 gap-3">
               <Field label="Comprimento (m)"><input type="number" min={0} step="any" className={inputCls} value={comp || ""} onChange={e => setComp(parseFloat(e.target.value) || 0)} autoFocus /></Field>
@@ -562,15 +550,6 @@ function MovementModal({
               <span className="font-black text-slate-900 tabular-nums">{fmtQty(q)} {item.unit}</span>
             </div>
           </>
-        ) : isArea ? (
-          <div className="grid grid-cols-2 gap-3">
-            <Field label={kind === "ajuste" ? `Saldo (${item.unit})` : `Quantidade (${item.unit})`}>
-              <input type="number" min={0} step="any" className={inputCls} value={qty || ""} onChange={e => setQty(parseFloat(e.target.value) || 0)} autoFocus />
-            </Field>
-            <Field label="Altura (m)">
-              <input type="number" min={0} step="any" className={inputCls} value={alturaOnly || ""} onChange={e => setAlturaOnly(parseFloat(e.target.value) || 0)} placeholder="ex.: 1,5" />
-            </Field>
-          </div>
         ) : (
           <Field label={kind === "ajuste" ? `Saldo real contado (${item.unit})` : `Quantidade (${item.unit})`}>
             <input type="number" min={0} step="any" className={inputCls} value={qty || ""} onChange={e => setQty(parseFloat(e.target.value) || 0)} autoFocus />

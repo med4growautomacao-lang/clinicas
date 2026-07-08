@@ -12,6 +12,7 @@ import { MarketingAnalytics } from './components/MarketingAnalytics';
 import { OrgAdmin } from './components/OrgAdmin';
 import { UserProfile } from './components/UserProfile';
 import { TeamManagement } from './components/TeamManagement';
+import { Production } from './components/production/Production';
 import { AIAssistant } from './components/AIAssistant';
 
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -109,6 +110,7 @@ function AppContent() {
     { id: 'org-admin',       el: <OrgAdmin onEnterClinic={() => handleSetActiveTab('dashboard')} /> },
     { id: 'profile',         el: <UserProfile /> },
     { id: 'team',            el: <TeamManagement /> },
+    { id: 'production',      el: <Production /> },
   ];
 
   return (

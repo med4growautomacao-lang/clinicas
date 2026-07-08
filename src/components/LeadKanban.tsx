@@ -36,7 +36,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { useFunnelStages, useLeads, useNotLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useProducts, Product, ProductInput, ProductAttribute, useQuoteImages, useAppointments, useDoctors, usePatients, useConsultationTypes, Conversion, Lead, Ticket, TransitionRule } from "../hooks/useSupabase";
+import { useFunnelStages, useLeads, useNotLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useProducts, Product, ProductInput, ProductAttribute, useQuoteImages, useAppointments, useDoctors, usePatients, useConsultationTypes, useProductionOrders, useInventoryItems, Conversion, Lead, Ticket, TransitionRule } from "../hooks/useSupabase";
 import { NotLeadPanel } from "./NotLeadPanel";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -1874,14 +1874,19 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
 // Modal de Ordem de Produção: monta o documento a partir do orçamento salvo do lead
 // (quoteData.lines resolvidas no catálogo atual), pré-preenche do modelo da clínica e
 // gera imagem/PDF para download. Documento interno (não envia por WhatsApp).
-function ProductionOrderModal({ lead, quoteData, onClose }: {
+function ProductionOrderModal({ lead, quoteData, ticketId, onClose }: {
   lead: { id: string; name: string; phone?: string | null };
   quoteData: any;
+  ticketId?: string | null;
   onClose: () => void;
 }) {
   const { clinic } = useSettings();
   const { data: products } = useProducts();
   const { data: protocols } = useProtocols();
+  const { create: createOP } = useProductionOrders();
+  const { data: inventoryItems } = useInventoryItems();
+  const showToast = useToast();
+  const [genBusy, setGenBusy] = useState(false);
   const logoDataUrl = useImageDataUrl(clinic?.logo_url);
 
   const itemById = useMemo(() => {
@@ -1945,35 +1950,35 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
         altura: area && hasAlt ? formatQty(lineAlturaFor(true, it.attributes, l.altura)) : '',
         qty: `${formatQty(q)} ${it.unit}`,
         value: lineValue(l),
+        // Campos p/ gerar a OP rastreável (ignorados pelo documento).
+        qtyNum: q,
+        productKey: String(l.productId),
       };
-    }).filter(Boolean) as { name: string; attrs: { label: string; value: string }[]; comprimento: string; altura: string; qty: string; value: number }[];
+    }).filter(Boolean) as { name: string; attrs: { label: string; value: string }[]; comprimento: string; altura: string; qty: string; value: number; qtyNum: number; productKey: string }[];
   }, [quoteData, itemById]);
 
   // Seleção + edição por item antes de imprimir/baixar. Semeado 1x quando os itens carregam
   // (products vêm async). include = vai pra produção; comprimento/altura editáveis (pré do orçamento).
-  type ItemSt = { include: boolean; comprimento: string; altura: string; mode: 'produzir' | 'separar' };
+  type ItemSt = { include: boolean; comprimento: string; altura: string };
   const [itemState, setItemState] = useState<ItemSt[]>([]);
   const seededRef = useRef(false);
   useEffect(() => {
     if (seededRef.current || prodItems.length === 0) return;
     seededRef.current = true;
-    setItemState(prodItems.map(it => ({ include: true, comprimento: it.comprimento, altura: it.altura, mode: 'produzir' as const })));
+    setItemState(prodItems.map(it => ({ include: true, comprimento: it.comprimento, altura: it.altura })));
   }, [prodItems]);
   const setItem = (i: number, patch: Partial<ItemSt>) =>
     setItemState(prev => prev.map((s, idx) => idx === i ? { ...s, ...patch } : s));
 
-  // Só os itens INCLUÍDOS, com comprimento/altura editados e o modo (produzir/separar), vão pro documento.
+  // Só os itens INCLUÍDOS, com comprimento/altura editados, vão pro documento.
   const docItems = prodItems
-    .map((it, i) => itemState[i] ? { ...it, comprimento: itemState[i].comprimento, altura: itemState[i].altura, mode: itemState[i].mode } : { ...it, mode: 'produzir' as const })
+    .map((it, i) => itemState[i] ? { ...it, comprimento: itemState[i].comprimento, altura: itemState[i].altura } : it)
     .filter((_, i) => itemState[i] ? itemState[i].include : true);
   const total = prodItems.reduce((s, it, i) => (itemState[i] && !itemState[i].include) ? s : s + it.value, 0);
 
-  // Título e nome do arquivo conforme os modos dos itens incluídos (só produção / só separação / misto).
-  const modes = docItems.map(it => it.mode ?? 'produzir');
-  const allSep = modes.length > 0 && modes.every(m => m === 'separar');
-  const allProd = modes.every(m => m === 'produzir');
-  const docTitle = allSep ? 'ORDEM DE SEPARAÇÃO' : (allProd ? 'ORDEM DE PRODUÇÃO' : 'ORDEM DE PRODUÇÃO / SEPARAÇÃO');
-  const fileBase = allSep ? 'Ordem-Separacao' : (allProd ? 'Ordem-Producao' : 'Ordem-Producao-Separacao');
+  // Título/arquivo GENÉRICOS: serve tanto p/ produzir quanto p/ separar do estoque (nem sempre produz).
+  const docTitle = 'ORDEM DE PRODUÇÃO / SEPARAÇÃO';
+  const fileBase = 'Ordem-Producao-Separacao';
 
   const [meta] = useState(() => ({ number: String(Date.now() % 100000).padStart(5, '0'), date: new Date().toLocaleDateString('pt-BR') }));
 
@@ -2063,6 +2068,40 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
     setBusy(false);
   };
 
+  // Gera Ordens de Produção rastreáveis (uma por item incluído), resolvendo o produto
+  // do orçamento para o item de estoque (produto acabado) quando existe vínculo.
+  const handleGenerateOP = async () => {
+    if (genBusy) return;
+    // Mapa: products.id -> inventory_item (produto acabado vinculado ao catálogo).
+    const invByProductId = new Map(
+      inventoryItems.filter(i => i.product_id).map(i => [i.product_id as string, i]),
+    );
+    const toGenerate = prodItems.filter((_, i) => itemState[i] ? itemState[i].include : true);
+    if (toGenerate.length === 0) { showToast('Nenhum item selecionado para produção.', 'error'); return; }
+    setGenBusy(true);
+    const numbers: number[] = [];
+    for (const it of toGenerate) {
+      const invItem = it.productKey.startsWith('p:') ? invByProductId.get(it.productKey.slice(2)) : undefined;
+      const created = await createOP({
+        product_item_id: invItem?.id ?? null,
+        product_label: it.name,
+        qty_planned: it.qtyNum,
+        client_name: lead.name,
+        ticket_id: ticketId ?? null,
+        lead_id: lead.id,
+        notes: observacoes.trim() || null,
+      });
+      if (created) numbers.push(created.number);
+    }
+    setGenBusy(false);
+    if (numbers.length) {
+      showToast(`${numbers.length === 1 ? 'OP gerada' : 'OPs geradas'}: ${numbers.map(n => `#${n}`).join(', ')}. Veja em Produção.`, 'success');
+      onClose();
+    } else {
+      showToast('Não foi possível gerar as OPs.', 'error');
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
       <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
@@ -2115,7 +2154,7 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block">Produtos a produzir</label>
               <p className="text-[11px] text-slate-400 -mt-1">Marque os que vão para a produção e ajuste as medidas, se precisar.</p>
               {prodItems.map((it, i) => {
-                const st = itemState[i] ?? { include: true, comprimento: it.comprimento, altura: it.altura, mode: 'produzir' as const };
+                const st = itemState[i] ?? { include: true, comprimento: it.comprimento, altura: it.altura };
                 return (
                   <div key={i} className={cn("rounded-xl border p-3 transition-all", st.include ? "border-slate-200 bg-white" : "border-slate-100 bg-slate-50")}>
                     <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -2124,23 +2163,14 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
                       <span className="text-[11px] font-semibold text-slate-400 shrink-0">{it.qty}</span>
                     </label>
                     {st.include && (
-                      <div className="mt-2 pl-6 space-y-2">
-                        <div className="flex bg-slate-100 rounded-lg p-0.5 w-max">
-                          {(['produzir', 'separar'] as const).map(m => (
-                            <button key={m} type="button" onClick={() => setItem(i, { mode: m })} className={cn("px-3 py-1 rounded-md text-[11px] font-bold transition-all", (st.mode ?? 'produzir') === m ? "bg-white text-teal-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>
-                              {m === 'produzir' ? 'Produzir' : 'Separar (estoque)'}
-                            </button>
-                          ))}
+                      <div className="grid grid-cols-2 gap-2 mt-2 pl-6">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block mb-0.5">Comprimento (m)</label>
+                          <input value={st.comprimento} onChange={e => setItem(i, { comprimento: e.target.value })} placeholder="—" className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" />
                         </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block mb-0.5">Comprimento (m)</label>
-                            <input value={st.comprimento} onChange={e => setItem(i, { comprimento: e.target.value })} placeholder="—" className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block mb-0.5">Altura (m)</label>
-                            <input value={st.altura} onChange={e => setItem(i, { altura: e.target.value })} placeholder="—" className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" />
-                          </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block mb-0.5">Altura (m)</label>
+                          <input value={st.altura} onChange={e => setItem(i, { altura: e.target.value })} placeholder="—" className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" />
                         </div>
                       </div>
                     )}
@@ -2162,6 +2192,15 @@ function ProductionOrderModal({ lead, quoteData, onClose }: {
               </div>
             </div>
           </div>
+
+          <button
+            onClick={handleGenerateOP}
+            disabled={genBusy || docItems.length === 0}
+            className={cn("w-full py-2.5 rounded-xl text-sm font-black border-2 border-dashed transition-all flex items-center justify-center gap-2", (genBusy || docItems.length === 0) ? "border-slate-200 text-slate-400" : "border-amber-300 text-amber-700 hover:bg-amber-50")}
+            title="Cria ordens de produção rastreáveis no módulo Produção"
+          >
+            {genBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Package className="w-4 h-4" />} Gerar OP rastreável (Produção)
+          </button>
 
           <div className="flex gap-2 pt-1">
             <button onClick={onClose} className="py-2.5 px-3 rounded-xl text-sm font-bold border border-slate-200 text-slate-500 hover:bg-slate-50 transition-all">Fechar</button>
@@ -2415,7 +2454,7 @@ export function LeadKanban() {
   const [ganhoLead, setGanhoLead] = useState<{ id: string; name: string; phone: string | null; patientId: string | null; prevStageId: string | null; ticketId: string } | null>(null);
   const [lossLead, setLossLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
   const [orcamentoLead, setOrcamentoLead] = useState<{ id: string; name: string; phone: string | null; prevStageId: string | null; ticketId: string; initialQuote?: any } | null>(null);
-  const [poLead, setPoLead] = useState<{ id: string; name: string; phone: string | null; quoteData: any } | null>(null);
+  const [poLead, setPoLead] = useState<{ id: string; name: string; phone: string | null; quoteData: any; ticketId?: string | null } | null>(null);
   // Aviso ao arrastar um card já resolvido (venda/perda) para uma etapa ativa: manter (novo
   // ciclo, card único) ou cancelar (reabre o mesmo ticket). Guarda o ticket p/ o fluxo "Manter".
   const [reopenLead, setReopenLead] = useState<{ ticket: Ticket; outcome: 'ganho' | 'perdido'; targetStageId: string } | null>(null);
@@ -4043,7 +4082,7 @@ export function LeadKanban() {
                         type="button"
                         onClick={() => {
                           setShowModal(false);
-                          setPoLead({ id: selectedLead.id, name: selectedLead.name, phone: selectedLead.phone ?? null, quoteData: et.quote_data });
+                          setPoLead({ id: selectedLead.id, name: selectedLead.name, phone: selectedLead.phone ?? null, quoteData: et.quote_data, ticketId: et.id });
                         }}
                         className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-teal-200 bg-teal-50 text-teal-700 font-bold text-sm hover:bg-teal-100 transition-colors"
                       >
@@ -4445,6 +4484,7 @@ export function LeadKanban() {
         <ProductionOrderModal
           lead={poLead}
           quoteData={poLead.quoteData}
+          ticketId={poLead.ticketId ?? null}
           onClose={() => setPoLead(null)}
         />
       )}

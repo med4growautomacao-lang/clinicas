@@ -15,6 +15,7 @@ import {
   BarChart3,
   ChevronDown,
   ChevronsUpDown,
+  Factory,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -85,6 +86,7 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
     { id: "marketing", label: "Marketing", icon: BarChart3, color: "text-cyan-600", roles: ['gestor', 'medico_gestor', 'vendedor'] },
     { id: "ai-secretary", label: "Comercial", icon: Bot, color: "text-teal-600", roles: ['gestor', 'medico_gestor', 'secretaria', 'vendedor'] },
     { id: "appointments", label: "Agendamentos", icon: CalendarDays, color: "text-teal-700", roles: ['gestor', 'medico', 'medico_gestor', 'secretaria'], clinicOnly: true },
+    { id: "production", label: "Produção", icon: Factory, color: "text-amber-600", roles: ['gestor', 'medico_gestor', 'secretaria', 'vendedor'], outroOnly: true },
     { id: "medical-records", label: "Prontuários", icon: ClipboardList, color: "text-slate-700", roles: ['medico', 'medico_gestor'], clinicOnly: true },
     { id: "doctors", label: "Corpo Clínico", icon: Users, color: "text-emerald-800", roles: ['gestor', 'medico_gestor'], clinicOnly: true },
     { id: "team", label: "Equipe", icon: Users, color: "text-indigo-600", roles: ['gestor', 'medico_gestor'] },
@@ -96,7 +98,8 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
 
   const navItems = allNavItems
     .filter(item => item.roles.includes(effectiveRole) || (item.id === 'org-admin' && isOrgUser))
-    .filter(item => !(isOutro && item.clinicOnly));
+    .filter(item => !(isOutro && (item as any).clinicOnly))
+    .filter(item => !((item as any).outroOnly && !isOutro));
 
   return (
     <div className="w-72 bg-white flex flex-col h-full border-r border-slate-200 shadow-sm z-10 transition-all duration-200">

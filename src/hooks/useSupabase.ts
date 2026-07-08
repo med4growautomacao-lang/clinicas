@@ -2999,3 +2999,456 @@ export function useOrgTasks(organizationId: string | null | undefined) {
 
   return { data, loading, error, refetch: fetch, create, update, setStatus, remove };
 }
+
+// ==========================================
+// PRODUCAO: ESTOQUE + PCP + MANUTENCAO (clientes WakeDesk, clinics.category='outro')
+// ==========================================
+
+export type InventoryKind = 'materia_prima' | 'produto_acabado' | 'insumo';
+
+export const INVENTORY_KIND_LABEL: Record<InventoryKind, string> = {
+  materia_prima: 'Matéria-prima',
+  produto_acabado: 'Produto acabado',
+  insumo: 'Insumo',
+};
+
+// Item estocavel. current_qty e um saldo cacheado mantido por trigger a partir de inventory_movements.
+export interface InventoryItem {
+  id: string;
+  clinic_id: string;
+  kind: InventoryKind;
+  name: string;
+  sku: string | null;
+  category: string | null;
+  unit: string;
+  current_qty: number;
+  min_qty: number;
+  unit_cost: number;
+  product_id: string | null;   // liga produto acabado ao catalogo `products`
+  location: string | null;
+  is_active: boolean;
+  notes: string | null;
+  created_at: string;
+}
+export type InventoryItemInput = Partial<Omit<InventoryItem, 'id' | 'clinic_id' | 'created_at' | 'current_qty'>>;
+
+export function useInventoryItems(kind?: InventoryKind) {
+  const { activeClinicId } = useAuth();
+  const [data, setData] = useState<InventoryItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = useCallback(async (silent = false) => {
+    if (!activeClinicId) return;
+    if (!silent) setLoading(true);
+    let query = supabase.from('inventory_items').select('*').eq('clinic_id', activeClinicId);
+    if (kind) query = query.eq('kind', kind);
+    const { data } = await query.order('name');
+    setData((data as InventoryItem[]) || []);
+    setLoading(false);
+  }, [activeClinicId, kind]);
+
+  useEffect(() => {
+    fetch();
+    if (!activeClinicId) return;
+    const channel = supabase
+      .channel(`inventory_items_${activeClinicId}_${kind || 'all'}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_items', filter: `clinic_id=eq.${activeClinicId}` }, () => fetch(true))
+      .subscribe();
+    const interval = setInterval(() => fetch(true), 60_000);
+    return () => { supabase.removeChannel(channel); clearInterval(interval); };
+  }, [fetch, activeClinicId, kind]);
+
+  const create = async (item: InventoryItemInput) => {
+    if (!activeClinicId) return null;
+    const { data, error } = await supabase
+      .from('inventory_items')
+      .insert({ ...item, clinic_id: activeClinicId })
+      .select()
+      .single();
+    if (error) return null;
+    setData(prev => [...prev, data as InventoryItem].sort((a, b) => a.name.localeCompare(b.name)));
+    return data as InventoryItem;
+  };
+
+  const update = async (id: string, updates: Partial<InventoryItem>) => {
+    setData(prev => prev.map(i => i.id === id ? { ...i, ...updates } : i));
+    const { error } = await supabase.from('inventory_items').update(updates).eq('id', id);
+    if (error) { fetch(true); return false; }
+    return true;
+  };
+
+  const remove = async (id: string) => {
+    setData(prev => prev.filter(i => i.id !== id));
+    const { error } = await supabase.from('inventory_items').delete().eq('id', id);
+    if (error) { fetch(true); return false; }
+    return true;
+  };
+
+  // Itens ativos no ou abaixo do minimo (mínimo definido > 0).
+  const lowStock = useMemo(
+    () => data.filter(i => i.is_active && Number(i.min_qty) > 0 && Number(i.current_qty) <= Number(i.min_qty)),
+    [data],
+  );
+  const totalValue = useMemo(
+    () => data.reduce((s, i) => s + Number(i.current_qty) * Number(i.unit_cost), 0),
+    [data],
+  );
+
+  return { data, loading, create, update, remove, refetch: fetch, lowStock, totalValue };
+}
+
+// Movimentacao de estoque (razao). O trigger apply_inventory_movement atualiza o saldo do item.
+export interface InventoryMovement {
+  id: string;
+  clinic_id: string;
+  item_id: string;
+  type: 'entrada' | 'saida';
+  qty: number;
+  unit_cost: number | null;
+  reason: string | null;
+  production_order_id: string | null;
+  maintenance_order_id: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  item?: { name: string; unit: string } | null;
+}
+
+export function useInventoryMovements(itemId?: string | null) {
+  const { activeClinicId } = useAuth();
+  const [data, setData] = useState<InventoryMovement[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = useCallback(async (silent = false) => {
+    if (!activeClinicId) { setData([]); setLoading(false); return; }
+    if (!silent) setLoading(true);
+    let query = supabase
+      .from('inventory_movements')
+      .select('*, item:inventory_items(name, unit)')
+      .eq('clinic_id', activeClinicId);
+    if (itemId) query = query.eq('item_id', itemId);
+    const { data } = await query.order('created_at', { ascending: false }).limit(500);
+    setData((data as InventoryMovement[]) || []);
+    setLoading(false);
+  }, [activeClinicId, itemId]);
+
+  useEffect(() => { fetch(); }, [fetch]);
+
+  // Registra entrada/saida/ajuste. Ajuste de inventario deve ser calculado pela UI
+  // (diferenca ate o saldo alvo) e enviado como entrada/saida com reason='ajuste'.
+  const register = async (mov: {
+    item_id: string;
+    type: 'entrada' | 'saida';
+    qty: number;
+    unit_cost?: number | null;
+    reason?: string | null;
+    notes?: string | null;
+    production_order_id?: string | null;
+    maintenance_order_id?: string | null;
+  }) => {
+    if (!activeClinicId) return null;
+    const { data: auth } = await supabase.auth.getUser();
+    const { data, error } = await supabase
+      .from('inventory_movements')
+      .insert({ ...mov, clinic_id: activeClinicId, created_by: auth?.user?.id ?? null })
+      .select()
+      .single();
+    if (error) return null;
+    await fetch(true);
+    return data as InventoryMovement;
+  };
+
+  return { data, loading, register, refetch: fetch };
+}
+
+// Ficha tecnica (BOM): linhas material x quantidade por unidade de um produto acabado.
+export interface BomLine {
+  id: string;
+  clinic_id: string;
+  product_item_id: string;
+  material_item_id: string;
+  qty_per_unit: number;
+  notes: string | null;
+  created_at: string;
+  material?: { name: string; unit: string } | null;
+}
+
+export function useProductBom(productItemId?: string | null) {
+  const { activeClinicId } = useAuth();
+  const [data, setData] = useState<BomLine[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = useCallback(async () => {
+    if (!activeClinicId || !productItemId) { setData([]); setLoading(false); return; }
+    setLoading(true);
+    const { data } = await supabase
+      .from('product_bom')
+      .select('*, material:inventory_items!product_bom_material_item_id_fkey(name, unit)')
+      .eq('product_item_id', productItemId)
+      .order('created_at');
+    setData((data as BomLine[]) || []);
+    setLoading(false);
+  }, [activeClinicId, productItemId]);
+
+  useEffect(() => { fetch(); }, [fetch]);
+
+  const add = async (material_item_id: string, qty_per_unit: number) => {
+    if (!activeClinicId || !productItemId) return null;
+    const { data, error } = await supabase
+      .from('product_bom')
+      .insert({ clinic_id: activeClinicId, product_item_id: productItemId, material_item_id, qty_per_unit })
+      .select('*, material:inventory_items!product_bom_material_item_id_fkey(name, unit)')
+      .single();
+    if (error) return null;
+    setData(prev => [...prev, data as BomLine]);
+    return data as BomLine;
+  };
+
+  const update = async (id: string, qty_per_unit: number) => {
+    setData(prev => prev.map(b => b.id === id ? { ...b, qty_per_unit } : b));
+    const { error } = await supabase.from('product_bom').update({ qty_per_unit }).eq('id', id);
+    if (error) { fetch(); return false; }
+    return true;
+  };
+
+  const remove = async (id: string) => {
+    setData(prev => prev.filter(b => b.id !== id));
+    const { error } = await supabase.from('product_bom').delete().eq('id', id);
+    if (error) { fetch(); return false; }
+    return true;
+  };
+
+  return { data, loading, add, update, remove, refetch: fetch };
+}
+
+// Ordem de Producao (PCP). number e sequencial por clinica (definido por trigger).
+export type ProductionStatus = 'planejada' | 'em_producao' | 'concluida' | 'cancelada';
+
+export interface ProductionOrder {
+  id: string;
+  clinic_id: string;
+  number: number;
+  product_item_id: string | null;
+  product_label: string | null;
+  qty_planned: number;
+  qty_produced: number;
+  status: ProductionStatus;
+  priority: 'baixa' | 'normal' | 'alta';
+  due_date: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  ticket_id: string | null;
+  lead_id: string | null;
+  client_name: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  product?: { name: string; unit: string } | null;
+}
+export type ProductionOrderInput = Partial<Omit<ProductionOrder, 'id' | 'clinic_id' | 'number' | 'created_at' | 'product'>>;
+
+export function useProductionOrders() {
+  const { activeClinicId } = useAuth();
+  const [data, setData] = useState<ProductionOrder[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = useCallback(async (silent = false) => {
+    if (!activeClinicId) return;
+    if (!silent) setLoading(true);
+    const { data } = await supabase
+      .from('production_orders')
+      .select('*, product:inventory_items(name, unit)')
+      .eq('clinic_id', activeClinicId)
+      .order('number', { ascending: false });
+    setData((data as ProductionOrder[]) || []);
+    setLoading(false);
+  }, [activeClinicId]);
+
+  useEffect(() => {
+    fetch();
+    if (!activeClinicId) return;
+    const channel = supabase
+      .channel(`production_orders_${activeClinicId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'production_orders', filter: `clinic_id=eq.${activeClinicId}` }, () => fetch(true))
+      .subscribe();
+    const interval = setInterval(() => fetch(true), 60_000);
+    return () => { supabase.removeChannel(channel); clearInterval(interval); };
+  }, [fetch, activeClinicId]);
+
+  const create = async (order: ProductionOrderInput) => {
+    if (!activeClinicId) return null;
+    const { data: auth } = await supabase.auth.getUser();
+    const { data, error } = await supabase
+      .from('production_orders')
+      .insert({ ...order, clinic_id: activeClinicId, created_by: auth?.user?.id ?? null })
+      .select('*, product:inventory_items(name, unit)')
+      .single();
+    if (error) return null;
+    setData(prev => [data as ProductionOrder, ...prev]);
+    return data as ProductionOrder;
+  };
+
+  const update = async (id: string, updates: Partial<ProductionOrder>) => {
+    setData(prev => prev.map(o => o.id === id ? { ...o, ...updates } : o));
+    const { error } = await supabase.from('production_orders').update(updates).eq('id', id);
+    if (error) { fetch(true); return false; }
+    return true;
+  };
+
+  const remove = async (id: string) => {
+    setData(prev => prev.filter(o => o.id !== id));
+    const { error } = await supabase.from('production_orders').delete().eq('id', id);
+    if (error) { fetch(true); return false; }
+    return true;
+  };
+
+  // Conclui a OP: baixa materia-prima pela ficha tecnica e da entrada no produto acabado (RPC idempotente).
+  const complete = async (id: string, qtyProduced: number) => {
+    const { data: res, error } = await supabase.rpc('complete_production_order', { p_order_id: id, p_qty_produced: qtyProduced });
+    await fetch(true);
+    if (error) return { success: false, error: error.message };
+    return res as { success: boolean; error_code?: string; already_done?: boolean };
+  };
+
+  return { data, loading, create, update, remove, complete, refetch: fetch };
+}
+
+// Equipamento/maquina (Manutencao).
+export interface Equipment {
+  id: string;
+  clinic_id: string;
+  name: string;
+  code: string | null;
+  location: string | null;
+  status: 'operando' | 'parada' | 'manutencao';
+  notes: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+export type EquipmentInput = Partial<Omit<Equipment, 'id' | 'clinic_id' | 'created_at'>>;
+
+export function useEquipment() {
+  const { activeClinicId } = useAuth();
+  const [data, setData] = useState<Equipment[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = useCallback(async (silent = false) => {
+    if (!activeClinicId) return;
+    if (!silent) setLoading(true);
+    const { data } = await supabase.from('equipment').select('*').eq('clinic_id', activeClinicId).order('name');
+    setData((data as Equipment[]) || []);
+    setLoading(false);
+  }, [activeClinicId]);
+
+  useEffect(() => {
+    fetch();
+    if (!activeClinicId) return;
+    const channel = supabase
+      .channel(`equipment_${activeClinicId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'equipment', filter: `clinic_id=eq.${activeClinicId}` }, () => fetch(true))
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [fetch, activeClinicId]);
+
+  const create = async (eq: EquipmentInput) => {
+    if (!activeClinicId) return null;
+    const { data, error } = await supabase.from('equipment').insert({ ...eq, clinic_id: activeClinicId }).select().single();
+    if (error) return null;
+    setData(prev => [...prev, data as Equipment].sort((a, b) => a.name.localeCompare(b.name)));
+    return data as Equipment;
+  };
+
+  const update = async (id: string, updates: Partial<Equipment>) => {
+    setData(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
+    const { error } = await supabase.from('equipment').update(updates).eq('id', id);
+    if (error) { fetch(true); return false; }
+    return true;
+  };
+
+  const remove = async (id: string) => {
+    setData(prev => prev.filter(e => e.id !== id));
+    const { error } = await supabase.from('equipment').delete().eq('id', id);
+    if (error) { fetch(true); return false; }
+    return true;
+  };
+
+  return { data, loading, create, update, remove, refetch: fetch };
+}
+
+// Ordem de Manutencao. number sequencial por clinica (trigger).
+export interface MaintenanceOrder {
+  id: string;
+  clinic_id: string;
+  number: number;
+  equipment_id: string | null;
+  type: 'preventiva' | 'corretiva' | 'preditiva';
+  status: 'aberta' | 'em_andamento' | 'concluida' | 'cancelada';
+  priority: 'baixa' | 'normal' | 'alta';
+  scheduled_date: string | null;
+  completed_at: string | null;
+  cost: number;
+  technician: string | null;
+  description: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  equipment?: { name: string } | null;
+}
+export type MaintenanceOrderInput = Partial<Omit<MaintenanceOrder, 'id' | 'clinic_id' | 'number' | 'created_at' | 'equipment'>>;
+
+export function useMaintenanceOrders() {
+  const { activeClinicId } = useAuth();
+  const [data, setData] = useState<MaintenanceOrder[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = useCallback(async (silent = false) => {
+    if (!activeClinicId) return;
+    if (!silent) setLoading(true);
+    const { data } = await supabase
+      .from('maintenance_orders')
+      .select('*, equipment:equipment(name)')
+      .eq('clinic_id', activeClinicId)
+      .order('number', { ascending: false });
+    setData((data as MaintenanceOrder[]) || []);
+    setLoading(false);
+  }, [activeClinicId]);
+
+  useEffect(() => {
+    fetch();
+    if (!activeClinicId) return;
+    const channel = supabase
+      .channel(`maintenance_orders_${activeClinicId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'maintenance_orders', filter: `clinic_id=eq.${activeClinicId}` }, () => fetch(true))
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [fetch, activeClinicId]);
+
+  const create = async (order: MaintenanceOrderInput) => {
+    if (!activeClinicId) return null;
+    const { data: auth } = await supabase.auth.getUser();
+    const { data, error } = await supabase
+      .from('maintenance_orders')
+      .insert({ ...order, clinic_id: activeClinicId, created_by: auth?.user?.id ?? null })
+      .select('*, equipment:equipment(name)')
+      .single();
+    if (error) return null;
+    setData(prev => [data as MaintenanceOrder, ...prev]);
+    return data as MaintenanceOrder;
+  };
+
+  const update = async (id: string, updates: Partial<MaintenanceOrder>) => {
+    setData(prev => prev.map(o => o.id === id ? { ...o, ...updates } : o));
+    const { error } = await supabase.from('maintenance_orders').update(updates).eq('id', id);
+    if (error) { fetch(true); return false; }
+    return true;
+  };
+
+  const remove = async (id: string) => {
+    setData(prev => prev.filter(o => o.id !== id));
+    const { error } = await supabase.from('maintenance_orders').delete().eq('id', id);
+    if (error) { fetch(true); return false; }
+    return true;
+  };
+
+  return { data, loading, create, update, remove, refetch: fetch };
+}

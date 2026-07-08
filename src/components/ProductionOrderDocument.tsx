@@ -5,7 +5,7 @@ import { DocumentChrome, SectionBlock, formatBRL, formatValidade } from "./Quote
 // Nº da OP + datas (no cabeçalho/título), DADOS DO CLIENTE, e por item TIPO DE PRODUTO +
 // ESPECIFICAÇÕES (bitola/comprimento/altura/malha) com caixas marcadas a partir do orçamento.
 
-export type ProdItem = { name: string; attrs: { label: string; value: string }[]; comprimento?: string; altura?: string; qty: string; value: number; mode?: "produzir" | "separar" };
+export type ProdItem = { name: string; attrs: { label: string; value: string }[]; comprimento?: string; altura?: string; qty: string; value: number };
 
 const attrVal = (attrs: { label: string; value: string }[], keys: string[]) => {
   const a = attrs.find(x => keys.some(k => (x.label || "").toLowerCase().includes(k)));
@@ -13,7 +13,7 @@ const attrVal = (attrs: { label: string; value: string }[], keys: string[]) => {
 };
 const digits = (s: string) => (s || "").replace(",", ".").replace(/[^\d.]/g, "");
 
-export function ProductionOrderDocument({ docRef, title = "ORDEM DE PRODUÇÃO", clinicName, clinicLegalName, clinicPhone, clinicEmail, clinicInstagram, clinicAddress, clinicCnpj, logoDataUrl, clientName, clientPhone, cidade, vendedor, number, dateStr, prazo, items, total, showPrices, observacoes, accent }: {
+export function ProductionOrderDocument({ docRef, title = "ORDEM DE PRODUÇÃO / SEPARAÇÃO", clinicName, clinicLegalName, clinicPhone, clinicEmail, clinicInstagram, clinicAddress, clinicCnpj, logoDataUrl, clientName, clientPhone, cidade, vendedor, number, dateStr, prazo, items, total, showPrices, observacoes, accent }: {
   docRef?: React.RefObject<HTMLDivElement | null>;
   title?: string;
   clinicName: string;
@@ -94,13 +94,8 @@ export function ProductionOrderDocument({ docRef, title = "ORDEM DE PRODUÇÃO",
         const malha = digits(attrVal(it.attrs, ["malha"]));
         return (
           <div key={idx} style={{ marginTop: 20, border: "1px solid #e2e8f0", borderRadius: 10, padding: "14px 16px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 800 }}>{it.name}</div>
-                <span style={{ display: "inline-block", marginTop: 4, fontSize: 10, fontWeight: 800, letterSpacing: 0.5, padding: "2px 8px", borderRadius: 4, color: "#ffffff", background: it.mode === "separar" ? "#334155" : accent }}>
-                  {it.mode === "separar" ? "SEPARAR • ESTOQUE" : "PRODUZIR"}
-                </span>
-              </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+              <div style={{ fontSize: 14, fontWeight: 800 }}>{it.name}</div>
               <div style={{ fontSize: 12.5, fontWeight: 700, whiteSpace: "nowrap" }}>Qtd: {it.qty || "—"}{showPrices ? ` · ${formatBRL(it.value)}` : ""}</div>
             </div>
 

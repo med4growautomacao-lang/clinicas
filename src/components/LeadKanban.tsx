@@ -4051,8 +4051,19 @@ export function LeadKanban() {
                               )}>
                                 {formatBRL(displayValue)}
                               </div>
-                              <span className="text-[9px] font-medium text-slate-400 truncate text-right flex-1">
-                                {formatDistanceToNow(parseISO(lastContact), { addSuffix: true, locale: ptBR })}
+                              <span className={cn(
+                                "text-[9px] font-medium truncate text-right flex-1",
+                                ticket.outcome === 'ganho' ? "text-emerald-600 font-bold"
+                                  : ticket.outcome === 'perdido' ? "text-rose-500 font-bold"
+                                    : "text-slate-400"
+                              )}>
+                                {(() => {
+                                  if (!ticket.outcome) return formatDistanceToNow(parseISO(lastContact), { addSuffix: true, locale: ptBR });
+                                  // Data de ganho = data da venda (conversão) quando houver; senão, quando o desfecho foi marcado.
+                                  const d = (ticket.outcome === 'ganho' ? lastConversion?.converted_at : null) ?? ticket.outcome_at;
+                                  const label = ticket.outcome === 'ganho' ? 'Ganho' : 'Perdido';
+                                  return d ? `${label} ${format(parseISO(d), 'dd/MM/yy')}` : label;
+                                })()}
                               </span>
                               <button
                                 onClick={() => setChatLead({ lead: ticket.lead, ticketId: ticket.id })}

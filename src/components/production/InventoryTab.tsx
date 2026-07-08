@@ -144,8 +144,16 @@ export function InventoryTab() {
                       </td>
                       <td className="px-4 py-3"><StatusBadge label={INVENTORY_KIND_LABEL[it.kind]} tone={KIND_TONE[it.kind]} /></td>
                       <td className={cn("px-4 py-3 text-right font-bold tabular-nums", low ? "text-rose-600" : "text-slate-800")}>
-                        {fmtQty(it.current_qty)} <span className="text-xs font-medium text-slate-400">{it.unit}</span>
-                        {low && <AlertTriangle className="inline w-3.5 h-3.5 ml-1 -mt-0.5 text-rose-500" />}
+                        {it.kind === "produto_acabado" ? (
+                          // Tela: sem m² no total. Sem subproduto em estoque -> 0; com subproduto -> em branco
+                          // (o saldo real aparece em metros lineares nas sub-linhas por altura).
+                          alturas.length > 0 ? null : "0"
+                        ) : (
+                          <>
+                            {fmtQty(it.current_qty)} <span className="text-xs font-medium text-slate-400">{it.unit}</span>
+                            {low && <AlertTriangle className="inline w-3.5 h-3.5 ml-1 -mt-0.5 text-rose-500" />}
+                          </>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right text-slate-400 tabular-nums">{Number(it.min_qty) > 0 ? fmtQty(it.min_qty) : "—"}</td>
                       <td className="px-4 py-3 text-right text-slate-500 tabular-nums">{fmtBRL(unitValueOf(it))}</td>

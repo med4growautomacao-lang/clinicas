@@ -2,12 +2,12 @@ import React, { useMemo, useState } from "react";
 import { AnimatePresence } from "framer-motion";
 import {
   Plus, Package, ArrowDownUp, Pencil, Trash2, ScrollText, Boxes,
-  AlertTriangle, Layers, FileStack, Factory,
+  AlertTriangle, Layers, FileStack, Factory, X,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { supabase } from "../../lib/supabase";
 import {
-  useInventoryItems, useInventoryMovements, useProductBom, useProducts, useProtocols,
+  useInventoryItems, useInventoryMovements, useProductBom, useProducts, useProtocols, useResponsibles,
   InventoryItem, InventoryKind, INVENTORY_KIND_LABEL,
 } from "../../hooks/useSupabase";
 import { useToast } from "../ui/toast";
@@ -429,12 +429,24 @@ function MovementModal({
   onClose: () => void;
   onSubmit: (mov: { item_id: string; type: "entrada" | "saida"; qty: number; unit_cost?: number | null; reason?: string | null; responsavel?: string | null; notes?: string | null }) => Promise<void>;
 }) {
+  const { data: responsibles, add: addResponsible } = useResponsibles();
   const [kind, setKind] = useState<MovKind>("entrada");
   const [qty, setQty] = useState<number>(0);       // entrada/saida: quantidade; ajuste: saldo alvo
   const [reason, setReason] = useState("");
   const [responsavel, setResponsavel] = useState("");
+  const [addingResp, setAddingResp] = useState(false);
+  const [newResp, setNewResp] = useState("");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
+
+  const confirmAddResp = async () => {
+    const nome = newResp.trim();
+    if (!nome) return;
+    await addResponsible(nome);
+    setResponsavel(nome);
+    setNewResp("");
+    setAddingResp(false);
+  };
   // Telas (m²): permite informar por medidas (comprimento × altura × peças).
   const isArea = /m²|m2/i.test(item.unit);
   const [mode, setMode] = useState<"valor" | "medidas">("valor");
@@ -524,7 +536,28 @@ function MovementModal({
             placeholder={kind === "entrada" ? "compra, devolução…" : kind === "saida" ? "venda, perda, consumo…" : "contagem de inventário"} />
         </Field>
         <Field label="Responsável">
-          <input className={inputCls} value={responsavel} onChange={e => setResponsavel(e.target.value)} placeholder="Quem fez a movimentação" />
+          {addingResp ? (
+            <div className="flex items-center gap-2">
+              <input
+                autoFocus className={cn(inputCls, "flex-1")} value={newResp}
+                onChange={e => setNewResp(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); confirmAddResp(); } }}
+                placeholder="Nome do responsável"
+              />
+              <Button size="sm" variant="secondary" disabled={!newResp.trim()} onClick={confirmAddResp}>Salvar</Button>
+              <button type="button" onClick={() => { setAddingResp(false); setNewResp(""); }} className="p-2 text-slate-400 hover:text-slate-700"><X className="w-4 h-4" /></button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <select className={cn(inputCls, "flex-1")} value={responsavel} onChange={e => setResponsavel(e.target.value)}>
+                <option value="">— Sem responsável —</option>
+                {responsibles.map(r => <option key={r.id} value={r.name}>{r.name}</option>)}
+              </select>
+              <Button size="sm" variant="outline" title="Adicionar responsável" onClick={() => { setAddingResp(true); setNewResp(""); }}>
+                <Plus className="w-4 h-4" />
+              </Button>
+            </div>
+          )}
         </Field>
         <Field label="Observações"><textarea className={cn(inputCls, "min-h-[56px] resize-y")} value={notes} onChange={e => setNotes(e.target.value)} /></Field>
 

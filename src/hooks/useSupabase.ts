@@ -3206,6 +3206,58 @@ export function useInventoryMovements(itemId?: string | null) {
   return { data, loading, register, refetch: fetch };
 }
 
+// Cadastro de responsaveis (por clinica) para o seletor das movimentacoes de estoque.
+export interface Responsible {
+  id: string;
+  clinic_id: string;
+  name: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export function useResponsibles() {
+  const { activeClinicId } = useAuth();
+  const [data, setData] = useState<Responsible[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = useCallback(async () => {
+    if (!activeClinicId) { setData([]); setLoading(false); return; }
+    const { data } = await supabase
+      .from('production_responsibles')
+      .select('*')
+      .eq('clinic_id', activeClinicId)
+      .eq('is_active', true)
+      .order('name');
+    setData((data as Responsible[]) || []);
+    setLoading(false);
+  }, [activeClinicId]);
+
+  useEffect(() => { fetch(); }, [fetch]);
+
+  // Adiciona um responsavel reutilizavel. Se ja existir (mesmo nome), apenas recarrega.
+  const add = async (name: string) => {
+    const nome = name.trim();
+    if (!activeClinicId || !nome) return null;
+    const { data, error } = await supabase
+      .from('production_responsibles')
+      .insert({ clinic_id: activeClinicId, name: nome })
+      .select()
+      .single();
+    if (error) { await fetch(); return null; }
+    setData(prev => [...prev, data as Responsible].sort((a, b) => a.name.localeCompare(b.name)));
+    return data as Responsible;
+  };
+
+  const remove = async (id: string) => {
+    setData(prev => prev.filter(r => r.id !== id));
+    const { error } = await supabase.from('production_responsibles').delete().eq('id', id);
+    if (error) { fetch(); return false; }
+    return true;
+  };
+
+  return { data, loading, add, remove, refetch: fetch };
+}
+
 // Ficha tecnica (BOM): linhas material x quantidade por unidade de um produto acabado.
 export interface BomLine {
   id: string;

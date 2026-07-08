@@ -157,10 +157,10 @@ export function InventoryTab() {
                         </td>
                         <td className="px-4 py-1.5 text-[11px] text-slate-400">subproduto</td>
                         <td className="px-4 py-1.5 text-right tabular-nums text-slate-700 font-semibold">
-                          {fmtQty(a.qty)} <span className="text-xs font-medium text-slate-400">m²</span>
+                          {a.altura > 0 ? fmtQty(a.qty / a.altura) : fmtQty(a.qty)} <span className="text-xs font-medium text-slate-400">m</span>
                         </td>
                         <td colSpan={3} className="px-4 py-1.5 text-right text-xs text-slate-400">
-                          {a.altura > 0 ? `${fmtQty(a.qty / a.altura)} m lineares` : ""}
+                          {fmtQty(a.qty)} m²
                         </td>
                         <td className="px-4 py-1.5"></td>
                       </tr>
@@ -630,8 +630,8 @@ function ExtratoModal({ item, onClose }: { item: InventoryItem; onClose: () => v
                 {byAltura.map(r => (
                   <div key={r.altura} className={cn("rounded-xl px-3 py-2 border", r.qty < 0 ? "bg-rose-50 border-rose-200" : "bg-slate-50 border-slate-200")}>
                     <div className="text-[11px] font-bold text-slate-400 uppercase">Altura {fmtQty(r.altura)} m</div>
-                    <div className={cn("text-lg font-black tabular-nums", r.qty < 0 ? "text-rose-600" : "text-slate-800")}>{fmtQty(r.qty)} m²</div>
-                    {r.altura > 0 && <div className="text-[11px] text-slate-400">{fmtQty(r.qty / r.altura)} m lineares</div>}
+                    <div className={cn("text-lg font-black tabular-nums", r.qty < 0 ? "text-rose-600" : "text-slate-800")}>{r.altura > 0 ? fmtQty(r.qty / r.altura) : fmtQty(r.qty)} <span className="text-sm font-bold text-slate-400">m</span></div>
+                    <div className="text-[11px] text-slate-400">{fmtQty(r.qty)} m²</div>
                   </div>
                 ))}
               </div>

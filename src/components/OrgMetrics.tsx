@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import { cn } from "@/src/lib/utils";
-import { Loader2, Building2, Users, CalendarCheck, Trophy, Wallet, Megaphone, ArrowUp, ArrowDown } from "lucide-react";
+import { matchesSearch } from "../lib/search";
+import { Loader2, Building2, Users, CalendarCheck, Trophy, Wallet, Megaphone, ArrowUp, ArrowDown, ChevronDown, Check, Search } from "lucide-react";
 
 interface ClinicMetricRow {
   clinicId: string;
@@ -86,6 +87,25 @@ export function OrgMetrics() {
   const [showInactive, setShowInactive] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("leads");
   const [sortDesc, setSortDesc] = useState(true);
+  // Seleção de clientes (vazio = todos); persiste entre sessões
+  const [selectedIds, setSelectedIds] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem("orgMetricsClinics") || "[]"); } catch { return []; }
+  });
+  const [clinicMenuOpen, setClinicMenuOpen] = useState(false);
+  const [clinicQuery, setClinicQuery] = useState("");
+  const clinicMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!clinicMenuOpen) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (clinicMenuRef.current && !clinicMenuRef.current.contains(e.target as Node)) {
+        setClinicMenuOpen(false);
+        setClinicQuery("");
+      }
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, [clinicMenuOpen]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -115,8 +135,37 @@ export function OrgMetrics() {
   useEffect(() => { load(); }, [load]);
 
   const visible = useMemo(
-    () => rows.filter(r => showInactive || r.isActive),
-    [rows, showInactive]
+    () => rows.filter(r =>
+      (showInactive || r.isActive) &&
+      (selectedIds.length === 0 || selectedIds.includes(r.clinicId))
+    ),
+    [rows, showInactive, selectedIds]
+  );
+
+  const toggleClinic = (id: string) => {
+    setSelectedIds(prev => {
+      const next = prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id];
+      localStorage.setItem("orgMetricsClinics", JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const clearClinicSelection = () => {
+    setSelectedIds([]);
+    localStorage.setItem("orgMetricsClinics", "[]");
+  };
+
+  // Lista do dropdown: respeita o toggle de inativas + busca
+  const clinicOptions = useMemo(
+    () => rows.filter(r =>
+      (showInactive || r.isActive) &&
+      matchesSearch(clinicQuery, { name: r.clinicName })
+    ),
+    [rows, showInactive, clinicQuery]
+  );
+  const selectedCount = useMemo(
+    () => rows.filter(r => selectedIds.includes(r.clinicId)).length,
+    [rows, selectedIds]
   );
 
   const sorted = useMemo(() => {
@@ -178,17 +227,77 @@ export function OrgMetrics() {
             </button>
           ))}
         </div>
-        <button
-          onClick={() => setShowInactive(v => !v)}
-          className={cn(
-            "px-3 py-1.5 rounded-lg text-[10px] font-bold border transition-all",
-            showInactive
-              ? "bg-violet-600 text-white border-violet-600 shadow-sm"
-              : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"
-          )}
-        >
-          {showInactive ? "Ocultar inativas" : "Mostrar inativas"}
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Filtro de clientes */}
+          <div className="relative" ref={clinicMenuRef}>
+            <button
+              onClick={() => { setClinicMenuOpen(o => !o); setClinicQuery(""); }}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold border transition-all",
+                selectedIds.length > 0
+                  ? "bg-violet-600 text-white border-violet-600 shadow-sm"
+                  : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"
+              )}
+            >
+              <Building2 className="w-3 h-3" />
+              {selectedIds.length === 0
+                ? "Todos os clientes"
+                : `${selectedCount} cliente${selectedCount === 1 ? "" : "s"}`}
+              <ChevronDown className={cn("w-3 h-3 transition-transform", clinicMenuOpen && "rotate-180")} />
+            </button>
+            {clinicMenuOpen && (
+              <div className="absolute right-0 top-full mt-1 z-50 bg-white border border-slate-200 rounded-xl shadow-lg py-1 w-64">
+                <div className="px-2 py-1">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      autoFocus
+                      value={clinicQuery}
+                      onChange={e => setClinicQuery(e.target.value)}
+                      placeholder="Buscar cliente..."
+                      className="w-full pl-8 pr-2 py-1.5 text-xs font-semibold text-slate-700 border border-slate-200 rounded-lg focus:outline-none focus:border-violet-300"
+                    />
+                  </div>
+                </div>
+                <button
+                  onClick={clearClinicSelection}
+                  className="w-full flex items-center justify-between gap-3 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors border-b border-slate-100"
+                >
+                  <span>Todos os clientes</span>
+                  {selectedIds.length === 0 && <Check className="w-3 h-3 text-violet-600 shrink-0" />}
+                </button>
+                <div className="max-h-64 overflow-y-auto">
+                  {clinicOptions.length === 0 ? (
+                    <p className="px-3 py-3 text-xs font-semibold text-slate-400 text-center">Nenhum cliente encontrado</p>
+                  ) : clinicOptions.map(r => (
+                    <button
+                      key={r.clinicId}
+                      onClick={() => toggleClinic(r.clinicId)}
+                      className="w-full flex items-center justify-between gap-3 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                    >
+                      <span className="truncate flex items-center gap-1.5">
+                        {r.clinicName}
+                        {!r.isActive && <span className="text-[9px] font-bold text-rose-400 uppercase shrink-0">Inativa</span>}
+                      </span>
+                      {selectedIds.includes(r.clinicId) && <Check className="w-3 h-3 text-violet-600 shrink-0" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <button
+            onClick={() => setShowInactive(v => !v)}
+            className={cn(
+              "px-3 py-1.5 rounded-lg text-[10px] font-bold border transition-all",
+              showInactive
+                ? "bg-violet-600 text-white border-violet-600 shadow-sm"
+                : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"
+            )}
+          >
+            {showInactive ? "Ocultar inativas" : "Mostrar inativas"}
+          </button>
+        </div>
       </div>
 
       {/* Cards de totais */}

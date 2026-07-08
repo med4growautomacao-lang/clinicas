@@ -3025,6 +3025,7 @@ export interface InventoryItem {
   min_qty: number;
   unit_cost: number;
   product_id: string | null;   // liga produto acabado ao catalogo `products`
+  protocol_id: string | null;  // ou ao catalogo `protocols` (Dados da Clinica) — exclusivo com product_id
   location: string | null;
   is_active: boolean;
   notes: string | null;

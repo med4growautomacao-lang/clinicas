@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import {
-  useInventoryItems, useInventoryMovements, useProductBom,
+  useInventoryItems, useInventoryMovements, useProductBom, useProducts, useProtocols,
   InventoryItem, InventoryKind, INVENTORY_KIND_LABEL,
 } from "../../hooks/useSupabase";
 import { useToast } from "../ui/toast";
@@ -210,6 +210,8 @@ function ItemModal({
   onClose: () => void;
   onSave: (input: Partial<InventoryItem>, id?: string) => Promise<InventoryItem | null>;
 }) {
+  const { data: products } = useProducts();
+  const { data: protocols } = useProtocols();
   const [form, setForm] = useState({
     kind: (item?.kind ?? "materia_prima") as InventoryKind,
     name: item?.name ?? "",
@@ -221,20 +223,39 @@ function ItemModal({
     location: item?.location ?? "",
     is_active: item?.is_active ?? true,
     notes: item?.notes ?? "",
+    product_id: (item?.product_id ?? null) as string | null,
+    protocol_id: (item?.protocol_id ?? null) as string | null,
   });
   // O item pode passar a existir apos salvar (para liberar a ficha tecnica sem fechar).
   const [savedId, setSavedId] = useState<string | null>(item?.id ?? null);
   const [saving, setSaving] = useState(false);
   const set = (patch: Partial<typeof form>) => setForm(f => ({ ...f, ...patch }));
 
+  // Vinculo com o catalogo de Dados da Clinica (produtos OU protocolos, exclusivo).
+  const linkKey = form.product_id ? `p:${form.product_id}` : form.protocol_id ? `t:${form.protocol_id}` : "";
+  const onLink = (val: string) => {
+    if (!val) { set({ product_id: null, protocol_id: null }); return; }
+    if (val.startsWith("p:")) {
+      const p = products.find(x => x.id === val.slice(2));
+      if (p) set({ product_id: p.id, protocol_id: null, name: p.name, unit: p.unit || "un" });
+    } else {
+      const t = protocols.find(x => x.id === val.slice(2));
+      if (t) set({ protocol_id: t.id, product_id: null, name: t.name, unit: "serviço" });
+    }
+  };
+
   const save = async () => {
     if (!form.name.trim()) return;
     setSaving(true);
+    const isFinished = form.kind === "produto_acabado";
     const input: Partial<InventoryItem> = {
       kind: form.kind, name: form.name.trim(), sku: form.sku.trim() || null,
       category: form.category.trim() || null, unit: form.unit.trim() || "un",
       min_qty: Number(form.min_qty) || 0, unit_cost: Number(form.unit_cost) || 0,
       location: form.location.trim() || null, is_active: form.is_active, notes: form.notes.trim() || null,
+      // Vinculo com catalogo so faz sentido para produto acabado.
+      product_id: isFinished ? form.product_id : null,
+      protocol_id: isFinished ? form.protocol_id : null,
     };
     const created = await onSave(input, savedId ?? undefined);
     if (created) setSavedId(created.id);
@@ -262,6 +283,24 @@ function ItemModal({
               <option value="insumo">Insumo</option>
             </select>
           </Field>
+          {form.kind === "produto_acabado" && (
+            <Field label="Puxar de cadastro (Dados da Clínica)">
+              <select className={inputCls} value={linkKey} onChange={e => onLink(e.target.value)}>
+                <option value="">Avulso (sem vínculo)</option>
+                {products.filter(p => p.is_active || p.id === form.product_id).length > 0 && (
+                  <optgroup label="Produtos">
+                    {products.filter(p => p.is_active || p.id === form.product_id).map(p => <option key={p.id} value={`p:${p.id}`}>{p.name}</option>)}
+                  </optgroup>
+                )}
+                {protocols.filter(t => t.is_active || t.id === form.protocol_id).length > 0 && (
+                  <optgroup label="Protocolos">
+                    {protocols.filter(t => t.is_active || t.id === form.protocol_id).map(t => <option key={t.id} value={`t:${t.id}`}>{t.name}</option>)}
+                  </optgroup>
+                )}
+              </select>
+              {linkKey && <p className="text-[11px] font-semibold text-emerald-600 mt-1">Vinculado ao catálogo — nome e unidade puxados. As OPs geradas do orçamento caem neste item.</p>}
+            </Field>
+          )}
           <Field label="Nome"><input className={inputCls} value={form.name} onChange={e => set({ name: e.target.value })} placeholder="Ex: Arame galvanizado 12" autoFocus /></Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Unidade"><input className={inputCls} value={form.unit} onChange={e => set({ unit: e.target.value })} placeholder="un, kg, m, m²…" /></Field>

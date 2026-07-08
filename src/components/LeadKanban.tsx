@@ -2072,16 +2072,23 @@ function ProductionOrderModal({ lead, quoteData, ticketId, onClose }: {
   // do orçamento para o item de estoque (produto acabado) quando existe vínculo.
   const handleGenerateOP = async () => {
     if (genBusy) return;
-    // Mapa: products.id -> inventory_item (produto acabado vinculado ao catálogo).
+    // Mapas: products.id / protocols.id -> inventory_item (produto acabado vinculado ao catálogo).
     const invByProductId = new Map(
       inventoryItems.filter(i => i.product_id).map(i => [i.product_id as string, i]),
+    );
+    const invByProtocolId = new Map(
+      inventoryItems.filter(i => i.protocol_id).map(i => [i.protocol_id as string, i]),
     );
     const toGenerate = prodItems.filter((_, i) => itemState[i] ? itemState[i].include : true);
     if (toGenerate.length === 0) { showToast('Nenhum item selecionado para produção.', 'error'); return; }
     setGenBusy(true);
     const numbers: number[] = [];
     for (const it of toGenerate) {
-      const invItem = it.productKey.startsWith('p:') ? invByProductId.get(it.productKey.slice(2)) : undefined;
+      const invItem = it.productKey.startsWith('p:')
+        ? invByProductId.get(it.productKey.slice(2))
+        : it.productKey.startsWith('t:')
+        ? invByProtocolId.get(it.productKey.slice(2))
+        : undefined;
       const created = await createOP({
         product_item_id: invItem?.id ?? null,
         product_label: it.name,

@@ -90,7 +90,8 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
     { id: "medical-records", label: "Prontuários", icon: ClipboardList, color: "text-slate-700", roles: ['medico', 'medico_gestor'], clinicOnly: true },
     { id: "doctors", label: "Corpo Clínico", icon: Users, color: "text-emerald-800", roles: ['gestor', 'medico_gestor'], clinicOnly: true },
     { id: "team", label: "Equipe", icon: Users, color: "text-indigo-600", roles: ['gestor', 'medico_gestor'] },
-    { id: "finance", label: "Financeiro", icon: CircleDollarSign, color: "text-emerald-700", roles: ['gestor', 'medico_gestor', 'secretaria', 'vendedor'] },
+    // Financeiro DESATIVADO por enquanto (jul/2026) — reativar removendo o comentário desta linha.
+    // { id: "finance", label: "Financeiro", icon: CircleDollarSign, color: "text-emerald-700", roles: ['gestor', 'medico_gestor', 'secretaria', 'vendedor'] },
     { id: "settings", label: "Configurações", icon: Settings, color: "text-slate-500", roles: ['gestor', 'medico_gestor', 'secretaria', 'vendedor'] },
     { id: "super-admin", label: "Super Admin", icon: ShieldCheck, color: "text-orange-600", roles: ['super-admin'] },
     { id: "org-admin", label: "Organização", icon: Activity, color: "text-violet-600", roles: ['org_owner', 'org_admin', 'org_team'] },

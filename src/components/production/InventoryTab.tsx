@@ -2,12 +2,12 @@ import React, { useMemo, useState } from "react";
 import { AnimatePresence } from "framer-motion";
 import {
   Plus, Package, ArrowDownUp, Pencil, Trash2, ScrollText, Boxes,
-  AlertTriangle, Layers, FileStack, Factory, X,
+  AlertTriangle, Layers, FileStack, Factory, X, ChevronRight, ChevronDown,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { supabase } from "../../lib/supabase";
 import {
-  useInventoryItems, useInventoryMovements, useProductBom, useProducts, useProtocols, useResponsibles,
+  useInventoryItems, useInventoryMovements, useProductBom, useProducts, useProtocols, useResponsibles, useStockByAltura,
   InventoryItem, InventoryKind, INVENTORY_KIND_LABEL,
 } from "../../hooks/useSupabase";
 import { useToast } from "../ui/toast";
@@ -24,6 +24,13 @@ export function InventoryTab() {
   const showToast = useToast();
   const { data: items, loading, create, update, remove, refetch, lowStock, totalValue } = useInventoryItems();
   const { register } = useInventoryMovements(null);
+  const { byItem: alturaByItem } = useStockByAltura();
+  const [expandedAltura, setExpandedAltura] = useState<Set<string>>(new Set());
+  const toggleExpand = (id: string) => setExpandedAltura(prev => {
+    const n = new Set(prev);
+    if (n.has(id)) n.delete(id); else n.add(id);
+    return n;
+  });
 
   const [kindFilter, setKindFilter] = useState<InventoryKind | "todos">("todos");
   const [itemModal, setItemModal] = useState<{ item: InventoryItem | null } | null>(null);
@@ -102,14 +109,22 @@ export function InventoryTab() {
               <tbody>
                 {filtered.map(it => {
                   const low = Number(it.min_qty) > 0 && Number(it.current_qty) <= Number(it.min_qty);
+                  const alturas = it.kind === "produto_acabado" ? (alturaByItem.get(it.id) ?? []) : [];
+                  const isOpen = expandedAltura.has(it.id);
                   return (
-                    <tr key={it.id} className="border-t border-slate-100 hover:bg-slate-50/60 group">
+                    <React.Fragment key={it.id}>
+                    <tr className="border-t border-slate-100 hover:bg-slate-50/60 group">
                       <td className="px-4 py-3">
-                        <div className="font-bold text-slate-800 flex items-center gap-2">
+                        <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                          {alturas.length > 0 ? (
+                            <button onClick={() => toggleExpand(it.id)} className="p-0.5 -ml-1 text-slate-400 hover:text-slate-700 rounded" title={isOpen ? "Ocultar alturas" : "Ver alturas"}>
+                              {isOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                            </button>
+                          ) : it.kind === "produto_acabado" ? <span className="inline-block w-4" /> : null}
                           {it.name}
                           {!it.is_active && <StatusBadge label="inativo" tone="slate" />}
                         </div>
-                        <div className="text-xs text-slate-400">
+                        <div className={cn("text-xs text-slate-400", it.kind === "produto_acabado" && "pl-5")}>
                           {[it.sku, it.category, it.location].filter(Boolean).join(" · ") || "—"}
                         </div>
                       </td>
@@ -133,6 +148,22 @@ export function InventoryTab() {
                         </div>
                       </td>
                     </tr>
+                    {isOpen && alturas.map(a => (
+                      <tr key={`${it.id}-${a.altura}`} className="bg-slate-50/50 border-t border-slate-100/60">
+                        <td className="px-4 py-1.5 pl-12">
+                          <span className="text-xs font-bold text-slate-500">Altura {fmtQty(a.altura)} m</span>
+                        </td>
+                        <td className="px-4 py-1.5 text-[11px] text-slate-400">subproduto</td>
+                        <td className="px-4 py-1.5 text-right tabular-nums text-slate-700 font-semibold">
+                          {fmtQty(a.qty)} <span className="text-xs font-medium text-slate-400">m²</span>
+                        </td>
+                        <td colSpan={3} className="px-4 py-1.5 text-right text-xs text-slate-400">
+                          {a.altura > 0 ? `${fmtQty(a.qty / a.altura)} m lineares` : ""}
+                        </td>
+                        <td className="px-4 py-1.5"></td>
+                      </tr>
+                    ))}
+                    </React.Fragment>
                   );
                 })}
               </tbody>
@@ -673,17 +704,14 @@ function RegisterProductionModal({ item, items, onClose, onDone }: {
   const showToast = useToast();
   const { data: bom } = useProductBom(item.id);
   const itemById = useMemo(() => new Map(items.map(i => [i.id, i])), [items]);
-  const [mode, setMode] = useState<"m2" | "medidas">("m2");
-  const [m2, setM2] = useState<number>(0);
-  const [altM2, setAltM2] = useState<number>(0);   // altura quando informa em m² direto
   const [comp, setComp] = useState<number>(0);
   const [alt, setAlt] = useState<number>(0);
   const [pcs, setPcs] = useState<number>(1);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const produced = mode === "m2" ? Number(m2) : (Number(comp) * Number(alt) * Number(pcs));
-  const efAltura = mode === "m2" ? Number(altM2) : Number(alt);
+  const produced = Number(comp) * Number(alt) * Number(pcs);
+  const efAltura = Number(alt);
   const rows = bom.map(b => {
     const mat = itemById.get(b.material_item_id);
     const need = Number(b.qty_per_unit) * produced;
@@ -718,37 +746,17 @@ function RegisterProductionModal({ item, items, onClose, onDone }: {
         <Button size="sm" onClick={submit} disabled={saving || produced <= 0}>{saving ? "Registrando…" : "Registrar e baixar estoque"}</Button>
       </>}
     >
-      <div className="flex bg-slate-100 rounded-xl p-1 mb-4">
-        {(["m2", "medidas"] as const).map(m => (
-          <button key={m} onClick={() => setMode(m)}
-            className={cn("flex-1 py-1.5 rounded-lg text-sm font-bold transition-all", mode === m ? "bg-white shadow-sm text-slate-900" : "text-slate-500")}>
-            {m === "m2" ? "Informar m²" : "Calcular por medidas"}
-          </button>
-        ))}
+      <div className="space-y-3">
+        <div className="grid grid-cols-3 gap-3">
+          <Field label="Comprimento (m)"><input type="number" min={0} step="any" className={inputCls} value={comp} onChange={e => setComp(parseFloat(e.target.value) || 0)} autoFocus /></Field>
+          <Field label="Altura (m)"><input type="number" min={0} step="any" className={inputCls} value={alt} onChange={e => setAlt(parseFloat(e.target.value) || 0)} /></Field>
+          <Field label="Peças"><input type="number" min={1} step="1" className={inputCls} value={pcs} onChange={e => setPcs(parseFloat(e.target.value) || 0)} /></Field>
+        </div>
+        <div className="flex items-center justify-between bg-slate-50 rounded-xl px-4 py-2.5 text-sm">
+          <span className="font-semibold text-slate-500">Total produzido</span>
+          <span className="font-black text-slate-900 tabular-nums">{fmtQty(produced)} {item.unit}</span>
+        </div>
       </div>
-
-      {mode === "m2" ? (
-        <div className="grid grid-cols-2 gap-3">
-          <Field label={`Quantidade produzida (${item.unit})`}>
-            <input type="number" min={0} step="any" className={inputCls} value={m2} onChange={e => setM2(parseFloat(e.target.value) || 0)} autoFocus />
-          </Field>
-          <Field label="Altura (m)">
-            <input type="number" min={0} step="any" className={inputCls} value={altM2} onChange={e => setAltM2(parseFloat(e.target.value) || 0)} placeholder="ex.: 1,5" />
-          </Field>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <div className="grid grid-cols-3 gap-3">
-            <Field label="Comprimento (m)"><input type="number" min={0} step="any" className={inputCls} value={comp} onChange={e => setComp(parseFloat(e.target.value) || 0)} autoFocus /></Field>
-            <Field label="Altura (m)"><input type="number" min={0} step="any" className={inputCls} value={alt} onChange={e => setAlt(parseFloat(e.target.value) || 0)} /></Field>
-            <Field label="Peças"><input type="number" min={1} step="1" className={inputCls} value={pcs} onChange={e => setPcs(parseFloat(e.target.value) || 0)} /></Field>
-          </div>
-          <div className="flex items-center justify-between bg-slate-50 rounded-xl px-4 py-2.5 text-sm">
-            <span className="font-semibold text-slate-500">Total produzido</span>
-            <span className="font-black text-slate-900 tabular-nums">{fmtQty(produced)} {item.unit}</span>
-          </div>
-        </div>
-      )}
 
       <div className="mt-4">
         <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Baixa de matéria-prima</p>

@@ -3208,6 +3208,49 @@ export function useInventoryMovements(itemId?: string | null) {
   return { data, loading, register, refetch: fetch };
 }
 
+// Saldo por (item, altura) da view vw_inventory_stock_by_altura, agrupado por item.
+// Alimenta a exibicao da altura como "subproduto" na lista de estoque (só saldo > 0).
+export interface StockByAltura { item_id: string; altura: number; qty: number; }
+
+export function useStockByAltura() {
+  const { activeClinicId } = useAuth();
+  const [data, setData] = useState<StockByAltura[]>([]);
+
+  const fetch = useCallback(async () => {
+    if (!activeClinicId) { setData([]); return; }
+    const { data } = await supabase
+      .from('vw_inventory_stock_by_altura')
+      .select('item_id, altura, qty')
+      .eq('clinic_id', activeClinicId);
+    setData((data as StockByAltura[]) || []);
+  }, [activeClinicId]);
+
+  useEffect(() => {
+    fetch();
+    if (!activeClinicId) return;
+    const channel = supabase
+      .channel(`stock_altura_${activeClinicId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_movements', filter: `clinic_id=eq.${activeClinicId}` }, () => fetch())
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [fetch, activeClinicId]);
+
+  // item_id -> [{altura, qty}] com saldo > 0, ordenado por altura.
+  const byItem = useMemo(() => {
+    const m = new Map<string, { altura: number; qty: number }[]>();
+    for (const r of data) {
+      if (Number(r.qty) <= 0) continue;
+      const arr = m.get(r.item_id) || [];
+      arr.push({ altura: Number(r.altura), qty: Number(r.qty) });
+      m.set(r.item_id, arr);
+    }
+    for (const arr of m.values()) arr.sort((a, b) => a.altura - b.altura);
+    return m;
+  }, [data]);
+
+  return { byItem, refetch: fetch };
+}
+
 // Cadastro de responsaveis (por clinica) para o seletor das movimentacoes de estoque.
 export interface Responsible {
   id: string;

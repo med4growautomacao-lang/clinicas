@@ -6,7 +6,7 @@ import { DateRangePicker } from "./DateRangePicker";
 import {
   Loader2, Building2, Users, CalendarCheck, Trophy, Wallet, Megaphone,
   ArrowUp, ArrowDown, ChevronDown, Check, Search, Percent, TrendingUp,
-  DollarSign, Target, XCircle, SlidersHorizontal,
+  DollarSign, Target, XCircle, SlidersHorizontal, Coins, CalendarClock,
 } from "lucide-react";
 
 interface ClinicMetricRow {
@@ -73,6 +73,8 @@ const METRICS: MetricDef[] = [
   { id: "investment",  label: "Investimento Geral (Google/Meta)", Icon: Megaphone,   color: "text-amber-600 bg-amber-50",     format: "currency", get: r => r.investment },
   { id: "roas",        label: "ROAS",                           Icon: TrendingUp,    color: "text-fuchsia-600 bg-fuchsia-50", format: "ratio",    get: r => r.investment > 0 ? r.revenue / r.investment : null },
   { id: "ticketMedio", label: "Ticket Médio",                   Icon: DollarSign,    color: "text-blue-600 bg-blue-50",       format: "currency", get: r => r.ticketMedio },
+  { id: "cpl",         label: "Custo por Lead",                 Icon: Coins,         color: "text-cyan-600 bg-cyan-50",       format: "currency", get: r => r.leads > 0 ? r.investment / r.leads : null },
+  { id: "custoAgendamento", label: "Custo por Agendamento",     Icon: CalendarClock, color: "text-lime-600 bg-lime-50",       format: "currency", get: r => r.patientsCaptured > 0 ? r.investment / r.patientsCaptured : null },
   { id: "cpa",         label: "Custo por Conversão",            Icon: Target,        color: "text-orange-600 bg-orange-50",   format: "currency", get: r => r.sales > 0 ? r.investment / r.sales : null },
 ];
 

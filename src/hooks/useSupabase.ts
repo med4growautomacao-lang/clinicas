@@ -2557,6 +2557,13 @@ export function useConversions() {
     return !error;
   };
 
+  const update = async (id: string, patch: Partial<Pick<Conversion, 'value' | 'description' | 'payment_method' | 'converted_at'>>) => {
+    setData(prev => prev.map(c => c.id === id ? { ...c, ...patch } : c));
+    const { error } = await supabase.from('conversions').update(patch).eq('id', id);
+    if (error) fetch();
+    return !error;
+  };
+
   // Agrupa por lead_id para uso no Kanban
   const byLead = data.reduce<Record<string, Conversion[]>>((acc, c) => {
     if (!acc[c.lead_id]) acc[c.lead_id] = [];
@@ -2564,7 +2571,7 @@ export function useConversions() {
     return acc;
   }, {});
 
-  return { data, loading, byLead, create, remove, refetch: fetch };
+  return { data, loading, byLead, create, remove, update, refetch: fetch };
 }
 
 // ==========================================

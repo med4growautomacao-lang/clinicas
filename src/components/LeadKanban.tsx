@@ -2563,7 +2563,7 @@ export function LeadKanban() {
   const { data: leads, create, createWithTicket, update, remove, markNotLead } = useLeads({ pageSize: 150 });
   const { data: notLeads, restore: restoreNotLead } = useNotLeads();
   const { tickets, loading: ticketsLoading, refetch: refetchTickets, moveTicket, reopenTicket, moveTicketKeepOutcome, openTicket, closeTicket, finalizeTicket } = useTickets();
-  const { byLead: conversionsByLead, create: createConversion } = useConversions();
+  const { byLead: conversionsByLead, create: createConversion, update: updateConversion } = useConversions();
   const { aiConfig, updateAI } = useSettings();
   const [ganhoLead, setGanhoLead] = useState<{ id: string; name: string; phone: string | null; patientId: string | null; prevStageId: string | null; ticketId: string } | null>(null);
   const [lossLead, setLossLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
@@ -2838,6 +2838,14 @@ export function LeadKanban() {
       if (selectedLead) {
         const ok = await update(selectedLead.id, payload);
         if (!ok) return;
+        // Se o lead já tem conversão (venda registrada), o card mostra o valor DA CONVERSÃO
+        // (tem prioridade sobre estimated_value). Então editar o valor precisa atualizar a
+        // conversão também — senão a edição não aparece no card.
+        const convs = conversionsByLead[selectedLead.id];
+        const lastConv = convs?.[convs.length - 1];
+        if (lastConv && payload.estimated_value !== Number(lastConv.value)) {
+          await updateConversion(lastConv.id, { value: payload.estimated_value });
+        }
         if (targetStageId && selectedLead._ticketId) {
           const openT = tickets.find(t => t.id === selectedLead._ticketId);
           if (openT && targetStageId !== openT.stage_id) {

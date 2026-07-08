@@ -324,7 +324,7 @@ function ItemModal({
         {form.kind === "produto_acabado" && (
           <div className="md:border-l md:border-slate-100 md:pl-4">
             {savedId ? (
-              <BomEditor productItemId={savedId} materials={allItems.filter(i => i.id !== savedId && i.kind !== "produto_acabado")} />
+              <BomEditor productItemId={savedId} productUnit={form.unit} materials={allItems.filter(i => i.id !== savedId && i.kind !== "produto_acabado")} />
             ) : (
               <div className="h-full flex flex-col items-center justify-center text-center text-sm text-slate-400 border border-dashed border-slate-200 rounded-xl p-6">
                 <FileStack className="w-8 h-8 mb-2 text-slate-300" />
@@ -339,20 +339,26 @@ function ItemModal({
 }
 
 // Ficha tecnica: linhas material x quantidade por unidade produzida.
-function BomEditor({ productItemId, materials }: { productItemId: string; materials: InventoryItem[] }) {
+// Para telas (produto em m²), o qty_per_unit e o kg/m² (media da fabrica): a media kg/m²
+// x preco/kg da materia-prima da o custo de material por m².
+function BomEditor({ productItemId, productUnit, materials }: { productItemId: string; productUnit: string; materials: InventoryItem[] }) {
   const { data: bom, add, update, remove } = useProductBom(productItemId);
   const [pick, setPick] = useState("");
   const [qty, setQty] = useState<number>(1);
+  const unit = productUnit || "un";
 
   const available = materials.filter(m => !bom.some(b => b.material_item_id === m.id));
+  const matById = useMemo(() => new Map(materials.map(m => [m.id, m])), [materials]);
+  // Custo de material por unidade de produto = Σ (kg/unidade × preço/kg).
+  const costPerUnit = bom.reduce((s, b) => s + Number(b.qty_per_unit) * Number(matById.get(b.material_item_id)?.unit_cost ?? 0), 0);
 
   return (
     <div>
-      <div className="flex items-center gap-2 mb-3">
+      <div className="flex items-center gap-2 mb-1">
         <FileStack className="w-4 h-4 text-teal-600" />
         <h4 className="text-sm font-black text-slate-800">Ficha técnica</h4>
       </div>
-      <p className="text-xs text-slate-400 mb-3">Consumo de matéria-prima por 1 unidade produzida. Ao concluir uma OP deste produto, a baixa é automática.</p>
+      <p className="text-xs text-slate-400 mb-3">Consumo de matéria-prima por <b className="text-slate-500">1 {unit}</b> produzido. Ex.: tela em m² → informe o <b className="text-slate-500">kg/{unit}</b> do arame. Concluir a OP baixa o estoque automaticamente.</p>
 
       <div className="space-y-2 mb-3">
         {bom.length === 0 && <p className="text-xs text-slate-400 italic">Sem ficha técnica — a baixa será manual.</p>}
@@ -365,23 +371,33 @@ function BomEditor({ productItemId, materials }: { productItemId: string; materi
               value={b.qty_per_unit}
               onChange={e => update(b.id, parseFloat(e.target.value) || 0)}
             />
-            <span className="text-xs text-slate-400 w-8">{b.material?.unit}</span>
+            <span className="text-xs text-slate-400 whitespace-nowrap w-14">{b.material?.unit ?? ""}/{unit}</span>
             <button onClick={() => remove(b.id)} className="p-1 text-slate-400 hover:text-rose-600"><Trash2 className="w-4 h-4" /></button>
           </div>
         ))}
       </div>
 
       {available.length > 0 ? (
-        <div className="flex items-center gap-2">
-          <select className={cn(inputCls, "flex-1")} value={pick} onChange={e => setPick(e.target.value)}>
-            <option value="">Adicionar matéria-prima…</option>
-            {available.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </select>
-          <input type="number" min={0} step="any" className="w-20 px-2 py-2 text-sm text-right bg-slate-50 border border-slate-200 rounded-xl" value={qty} onChange={e => setQty(parseFloat(e.target.value) || 0)} />
-          <Button size="sm" variant="secondary" disabled={!pick || qty <= 0} onClick={async () => { await add(pick, qty); setPick(""); setQty(1); }}>Add</Button>
-        </div>
+        <>
+          <div className="flex items-center gap-2">
+            <select className={cn(inputCls, "flex-1")} value={pick} onChange={e => setPick(e.target.value)}>
+              <option value="">Adicionar matéria-prima…</option>
+              {available.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+            <input type="number" min={0} step="any" title={`Quantidade por ${unit}`} className="w-20 px-2 py-2 text-sm text-right bg-slate-50 border border-slate-200 rounded-xl" value={qty} onChange={e => setQty(parseFloat(e.target.value) || 0)} />
+            <Button size="sm" variant="secondary" disabled={!pick || qty <= 0} onClick={async () => { await add(pick, qty); setPick(""); setQty(1); }}>Add</Button>
+          </div>
+          <p className="text-[11px] text-slate-400 mt-1">Quantidade de matéria-prima por <b className="text-slate-500">1 {unit}</b> produzido (ex.: <b className="text-slate-500">kg/{unit}</b>).</p>
+        </>
       ) : (
-        <p className="text-xs text-slate-400 italic">Cadastre matérias-primas para compor a ficha.</p>
+        <p className="text-xs text-slate-400 italic">Cadastre matérias-primas (em kg) para compor a ficha.</p>
+      )}
+
+      {costPerUnit > 0 && (
+        <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100">
+          <span className="text-sm font-semibold text-slate-500">Custo de material</span>
+          <span className="text-sm font-black text-slate-800">{fmtBRL(costPerUnit)}/{unit}</span>
+        </div>
       )}
     </div>
   );

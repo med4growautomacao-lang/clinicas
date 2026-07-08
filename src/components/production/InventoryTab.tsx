@@ -427,11 +427,12 @@ function MovementModal({
 }: {
   item: InventoryItem;
   onClose: () => void;
-  onSubmit: (mov: { item_id: string; type: "entrada" | "saida"; qty: number; unit_cost?: number | null; reason?: string | null; notes?: string | null }) => Promise<void>;
+  onSubmit: (mov: { item_id: string; type: "entrada" | "saida"; qty: number; unit_cost?: number | null; reason?: string | null; responsavel?: string | null; notes?: string | null }) => Promise<void>;
 }) {
   const [kind, setKind] = useState<MovKind>("entrada");
   const [qty, setQty] = useState<number>(0);       // entrada/saida: quantidade; ajuste: saldo alvo
   const [reason, setReason] = useState("");
+  const [responsavel, setResponsavel] = useState("");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   // Telas (m²): permite informar por medidas (comprimento × altura × peças).
@@ -459,6 +460,7 @@ function MovementModal({
       type: moveType,
       qty: moveQty,
       reason: (reason.trim() || (kind === "ajuste" ? "ajuste" : null)),
+      responsavel: responsavel.trim() || null,
       notes: notes.trim() || null,
     });
     setSaving(false);
@@ -521,6 +523,9 @@ function MovementModal({
           <input className={inputCls} value={reason} onChange={e => setReason(e.target.value)}
             placeholder={kind === "entrada" ? "compra, devolução…" : kind === "saida" ? "venda, perda, consumo…" : "contagem de inventário"} />
         </Field>
+        <Field label="Responsável">
+          <input className={inputCls} value={responsavel} onChange={e => setResponsavel(e.target.value)} placeholder="Quem fez a movimentação" />
+        </Field>
         <Field label="Observações"><textarea className={cn(inputCls, "min-h-[56px] resize-y")} value={notes} onChange={e => setNotes(e.target.value)} /></Field>
 
         <div className="flex items-center justify-between bg-slate-50 rounded-xl px-4 py-3 text-sm">
@@ -556,6 +561,7 @@ function ExtratoModal({ item, onClose }: { item: InventoryItem; onClose: () => v
                 <th className="text-left py-2">Tipo</th>
                 <th className="text-right py-2">Qtd</th>
                 <th className="text-left py-2 pl-4">Motivo</th>
+                <th className="text-left py-2 pl-4">Responsável</th>
               </tr>
             </thead>
             <tbody>
@@ -567,6 +573,7 @@ function ExtratoModal({ item, onClose }: { item: InventoryItem; onClose: () => v
                     {m.type === "entrada" ? "+" : "−"}{fmtQty(m.qty)} {item.unit}
                   </td>
                   <td className="py-2 pl-4 text-slate-600">{[m.reason, m.notes].filter(Boolean).join(" — ") || "—"}</td>
+                  <td className="py-2 pl-4 text-slate-600">{m.responsavel || "—"}</td>
                 </tr>
               ))}
             </tbody>

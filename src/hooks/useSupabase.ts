@@ -3149,6 +3149,7 @@ export interface InventoryMovement {
   qty: number;
   unit_cost: number | null;
   reason: string | null;
+  responsavel: string | null;
   production_order_id: string | null;
   maintenance_order_id: string | null;
   notes: string | null;
@@ -3185,6 +3186,7 @@ export function useInventoryMovements(itemId?: string | null) {
     qty: number;
     unit_cost?: number | null;
     reason?: string | null;
+    responsavel?: string | null;
     notes?: string | null;
     production_order_id?: string | null;
     maintenance_order_id?: string | null;

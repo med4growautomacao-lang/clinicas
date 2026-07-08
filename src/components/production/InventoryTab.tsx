@@ -427,7 +427,7 @@ function MovementModal({
 }: {
   item: InventoryItem;
   onClose: () => void;
-  onSubmit: (mov: { item_id: string; type: "entrada" | "saida"; qty: number; unit_cost?: number | null; reason?: string | null; responsavel?: string | null; notes?: string | null }) => Promise<void>;
+  onSubmit: (mov: { item_id: string; type: "entrada" | "saida"; qty: number; unit_cost?: number | null; reason?: string | null; responsavel?: string | null; altura?: number | null; notes?: string | null }) => Promise<void>;
 }) {
   const { data: responsibles, add: addResponsible } = useResponsibles();
   const [kind, setKind] = useState<MovKind>("entrada");
@@ -453,8 +453,10 @@ function MovementModal({
   const [comp, setComp] = useState<number>(0);
   const [alt, setAlt] = useState<number>(0);
   const [pcs, setPcs] = useState<number>(1);
+  const [alturaOnly, setAlturaOnly] = useState<number>(0);  // altura quando informa em m² direto
   const byMedidas = isArea && mode === "medidas";
   const q = byMedidas ? Number(comp) * Number(alt) * Number(pcs) : Number(qty);
+  const efAltura = isArea ? (byMedidas ? Number(alt) : Number(alturaOnly)) : 0;
 
   const current = Number(item.current_qty);
   const delta = kind === "ajuste" ? q - current : (kind === "entrada" ? q : -q);
@@ -473,6 +475,7 @@ function MovementModal({
       qty: moveQty,
       reason: (reason.trim() || (kind === "ajuste" ? "ajuste" : null)),
       responsavel: responsavel.trim() || null,
+      altura: (isArea && efAltura > 0) ? efAltura : null,
       notes: notes.trim() || null,
     });
     setSaving(false);
@@ -526,6 +529,15 @@ function MovementModal({
               <span className="font-black text-slate-900 tabular-nums">{fmtQty(q)} {item.unit}</span>
             </div>
           </>
+        ) : isArea ? (
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={kind === "ajuste" ? `Saldo (${item.unit})` : `Quantidade (${item.unit})`}>
+              <input type="number" min={0} step="any" className={inputCls} value={qty} onChange={e => setQty(parseFloat(e.target.value) || 0)} autoFocus />
+            </Field>
+            <Field label="Altura (m)">
+              <input type="number" min={0} step="any" className={inputCls} value={alturaOnly} onChange={e => setAlturaOnly(parseFloat(e.target.value) || 0)} placeholder="ex.: 1,5" />
+            </Field>
+          </div>
         ) : (
           <Field label={kind === "ajuste" ? `Saldo real contado (${item.unit})` : `Quantidade (${item.unit})`}>
             <input type="number" min={0} step="any" className={inputCls} value={qty} onChange={e => setQty(parseFloat(e.target.value) || 0)} autoFocus />
@@ -579,6 +591,18 @@ function MovementModal({
 // ---------------------------------------------------------------------------
 function ExtratoModal({ item, onClose }: { item: InventoryItem; onClose: () => void }) {
   const { data: movs, loading } = useInventoryMovements(item.id);
+
+  // Saldo por altura (soma das movimentações com altura, m² e metros lineares).
+  const byAltura = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const m of movs) {
+      if (m.altura == null) continue;
+      const a = Number(m.altura);
+      map.set(a, (map.get(a) ?? 0) + (m.type === "entrada" ? 1 : -1) * Number(m.qty));
+    }
+    return Array.from(map.entries()).map(([altura, qty]) => ({ altura, qty })).sort((x, y) => x.altura - y.altura);
+  }, [movs]);
+
   return (
     <Modal title="Extrato de movimentações" subtitle={item.name} onClose={onClose} wide>
       {loading ? (
@@ -586,32 +610,50 @@ function ExtratoModal({ item, onClose }: { item: InventoryItem; onClose: () => v
       ) : movs.length === 0 ? (
         <EmptyState icon={<ScrollText className="w-7 h-7" />} title="Sem movimentações" />
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-[11px] uppercase tracking-wide text-slate-400 font-bold">
-                <th className="text-left py-2">Data</th>
-                <th className="text-left py-2">Tipo</th>
-                <th className="text-right py-2">Qtd</th>
-                <th className="text-left py-2 pl-4">Motivo</th>
-                <th className="text-left py-2 pl-4">Responsável</th>
-              </tr>
-            </thead>
-            <tbody>
-              {movs.map(m => (
-                <tr key={m.id} className="border-t border-slate-100">
-                  <td className="py-2 text-slate-500 whitespace-nowrap">{new Date(m.created_at).toLocaleString("pt-BR")}</td>
-                  <td className="py-2"><StatusBadge label={m.type === "entrada" ? "Entrada" : "Saída"} tone={m.type === "entrada" ? "emerald" : "rose"} /></td>
-                  <td className={cn("py-2 text-right font-bold tabular-nums", m.type === "entrada" ? "text-emerald-600" : "text-rose-600")}>
-                    {m.type === "entrada" ? "+" : "−"}{fmtQty(m.qty)} {item.unit}
-                  </td>
-                  <td className="py-2 pl-4 text-slate-600">{[m.reason, m.notes].filter(Boolean).join(" — ") || "—"}</td>
-                  <td className="py-2 pl-4 text-slate-600">{m.responsavel || "—"}</td>
+        <>
+          {byAltura.length > 0 && (
+            <div className="mb-5">
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Estoque por altura</p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {byAltura.map(r => (
+                  <div key={r.altura} className={cn("rounded-xl px-3 py-2 border", r.qty < 0 ? "bg-rose-50 border-rose-200" : "bg-slate-50 border-slate-200")}>
+                    <div className="text-[11px] font-bold text-slate-400 uppercase">Altura {fmtQty(r.altura)} m</div>
+                    <div className={cn("text-lg font-black tabular-nums", r.qty < 0 ? "text-rose-600" : "text-slate-800")}>{fmtQty(r.qty)} m²</div>
+                    {r.altura > 0 && <div className="text-[11px] text-slate-400">{fmtQty(r.qty / r.altura)} m lineares</div>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-[11px] uppercase tracking-wide text-slate-400 font-bold">
+                  <th className="text-left py-2">Data</th>
+                  <th className="text-left py-2">Tipo</th>
+                  <th className="text-right py-2">Qtd</th>
+                  <th className="text-right py-2 pl-4">Altura</th>
+                  <th className="text-left py-2 pl-4">Motivo</th>
+                  <th className="text-left py-2 pl-4">Responsável</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {movs.map(m => (
+                  <tr key={m.id} className="border-t border-slate-100">
+                    <td className="py-2 text-slate-500 whitespace-nowrap">{new Date(m.created_at).toLocaleString("pt-BR")}</td>
+                    <td className="py-2"><StatusBadge label={m.type === "entrada" ? "Entrada" : "Saída"} tone={m.type === "entrada" ? "emerald" : "rose"} /></td>
+                    <td className={cn("py-2 text-right font-bold tabular-nums", m.type === "entrada" ? "text-emerald-600" : "text-rose-600")}>
+                      {m.type === "entrada" ? "+" : "−"}{fmtQty(m.qty)} {item.unit}
+                    </td>
+                    <td className="py-2 pl-4 text-right text-slate-500 tabular-nums">{m.altura != null ? `${fmtQty(m.altura)} m` : "—"}</td>
+                    <td className="py-2 pl-4 text-slate-600">{[m.reason, m.notes].filter(Boolean).join(" — ") || "—"}</td>
+                    <td className="py-2 pl-4 text-slate-600">{m.responsavel || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </Modal>
   );
@@ -633,6 +675,7 @@ function RegisterProductionModal({ item, items, onClose, onDone }: {
   const itemById = useMemo(() => new Map(items.map(i => [i.id, i])), [items]);
   const [mode, setMode] = useState<"m2" | "medidas">("m2");
   const [m2, setM2] = useState<number>(0);
+  const [altM2, setAltM2] = useState<number>(0);   // altura quando informa em m² direto
   const [comp, setComp] = useState<number>(0);
   const [alt, setAlt] = useState<number>(0);
   const [pcs, setPcs] = useState<number>(1);
@@ -640,6 +683,7 @@ function RegisterProductionModal({ item, items, onClose, onDone }: {
   const [saving, setSaving] = useState(false);
 
   const produced = mode === "m2" ? Number(m2) : (Number(comp) * Number(alt) * Number(pcs));
+  const efAltura = mode === "m2" ? Number(altM2) : Number(alt);
   const rows = bom.map(b => {
     const mat = itemById.get(b.material_item_id);
     const need = Number(b.qty_per_unit) * produced;
@@ -656,6 +700,7 @@ function RegisterProductionModal({ item, items, onClose, onDone }: {
       p_product_item_id: item.id,
       p_qty: produced,
       p_notes: notes.trim() || null,
+      p_altura: efAltura > 0 ? efAltura : null,
     });
     setSaving(false);
     if (error || !(data as any)?.success) { showToast("Erro ao registrar produção.", "error"); return; }
@@ -683,9 +728,14 @@ function RegisterProductionModal({ item, items, onClose, onDone }: {
       </div>
 
       {mode === "m2" ? (
-        <Field label={`Quantidade produzida (${item.unit})`}>
-          <input type="number" min={0} step="any" className={inputCls} value={m2} onChange={e => setM2(parseFloat(e.target.value) || 0)} autoFocus />
-        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label={`Quantidade produzida (${item.unit})`}>
+            <input type="number" min={0} step="any" className={inputCls} value={m2} onChange={e => setM2(parseFloat(e.target.value) || 0)} autoFocus />
+          </Field>
+          <Field label="Altura (m)">
+            <input type="number" min={0} step="any" className={inputCls} value={altM2} onChange={e => setAltM2(parseFloat(e.target.value) || 0)} placeholder="ex.: 1,5" />
+          </Field>
+        </div>
       ) : (
         <div className="space-y-3">
           <div className="grid grid-cols-3 gap-3">

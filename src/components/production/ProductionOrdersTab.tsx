@@ -134,8 +134,8 @@ export function ProductionOrdersTab() {
             order={completeOrder}
             items={items}
             onClose={() => setCompleteOrder(null)}
-            onConfirm={async (qty) => {
-              const res = await complete(completeOrder.id, qty);
+            onConfirm={async (qty, altura) => {
+              const res = await complete(completeOrder.id, qty, altura);
               if (res?.success) showToast((res as any).already_done ? "OP já estava concluída." : `OP #${completeOrder.number} concluída. Estoque atualizado.`, "success");
               else showToast("Erro ao concluir OP.", "error");
               setCompleteOrder(null);
@@ -169,7 +169,7 @@ function OrderCard({ o, onStart, onComplete, onEdit, onCancel }: {
       </div>
       <p className="font-bold text-slate-800 text-sm leading-snug">{productName}</p>
       <div className="text-xs text-slate-500 mt-1 space-y-0.5">
-        <div>Qtd: <span className="font-semibold text-slate-700">{fmtQty(o.qty_planned)} {unit}</span>{o.status === "concluida" && <span className="text-emerald-600"> · produzido {fmtQty(o.qty_produced)}</span>}</div>
+        <div>Qtd: <span className="font-semibold text-slate-700">{fmtQty(o.qty_planned)} {unit}</span>{o.altura ? <span className="text-slate-400"> · alt {fmtQty(o.altura)}m</span> : null}{o.status === "concluida" && <span className="text-emerald-600"> · produzido {fmtQty(o.qty_produced)}</span>}</div>
         {o.client_name && <div className="truncate">Cliente: {o.client_name}</div>}
         <div className={cn(late && "text-rose-600 font-semibold flex items-center gap-1")}>
           {late && <AlertTriangle className="w-3 h-3" />}
@@ -202,6 +202,7 @@ function OrderModal({ order, finished, onClose, onSave }: {
     product_item_id: order?.product_item_id ?? "",
     product_label: order?.product_label ?? "",
     qty_planned: order?.qty_planned ?? 1,
+    altura: order?.altura ?? 0,
     due_date: order?.due_date ?? "",
     priority: (order?.priority ?? "normal") as ProductionOrder["priority"],
     client_name: order?.client_name ?? "",
@@ -220,6 +221,7 @@ function OrderModal({ order, finished, onClose, onSave }: {
       product_item_id: freeText ? null : (form.product_item_id || null),
       product_label: freeText ? form.product_label.trim() : null,
       qty_planned: Number(form.qty_planned) || 0,
+      altura: Number(form.altura) || null,
       due_date: form.due_date || null,
       priority: form.priority,
       client_name: form.client_name.trim() || null,
@@ -252,9 +254,10 @@ function OrderModal({ order, finished, onClose, onSave }: {
           </button>
         </Field>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-3 gap-3">
           <Field label="Quantidade"><input type="number" min={0} step="any" className={inputCls} value={form.qty_planned} onChange={e => set({ qty_planned: parseFloat(e.target.value) || 0 })} /></Field>
-          <Field label="Prazo de entrega"><input type="date" className={inputCls} value={form.due_date} onChange={e => set({ due_date: e.target.value })} /></Field>
+          <Field label="Altura (m)"><input type="number" min={0} step="any" className={inputCls} value={form.altura} onChange={e => set({ altura: parseFloat(e.target.value) || 0 })} placeholder="telas" /></Field>
+          <Field label="Prazo"><input type="date" className={inputCls} value={form.due_date} onChange={e => set({ due_date: e.target.value })} /></Field>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Prioridade">
@@ -277,9 +280,10 @@ function CompleteModal({ order, items, onClose, onConfirm }: {
   order: ProductionOrder;
   items: InventoryItem[];
   onClose: () => void;
-  onConfirm: (qty: number) => Promise<void>;
+  onConfirm: (qty: number, altura?: number | null) => Promise<void>;
 }) {
   const [qty, setQty] = useState<number>(Number(order.qty_planned) || 0);
+  const [altura, setAltura] = useState<number>(Number(order.altura) || 0);
   const [saving, setSaving] = useState(false);
   const { data: bom } = useProductBom(order.product_item_id);
   const itemById = useMemo(() => new Map(items.map(i => [i.id, i])), [items]);
@@ -299,14 +303,19 @@ function CompleteModal({ order, items, onClose, onConfirm }: {
       onClose={onClose}
       footer={<>
         <Button variant="outline" size="sm" onClick={onClose}>Cancelar</Button>
-        <Button size="sm" onClick={async () => { setSaving(true); await onConfirm(qty); setSaving(false); }} disabled={saving || qty <= 0}>
+        <Button size="sm" onClick={async () => { setSaving(true); await onConfirm(qty, altura > 0 ? altura : null); setSaving(false); }} disabled={saving || qty <= 0}>
           {saving ? "Concluindo…" : "Concluir e baixar estoque"}
         </Button>
       </>}
     >
-      <Field label={`Quantidade produzida (${order.product?.unit ?? "un"})`}>
-        <input type="number" min={0} step="any" className={inputCls} value={qty} onChange={e => setQty(parseFloat(e.target.value) || 0)} autoFocus />
-      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label={`Quantidade produzida (${order.product?.unit ?? "un"})`}>
+          <input type="number" min={0} step="any" className={inputCls} value={qty} onChange={e => setQty(parseFloat(e.target.value) || 0)} autoFocus />
+        </Field>
+        <Field label="Altura (m)">
+          <input type="number" min={0} step="any" className={inputCls} value={altura} onChange={e => setAltura(parseFloat(e.target.value) || 0)} placeholder="telas" />
+        </Field>
+      </div>
 
       <div className="mt-4">
         <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Baixa de matéria-prima</p>

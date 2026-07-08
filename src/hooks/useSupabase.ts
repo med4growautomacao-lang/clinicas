@@ -3150,6 +3150,7 @@ export interface InventoryMovement {
   unit_cost: number | null;
   reason: string | null;
   responsavel: string | null;
+  altura: number | null;
   production_order_id: string | null;
   maintenance_order_id: string | null;
   notes: string | null;
@@ -3187,6 +3188,7 @@ export function useInventoryMovements(itemId?: string | null) {
     unit_cost?: number | null;
     reason?: string | null;
     responsavel?: string | null;
+    altura?: number | null;
     notes?: string | null;
     production_order_id?: string | null;
     maintenance_order_id?: string | null;
@@ -3329,6 +3331,7 @@ export interface ProductionOrder {
   product_label: string | null;
   qty_planned: number;
   qty_produced: number;
+  altura: number | null;
   status: ProductionStatus;
   priority: 'baixa' | 'normal' | 'alta';
   due_date: string | null;
@@ -3400,8 +3403,8 @@ export function useProductionOrders() {
   };
 
   // Conclui a OP: baixa materia-prima pela ficha tecnica e da entrada no produto acabado (RPC idempotente).
-  const complete = async (id: string, qtyProduced: number) => {
-    const { data: res, error } = await supabase.rpc('complete_production_order', { p_order_id: id, p_qty_produced: qtyProduced });
+  const complete = async (id: string, qtyProduced: number, altura?: number | null) => {
+    const { data: res, error } = await supabase.rpc('complete_production_order', { p_order_id: id, p_qty_produced: qtyProduced, p_altura: altura ?? null });
     await fetch(true);
     if (error) return { success: false, error: error.message };
     return res as { success: boolean; error_code?: string; already_done?: boolean };

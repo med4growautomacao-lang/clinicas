@@ -2059,9 +2059,10 @@ function ProductionOrderModal({ lead, quoteData, ticketId, onClose }: {
         value: lineValue(l),
         // Campos p/ gerar a OP rastreável (ignorados pelo documento).
         qtyNum: q,
+        alturaNum: area ? lineAlturaFor(true, it.attributes, l.altura) : 0,
         productKey: String(l.productId),
       };
-    }).filter(Boolean) as { name: string; attrs: { label: string; value: string }[]; comprimento: string; altura: string; qty: string; value: number; qtyNum: number; productKey: string }[];
+    }).filter(Boolean) as { name: string; attrs: { label: string; value: string }[]; comprimento: string; altura: string; qty: string; value: number; qtyNum: number; alturaNum: number; productKey: string }[];
   }, [quoteData, itemById]);
 
   // Seleção + edição por item antes de imprimir/baixar. Semeado 1x quando os itens carregam
@@ -2200,6 +2201,7 @@ function ProductionOrderModal({ lead, quoteData, ticketId, onClose }: {
         product_item_id: invItem?.id ?? null,
         product_label: it.name,
         qty_planned: it.qtyNum,
+        altura: it.alturaNum > 0 ? it.alturaNum : null,
         client_name: lead.name,
         ticket_id: ticketId ?? null,
         lead_id: lead.id,

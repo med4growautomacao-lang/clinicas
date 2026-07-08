@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { supabase } from "../lib/supabase";
 import { cn } from "@/src/lib/utils";
 import { matchesSearch } from "../lib/search";
+import { DateRangePicker } from "./DateRangePicker";
 import { Loader2, Building2, Users, CalendarCheck, Trophy, Wallet, Megaphone, ArrowUp, ArrowDown, ChevronDown, Check, Search } from "lucide-react";
 
 interface ClinicMetricRow {
@@ -18,38 +19,11 @@ interface ClinicMetricRow {
   investment: number;
 }
 
-type PeriodId = "this_month" | "last_7" | "last_30" | "last_month" | "last_90";
-
-const PERIODS: { id: PeriodId; label: string }[] = [
-  { id: "this_month", label: "Este mês" },
-  { id: "last_month", label: "Mês passado" },
-  { id: "last_7", label: "7 dias" },
-  { id: "last_30", label: "30 dias" },
-  { id: "last_90", label: "90 dias" },
-];
-
 function toISODate(d: Date) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
-}
-
-function periodRange(id: PeriodId): { from: string; to: string } {
-  const now = new Date();
-  if (id === "this_month") {
-    return { from: toISODate(new Date(now.getFullYear(), now.getMonth(), 1)), to: toISODate(now) };
-  }
-  if (id === "last_month") {
-    return {
-      from: toISODate(new Date(now.getFullYear(), now.getMonth() - 1, 1)),
-      to: toISODate(new Date(now.getFullYear(), now.getMonth(), 0)),
-    };
-  }
-  const days = id === "last_7" ? 7 : id === "last_30" ? 30 : 90;
-  const from = new Date(now);
-  from.setDate(from.getDate() - (days - 1));
-  return { from: toISODate(from), to: toISODate(now) };
 }
 
 function formatBRL(v: number) {
@@ -83,7 +57,8 @@ function metricValue(r: ClinicMetricRow, key: SortKey): number {
 export function OrgMetrics() {
   const [rows, setRows] = useState<ClinicMetricRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [period, setPeriod] = useState<PeriodId>("this_month");
+  const [dateFrom, setDateFrom] = useState(() => toISODate(new Date(new Date().getFullYear(), new Date().getMonth(), 1)));
+  const [dateTo, setDateTo] = useState(() => toISODate(new Date()));
   const [showInactive, setShowInactive] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("leads");
   const [sortDesc, setSortDesc] = useState(true);
@@ -109,10 +84,9 @@ export function OrgMetrics() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { from, to } = periodRange(period);
     const { data, error } = await supabase.rpc("get_org_clinics_metrics", {
-      p_date_from: from,
-      p_date_to: to,
+      p_date_from: dateFrom || null,
+      p_date_to: dateTo || null,
     });
     if (!error && Array.isArray(data)) {
       setRows((data as any[]).map(r => ({
@@ -130,7 +104,7 @@ export function OrgMetrics() {
       })));
     }
     setLoading(false);
-  }, [period]);
+  }, [dateFrom, dateTo]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -211,22 +185,13 @@ export function OrgMetrics() {
     <div className="flex flex-col gap-4">
       {/* Período + toggle inativas */}
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="flex bg-white p-1 rounded-xl border border-slate-200 gap-1 w-fit">
-          {PERIODS.map(p => (
-            <button
-              key={p.id}
-              onClick={() => setPeriod(p.id)}
-              className={cn(
-                "px-3.5 py-1.5 text-[11px] font-bold rounded-lg transition-all",
-                period === p.id
-                  ? "bg-violet-600 text-white shadow-sm"
-                  : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
-              )}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
+        <DateRangePicker
+          label="Período"
+          from={dateFrom}
+          to={dateTo}
+          onFromChange={setDateFrom}
+          onToChange={setDateTo}
+        />
         <div className="flex items-center gap-2">
           {/* Filtro de clientes */}
           <div className="relative" ref={clinicMenuRef}>

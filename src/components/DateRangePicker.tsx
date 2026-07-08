@@ -20,6 +20,7 @@ interface DateRangePickerProps {
 }
 
 const QUICK_OPTIONS = [
+  { id: "all",        label: "Todos" },
   { id: "today",      label: "Hoje" },
   { id: "yesterday",  label: "Ontem" },
   { id: "week",       label: "Esta Semana" },
@@ -85,7 +86,7 @@ export function DateRangePicker({
   const hasValue = !!(from || to);
 
   const displayText = () => {
-    if (activeLabel && (from || to)) return activeLabel;
+    if (activeLabel) return activeLabel;
     if (from && to) return `${format(parseISO(from), "dd/MM/yy")} — ${format(parseISO(to), "dd/MM/yy")}`;
     if (from) return `A partir de ${format(parseISO(from), "dd/MM/yy")}`;
     if (to)   return `Até ${format(parseISO(to), "dd/MM/yy")}`;
@@ -119,6 +120,13 @@ export function DateRangePicker({
   };
 
   const applyQuick = (id: string) => {
+    if (id === "all") {
+      onFromChange("");
+      onToChange("");
+      setActiveLabel("Todos");
+      setOpen(false);
+      return;
+    }
     const { from: f, to: t, label: l } = computeQuick(id);
     onFromChange(format(f, "yyyy-MM-dd"));
     onToChange(format(t,   "yyyy-MM-dd"));

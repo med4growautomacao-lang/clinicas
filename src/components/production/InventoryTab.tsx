@@ -22,9 +22,21 @@ const KIND_TONE: Record<InventoryKind, "amber" | "emerald" | "sky"> = {
 
 export function InventoryTab() {
   const showToast = useToast();
-  const { data: items, loading, create, update, remove, refetch, lowStock, totalValue } = useInventoryItems();
+  const { data: items, loading, create, update, remove, refetch, lowStock } = useInventoryItems();
   const { register } = useInventoryMovements(null);
   const { byItem: alturaByItem } = useStockByAltura();
+  const { data: products } = useProducts();
+  const { data: protocols } = useProtocols();
+
+  // Valor unitário do item: produto acabado puxa o preço do catálogo (Dados da Clínica) do
+  // produto/protocolo vinculado; demais itens usam o custo unitário cadastrado.
+  const productPrice = useMemo(() => new Map(products.map(p => [p.id, Number(p.unit_price)])), [products]);
+  const protocolPrice = useMemo(() => new Map(protocols.map(t => [t.id, Number(t.price ?? 0)])), [protocols]);
+  const unitValueOf = (it: InventoryItem) =>
+    it.product_id ? (productPrice.get(it.product_id) ?? 0)
+      : it.protocol_id ? (protocolPrice.get(it.protocol_id) ?? 0)
+        : Number(it.unit_cost);
+  const totalValue = items.reduce((s, it) => s + Number(it.current_qty) * unitValueOf(it), 0);
   const [expandedAltura, setExpandedAltura] = useState<Set<string>>(new Set());
   const toggleExpand = (id: string) => setExpandedAltura(prev => {
     const n = new Set(prev);
@@ -136,8 +148,8 @@ export function InventoryTab() {
                         {low && <AlertTriangle className="inline w-3.5 h-3.5 ml-1 -mt-0.5 text-rose-500" />}
                       </td>
                       <td className="px-4 py-3 text-right text-slate-400 tabular-nums">{Number(it.min_qty) > 0 ? fmtQty(it.min_qty) : "—"}</td>
-                      <td className="px-4 py-3 text-right text-slate-500 tabular-nums">{fmtBRL(it.unit_cost)}</td>
-                      <td className="px-4 py-3 text-right text-slate-700 font-semibold tabular-nums">{fmtBRL(Number(it.current_qty) * Number(it.unit_cost))}</td>
+                      <td className="px-4 py-3 text-right text-slate-500 tabular-nums">{fmtBRL(unitValueOf(it))}</td>
+                      <td className="px-4 py-3 text-right text-slate-700 font-semibold tabular-nums">{fmtBRL(Number(it.current_qty) * unitValueOf(it))}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           {it.kind === "produto_acabado" && (
@@ -157,11 +169,11 @@ export function InventoryTab() {
                         </td>
                         <td className="px-4 py-1.5 text-[11px] text-slate-400">subproduto</td>
                         <td className="px-4 py-1.5 text-right tabular-nums text-slate-700 font-semibold">
-                          {a.altura > 0 ? fmtQty(a.qty / a.altura) : fmtQty(a.qty)} <span className="text-xs font-medium text-slate-400">m</span>
+                          {a.altura > 0 ? fmtQty(a.qty / a.altura) : fmtQty(a.qty)} <span className="text-xs font-medium text-slate-400">metros lineares</span>
                         </td>
-                        <td colSpan={3} className="px-4 py-1.5 text-right text-xs text-slate-400">
-                          {fmtQty(a.qty)} m²
-                        </td>
+                        <td className="px-4 py-1.5"></td>
+                        <td className="px-4 py-1.5"></td>
+                        <td className="px-4 py-1.5 text-right text-slate-500 tabular-nums text-xs">{fmtBRL(a.qty * unitValueOf(it))}</td>
                         <td className="px-4 py-1.5"></td>
                       </tr>
                     ))}

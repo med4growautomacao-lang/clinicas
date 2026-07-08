@@ -156,7 +156,7 @@ export function InventoryTab() {
                         )}
                       </td>
                       <td className="px-4 py-3 text-right text-slate-400 tabular-nums">{Number(it.min_qty) > 0 ? fmtQty(it.min_qty) : "—"}</td>
-                      <td className="px-4 py-3 text-right text-slate-500 tabular-nums">{fmtBRL(unitValueOf(it))}</td>
+                      <td className="px-4 py-3 text-right text-slate-500 tabular-nums">{it.kind === "produto_acabado" ? "" : fmtBRL(unitValueOf(it))}</td>
                       <td className="px-4 py-3 text-right text-slate-700 font-semibold tabular-nums">{fmtBRL(Number(it.current_qty) * unitValueOf(it))}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -180,7 +180,7 @@ export function InventoryTab() {
                           {a.altura > 0 ? fmtQty(a.qty / a.altura) : fmtQty(a.qty)} <span className="text-xs font-medium text-slate-400">metros lineares</span>
                         </td>
                         <td className="px-4 py-1.5"></td>
-                        <td className="px-4 py-1.5"></td>
+                        <td className="px-4 py-1.5 text-right text-slate-500 tabular-nums text-xs">{fmtBRL(unitValueOf(it) * a.altura)}</td>
                         <td className="px-4 py-1.5 text-right text-slate-500 tabular-nums text-xs">{fmtBRL(a.qty * unitValueOf(it))}</td>
                         <td className="px-4 py-1.5"></td>
                       </tr>

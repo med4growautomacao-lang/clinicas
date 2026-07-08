@@ -13,10 +13,53 @@ const STATUS_LABEL: Record<string, string> = {
 
 const UAZAPI_BASE = "https://med4growautomacao.uazapi.com";
 
+// Data "hoje" no fuso da clínica (America/Sao_Paulo). O runtime do edge é UTC, então
+// new Date().toISOString() vira o dia seguinte entre 21h-00h de SP — o que fazia consultas
+// de hoje à noite serem classificadas como "passadas".
+function todaySP(): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
+}
+
 function addDays(dateStr: string, n: number): string {
   const d = new Date(dateStr + "T00:00:00");
   d.setDate(d.getDate() + n);
   return d.toISOString().split("T")[0];
+}
+
+// Resolve o(s) tipo(s) de consulta de um médico a partir de um id OU de uma string que
+// pode ser um slug ("primeira-online") OU uma modalidade ("online"/"presencial").
+// Corrige o trap em que a modalidade era usada como slug: get_available_slots casa
+// slug = p_modality, e "presencial" não é slug de nenhum tipo da Lorena -> caía em vazio
+// silencioso (falso "sem horários"). Aqui casamos primeiro por slug e, se não achar, pela
+// coluna modality real.
+async function findDoctorTypes(
+  supabaseClient: any, doctorId: string, ctId: string | undefined, modalityOrSlug: string,
+): Promise<any[]> {
+  if (ctId) {
+    const { data } = await supabaseClient.from("consultation_types")
+      .select("id, slug, modality, is_active").eq("id", ctId).eq("doctor_id", doctorId).maybeSingle();
+    if (data) return data.is_active === false ? [] : [data];
+    // ctId não pertence a este médico -> tenta resolver por modalidade/slug abaixo
+  }
+  const key = (modalityOrSlug || "").trim().toLowerCase();
+  const { data: types } = await supabaseClient.from("consultation_types")
+    .select("id, slug, modality, is_active").eq("doctor_id", doctorId).eq("is_active", true);
+  const list = types || [];
+  // "online"/"presencial" são MODALIDADES, não slugs — mesmo que exista um tipo cujo slug
+  // seja "online" (Seguimento Online). Tratá-las como modalidade faz uma clínica com
+  // primeira+seguimento na mesma modalidade cair em ambiguidade (2 matches), o que força
+  // o agendamento a exigir o consultation_type_id em vez de marcar seguimento por engano.
+  // Uma string que é um slug real (ex.: "primeira-online") continua casando por slug.
+  const isBareModality = key === "online" || key === "presencial";
+  let m = isBareModality ? [] : list.filter((t: any) => (t.slug || "").toLowerCase() === key);
+  if (m.length === 0) m = list.filter((t: any) => (t.modality || "").toLowerCase() === key);
+  return m;
+}
+
+// Quando mais de um tipo casa com a mesma modalidade, prefere "primeira" (primeira consulta)
+// como default seguro — evita mostrar/assumir seguimento para um paciente novo.
+function preferType(matches: any[]): any {
+  return matches.find((t: any) => (t.slug || "").toLowerCase().includes("primeira")) || matches[0];
 }
 
 async function fetchSlotsForDoctorDate(
@@ -26,13 +69,16 @@ async function fetchSlotsForDoctorDate(
   modality: string = "presencial",
   consultationTypeId?: string,
 ): Promise<string[]> {
-  const params: any = { p_doctor_id: doctorId, p_date: date };
-  if (consultationTypeId) {
-    params.p_consultation_type_id = consultationTypeId;
-  } else {
-    params.p_modality = modality;
+  const matches = await findDoctorTypes(supabaseClient, doctorId, consultationTypeId, modality);
+  if (matches.length === 0) return [];
+  const typeId = preferType(matches).id;
+  const { data, error } = await supabaseClient.rpc("get_available_slots", {
+    p_doctor_id: doctorId, p_date: date, p_consultation_type_id: typeId,
+  });
+  if (error) {
+    console.error("get_available_slots error", { doctorId, date, typeId, msg: error.message });
+    return [];
   }
-  const { data } = await supabaseClient.rpc("get_available_slots", params);
   return (data || []).map((s: any) => (s.slot_time || "").toString().substring(0, 5));
 }
 
@@ -245,27 +291,34 @@ serve(async (req) => {
       const finalModality = (typeof modality === "string" && modality.trim())
         ? modality.trim().toLowerCase() : "presencial";
 
-      // Pré-validação só pelo slug (modality legado). Se vier id, a RPC valida internamente.
-      if (!ctId) {
-        const { data: ct } = await supabaseClient
-          .from("consultation_types")
-          .select("slug, is_active")
-          .eq("doctor_id", doctor_id)
-          .eq("slug", finalModality)
-          .maybeSingle();
-        if (!ct) {
-          return new Response(
-            JSON.stringify({ success: false, error_code: "consultation_type_not_found", error: `Tipo de consulta "${finalModality}" não está configurado para este médico.` }),
-            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
-          );
-        }
-        if (ct.is_active === false) {
-          return new Response(
-            JSON.stringify({ success: false, error_code: "consultation_type_inactive", error: `Tipo de consulta "${finalModality}" está inativo.` }),
-            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
-          );
-        }
+      // Resolve o tipo de consulta ANTES de gravar. Nunca trata "modality" como slug:
+      // casa por id, depois por slug, depois pela coluna modality. Para AGENDAR exigimos
+      // UM tipo inequívoco — se a modalidade casar com vários (ex.: primeira + seguimento),
+      // devolve erro pedindo o consultation_type_id, evitando marcar o tipo errado.
+      const typeMatches = await findDoctorTypes(supabaseClient, doctor_id, ctId, finalModality);
+      if (typeMatches.length === 0) {
+        return new Response(
+          JSON.stringify({
+            success: false, error_code: "consultation_type_not_found",
+            error: ctId
+              ? `Tipo de consulta com id "${ctId}" não está disponível para este médico.`
+              : `Não há tipo de consulta "${finalModality}" configurado para este médico.`,
+            next_step: "Chame LISTAR_TIPOS_CONSULTA, escolha um consultation_type_id válido deste médico e chame MARCAR_HORARIO com esse id.",
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
+        );
       }
+      if (typeMatches.length > 1) {
+        return new Response(
+          JSON.stringify({
+            success: false, error_code: "consultation_type_ambiguous",
+            error: `Há mais de um tipo de consulta "${finalModality}" para este médico (ex.: primeira consulta e seguimento).`,
+            next_step: "Chame LISTAR_TIPOS_CONSULTA e passe o consultation_type_id EXATO escolhido pelo paciente em MARCAR_HORARIO (não use apenas a modalidade).",
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
+        );
+      }
+      const resolvedTypeId = typeMatches[0].id;
 
       const derived = await crypto.subtle.digest("SHA-256",
         new TextEncoder().encode(`${clinic_id}|${doctor_id}|${date}|${time}|${patient_phone}`));
@@ -276,9 +329,8 @@ serve(async (req) => {
         p_clinic_id: clinic_id, p_doctor_id: doctor_id, p_date: date, p_time: time,
         p_patient_name: patient_name, p_patient_phone: patient_phone, p_source: "ia",
         p_notes: notes || null, p_request_id: final_request_id,
+        p_consultation_type_id: resolvedTypeId,
       };
-      if (ctId) rpcParams.p_consultation_type_id = ctId;
-      else rpcParams.p_modality = finalModality;
       const { data, error } = await supabaseClient.rpc("book_appointment", rpcParams);
       if (error) throw error;
       const result = data as any;
@@ -294,7 +346,7 @@ serve(async (req) => {
           errorMsg = code === "slot_conflict"
             ? `O horário ${time} de ${date} acabou de ser reservado por outra pessoa.`
             : `O horário ${time} de ${date} está fora da agenda do médico (expediente, bloqueio ou antecedência mínima).`;
-          const alt = await findAlternativeSlots(supabaseClient, doctor_id, date, finalModality, ctId);
+          const alt = await findAlternativeSlots(supabaseClient, doctor_id, date, finalModality, resolvedTypeId);
           if (alt) {
             extra.alternatives = alt;
             next_step = `NÃO repita o mesmo horário. Ofereça ao paciente estes horários disponíveis em ${alt.date}: ${alt.slots.join(", ")}. Quando ele escolher, chame MARCAR_HORARIO novamente com o horário escolhido.`;
@@ -319,9 +371,7 @@ serve(async (req) => {
           errorMsg = "Telefone do paciente inválido para vincular o agendamento.";
           next_step = "Use SEMPRE o número de WhatsApp da própria conversa (lead_phone da sessão) no campo patient_phone — nunca um número ditado pelo paciente.";
         } else if (code === "consultation_type_not_found" || code === "consultation_type_inactive") {
-          errorMsg = ctId
-            ? `Tipo de consulta com id "${ctId}" não está disponível para este médico.`
-            : `Tipo de consulta "${finalModality}" não está configurado para este médico.`;
+          errorMsg = `Tipo de consulta com id "${resolvedTypeId}" não está disponível para este médico.`;
           next_step = "Chame LISTAR_TIPOS_CONSULTA, escolha um consultation_type_id válido deste médico e tente novamente.";
         } else if (code === "doctor_not_found" || code === "doctor_inactive" || code === "doctor_clinic_mismatch") {
           errorMsg = "Médico inválido ou indisponível nesta clínica.";
@@ -350,7 +400,7 @@ serve(async (req) => {
         );
       }
       const { data: curApt } = await supabaseClient.from("appointments")
-        .select("doctor_id, consultation_type_id, modality").eq("id", appointment_id).maybeSingle();
+        .select("doctor_id, consultation_type_id, consultation_type_slug, modality").eq("id", appointment_id).maybeSingle();
       if (!curApt) {
         return new Response(
           JSON.stringify({ success: false, error_code: "appointment_not_found", error: "Agendamento não encontrado.", next_step: "Use CONSULTAR_AGENDAMENTOS para obter um appointment_id válido deste paciente." }),
@@ -384,7 +434,10 @@ serve(async (req) => {
           next_step = "Se o paciente quer uma NOVA consulta, use MARCAR_HORARIO normalmente.";
         } else if (code === "slot_unavailable" || code === "slot_conflict") {
           errorMsg = `O horário ${time} de ${date} não está disponível para reagendamento.`;
-          const alt = await findAlternativeSlots(supabaseClient, targetDoctor, date, curApt.modality || "presencial", rctId);
+          // Alternativas pelo tipo real do agendamento (consultation_type_slug), não pela
+          // coluna modality (que não é slug e devolvia lista vazia p/ agendamentos legados).
+          const altModality = curApt.consultation_type_slug || curApt.modality || "presencial";
+          const alt = await findAlternativeSlots(supabaseClient, targetDoctor, date, altModality, rctId);
           if (alt) {
             extra.alternatives = alt;
             next_step = `Ofereça ao paciente os horários disponíveis em ${alt.date}: ${alt.slots.join(", ")} e chame REAGENDAR_HORARIO novamente com o escolhido.`;
@@ -451,7 +504,7 @@ serve(async (req) => {
       const includePast = include_past !== false;
       const includeFuture = include_future !== false;
       const lim = Math.min(Number(limit) || 10, 50);
-      const today = new Date().toISOString().split("T")[0];
+      const today = todaySP();
       // Lookup por telefone NORMALIZADO (o n8n manda o numero da sessao com 9o digito;
       // o paciente esta gravado na forma canonica sem o 9)
       const { data: aptLookup } = await supabaseClient.rpc("find_patient_by_phone", { p_clinic_id: clinic_id, p_phone: patient_phone });

@@ -1097,6 +1097,23 @@ export function useTickets() {
     return true;
   };
 
+  // "Manter venda/perda": move o MESMO ticket para outra coluna PRESERVANDO o desfecho
+  // (ganho/perdido) — mantém a conversão, todas as propriedades e o botão "Resolver".
+  // Pipeline de vendas: o negócio é ganho e avança pelas etapas sem deixar de ser venda.
+  const moveTicketKeepOutcome = async (ticketId: string, stageId: string) => {
+    setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, stage_id: stageId } : t)); // outcome mantido
+    const { data, error } = await supabase.rpc('move_ticket_keep_outcome', {
+      p_ticket_id: ticketId,
+      p_new_stage_id: stageId,
+    });
+    if (error || !(data as any)?.success) {
+      console.error('[moveTicketKeepOutcome] move_ticket_keep_outcome falhou', { ticketId, stageId, error, data });
+      fetch(true);
+      return false;
+    }
+    return true;
+  };
+
   const openTicket = async (leadId: string, stageId: string) => {
     const alreadyOpen = tickets.some(t => t.lead_id === leadId && t.status === 'open');
     if (alreadyOpen) return null;
@@ -1195,7 +1212,7 @@ export function useTickets() {
     }
   };
 
-  return { tickets, loading, refetch: fetch, moveTicket, reopenTicket, openTicket, closeTicket, finalizeTicket };
+  return { tickets, loading, refetch: fetch, moveTicket, reopenTicket, moveTicketKeepOutcome, openTicket, closeTicket, finalizeTicket };
 }
 
 // ==========================================

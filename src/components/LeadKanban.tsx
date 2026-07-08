@@ -2511,7 +2511,7 @@ function ReopenChoiceModal({ info, targetStageName, checkAppointment, onKeep, on
                 <button onClick={handleKeep} disabled={busy}
                   className="w-full text-left px-4 py-3 rounded-xl border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/60 transition-all disabled:opacity-50">
                   <div className="flex items-center gap-2 font-bold text-sm text-slate-800"><Check className="w-4 h-4 text-emerald-600 shrink-0" /> Manter {noun}</div>
-                  <p className="text-xs text-slate-500 mt-1">Preserva o registro — a {noun} continua contando nos relatórios — e mostra o card na nova etapa.</p>
+                  <p className="text-xs text-slate-500 mt-1">Move o card para a nova etapa <strong>continuando como {noun}</strong> — o valor e o botão "Resolver" seguem com ele; continua contando nos relatórios.</p>
                 </button>
                 <button onClick={handleCancelClick} disabled={busy}
                   className="w-full text-left px-4 py-3 rounded-xl border border-slate-200 hover:border-rose-300 hover:bg-rose-50/60 transition-all disabled:opacity-50">
@@ -2562,7 +2562,7 @@ export function LeadKanban() {
   const { data: stages, loading: stagesLoading, reorder: reorderStages, update: updateStage, create: createStage, remove: removeStage } = useFunnelStages();
   const { data: leads, create, createWithTicket, update, remove, markNotLead } = useLeads({ pageSize: 150 });
   const { data: notLeads, restore: restoreNotLead } = useNotLeads();
-  const { tickets, loading: ticketsLoading, refetch: refetchTickets, moveTicket, reopenTicket, openTicket, closeTicket, finalizeTicket } = useTickets();
+  const { tickets, loading: ticketsLoading, refetch: refetchTickets, moveTicket, reopenTicket, moveTicketKeepOutcome, openTicket, closeTicket, finalizeTicket } = useTickets();
   const { byLead: conversionsByLead, create: createConversion } = useConversions();
   const { aiConfig, updateAI } = useSettings();
   const [ganhoLead, setGanhoLead] = useState<{ id: string; name: string; phone: string | null; patientId: string | null; prevStageId: string | null; ticketId: string } | null>(null);
@@ -4612,9 +4612,9 @@ export function LeadKanban() {
           onKeep={async () => {
             const { ticket, targetStageId } = reopenLead;
             setReopenLead(null);
-            await performDrop(ticket, targetStageId);
-            // Novo ciclo cria um ticket novo e fecha o antigo — reconcilia já, sem depender
-            // do timing do realtime (senão o card parece "voltar" para Ganho).
+            // Move o MESMO card mantendo o desfecho (ganho/perda): conversão, valor, botão
+            // Resolver e demais propriedades seguem com ele para a nova coluna (pipeline).
+            await moveTicketKeepOutcome(ticket.id, targetStageId);
             await refetchTickets(true);
           }}
           onCancelOutcome={async (cancelAppointment) => {

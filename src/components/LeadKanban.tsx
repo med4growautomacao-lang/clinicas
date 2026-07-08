@@ -1044,7 +1044,6 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   type Line = { productId: string; qty: string; price: string; discount: string; fee: string; altura?: string };
   const [lines, setLines] = useState<Line[]>(Array.isArray(iq?.lines) && iq.lines.length ? iq.lines : [{ productId: '', qty: '', price: '', discount: '', fee: '', altura: '' }]);
   const [manualValue, setManualValue] = useState(iq?.manualValue ?? '');
-  const [editPrices, setEditPrices] = useState(false);  // destrava a edicao do valor unitario (antes de x qtd)
   const [notes, setNotes] = useState(iq?.notes ?? '');
 
   // Etapa 2 (opcional): configuracao da mensagem enviada por WhatsApp.
@@ -1459,20 +1458,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
           {step === 1 && (<>
           {hasCatalog ? (
             <div className="space-y-2.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">{sectionLabel}</label>
-                <button
-                  type="button"
-                  onClick={() => setEditPrices(v => !v)}
-                  className={cn(
-                    "text-[11px] font-bold flex items-center gap-1 px-2 py-1 rounded-lg transition-colors",
-                    editPrices ? "bg-blue-50 text-blue-600" : "text-slate-400 hover:text-blue-600"
-                  )}
-                  title="Editar o valor unitário (antes de multiplicar pela quantidade)"
-                >
-                  <Pencil className="w-3 h-3" /> {editPrices ? 'Editando valores' : 'Editar valores'}
-                </button>
-              </div>
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">{sectionLabel}</label>
               {lines.map((l, i) => {
                 const p = itemById[l.productId];
                 const base = lineBase(l);
@@ -1530,14 +1516,13 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
                               </div>
                             </div>
                             <div className="flex items-center justify-between gap-2">
-                              {editPrices ? (
+                              <div className="flex items-center gap-1 flex-1 min-w-0">
+                                <span className="text-xs font-medium text-slate-400 shrink-0">m² ×</span>
                                 <div className="relative flex-1 min-w-0">
                                   <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] font-bold text-slate-400 pointer-events-none">R$</span>
-                                  <input type="number" min="0" step="any" inputMode="decimal" value={l.price} onChange={e => updateLine(i, 'price', e.target.value)} className="w-full pl-7 pr-2 py-2 border border-blue-200 bg-blue-50/40 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500" />
+                                  <input type="number" min="0" step="any" inputMode="decimal" value={l.price} onChange={e => updateLine(i, 'price', e.target.value)} className="w-full pl-7 pr-2 py-2 border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500" />
                                 </div>
-                              ) : (
-                                <span className="text-xs font-medium text-slate-500 truncate">m² × {formatBRL(unitPrice(l))}</span>
-                              )}
+                              </div>
                               <span className="text-sm font-black text-slate-800 shrink-0">{formatBRL(base)}</span>
                             </div>
                           </div>
@@ -1551,17 +1536,13 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
                               onChange={e => updateLine(i, 'qty', e.target.value)}
                               className="w-24 shrink-0 px-2.5 py-2 border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                             />
-                            {editPrices ? (
-                              <div className="flex items-center gap-1 flex-1 min-w-0">
-                                <span className="text-xs font-medium text-slate-400 shrink-0">{p.unit} ×</span>
-                                <div className="relative flex-1 min-w-0">
-                                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] font-bold text-slate-400 pointer-events-none">R$</span>
-                                  <input type="number" min="0" step="any" inputMode="decimal" value={l.price} onChange={e => updateLine(i, 'price', e.target.value)} className="w-full pl-7 pr-2 py-2 border border-blue-200 bg-blue-50/40 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500" />
-                                </div>
+                            <div className="flex items-center gap-1 flex-1 min-w-0">
+                              <span className="text-xs font-medium text-slate-400 shrink-0">{p.unit} ×</span>
+                              <div className="relative flex-1 min-w-0">
+                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] font-bold text-slate-400 pointer-events-none">R$</span>
+                                <input type="number" min="0" step="any" inputMode="decimal" value={l.price} onChange={e => updateLine(i, 'price', e.target.value)} className="w-full pl-7 pr-2 py-2 border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500" />
                               </div>
-                            ) : (
-                              <span className="text-xs font-medium text-slate-500 flex-1 min-w-0 truncate">{p.unit} × {formatBRL(unitPrice(l))}</span>
-                            )}
+                            </div>
                             <span className="text-sm font-black text-slate-800 shrink-0">{formatBRL(base)}</span>
                           </div>
                         )}

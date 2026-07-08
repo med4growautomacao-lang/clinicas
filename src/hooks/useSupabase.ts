@@ -2643,10 +2643,12 @@ export interface Product {
   is_active: boolean;
   charge_by_area?: boolean;  // cobra por m² (área = comprimento × altura)
   quote_image_ids?: string[] | null;  // fotos lembradas p/ envio no orçamento deste produto (null = usa send_by_default global)
+  color?: string | null;     // cor de preenchimento (tag visual) no catálogo
+  position?: number;         // ordem manual no catálogo
   created_at: string;
 }
 
-export type ProductInput = Pick<Product, 'name' | 'description' | 'unit' | 'unit_price' | 'attributes' | 'is_active' | 'charge_by_area' | 'quote_image_ids'>;
+export type ProductInput = Pick<Product, 'name' | 'description' | 'unit' | 'unit_price' | 'attributes' | 'is_active' | 'charge_by_area' | 'quote_image_ids' | 'color'>;
 
 export function useProducts() {
   const { activeClinicId } = useAuth();
@@ -2663,6 +2665,7 @@ export function useProducts() {
       .from('products')
       .select('*')
       .eq('clinic_id', activeClinicId)
+      .order('position')
       .order('name');
     setCached(cacheKey, data || []);
     setData((data as Product[]) || []);
@@ -2673,16 +2676,17 @@ export function useProducts() {
 
   const create = async (product: ProductInput) => {
     if (!activeClinicId) return null;
-    const { data, error } = await supabase
+    const nextPos = data.reduce((m, p) => Math.max(m, p.position ?? 0), -1) + 1; // vai pro fim do catálogo
+    const { data: row, error } = await supabase
       .from('products')
-      .insert({ ...product, clinic_id: activeClinicId })
+      .insert({ ...product, clinic_id: activeClinicId, position: nextPos })
       .select()
       .single();
     if (!error) {
       invalidateCache(`products:${activeClinicId}`);
-      setData(prev => [...prev, data as Product].sort((a, b) => a.name.localeCompare(b.name)));
+      setData(prev => [...prev, row as Product]);
     }
-    return error ? null : (data as Product);
+    return error ? null : (row as Product);
   };
 
   const update = async (id: string, updates: Partial<Product>) => {
@@ -2694,6 +2698,20 @@ export function useProducts() {
     return !error;
   };
 
+  // Move o produto p/ cima (-1) ou baixo (+1) no catálogo, trocando a posição com o vizinho.
+  const move = async (id: string, direction: -1 | 1) => {
+    const idx = data.findIndex(p => p.id === id);
+    const j = idx + direction;
+    if (idx < 0 || j < 0 || j >= data.length) return false;
+    const a = data[idx], b = data[j];
+    const aPos = a.position ?? idx, bPos = b.position ?? j;
+    setData(prev => { const next = [...prev]; next[idx] = { ...b, position: aPos }; next[j] = { ...a, position: bPos }; return next; });
+    invalidateCache(`products:${activeClinicId}`);
+    const r1 = await supabase.from('products').update({ position: bPos }).eq('id', a.id);
+    const r2 = await supabase.from('products').update({ position: aPos }).eq('id', b.id);
+    return !r1.error && !r2.error;
+  };
+
   const remove = async (id: string) => {
     const { error } = await supabase.from('products').delete().eq('id', id);
     if (!error) {
@@ -2703,7 +2721,7 @@ export function useProducts() {
     return !error;
   };
 
-  return { data, loading, create, update, remove, refetch: fetch };
+  return { data, loading, create, update, move, remove, refetch: fetch };
 }
 
 // ==========================================

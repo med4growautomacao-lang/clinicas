@@ -36,6 +36,8 @@ import {
     Package,
     FileText,
     Maximize2,
+    ChevronUp,
+    ChevronDown,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -82,7 +84,7 @@ export function Settings() {
     const [savingProtocol, setSavingProtocol] = useState(false);
 
     // Produtos (catalogo generico e personalizavel)
-    const { data: products, create: createProduct, update: updateProduct, remove: removeProduct } = useProducts();
+    const { data: products, create: createProduct, update: updateProduct, move: moveProduct, remove: removeProduct } = useProducts();
     const [productModal, setProductModal] = useState<{ open: boolean; item: Partial<Product> | null }>({ open: false, item: null });
     const [savingProduct, setSavingProduct] = useState(false);
 
@@ -365,6 +367,7 @@ export function Settings() {
             is_active: item.is_active ?? true,
             charge_by_area: true,
             quote_image_ids: item.quote_image_ids ?? null,
+            color: item.color ?? null,
         };
         if (item.id) {
             await updateProduct(item.id, payload);
@@ -671,9 +674,13 @@ export function Settings() {
                                         </div>
                                     ) : (
                                         <div className="space-y-2">
-                                            {products.map(p => (
-                                                <div key={p.id} className="flex items-center justify-between p-3 rounded-xl border border-slate-100 hover:border-slate-200 bg-white transition-all group">
-                                                    <div className="flex items-center gap-3 min-w-0">
+                                            {products.map((p, idx) => (
+                                                <div key={p.id} style={{ borderLeft: `4px solid ${p.color || '#e2e8f0'}` }} className="flex items-center justify-between p-3 rounded-xl border border-slate-100 hover:border-slate-200 bg-white transition-all group">
+                                                    <div className="flex items-center gap-2 min-w-0">
+                                                        <div className="flex flex-col shrink-0 -my-1">
+                                                            <button onClick={() => moveProduct(p.id, -1)} disabled={idx === 0} className="p-0.5 text-slate-300 hover:text-teal-600 disabled:opacity-25 transition-colors" title="Mover para cima"><ChevronUp className="w-4 h-4" /></button>
+                                                            <button onClick={() => moveProduct(p.id, 1)} disabled={idx === products.length - 1} className="p-0.5 text-slate-300 hover:text-teal-600 disabled:opacity-25 transition-colors" title="Mover para baixo"><ChevronDown className="w-4 h-4" /></button>
+                                                        </div>
                                                         <button onClick={() => updateProduct(p.id, { is_active: !p.is_active })} className="shrink-0">
                                                             {p.is_active
                                                                 ? <ToggleRight className="w-6 h-6 text-teal-500" />
@@ -907,6 +914,28 @@ export function Settings() {
                                         onChange={v => setProductModal(prev => ({ ...prev, item: { ...prev.item!, unit_price: v || 0 } }))}
                                     />
                                     <p className="text-[10px] text-slate-400 mt-1">Cobrado por m² (área = comprimento × altura). No orçamento o vendedor digita o comprimento e a altura. Crie um campo "altura" se quiser um valor padrão.</p>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Cor de preenchimento</label>
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="color"
+                                            value={productModal.item.color || '#0d9488'}
+                                            onChange={e => setProductModal(prev => ({ ...prev, item: { ...prev.item!, color: e.target.value } }))}
+                                            className="w-12 h-10 rounded-lg border border-slate-200 cursor-pointer bg-white p-1"
+                                        />
+                                        <input
+                                            type="text"
+                                            value={productModal.item.color || ''}
+                                            onChange={e => setProductModal(prev => ({ ...prev, item: { ...prev.item!, color: e.target.value } }))}
+                                            placeholder="#0d9488"
+                                            className="w-28 border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500"
+                                        />
+                                        {productModal.item.color && (
+                                            <button type="button" onClick={() => setProductModal(prev => ({ ...prev, item: { ...prev.item!, color: null } }))} className="text-xs font-semibold text-rose-500 hover:text-rose-700">Remover</button>
+                                        )}
+                                    </div>
+                                    <p className="text-[10px] text-slate-400 mt-1">Aparece como uma faixa colorida no catálogo, para identificar/organizar o produto.</p>
                                 </div>
 
                                 <div className="pt-1">

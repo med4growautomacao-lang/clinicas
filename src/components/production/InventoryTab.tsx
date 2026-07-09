@@ -7,8 +7,8 @@ import {
 import { cn } from "@/src/lib/utils";
 import { supabase } from "../../lib/supabase";
 import {
-  useInventoryItems, useInventoryMovements, useProductBom, useAllProductBomCost, useProducts, useProtocols, useResponsibles, useStockByAltura, useSettings,
-  InventoryItem, InventoryKind, INVENTORY_KIND_LABEL,
+  useInventoryItems, useInventoryMovements, useProductBom, useAllProductBomCost, useProducts, useProtocols, useResponsibles, useSettings,
+  InventoryItem, InventoryKind, INVENTORY_KIND_LABEL, Product,
 } from "../../hooks/useSupabase";
 import { useToast } from "../ui/toast";
 import { MoneyInput } from "../ui/money-input";
@@ -24,7 +24,6 @@ export function InventoryTab() {
   const showToast = useToast();
   const { data: items, loading, create, update, remove, refetch, lowStock } = useInventoryItems();
   const { register } = useInventoryMovements(null);
-  const { byItem: alturaByItem } = useStockByAltura();
   const { data: products } = useProducts();
   const { data: protocols } = useProtocols();
   const { clinic } = useSettings();
@@ -68,6 +67,33 @@ export function InventoryTab() {
     () => (kindFilter === "todos" ? items : items.filter(i => i.kind === kindFilter)),
     [items, kindFilter],
   );
+
+  // Agrupa os SKUs de altura (flatten) por modelo base (products.base_product_id) para não poluir
+  // a lista com uma linha por altura — o modelo vira 1 linha com seta, expande para os SKUs reais.
+  // Itens sem modelo base (matéria-prima, insumo, produto avulso) continuam como linha única.
+  const productById = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
+  type GroupRow = { baseId: string; baseName: string; children: InventoryItem[] };
+  type Row = { kind: "group"; group: GroupRow } | { kind: "single"; item: InventoryItem };
+  const rows = useMemo<Row[]>(() => {
+    const groups = new Map<string, GroupRow>();
+    const singles: InventoryItem[] = [];
+    filtered.forEach(it => {
+      const prod: Product | undefined = it.product_id ? productById.get(it.product_id) : undefined;
+      const baseId = prod?.base_product_id;
+      if (baseId) {
+        let g = groups.get(baseId);
+        if (!g) { g = { baseId, baseName: productById.get(baseId)?.name ?? prod!.name, children: [] }; groups.set(baseId, g); }
+        g.children.push(it);
+      } else {
+        singles.push(it);
+      }
+    });
+    groups.forEach(g => g.children.sort((a, b) => Number(a.altura ?? 0) - Number(b.altura ?? 0)));
+    const groupRows: Row[] = Array.from(groups.values()).map(group => ({ kind: "group" as const, group }));
+    const singleRows: Row[] = singles.map(item => ({ kind: "single" as const, item }));
+    return [...groupRows, ...singleRows].sort((a, b) =>
+      (a.kind === "group" ? a.group.baseName : a.item.name).localeCompare(b.kind === "group" ? b.group.baseName : b.item.name, "pt-BR"));
+  }, [filtered, productById]);
 
   const kindTabs: { id: InventoryKind | "todos"; label: string }[] = [
     { id: "todos", label: "Todos" },
@@ -133,97 +159,43 @@ export function InventoryTab() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(it => {
-                  // Alerta de reposição vem da view (desconta reservas e soma OP de reposição já
-                  // programada); cai na regra antiga se a view não trouxe o campo.
-                  const low = it.precisa_reposicao != null
-                    ? it.precisa_reposicao
-                    : (Number(it.min_qty) > 0 && Number(it.current_qty) <= Number(it.min_qty));
-                  const reserved = Number(it.reserved_qty ?? 0);
-                  const emProducao = Number(it.reposicao_qty ?? 0);
-                  const alturas = it.kind === "produto_acabado" ? (alturaByItem.get(it.id) ?? []) : [];
-                  const isOpen = expandedAltura.has(it.id);
+                {rows.map(row => {
+                  if (row.kind === "single") return (
+                    <ItemRowTr key={row.item.id} it={row.item} unitValueOf={unitValueOf}
+                      onProduction={setProdItem} onMove={setMovItem} onExtrato={setExtratoItem}
+                      onEdit={it => setItemModal({ item: it })} onDelete={setDelItem} />
+                  );
+                  const { group } = row;
+                  const isOpen = expandedAltura.has(group.baseId);
+                  const anyLow = group.children.some(c => c.precisa_reposicao != null
+                    ? c.precisa_reposicao
+                    : (Number(c.min_qty) > 0 && Number(c.current_qty) <= Number(c.min_qty)));
                   return (
-                    <React.Fragment key={it.id}>
-                    <tr className="border-t border-slate-100 hover:bg-slate-50/60 group">
-                      <td className="px-4 py-3">
-                        <div className="font-bold text-slate-800 flex items-center gap-1.5">
-                          {alturas.length > 0 ? (
-                            <button onClick={() => toggleExpand(it.id)} className="p-0.5 -ml-1 text-slate-400 hover:text-slate-700 rounded" title={isOpen ? "Ocultar alturas" : "Ver alturas"}>
+                    <React.Fragment key={group.baseId}>
+                      <tr className="border-t border-slate-100 hover:bg-slate-50/60">
+                        <td className="px-4 py-3">
+                          <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                            <button onClick={() => toggleExpand(group.baseId)} className="p-0.5 -ml-1 text-slate-400 hover:text-slate-700 rounded" title={isOpen ? "Ocultar alturas" : "Ver alturas"}>
                               {isOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                             </button>
-                          ) : it.kind === "produto_acabado" ? <span className="inline-block w-4" /> : null}
-                          {it.name}
-                          {low && it.is_active && <StatusBadge label="repor" tone="rose" />}
-                          {!it.is_active && <StatusBadge label="inativo" tone="slate" />}
-                        </div>
-                        {[it.sku, it.category, it.location].filter(Boolean).length > 0 && (
-                          <div className={cn("text-xs text-slate-400", it.kind === "produto_acabado" && "pl-5")}>
-                            {[it.sku, it.category, it.location].filter(Boolean).join(" · ")}
+                            {group.baseName}
+                            {anyLow && <StatusBadge label="repor" tone="rose" />}
                           </div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3"><StatusBadge label={INVENTORY_KIND_LABEL[it.kind]} tone={KIND_TONE[it.kind]} /></td>
-                      <td className={cn("px-4 py-3 text-right font-bold tabular-nums", low ? "text-rose-600" : "text-slate-800")}>
-                        {it.kind === "produto_acabado" && alturas.length > 0 ? (
-                          // Legado: base com subprodutos por altura -> saldo real nas sub-linhas (em branco aqui).
-                          null
-                        ) : (
-                          <>
-                            {fmtQty(it.current_qty)} <span className="text-xs font-medium text-slate-400">{it.unit}</span>
-                            {low && <AlertTriangle className="inline w-3.5 h-3.5 ml-1 -mt-0.5 text-rose-500" />}
-                          </>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-right tabular-nums">
-                        {it.available_qty == null || (it.kind === "produto_acabado" && alturas.length > 0) ? (
-                          <span className="text-slate-300">—</span>
-                        ) : (
-                          <>
-                            <div className={cn("font-bold", low ? "text-rose-600" : "text-slate-800")}>
-                              {fmtQty(it.available_qty)} <span className="text-xs font-medium text-slate-400">{it.unit}</span>
-                            </div>
-                            {(reserved > 0 || emProducao > 0) && (
-                              <div className="text-[11px] text-slate-400 leading-tight">
-                                {reserved > 0 && <>reservado {fmtQty(reserved)}</>}
-                                {reserved > 0 && emProducao > 0 && " · "}
-                                {emProducao > 0 && <>em produção {fmtQty(emProducao)}</>}
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-right text-slate-400 tabular-nums">{Number(it.min_qty) > 0 ? fmtQty(it.min_qty) : "—"}</td>
-                      <td className="px-4 py-3 text-right text-slate-500 tabular-nums">{it.kind === "produto_acabado" ? "" : fmtBRL(unitValueOf(it))}</td>
-                      <td className="px-4 py-3 text-right text-slate-700 font-semibold tabular-nums">{fmtBRL(Number(it.current_qty) * unitValueOf(it))}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          {it.kind === "produto_acabado" && (
-                            <IconBtn title="Registrar produção (baixa a matéria-prima)" onClick={() => setProdItem(it)}><Factory className="w-4 h-4" /></IconBtn>
-                          )}
-                          <IconBtn title="Movimentar" onClick={() => setMovItem(it)}><ArrowDownUp className="w-4 h-4" /></IconBtn>
-                          <IconBtn title="Extrato" onClick={() => setExtratoItem(it)}><ScrollText className="w-4 h-4" /></IconBtn>
-                          <IconBtn title="Editar" onClick={() => setItemModal({ item: it })}><Pencil className="w-4 h-4" /></IconBtn>
-                          <IconBtn title="Excluir" danger onClick={() => setDelItem(it)}><Trash2 className="w-4 h-4" /></IconBtn>
-                        </div>
-                      </td>
-                    </tr>
-                    {isOpen && alturas.map(a => (
-                      <tr key={`${it.id}-${a.altura}`} className="bg-slate-50/50 border-t border-slate-100/60">
-                        <td className="px-4 py-1.5 pl-12">
-                          <span className="text-xs font-bold text-slate-500">Altura {fmtQty(a.altura)} m</span>
+                          <div className="text-xs text-slate-400 pl-5">{group.children.length} alturas</div>
                         </td>
-                        <td className="px-4 py-1.5 text-[11px] text-slate-400">subproduto</td>
-                        <td className="px-4 py-1.5 text-right tabular-nums text-slate-700 font-semibold">
-                          {a.altura > 0 ? fmtQty(a.qty / a.altura) : fmtQty(a.qty)} <span className="text-xs font-medium text-slate-400">metros lineares</span>
-                        </td>
-                        <td className="px-4 py-1.5"></td>
-                        <td className="px-4 py-1.5"></td>
-                        <td className="px-4 py-1.5 text-right text-slate-500 tabular-nums text-xs">{fmtBRL(unitValueOf(it) * a.altura)}</td>
-                        <td className="px-4 py-1.5 text-right text-slate-500 tabular-nums text-xs">{fmtBRL(a.qty * unitValueOf(it))}</td>
-                        <td className="px-4 py-1.5"></td>
+                        <td className="px-4 py-3"><StatusBadge label={INVENTORY_KIND_LABEL.produto_acabado} tone={KIND_TONE.produto_acabado} /></td>
+                        <td className="px-4 py-3 text-right text-slate-300">—</td>
+                        <td className="px-4 py-3 text-right text-slate-300">—</td>
+                        <td className="px-4 py-3 text-right text-slate-300">—</td>
+                        <td className="px-4 py-3 text-right text-slate-300">—</td>
+                        <td className="px-4 py-3 text-right text-slate-300">—</td>
+                        <td className="px-4 py-3"></td>
                       </tr>
-                    ))}
+                      {isOpen && group.children.map(child => (
+                        <ItemRowTr key={child.id} it={child} indented unitValueOf={unitValueOf}
+                          onProduction={setProdItem} onMove={setMovItem} onExtrato={setExtratoItem}
+                          onEdit={it => setItemModal({ item: it })} onDelete={setDelItem} />
+                      ))}
                     </React.Fragment>
                   );
                 })}
@@ -290,6 +262,73 @@ export function InventoryTab() {
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+// Linha de item na tabela de Estoque — usada tanto para itens avulsos quanto para os SKUs de
+// altura dentro de um grupo (modelo) expandido, indentados.
+function ItemRowTr({ it, indented, unitValueOf, onProduction, onMove, onExtrato, onEdit, onDelete }: {
+  it: InventoryItem; indented?: boolean; unitValueOf: (it: InventoryItem) => number;
+  onProduction: (it: InventoryItem) => void; onMove: (it: InventoryItem) => void;
+  onExtrato: (it: InventoryItem) => void; onEdit: (it: InventoryItem) => void; onDelete: (it: InventoryItem) => void;
+}) {
+  const low = it.precisa_reposicao != null
+    ? it.precisa_reposicao
+    : (Number(it.min_qty) > 0 && Number(it.current_qty) <= Number(it.min_qty));
+  const reserved = Number(it.reserved_qty ?? 0);
+  const emProducao = Number(it.reposicao_qty ?? 0);
+  return (
+    <tr className={cn("border-t border-slate-100 hover:bg-slate-50/60 group", indented && "bg-slate-50/30")}>
+      <td className="px-4 py-3">
+        <div className={cn("font-bold text-slate-800 flex items-center gap-1.5", indented && "pl-5")}>
+          {it.name}
+          {low && it.is_active && <StatusBadge label="repor" tone="rose" />}
+          {!it.is_active && <StatusBadge label="inativo" tone="slate" />}
+        </div>
+        {[it.sku, it.category, it.location].filter(Boolean).length > 0 && (
+          <div className={cn("text-xs text-slate-400", indented && "pl-5")}>
+            {[it.sku, it.category, it.location].filter(Boolean).join(" · ")}
+          </div>
+        )}
+      </td>
+      <td className="px-4 py-3"><StatusBadge label={INVENTORY_KIND_LABEL[it.kind]} tone={KIND_TONE[it.kind]} /></td>
+      <td className={cn("px-4 py-3 text-right font-bold tabular-nums", low ? "text-rose-600" : "text-slate-800")}>
+        {fmtQty(it.current_qty)} <span className="text-xs font-medium text-slate-400">{it.unit}</span>
+        {low && <AlertTriangle className="inline w-3.5 h-3.5 ml-1 -mt-0.5 text-rose-500" />}
+      </td>
+      <td className="px-4 py-3 text-right tabular-nums">
+        {it.available_qty == null ? (
+          <span className="text-slate-300">—</span>
+        ) : (
+          <>
+            <div className={cn("font-bold", low ? "text-rose-600" : "text-slate-800")}>
+              {fmtQty(it.available_qty)} <span className="text-xs font-medium text-slate-400">{it.unit}</span>
+            </div>
+            {(reserved > 0 || emProducao > 0) && (
+              <div className="text-[11px] text-slate-400 leading-tight">
+                {reserved > 0 && <>reservado {fmtQty(reserved)}</>}
+                {reserved > 0 && emProducao > 0 && " · "}
+                {emProducao > 0 && <>em produção {fmtQty(emProducao)}</>}
+              </div>
+            )}
+          </>
+        )}
+      </td>
+      <td className="px-4 py-3 text-right text-slate-400 tabular-nums">{Number(it.min_qty) > 0 ? fmtQty(it.min_qty) : "—"}</td>
+      <td className="px-4 py-3 text-right text-slate-500 tabular-nums">{it.kind === "produto_acabado" ? "" : fmtBRL(unitValueOf(it))}</td>
+      <td className="px-4 py-3 text-right text-slate-700 font-semibold tabular-nums">{fmtBRL(Number(it.current_qty) * unitValueOf(it))}</td>
+      <td className="px-4 py-3">
+        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          {it.kind === "produto_acabado" && (
+            <IconBtn title="Registrar produção (baixa a matéria-prima)" onClick={() => onProduction(it)}><Factory className="w-4 h-4" /></IconBtn>
+          )}
+          <IconBtn title="Movimentar" onClick={() => onMove(it)}><ArrowDownUp className="w-4 h-4" /></IconBtn>
+          <IconBtn title="Extrato" onClick={() => onExtrato(it)}><ScrollText className="w-4 h-4" /></IconBtn>
+          <IconBtn title="Editar" onClick={() => onEdit(it)}><Pencil className="w-4 h-4" /></IconBtn>
+          <IconBtn title="Excluir" danger onClick={() => onDelete(it)}><Trash2 className="w-4 h-4" /></IconBtn>
+        </div>
+      </td>
+    </tr>
   );
 }
 

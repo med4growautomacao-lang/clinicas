@@ -68,6 +68,7 @@ const METRICS: MetricDef[] = [
   { id: "patients",    label: "Pacientes Captados",             Icon: CalendarCheck, color: "text-sky-600 bg-sky-50",         format: "number",   get: r => r.patientsCaptured },
   { id: "sales",       label: "Novas Consultas Realizadas",     Icon: Trophy,        color: "text-emerald-600 bg-emerald-50", valueColor: "text-emerald-600", format: "number", get: r => r.sales },
   { id: "lost",        label: "Perdidos",                       Icon: XCircle,       color: "text-rose-600 bg-rose-50",       valueColor: "text-rose-500",    format: "number", get: r => r.lost },
+  { id: "schedulingRate", label: "Taxa de Agendamento",         Icon: Percent,       color: "text-emerald-600 bg-emerald-50", format: "percent",  get: r => r.leads > 0 ? (r.patientsCaptured / r.leads) * 100 : null },
   { id: "conversion",  label: "Taxa de Conversão",              Icon: Percent,       color: "text-indigo-600 bg-indigo-50",   format: "percent",  get: r => r.leads > 0 ? (r.sales / r.leads) * 100 : null },
   { id: "revenue",     label: "Faturamento",                    Icon: Wallet,        color: "text-teal-600 bg-teal-50",       format: "currency", get: r => r.revenue },
   { id: "investment",  label: "Investimento Geral (Google/Meta)", Icon: Megaphone,   color: "text-amber-600 bg-amber-50",     format: "currency", get: r => r.investment },

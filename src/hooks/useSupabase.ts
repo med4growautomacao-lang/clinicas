@@ -2666,6 +2666,8 @@ export interface Product {
   attributes: ProductAttribute[];
   is_active: boolean;
   charge_by_area?: boolean;  // cobra por m² (área = comprimento × altura)
+  altura?: number | null;    // altura FIXA do SKU (flatten por altura); quando presente, a venda não digita altura
+  tipo?: string;             // 'padrao' (estocável) | 'sob_medida' (make-to-order)
   quote_image_ids?: string[] | null;  // fotos lembradas p/ envio no orçamento deste produto (null = usa send_by_default global)
   color?: string | null;     // cor de preenchimento (tag visual) no catálogo
   position?: number;         // ordem manual no catálogo

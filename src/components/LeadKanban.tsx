@@ -1146,10 +1146,10 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   const activeProtocols = useMemo(() => useProt ? protocols.filter(p => p.is_active) : [], [protocols, useProt]);
 
   // Item unificado (produto OU protocolo). Protocolo = valor fixo, sem unidade/especificações.
-  type CatItem = { id: string; kind: 'product' | 'protocol'; name: string; description: string | null; unit: string; unit_price: number; attributes: ProductAttribute[]; charge_by_area?: boolean };
+  type CatItem = { id: string; kind: 'product' | 'protocol'; name: string; description: string | null; unit: string; unit_price: number; attributes: ProductAttribute[]; charge_by_area?: boolean; altura?: number | null };
   const catalogItems = useMemo<CatItem[]>(() => [
-    ...activeProducts.map(p => ({ id: `p:${p.id}`, kind: 'product' as const, name: p.name, description: p.description, unit: p.unit, unit_price: Number(p.unit_price), attributes: p.attributes ?? [], charge_by_area: !!p.charge_by_area })),
-    ...activeProtocols.map(t => ({ id: `t:${t.id}`, kind: 'protocol' as const, name: t.name, description: t.description, unit: 'serviço', unit_price: Number(t.price ?? 0), attributes: [] as ProductAttribute[], charge_by_area: false })),
+    ...activeProducts.map(p => ({ id: `p:${p.id}`, kind: 'product' as const, name: p.name, description: p.description, unit: p.unit, unit_price: Number(p.unit_price), attributes: p.attributes ?? [], charge_by_area: !!p.charge_by_area, altura: p.altura ?? null })),
+    ...activeProtocols.map(t => ({ id: `t:${t.id}`, kind: 'protocol' as const, name: t.name, description: t.description, unit: 'serviço', unit_price: Number(t.price ?? 0), attributes: [] as ProductAttribute[], charge_by_area: false, altura: null })),
   ], [activeProducts, activeProtocols]);
   const itemById = useMemo(() => {
     const m: Record<string, CatItem> = {};
@@ -1308,8 +1308,10 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   const selectProduct = (i: number, productId: string) => {
     if (productId === '__new__') { setQuickNewFor(i); return; }
     const it = itemById[productId];
+    // SKU com altura FIXA (flatten): a altura vem do produto, não é digitada. Senão, cai no atributo "altura".
     const altAttr = (it?.attributes ?? []).find(a => (a.label || '').toLowerCase().includes('altura'));
-    const altSeed = isAreaItem(it) && altAttr ? String(altAttr.value) : '';
+    const altSeed = it?.altura != null ? String(it.altura)
+      : (isAreaItem(it) && altAttr ? String(altAttr.value) : '');
     setLines(prev => prev.map((l, idx) => idx === i
       ? { ...l, productId, price: productId ? String(it?.unit_price ?? '') : '', altura: altSeed }
       : l));
@@ -1622,12 +1624,19 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
                               </div>
                               <div>
                                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Altura (m)</label>
-                                <input
-                                  type="number" min="0" step="any" inputMode="decimal"
-                                  value={l.altura ?? ''}
-                                  onChange={e => updateLine(i, 'altura', e.target.value)}
-                                  className="w-full px-2.5 py-2 border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                                />
+                                {p.altura != null ? (
+                                  // SKU com altura fixa: mostra travada (vem do produto), não digita.
+                                  <div className="w-full px-2.5 py-2 border border-slate-200 bg-slate-50 rounded-lg text-sm font-bold text-slate-500 flex items-center gap-1.5" title="Altura do produto">
+                                    {formatQty(Number(p.altura))} <span className="text-[10px] font-semibold text-slate-400">fixa</span>
+                                  </div>
+                                ) : (
+                                  <input
+                                    type="number" min="0" step="any" inputMode="decimal"
+                                    value={l.altura ?? ''}
+                                    onChange={e => updateLine(i, 'altura', e.target.value)}
+                                    className="w-full px-2.5 py-2 border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                                  />
+                                )}
                               </div>
                             </div>
                             <div className="flex items-center justify-between gap-2">
@@ -2309,14 +2318,13 @@ function ProductionOrderModal({ lead, quoteData, ticketId, onClose }: {
             </div>
           </div>
 
-          <button
-            onClick={handleGenerateOP}
-            disabled={genBusy || docItems.length === 0}
-            className={cn("w-full py-2.5 rounded-xl text-sm font-black border-2 border-dashed transition-all flex items-center justify-center gap-2", (genBusy || docItems.length === 0) ? "border-slate-200 text-slate-400" : "border-amber-300 text-amber-700 hover:bg-amber-50")}
-            title="Cria ordens de produção rastreáveis no módulo Produção"
-          >
-            {genBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Package className="w-4 h-4" />} Gerar OP rastreável (Produção)
-          </button>
+          {/* OPs agora são geradas automaticamente na APROVAÇÃO do orçamento (provision_orcamento:
+              reserva o disponível + gera OP do que falta pelo algoritmo de estoque mínimo/lote).
+              O botão manual foi removido para não duplicar. Este modal segue servindo o documento
+              imprimível de produção/separação. Criação avulsa de OP fica no módulo Produção. */}
+          <div className="rounded-xl border border-amber-100 bg-amber-50/60 px-3 py-2 text-[11px] font-semibold text-amber-700 flex items-center gap-2">
+            <Package className="w-3.5 h-3.5 shrink-0" /> A OP é gerada automaticamente ao aprovar o orçamento (reserva + produção do que faltar).
+          </div>
 
           <div className="flex gap-2 pt-1">
             <button onClick={onClose} className="py-2.5 px-3 rounded-xl text-sm font-bold border border-slate-200 text-slate-500 hover:bg-slate-50 transition-all">Fechar</button>

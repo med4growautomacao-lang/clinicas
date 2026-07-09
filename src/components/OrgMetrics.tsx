@@ -523,7 +523,7 @@ export function OrgMetrics() {
                 { bar: "bg-rose-50 border-rose-200", icon: "bg-rose-50 border-rose-100", iconColor: "text-rose-600", value: "text-rose-600" },
               ][rank];
               return (
-                <div key={row.clinicId} className="flex flex-col items-center w-[132px] sm:w-[148px]">
+                <div key={row.clinicId} className="flex flex-col items-center flex-1 min-w-0 max-w-[300px]">
                   <div className={cn("w-10 h-10 rounded-xl border flex items-center justify-center mb-2", styles.icon)}>
                     {hidePodiumNames
                       ? <span className={cn("text-sm font-black", styles.iconColor)}>{rank + 1}º</span>

@@ -7,3 +7,6 @@ coverage/
 .env*
 !.env.example
 .mcp.json
+
+# Playwright MCP snapshots/screenshots
+.playwright-mcp/

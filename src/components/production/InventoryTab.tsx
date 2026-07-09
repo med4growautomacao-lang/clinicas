@@ -112,6 +112,7 @@ export function InventoryTab() {
                   <th className="text-left px-4 py-2.5">Item</th>
                   <th className="text-left px-4 py-2.5">Tipo</th>
                   <th className="text-right px-4 py-2.5">Saldo</th>
+                  <th className="text-right px-4 py-2.5">Disponível</th>
                   <th className="text-right px-4 py-2.5">Mínimo</th>
                   <th className="text-right px-4 py-2.5">Custo un.</th>
                   <th className="text-right px-4 py-2.5">Valor</th>
@@ -120,7 +121,13 @@ export function InventoryTab() {
               </thead>
               <tbody>
                 {filtered.map(it => {
-                  const low = Number(it.min_qty) > 0 && Number(it.current_qty) <= Number(it.min_qty);
+                  // Alerta de reposição vem da view (desconta reservas e soma OP de reposição já
+                  // programada); cai na regra antiga se a view não trouxe o campo.
+                  const low = it.precisa_reposicao != null
+                    ? it.precisa_reposicao
+                    : (Number(it.min_qty) > 0 && Number(it.current_qty) <= Number(it.min_qty));
+                  const reserved = Number(it.reserved_qty ?? 0);
+                  const emProducao = Number(it.reposicao_qty ?? 0);
                   const alturas = it.kind === "produto_acabado" ? (alturaByItem.get(it.id) ?? []) : [];
                   const isOpen = expandedAltura.has(it.id);
                   return (
@@ -134,6 +141,7 @@ export function InventoryTab() {
                             </button>
                           ) : it.kind === "produto_acabado" ? <span className="inline-block w-4" /> : null}
                           {it.name}
+                          {low && it.is_active && <StatusBadge label="repor" tone="rose" />}
                           {!it.is_active && <StatusBadge label="inativo" tone="slate" />}
                         </div>
                         {[it.sku, it.category, it.location].filter(Boolean).length > 0 && (
@@ -144,14 +152,31 @@ export function InventoryTab() {
                       </td>
                       <td className="px-4 py-3"><StatusBadge label={INVENTORY_KIND_LABEL[it.kind]} tone={KIND_TONE[it.kind]} /></td>
                       <td className={cn("px-4 py-3 text-right font-bold tabular-nums", low ? "text-rose-600" : "text-slate-800")}>
-                        {it.kind === "produto_acabado" ? (
-                          // Tela: sem m² no total. Sem subproduto em estoque -> 0; com subproduto -> em branco
-                          // (o saldo real aparece em metros lineares nas sub-linhas por altura).
-                          alturas.length > 0 ? null : "0"
+                        {it.kind === "produto_acabado" && alturas.length > 0 ? (
+                          // Legado: base com subprodutos por altura -> saldo real nas sub-linhas (em branco aqui).
+                          null
                         ) : (
                           <>
                             {fmtQty(it.current_qty)} <span className="text-xs font-medium text-slate-400">{it.unit}</span>
                             {low && <AlertTriangle className="inline w-3.5 h-3.5 ml-1 -mt-0.5 text-rose-500" />}
+                          </>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        {it.available_qty == null || (it.kind === "produto_acabado" && alturas.length > 0) ? (
+                          <span className="text-slate-300">—</span>
+                        ) : (
+                          <>
+                            <div className={cn("font-bold", low ? "text-rose-600" : "text-slate-800")}>
+                              {fmtQty(it.available_qty)} <span className="text-xs font-medium text-slate-400">{it.unit}</span>
+                            </div>
+                            {(reserved > 0 || emProducao > 0) && (
+                              <div className="text-[11px] text-slate-400 leading-tight">
+                                {reserved > 0 && <>reservado {fmtQty(reserved)}</>}
+                                {reserved > 0 && emProducao > 0 && " · "}
+                                {emProducao > 0 && <>em produção {fmtQty(emProducao)}</>}
+                              </div>
+                            )}
                           </>
                         )}
                       </td>
@@ -179,6 +204,7 @@ export function InventoryTab() {
                         <td className="px-4 py-1.5 text-right tabular-nums text-slate-700 font-semibold">
                           {a.altura > 0 ? fmtQty(a.qty / a.altura) : fmtQty(a.qty)} <span className="text-xs font-medium text-slate-400">metros lineares</span>
                         </td>
+                        <td className="px-4 py-1.5"></td>
                         <td className="px-4 py-1.5"></td>
                         <td className="px-4 py-1.5 text-right text-slate-500 tabular-nums text-xs">{fmtBRL(unitValueOf(it) * a.altura)}</td>
                         <td className="px-4 py-1.5 text-right text-slate-500 tabular-nums text-xs">{fmtBRL(a.qty * unitValueOf(it))}</td>

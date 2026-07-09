@@ -3074,6 +3074,15 @@ export interface InventoryItem {
   is_active: boolean;
   notes: string | null;
   created_at: string;
+  altura?: number | null;                 // SKU de tela achatado por altura
+  tipo?: string;                          // 'padrao' | 'sob_medida'
+  lote_minimo?: number | null;
+  lead_time_producao?: number | null;
+  // Derivados da view vw_inventory_available (presentes só quando lido via view):
+  reserved_qty?: number;                  // Σ reservas ativas (ml)
+  available_qty?: number;                 // saldo − reservado
+  reposicao_qty?: number;                 // Σ OPs de reposição abertas (o que o operador já programou)
+  precisa_reposicao?: boolean;            // alerta: disponível + reposição em andamento < mínimo
 }
 export type InventoryItemInput = Partial<Omit<InventoryItem, 'id' | 'clinic_id' | 'created_at' | 'current_qty'>>;
 
@@ -3085,7 +3094,8 @@ export function useInventoryItems(kind?: InventoryKind) {
   const fetch = useCallback(async (silent = false) => {
     if (!activeClinicId) return;
     if (!silent) setLoading(true);
-    let query = supabase.from('inventory_items').select('*').eq('clinic_id', activeClinicId);
+    // Lê da view (traz disponível/reservado/reposição/precisa_reposicao); mutações continuam na tabela.
+    let query = supabase.from('vw_inventory_available').select('*').eq('clinic_id', activeClinicId);
     if (kind) query = query.eq('kind', kind);
     const { data } = await query.order('name');
     setData((data as InventoryItem[]) || []);
@@ -3129,9 +3139,14 @@ export function useInventoryItems(kind?: InventoryKind) {
     return true;
   };
 
-  // Itens ativos no ou abaixo do minimo (mínimo definido > 0).
+  // Itens que precisam de reposição. Usa o alerta da view (disponível + reposição em andamento <
+  // mínimo, já descontando reservas); cai na regra antiga (saldo ≤ mínimo) se a view não trouxe o campo.
   const lowStock = useMemo(
-    () => data.filter(i => i.is_active && Number(i.min_qty) > 0 && Number(i.current_qty) <= Number(i.min_qty)),
+    () => data.filter(i => i.is_active && (
+      i.precisa_reposicao != null
+        ? i.precisa_reposicao
+        : (Number(i.min_qty) > 0 && Number(i.current_qty) <= Number(i.min_qty))
+    )),
     [data],
   );
   const totalValue = useMemo(

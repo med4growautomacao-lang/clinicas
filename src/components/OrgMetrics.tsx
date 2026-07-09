@@ -3,6 +3,7 @@ import { supabase } from "../lib/supabase";
 import { cn } from "@/src/lib/utils";
 import { matchesSearch } from "../lib/search";
 import { DateRangePicker } from "./DateRangePicker";
+import { MetricLottie } from "./MetricLottie";
 import {
   Loader2, Building2, Users, CalendarCheck, Trophy, Wallet, Megaphone,
   ArrowUp, ArrowDown, ChevronDown, Check, Search, Percent, TrendingUp,
@@ -83,6 +84,14 @@ const METRICS: MetricDef[] = [
 const DEFAULT_VISIBLE = METRICS.map(m => m.id);
 
 const MONTH_NAMES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+
+// Cor hex (tom -600 do Tailwind) por métrica, usada na ilustração animada do Pódio.
+const PODIUM_ACCENT: Record<string, string> = {
+  leads: "#7c3aed", patients: "#0284c7", sales: "#059669", lost: "#e11d48",
+  schedulingRate: "#059669", conversion: "#4f46e5", revenue: "#0d9488",
+  investment: "#d97706", roas: "#c026d3", ticketMedio: "#2563eb",
+  cpl: "#0891b2", custoAgendamento: "#65a30d", cpa: "#ea580c",
+};
 
 export function OrgMetrics() {
   const [rows, setRows] = useState<ClinicMetricRow[]>([]);
@@ -369,7 +378,7 @@ export function OrgMetrics() {
         }
         @keyframes orgMetricsTodayGlow {
           0%, 100% { box-shadow: 0 0 0 0 var(--glow-c0, transparent); }
-          50%      { box-shadow: 0 0 0 6px var(--glow-c1, transparent); }
+          50%      { box-shadow: 0 0 0 2px var(--glow-c1, transparent); }
         }
         @keyframes orgMetricsLiveDot {
           0%, 100% { opacity: 1; transform: scale(1); }
@@ -393,8 +402,8 @@ export function OrgMetrics() {
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
           <div
-            className="today-shine bg-white border border-violet-200 rounded-2xl p-4"
-            style={{ "--sweep-c": "#ede9fe", "--glow-c0": "rgba(124,58,237,0)", "--glow-c1": "rgba(124,58,237,0.18)" } as React.CSSProperties}
+            className="today-shine bg-white border rounded-2xl p-4"
+            style={{ borderColor: "#d4af37", "--sweep-c": "#faf3dd", "--glow-c0": "rgba(212,175,55,0)", "--glow-c1": "rgba(212,175,55,0.45)" } as React.CSSProperties}
           >
             <div className="flex items-center gap-2 mb-2">
               <div className="w-7 h-7 rounded-lg bg-violet-50 border border-violet-100 flex items-center justify-center shrink-0">
@@ -406,8 +415,8 @@ export function OrgMetrics() {
           </div>
 
           <div
-            className="today-shine bg-white border border-sky-200 rounded-2xl p-4"
-            style={{ "--sweep-c": "#e0f2fe", "--glow-c0": "rgba(2,132,199,0)", "--glow-c1": "rgba(2,132,199,0.18)" } as React.CSSProperties}
+            className="today-shine bg-white border rounded-2xl p-4"
+            style={{ borderColor: "#d4af37", "--sweep-c": "#faf3dd", "--glow-c0": "rgba(212,175,55,0)", "--glow-c1": "rgba(212,175,55,0.45)" } as React.CSSProperties}
           >
             <div className="flex items-center gap-2 mb-2">
               <div className="w-7 h-7 rounded-lg bg-sky-50 border border-sky-100 flex items-center justify-center shrink-0">
@@ -419,8 +428,8 @@ export function OrgMetrics() {
           </div>
 
           <div
-            className="today-shine bg-white border border-emerald-200 rounded-2xl p-4"
-            style={{ "--sweep-c": "#d1fae5", "--glow-c0": "rgba(5,150,105,0)", "--glow-c1": "rgba(5,150,105,0.18)" } as React.CSSProperties}
+            className="today-shine bg-white border rounded-2xl p-4"
+            style={{ borderColor: "#d4af37", "--sweep-c": "#faf3dd", "--glow-c0": "rgba(212,175,55,0)", "--glow-c1": "rgba(212,175,55,0.45)" } as React.CSSProperties}
           >
             <div className="flex items-center gap-2 mb-2">
               <div className="w-7 h-7 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center shrink-0">
@@ -493,7 +502,12 @@ export function OrgMetrics() {
               </button>
             </div>
           </div>
-          <div className="flex items-end justify-center gap-3 sm:gap-4 flex-wrap">
+          <div className="flex items-center gap-3 sm:gap-6">
+            {/* Ilustração animada por métrica (Lottie do cliente, com fallback SVG) */}
+            <div key={podiumMetricId} className="hidden md:block shrink-0 w-[150px] lg:w-[190px]">
+              <MetricLottie metricId={podiumMetricId} accent={PODIUM_ACCENT[podiumMetricId] ?? "#7c3aed"} />
+            </div>
+            <div className="flex-1 flex items-end justify-center gap-3 sm:gap-4 flex-wrap">
             {podiumDisplay.map(({ row, rank }) => {
               const medal = ["🥇", "🥈", "🥉"][rank];
               const barH = [104, 74, 52][rank];
@@ -525,6 +539,7 @@ export function OrgMetrics() {
                 </div>
               );
             })}
+            </div>
           </div>
         </div>
       )}

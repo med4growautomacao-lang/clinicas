@@ -327,7 +327,8 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
         name: clinicForm.name.trim(),
         plan: clinicForm.plan,
         category: clinicForm.category || 'clinica',
-        features: { feature_followup: clinicForm.feature_followup, feature_ia: clinicForm.feature_ia },
+        // Preserva outras flags do JSONB (ex.: agenda_via_funil) — o form só controla os 2 toggles.
+        features: { ...((editClinicTarget as any)?.features || {}), feature_followup: clinicForm.feature_followup, feature_ia: clinicForm.feature_ia },
         meta_status: clinicForm.meta_status,
         google_status: clinicForm.google_status,
         site_status: clinicForm.site_status,

@@ -1505,7 +1505,7 @@ export interface Clinic {
   google_ad_account_id?: string | null;
   google_ad_mcc_id?: string | null;
   google_ad_mcc_token?: string | null;
-  features?: { feature_followup?: boolean; feature_ia?: boolean } | null;
+  features?: { feature_followup?: boolean; feature_ia?: boolean; agenda_via_funil?: boolean } | null;
   meta_status?: 'none' | 'inactive' | 'active';
   google_status?: 'none' | 'inactive' | 'active';
   site_status?: 'none' | 'inactive' | 'active';

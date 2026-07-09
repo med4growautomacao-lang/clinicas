@@ -546,7 +546,9 @@ function EditClinicModal({
     await onSubmit({
       ...form,
       organization_id: form.organization_id === '' ? null : form.organization_id,
-      features: { feature_followup: form.feature_followup, feature_ia: form.feature_ia },
+      // Preserva outras flags do JSONB (ex.: agenda_via_funil, lida pelo painel Comercial) — o form
+      // só controla feature_followup/feature_ia; reconstruir do zero apagaria as demais.
+      features: { ...(clinic?.features || {}), feature_followup: form.feature_followup, feature_ia: form.feature_ia },
     });
     setSaving(false);
     onClose();

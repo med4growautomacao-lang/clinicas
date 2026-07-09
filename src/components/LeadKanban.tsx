@@ -942,9 +942,6 @@ const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 // Awaited + sequencial => serializa e evita a rajada que o WhatsApp rejeita.
 const DOC_SEND_DELAY_MS = 1000;   // documento do orçamento
 const PHOTO_SEND_DELAY_MS = 1500; // cada foto do banco
-// STANDBY (pedido do usuário 09/07): campo "Data de entrega prevista" do orçamento (fábrica) fica
-// oculto por enquanto — não remover, só reativar aqui quando o usuário pedir.
-const SHOW_DATA_ENTREGA_PREVISTA = false;
 // Espera o arquivo recém-subido ficar acessível publicamente antes de o uazapi buscá-lo pela URL.
 const waitForPublicUrl = async (url: string, tries = 5) => {
   for (let i = 0; i < tries; i++) {
@@ -1188,6 +1185,9 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   const [pagamento, setPagamento] = useState(iq?.pagamento ?? String(tpl.pagamento ?? ''));
   // Data prometida de entrega (fábrica): alimenta o algoritmo de produção na aprovação.
   const [dataEntrega, setDataEntrega] = useState<string>(iq?.dataEntrega ?? '');
+  // Simulação de disponibilidade/prazo (read-only) para sugerir a data de entrega.
+  const [eta, setEta] = useState<any>(null);
+  const [etaLoading, setEtaLoading] = useState(false);
   const [includeSpecs, setIncludeSpecs] = useState<boolean>(iq?.includeSpecs ?? (tpl.include_specs ?? true));
   const [messageText, setMessageText] = useState('');
   const [msgTouched, setMsgTouched] = useState(false);
@@ -1451,6 +1451,27 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
 
   // Snapshot estruturado p/ reabrir o orçamento depois (persistido em tickets.quote_data).
   const buildQuoteSnapshot = () => ({ lines, manualValue, notes, saudacao, rodape, validade, pagamento, dataEntrega, includeSpecs, format, imageIds: selectedImages.map(i => i.id) });
+
+  // Linhas de produto com quantidade > 0 (base p/ simular disponibilidade/prazo).
+  const telaLines = useMemo(
+    () => lines.filter(l => l.productId.startsWith('p:') && (parseFloat(String(l.qty ?? '').replace(',', '.')) || 0) > 0),
+    [lines],
+  );
+  // Verifica estoque + capacidade de produção (RPC read-only) e sugere a data de entrega.
+  const handleVerificarEta = async () => {
+    if (!activeClinicId || telaLines.length === 0 || etaLoading) return;
+    setEtaLoading(true);
+    const { data, error } = await supabase.rpc('simulate_production_eta', {
+      p_clinic_id: activeClinicId,
+      p_lines: telaLines.map(l => ({ productId: l.productId, qty: l.qty, altura: l.altura ?? '' })),
+    });
+    setEtaLoading(false);
+    if (error || !(data as any)?.success) { setEta({ error: true }); showToast('Não foi possível calcular a disponibilidade.', 'error'); return; }
+    const res = data as any;
+    setEta(res);
+    if (res.resumo?.data_sugerida) setDataEntrega(res.resumo.data_sugerida);
+  };
+  const fmtDataBR = (iso?: string) => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('pt-BR') : '';
 
   // Etapa 1: registra o orçamento sem enviar (fluxo antigo — o WhatsApp é opcional).
   const handleRegisterOnly = async () => {
@@ -1772,19 +1793,59 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
             </div>
           )}
 
-          {/* STANDBY (pedido do usuário 09/07): ocultar por enquanto, sem remover — dataEntrega
-              continua no snapshot/state e o backend (save_orcamento/provision_orcamento) já lê
-              normalmente. Reativar trocando SHOW_DATA_ENTREGA_PREVISTA para true. */}
-          {SHOW_DATA_ENTREGA_PREVISTA && clinic?.category === 'outro' && (
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Data de entrega prevista</label>
-              <input
-                type="date"
-                value={dataEntrega}
-                onChange={e => setDataEntrega(e.target.value)}
-                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-              />
-              <p className="text-[11px] text-slate-400">Usada no planejamento de produção: uma reposição só cobre este pedido se ficar pronta a tempo.</p>
+          {/* Fábrica (category='outro'): verifica estoque + capacidade e SUGERE a data de entrega.
+              Substitui o campo de data manual — a data vem da simulação (ajustável). */}
+          {clinic?.category === 'outro' && (
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={handleVerificarEta}
+                disabled={etaLoading || telaLines.length === 0}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border border-teal-200 bg-teal-50 text-teal-700 text-sm font-bold hover:bg-teal-100 disabled:opacity-50 transition-colors"
+              >
+                <Package className="w-4 h-4" />
+                {etaLoading ? 'Calculando…' : eta ? 'Recalcular disponibilidade' : 'Verificar disponibilidade e sugerir entrega'}
+              </button>
+
+              {eta && !eta.error && (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+                  <div className="space-y-1">
+                    {eta.linhas.map((ln: any, idx: number) => (
+                      <div key={idx} className="flex items-center justify-between text-xs gap-2">
+                        <span className="text-slate-600 truncate">{ln.label}</span>
+                        {ln.sem_estimativa ? (
+                          <span className="text-amber-600 font-semibold shrink-0">sem estimativa</span>
+                        ) : ln.em_estoque ? (
+                          <span className="text-emerald-600 font-semibold shrink-0">✓ em estoque</span>
+                        ) : (
+                          <span className="text-blue-600 font-semibold shrink-0">⏳ produzir {formatQty(Number(ln.falta))} m</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="pt-2 border-t border-slate-200 flex items-center justify-between gap-2">
+                    <span className="text-xs text-slate-500">
+                      {eta.resumo.tudo_em_estoque
+                        ? 'Tudo em estoque'
+                        : `Produção ~${eta.resumo.dias_producao} dia(s)${eta.resumo.dias_expedicao ? ` + ${eta.resumo.dias_expedicao} expedição` : ''}`}
+                    </span>
+                    <span className="text-sm font-black text-slate-800 shrink-0">Entrega: {fmtDataBR(eta.resumo.data_sugerida)}</span>
+                  </div>
+                  {eta.resumo.sem_estimativa && (
+                    <p className="text-[11px] text-amber-600">Alguma linha sem taxa de produção cadastrada — o prazo pode estar incompleto.</p>
+                  )}
+                  <div className="flex items-center gap-2 pt-1">
+                    <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider shrink-0">Entrega prevista</label>
+                    <input
+                      type="date"
+                      value={dataEntrega}
+                      onChange={e => setDataEntrega(e.target.value)}
+                      className="flex-1 px-2 py-1.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
+                    />
+                  </div>
+                  <p className="text-[10px] text-slate-400">Sugestão automática (ajustável). Considera saldo, reservas e capacidade; não considera a fila de outros pedidos.</p>
+                </div>
+              )}
             </div>
           )}
 

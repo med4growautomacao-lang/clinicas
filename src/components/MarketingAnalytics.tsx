@@ -675,8 +675,9 @@ export function MarketingAnalytics() {
           platform: p,
           investment: Number(editValues[`${key}-investment`] || 0),
           manual_leads_count: Number(editValues[`${key}-leads`] || 0),
-          manual_appointments_count: Number(editValues[`${key}-appointments`] || 0),
-          manual_conversions_count: Number(editValues[`${key}-convs`] || 0),
+          // manual_appointments_count / manual_conversions_count NÃO entram no payload: o editor os
+          // semeia a partir do funil (calculateStats), não da coluna salva, então gravá-los aqui
+          // sobrescreveria o valor manual com 0 (upsert onConflict). Omitir preserva o que está salvo.
           conversions_value: Number(editValues[`${key}-value`] || 0)
         });
       });

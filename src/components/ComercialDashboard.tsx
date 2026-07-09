@@ -46,6 +46,7 @@ import { supabase } from "../lib/supabase";
 import { cn } from "../lib/utils";
 import { LeadChat } from "./LeadChat";
 import type { Lead } from "../hooks/useSupabase";
+import { useOrcamentos } from "../hooks/useSupabase";
 import { TrendBarChart, fmtByType } from "./TrendBarChart";
 import { Button } from "./ui/button";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
@@ -387,7 +388,16 @@ function buildReportText(
 // Componente principal
 // ==========================================
 export function ComercialDashboard() {
-  const { profile, activeClinicId } = useAuth();
+  const { profile, activeClinicId, activeClinicCategory } = useAuth();
+  // WakeDesk (category='outro') não tem consultas — o "Faturamento" acima é escopado por
+  // appointment realizado e sempre mostraria zero. Card próprio, somando os orçamentos
+  // aprovados (fonte: Central de Orçamentos), independente do período filtrado no topo.
+  const { data: orcamentosWD } = useOrcamentos();
+  const isOutro = activeClinicCategory === 'outro';
+  const orcamentosAprovados = isOutro ? orcamentosWD.filter(o => o.status === 'aprovado') : [];
+  const faturamentoWD = orcamentosAprovados.reduce((s, o) => s + Number(o.total || 0), 0);
+  const orcamentosProcessados = isOutro ? orcamentosWD.filter(o => o.status === 'aprovado' || o.status === 'recusado').length : 0;
+  const taxaAprovacaoWD = orcamentosProcessados > 0 ? Math.round((orcamentosAprovados.length / orcamentosProcessados) * 100) : null;
   const [data, setData] = useState<CommercialData | null>(null);
   const [clinicFeatures, setClinicFeatures] = useState<{ feature_followup?: boolean; feature_ia?: boolean } | null>(null);
   const [clinicName, setClinicName] = useState("");
@@ -1246,6 +1256,40 @@ export function ComercialDashboard() {
         </div>
       </div>
       </div>
+
+      {/* Faturamento WakeDesk (category='outro'): não tem consultas, então soma os orçamentos
+          aprovados na Central em vez do "Faturamento" escopado por appointment acima. */}
+      {isOutro && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-2">
+          <Card className="bg-white border-slate-200 shadow-lg rounded-2xl p-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-xl bg-emerald-50"><Wallet className="w-4 h-4 text-emerald-700" /></div>
+              <div>
+                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Faturamento (orçamentos aprovados)</p>
+                <p className="text-xl font-black text-slate-900">{fmtBRL(faturamentoWD)}</p>
+              </div>
+            </div>
+          </Card>
+          <Card className="bg-white border-slate-200 shadow-lg rounded-2xl p-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-xl bg-cyan-50"><CheckCircle2 className="w-4 h-4 text-cyan-600" /></div>
+              <div>
+                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Orçamentos aprovados</p>
+                <p className="text-xl font-black text-slate-900">{orcamentosAprovados.length}</p>
+              </div>
+            </div>
+          </Card>
+          <Card className="bg-white border-slate-200 shadow-lg rounded-2xl p-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-xl bg-violet-50"><Percent className="w-4 h-4 text-violet-600" /></div>
+              <div>
+                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Taxa de aprovação</p>
+                <p className="text-xl font-black text-slate-900">{taxaAprovacaoWD != null ? `${taxaAprovacaoWD}%` : "—"}</p>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
 
       {/* KPI strip */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6 gap-4">

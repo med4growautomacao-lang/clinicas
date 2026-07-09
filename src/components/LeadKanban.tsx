@@ -37,7 +37,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { useFunnelStages, useLeads, useNotLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useProducts, Product, ProductInput, ProductAttribute, useQuoteImages, useAppointments, useDoctors, usePatients, useConsultationTypes, useProductionOrders, useInventoryItems, Conversion, Lead, Ticket, TransitionRule } from "../hooks/useSupabase";
+import { useFunnelStages, useLeads, useNotLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useProducts, Product, ProductInput, ProductAttribute, useQuoteImages, useAppointments, useDoctors, usePatients, useConsultationTypes, useProductionOrders, useInventoryItems, useOrcamentos, getVigenteOrcamento, Conversion, Lead, Ticket, TransitionRule } from "../hooks/useSupabase";
 import { NotLeadPanel } from "./NotLeadPanel";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -1122,7 +1122,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   initialQuote?: any;
   onClose: () => void;
   onCancel: () => void;
-  onConfirm: (value: number, description: string, quoteData?: any) => Promise<boolean>;
+  onConfirm: (value: number, description: string, quoteData: any, status: 'rascunho' | 'enviado') => Promise<boolean>;
 }) {
   const iq: any = initialQuote ?? null; // orçamento salvo (editar) — tem prioridade sobre o modelo
   const showToast = useToast();
@@ -1445,7 +1445,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   const handleRegisterOnly = async () => {
     if (!total || total <= 0 || saving) return;
     setSaving(true);
-    const ok = await onConfirm(total, buildDescription().trim(), buildQuoteSnapshot());
+    const ok = await onConfirm(total, buildDescription().trim(), buildQuoteSnapshot(), 'rascunho');
     if (ok) { setDone(true); setTimeout(onClose, 900); }
     setSaving(false);
   };
@@ -1499,7 +1499,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
     if (!activeClinicId || !lead.phone) { setSendError('Lead sem telefone cadastrado.'); return; }
     if (format === 'texto' && !messageText.trim()) { setSendError('Mensagem vazia.'); return; }
     setSending(true); setSendError(null);
-    const ok = await onConfirm(total, buildDescription().trim(), buildQuoteSnapshot());
+    const ok = await onConfirm(total, buildDescription().trim(), buildQuoteSnapshot(), 'enviado');
     if (!ok) { setSending(false); setSendError('Falha ao registrar o orçamento.'); return; }
 
     const clinicId = activeClinicId;
@@ -2567,9 +2567,10 @@ export function LeadKanban() {
   const { tickets, loading: ticketsLoading, refetch: refetchTickets, moveTicket, reopenTicket, moveTicketKeepOutcome, openTicket, closeTicket, finalizeTicket } = useTickets();
   const { byLead: conversionsByLead, create: createConversion, update: updateConversion } = useConversions();
   const { aiConfig, updateAI } = useSettings();
+  const { data: orcamentos, save: saveOrcamento } = useOrcamentos();
   const [ganhoLead, setGanhoLead] = useState<{ id: string; name: string; phone: string | null; patientId: string | null; prevStageId: string | null; ticketId: string } | null>(null);
   const [lossLead, setLossLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
-  const [orcamentoLead, setOrcamentoLead] = useState<{ id: string; name: string; phone: string | null; prevStageId: string | null; ticketId: string; initialQuote?: any } | null>(null);
+  const [orcamentoLead, setOrcamentoLead] = useState<{ id: string; name: string; phone: string | null; prevStageId: string | null; ticketId: string; initialQuote?: any; orcamentoId?: string | null } | null>(null);
   const [poLead, setPoLead] = useState<{ id: string; name: string; phone: string | null; quoteData: any; ticketId?: string | null } | null>(null);
   // Aviso ao arrastar um card já resolvido (venda/perda) para uma etapa ativa: manter (novo
   // ciclo, card único) ou cancelar (reabre o mesmo ticket). Guarda o ticket p/ o fluxo "Manter".
@@ -4207,7 +4208,8 @@ export function LeadKanban() {
                         type="button"
                         onClick={() => {
                           setShowModal(false);
-                          setOrcamentoLead({ id: selectedLead.id, name: selectedLead.name, phone: selectedLead.phone ?? null, prevStageId: null, ticketId: et.id, initialQuote: et.quote_data });
+                          const vig = getVigenteOrcamento(orcamentos, selectedLead.id, et.id);
+                          setOrcamentoLead({ id: selectedLead.id, name: selectedLead.name, phone: selectedLead.phone ?? null, prevStageId: null, ticketId: et.id, initialQuote: et.quote_data, orcamentoId: vig?.id ?? null });
                         }}
                         className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 font-bold text-sm hover:bg-blue-100 transition-colors"
                       >
@@ -4600,14 +4602,20 @@ export function LeadKanban() {
             setOrcamentoLead(null);
             if (prevStageId) moveTicket(ticketId, prevStageId);
           }}
-          onConfirm={async (value, description, quoteData) => {
-            await update(orcamentoLead.id, { estimated_value: value });
-            const patch: any = {};
-            if (description) patch.notes = description;
-            if (quoteData !== undefined) patch.quote_data = quoteData;
-            if (Object.keys(patch).length) {
-              await supabase.from('tickets').update(patch).eq('id', orcamentoLead.ticketId);
-            }
+          onConfirm={async (value, description, quoteData, status) => {
+            // Única escrita: a RPC grava o orçamento E espelha em tickets.quote_data/notes +
+            // leads.estimated_value na mesma transação (substitui o dual-write solto no client).
+            const res = await saveOrcamento({
+              id: orcamentoLead.orcamentoId ?? null,
+              leadId: orcamentoLead.id,
+              ticketId: orcamentoLead.ticketId,
+              status,
+              clientName: orcamentoLead.name,
+              total: value,
+              notes: description || null,
+              snapshot: quoteData ?? null,
+            });
+            if (!res.success) return false;
             await refetchTickets(true);
             return true;
           }}

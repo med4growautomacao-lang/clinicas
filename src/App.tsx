@@ -13,6 +13,7 @@ import { OrgAdmin } from './components/OrgAdmin';
 import { UserProfile } from './components/UserProfile';
 import { TeamManagement } from './components/TeamManagement';
 import { Production } from './components/production/Production';
+import { OrcamentosCentral } from './components/orcamentos/OrcamentosCentral';
 import { AIAssistant } from './components/AIAssistant';
 
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -76,7 +77,7 @@ function AppContent() {
     if (loading) return;
     const ROLE_ALLOWED_TABS: Record<string, string[]> = {
       medico: ['appointments', 'medical-records', 'profile'],
-      vendedor: ['dashboard', 'marketing', 'ai-secretary', 'finance', 'settings', 'profile'],
+      vendedor: ['dashboard', 'marketing', 'ai-secretary', 'finance', 'settings', 'profile', 'orcamentos'],
     };
     const allowed = ROLE_ALLOWED_TABS[userRole];
     if (allowed && !allowed.includes(activeTab)) {
@@ -111,6 +112,7 @@ function AppContent() {
     { id: 'profile',         el: <UserProfile /> },
     { id: 'team',            el: <TeamManagement /> },
     { id: 'production',      el: <Production /> },
+    { id: 'orcamentos',      el: <OrcamentosCentral /> },
   ];
 
   return (

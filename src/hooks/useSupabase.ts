@@ -3456,6 +3456,170 @@ export function useProductionOrders() {
   return { data, loading, create, update, remove, complete, refetch: fetch };
 }
 
+// ==========================================
+// ORÇAMENTOS (Central de Orçamentos, WakeDesk/category='outro')
+// ==========================================
+export type OrcamentoStatus = 'rascunho' | 'enviado' | 'aprovado' | 'recusado' | 'expirado';
+
+export interface Orcamento {
+  id: string;
+  clinic_id: string;
+  number: number;
+  lead_id: string | null;
+  ticket_id: string | null;
+  approved_ticket_id: string | null;
+  status: OrcamentoStatus;
+  client_name: string | null;
+  client_doc: string | null;
+  client_address: string | null;
+  subtotal: number | null;
+  desconto: number | null;
+  frete: number | null;
+  total: number;
+  validade: string | null;
+  vencimento: string | null;
+  pagamento: string | null;
+  notes: string | null;
+  reject_reason: string | null;
+  snapshot: any;
+  created_by: string | null;
+  created_at: string;
+  sent_at: string | null;
+  approved_at: string | null;
+  rejected_at: string | null;
+  lead?: { name: string; phone: string | null } | null;
+}
+
+export interface SaveOrcamentoInput {
+  id?: string | null;
+  leadId: string;
+  ticketId?: string | null;
+  status: 'rascunho' | 'enviado';
+  clientName?: string | null;
+  clientDoc?: string | null;
+  clientAddress?: string | null;
+  subtotal?: number | null;
+  desconto?: number | null;
+  frete?: number | null;
+  total: number;
+  validade?: string | null;
+  vencimento?: string | null;
+  pagamento?: string | null;
+  notes?: string | null;
+  snapshot?: any;
+}
+
+type RpcResult = { success: boolean; error_code?: string; [key: string]: any };
+
+// Orçamento VIGENTE de um lead: espelha get_orcamento_vigente (SQL) para uso client-side sem
+// round-trip — prioriza um 'aprovado' cujo approved_ticket_id é o ticket aberto atual do lead;
+// senão, o mais recente por created_at.
+export function getVigenteOrcamento(list: Orcamento[], leadId: string, openTicketId?: string | null): Orcamento | null {
+  const mine = list.filter(o => o.lead_id === leadId);
+  if (!mine.length) return null;
+  const approvedCurrent = mine.find(o => o.status === 'aprovado' && o.approved_ticket_id && o.approved_ticket_id === openTicketId);
+  if (approvedCurrent) return approvedCurrent;
+  return mine.slice().sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+}
+
+export function useOrcamentos() {
+  const { activeClinicId } = useAuth();
+  const [data, setData] = useState<Orcamento[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = useCallback(async (silent = false) => {
+    if (!activeClinicId) return;
+    if (!silent) setLoading(true);
+    const { data } = await supabase
+      .from('orcamentos')
+      .select('*, lead:leads(name, phone)')
+      .eq('clinic_id', activeClinicId)
+      .order('number', { ascending: false });
+    setData((data as Orcamento[]) || []);
+    setLoading(false);
+  }, [activeClinicId]);
+
+  useEffect(() => {
+    fetch();
+    if (!activeClinicId) return;
+    const channel = supabase
+      .channel(`orcamentos_${activeClinicId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orcamentos', filter: `clinic_id=eq.${activeClinicId}` }, () => fetch(true))
+      .subscribe();
+    const interval = setInterval(() => fetch(true), 60_000);
+    return () => { supabase.removeChannel(channel); clearInterval(interval); };
+  }, [fetch, activeClinicId]);
+
+  // Único ponto de escrita (criar/editar): grava o cabeçalho e espelha em
+  // tickets.quote_data/notes + leads.estimated_value dentro da mesma transação (RPC).
+  const save = async (input: SaveOrcamentoInput): Promise<RpcResult> => {
+    if (!activeClinicId) return { success: false, error_code: 'no_active_clinic' };
+    const { data: res, error } = await supabase.rpc('save_orcamento', {
+      p_id: input.id ?? null,
+      p_clinic_id: activeClinicId,
+      p_lead_id: input.leadId,
+      p_status: input.status,
+      p_client_name: input.clientName ?? null,
+      p_client_doc: input.clientDoc ?? null,
+      p_client_address: input.clientAddress ?? null,
+      p_subtotal: input.subtotal ?? null,
+      p_desconto: input.desconto ?? null,
+      p_frete: input.frete ?? null,
+      p_total: input.total,
+      p_validade: input.validade ?? null,
+      p_vencimento: input.vencimento ?? null,
+      p_pagamento: input.pagamento ?? null,
+      p_notes: input.notes ?? null,
+      p_snapshot: input.snapshot ?? null,
+      p_ticket_id: input.ticketId ?? null,
+    });
+    await fetch(true);
+    if (error) return { success: false, error_code: error.message };
+    return res as RpcResult;
+  };
+
+  // Aprovar = fecha a venda (Ganho + receita). Idempotente no servidor.
+  const approve = async (id: string, opts: { paymentMethod: string; paymentStatus: 'pago' | 'pendente'; paymentDate: string; category?: string }): Promise<RpcResult> => {
+    const { data: res, error } = await supabase.rpc('close_sale_from_orcamento', {
+      p_orcamento_id: id,
+      p_payment_method: opts.paymentMethod,
+      p_payment_status: opts.paymentStatus,
+      p_payment_date: opts.paymentDate,
+      p_category: opts.category ?? 'Venda de produto',
+    });
+    await fetch(true);
+    if (error) return { success: false, error_code: error.message };
+    return res as RpcResult;
+  };
+
+  const updateStatus = async (id: string, status: 'enviado' | 'recusado' | 'expirado', reason?: string | null): Promise<RpcResult> => {
+    const { data: res, error } = await supabase.rpc('update_orcamento_status', {
+      p_orcamento_id: id,
+      p_status: status,
+      p_reason: reason ?? null,
+    });
+    await fetch(true);
+    if (error) return { success: false, error_code: error.message };
+    return res as RpcResult;
+  };
+
+  // Campos "cosméticos" da Ordem de Pedido impressa (doc/endereço do cliente, vencimento) —
+  // não afetam a venda, então dá p/ editar mesmo com o orçamento já aprovado.
+  const setPrintInfo = async (id: string, info: { clientDoc?: string | null; clientAddress?: string | null; vencimento?: string | null }): Promise<RpcResult> => {
+    const { data: res, error } = await supabase.rpc('set_orcamento_print_info', {
+      p_orcamento_id: id,
+      p_client_doc: info.clientDoc ?? null,
+      p_client_address: info.clientAddress ?? null,
+      p_vencimento: info.vencimento ?? null,
+    });
+    await fetch(true);
+    if (error) return { success: false, error_code: error.message };
+    return res as RpcResult;
+  };
+
+  return { data, loading, refetch: fetch, save, approve, updateStatus, setPrintInfo };
+}
+
 // Equipamento/maquina (Manutencao).
 export interface Equipment {
   id: string;

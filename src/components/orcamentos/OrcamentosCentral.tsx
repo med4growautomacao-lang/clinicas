@@ -3,8 +3,9 @@ import { AnimatePresence } from "framer-motion";
 import { FileText, Send, CheckCircle2, XCircle, Search, ExternalLink, Printer, Download, Receipt } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useOrcamentos, useSettings, useProducts, useProtocols, Orcamento, OrcamentoStatus } from "../../hooks/useSupabase";
+import { supabase } from "../../lib/supabase";
 import { useToast } from "../ui/toast";
-import { Button, Modal, Field, StatCard, StatusBadge, EmptyState, inputCls, fmtDate } from "../production/shared";
+import { Button, Modal, Field, StatCard, StatusBadge, EmptyState, inputCls, fmtDate, fmtQty } from "../production/shared";
 import { useImageDataUrl } from "../QuoteDocument";
 import { ReciboDocument, ReciboItem } from "./ReciboDocument";
 
@@ -224,12 +225,40 @@ function OrcamentoRow({ o, onApprove, onReject, onPrint, onMarkSent }: {
 function ApproveModal({ orcamento, onClose, onConfirm }: {
   orcamento: Orcamento;
   onClose: () => void;
-  onConfirm: (opts: { paymentMethod: string; paymentStatus: "pago" | "pendente"; paymentDate: string }) => Promise<void>;
+  onConfirm: (opts: { paymentMethod: string; paymentStatus: "pago" | "pendente"; paymentDate: string; dataEntrega?: string | null }) => Promise<void>;
 }) {
+  const { clinic } = useSettings();
+  const isFactory = clinic?.category === "outro";
   const [paymentMethod, setPaymentMethod] = useState("pix");
   const [paymentStatus, setPaymentStatus] = useState<"pago" | "pendente">("pago");
   const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
+  // Disponibilidade + prazo (fábrica): roda a simulação ao abrir e pré-preenche a data de entrega.
+  const [eta, setEta] = useState<any>(null);
+  const [etaLoading, setEtaLoading] = useState(isFactory);
+  const [dataEntrega, setDataEntrega] = useState<string>(orcamento.data_entrega_prevista ?? "");
+
+  useEffect(() => {
+    if (!isFactory) return;
+    const lines = Array.isArray(orcamento.snapshot?.lines) ? orcamento.snapshot.lines : [];
+    const payload = lines
+      .filter((l: any) => String(l.productId || "").startsWith("p:") && (parseFloat(String(l.qty ?? "").replace(",", ".")) || 0) > 0)
+      .map((l: any) => ({ productId: l.productId, qty: l.qty, altura: l.altura ?? "" }));
+    if (payload.length === 0) { setEtaLoading(false); return; }
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase.rpc("simulate_production_eta", { p_clinic_id: orcamento.clinic_id, p_lines: payload });
+      if (cancelled) return;
+      setEtaLoading(false);
+      if (error || !(data as any)?.success) { setEta({ error: true }); return; }
+      const res = data as any;
+      setEta(res);
+      setDataEntrega(prev => prev || res.resumo?.data_sugerida || "");
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const fmtDataBR = (iso?: string) => iso ? new Date(iso + "T00:00:00").toLocaleDateString("pt-BR") : "";
 
   const METHODS = [
     { id: "pix", label: "Pix" },
@@ -241,11 +270,11 @@ function ApproveModal({ orcamento, onClose, onConfirm }: {
   return (
     <Modal
       title={`Aprovar orçamento #${orcamento.number}`}
-      subtitle="Isso fecha a venda: marca o card como Ganho e lança a receita no Financeiro."
+      subtitle="Isso fecha a venda: marca o card como Ganho, lança a receita e programa a produção."
       onClose={onClose}
       footer={<>
         <Button variant="outline" size="sm" onClick={onClose}>Cancelar</Button>
-        <Button size="sm" onClick={async () => { setSaving(true); await onConfirm({ paymentMethod, paymentStatus, paymentDate }); setSaving(false); }} disabled={saving}>
+        <Button size="sm" onClick={async () => { setSaving(true); await onConfirm({ paymentMethod, paymentStatus, paymentDate, dataEntrega: isFactory ? (dataEntrega || null) : null }); setSaving(false); }} disabled={saving}>
           {saving ? "Aprovando…" : "Confirmar venda"}
         </Button>
       </>}
@@ -255,6 +284,49 @@ function ApproveModal({ orcamento, onClose, onConfirm }: {
           <span className="text-sm font-bold text-emerald-800">Valor da venda</span>
           <span className="text-xl font-black text-emerald-700">{fmtBRL(orcamento.total)}</span>
         </div>
+
+        {isFactory && (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+            <div className="text-xs font-bold text-slate-500 uppercase tracking-wide">Disponibilidade e prazo</div>
+            {etaLoading ? (
+              <p className="text-sm text-slate-400 py-1">Verificando estoque e produção…</p>
+            ) : eta && !eta.error ? (
+              <>
+                <div className="space-y-1">
+                  {eta.linhas.map((ln: any, idx: number) => (
+                    <div key={idx} className="flex items-center justify-between text-xs gap-2">
+                      <span className="text-slate-600 truncate">{ln.label}</span>
+                      {ln.sem_estimativa ? (
+                        <span className="text-amber-600 font-semibold shrink-0">sem estimativa</span>
+                      ) : ln.em_estoque ? (
+                        <span className="text-emerald-600 font-semibold shrink-0">✓ em estoque</span>
+                      ) : (
+                        <span className="text-blue-600 font-semibold shrink-0">⏳ produzir {fmtQty(Number(ln.falta))} m</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="pt-2 border-t border-slate-200 flex items-center justify-between gap-2">
+                  <span className="text-xs text-slate-500">
+                    {eta.resumo.tudo_em_estoque
+                      ? "Tudo em estoque"
+                      : `Produção ~${eta.resumo.dias_producao} dia(s)${eta.resumo.dias_expedicao ? ` + ${eta.resumo.dias_expedicao} expedição` : ""}`}
+                  </span>
+                  <span className="text-sm font-black text-slate-800 shrink-0">Sugerido: {fmtDataBR(eta.resumo.data_sugerida)}</span>
+                </div>
+                {eta.resumo.sem_estimativa && (
+                  <p className="text-[11px] text-amber-600">Alguma linha sem taxa de produção cadastrada — o prazo pode estar incompleto.</p>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-slate-400 py-1">Não foi possível verificar a disponibilidade agora.</p>
+            )}
+            <Field label="Prazo de entrega (confirme ou ajuste)">
+              <input type="date" className={inputCls} value={dataEntrega} onChange={e => setDataEntrega(e.target.value)} />
+            </Field>
+          </div>
+        )}
+
         <div className="grid grid-cols-2 gap-3">
           <Field label="Forma de pagamento">
             <select className={inputCls} value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}>

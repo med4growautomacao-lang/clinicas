@@ -3631,13 +3631,14 @@ export function useOrcamentos() {
   };
 
   // Aprovar = fecha a venda (Ganho + receita). Idempotente no servidor.
-  const approve = async (id: string, opts: { paymentMethod: string; paymentStatus: 'pago' | 'pendente'; paymentDate: string; category?: string }): Promise<RpcResult> => {
+  const approve = async (id: string, opts: { paymentMethod: string; paymentStatus: 'pago' | 'pendente'; paymentDate: string; category?: string; dataEntrega?: string | null }): Promise<RpcResult> => {
     const { data: res, error } = await supabase.rpc('close_sale_from_orcamento', {
       p_orcamento_id: id,
       p_payment_method: opts.paymentMethod,
       p_payment_status: opts.paymentStatus,
       p_payment_date: opts.paymentDate,
       p_category: opts.category ?? 'Venda de produto',
+      p_data_entrega: opts.dataEntrega || null,
     });
     await fetch(true);
     if (error) return { success: false, error_code: error.message };

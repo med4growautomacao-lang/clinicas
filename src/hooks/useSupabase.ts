@@ -1530,6 +1530,8 @@ export interface Clinic {
   } | null;
   lead_time_expedicao_dias?: number;   // fábrica: folga (dias) entre OP pronta e entrega (separar/expedir)
   horas_uteis_producao_dia?: number;   // fábrica: jornada diária (horas) p/ converter tempo de produção em dias
+  custo_mao_obra_hora?: number;        // fábrica: R$/hora de mão de obra p/ compor o custo real por SKU
+  custo_fixo_hora?: number;            // fábrica: R$/hora de rateio de custos fixos p/ compor o custo real por SKU
 }
 
 export interface CompanyPrompt {
@@ -3382,6 +3384,33 @@ export function useProductBom(productItemId?: string | null) {
   };
 
   return { data, loading, add, update, remove, refetch: fetch };
+}
+
+// Custo de material (ficha tecnica) de TODOS os produtos acabados da clinica de uma vez — usado
+// para o "Valor em estoque" da lista (useProductBom busca so 1 item, para o modal).
+export function useAllProductBomCost() {
+  const { activeClinicId } = useAuth();
+  const [data, setData] = useState<Map<string, number>>(new Map());
+  const [loading, setLoading] = useState(true);
+
+  const fetch = useCallback(async () => {
+    if (!activeClinicId) { setData(new Map()); setLoading(false); return; }
+    setLoading(true);
+    const { data: rows } = await supabase
+      .from('product_bom')
+      .select('product_item_id, qty_per_unit, material:inventory_items!product_bom_material_item_id_fkey(unit_cost)')
+      .eq('clinic_id', activeClinicId);
+    const map = new Map<string, number>();
+    (rows || []).forEach((r: any) => {
+      const cost = Number(r.qty_per_unit) * Number(r.material?.unit_cost ?? 0);
+      map.set(r.product_item_id, (map.get(r.product_item_id) ?? 0) + cost);
+    });
+    setData(map);
+    setLoading(false);
+  }, [activeClinicId]);
+
+  useEffect(() => { fetch(); }, [fetch]);
+  return { data, loading, refetch: fetch };
 }
 
 // Ordem de Producao (PCP). number e sequencial por clinica (definido por trigger).

@@ -846,6 +846,17 @@ export function Settings() {
                                                 />
                                                 <p className="text-[11px] text-slate-400 mt-1.5">Usada para converter o tempo de produção (setup + m²/hora, cadastrado por SKU no Estoque) em dias de prazo da OP.</p>
                                             </div>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="text-sm font-bold text-slate-700 block mb-1">Mão de obra (R$/hora)</label>
+                                                    <MoneyInput value={(localClinic as any).custo_mao_obra_hora ?? 0} onChange={v => setLocalClinic(prev => ({ ...prev, custo_mao_obra_hora: v }))} />
+                                                </div>
+                                                <div>
+                                                    <label className="text-sm font-bold text-slate-700 block mb-1">Custos fixos (R$/hora)</label>
+                                                    <MoneyInput value={(localClinic as any).custo_fixo_hora ?? 0} onChange={v => setLocalClinic(prev => ({ ...prev, custo_fixo_hora: v }))} />
+                                                </div>
+                                            </div>
+                                            <p className="text-[11px] text-slate-400 -mt-2.5">Somados e multiplicados pelo tempo de produção corrido do SKU (sem o setup) para compor o "Custo real de produção" mostrado no item, ao lado do Custo de material.</p>
                                             <div>
                                                 <label className="text-sm font-bold text-slate-700 block mb-1">Prazo de expedição (dias)</label>
                                                 <input

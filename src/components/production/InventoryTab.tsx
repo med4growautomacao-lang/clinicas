@@ -7,7 +7,7 @@ import {
 import { cn } from "@/src/lib/utils";
 import { supabase } from "../../lib/supabase";
 import {
-  useInventoryItems, useInventoryMovements, useProductBom, useProducts, useProtocols, useResponsibles, useStockByAltura,
+  useInventoryItems, useInventoryMovements, useProductBom, useAllProductBomCost, useProducts, useProtocols, useResponsibles, useStockByAltura, useSettings,
   InventoryItem, InventoryKind, INVENTORY_KIND_LABEL,
 } from "../../hooks/useSupabase";
 import { useToast } from "../ui/toast";
@@ -27,15 +27,28 @@ export function InventoryTab() {
   const { byItem: alturaByItem } = useStockByAltura();
   const { data: products } = useProducts();
   const { data: protocols } = useProtocols();
+  const { clinic } = useSettings();
+  const { data: bomCostByItem } = useAllProductBomCost();
 
-  // Valor unitário do item: produto acabado puxa o preço do catálogo (Dados da Clínica) do
-  // produto/protocolo vinculado; demais itens usam o custo unitário cadastrado.
+  // Valor unitário do item, em cascata (o mais preciso disponível primeiro):
+  //   1. Custo real (material + mão de obra/fixos do tempo de produção, se taxa+altura+custo/hora cadastrados)
+  //   2. Custo de material (ficha técnica), se cadastrada
+  //   3. Custo unitário manual, se preenchido
+  //   4. Preço de venda do catálogo (produto/protocolo vinculado) — fallback só quando nada acima existe.
+  const custoHora = Number(clinic?.custo_mao_obra_hora ?? 0) + Number(clinic?.custo_fixo_hora ?? 0);
   const productPrice = useMemo(() => new Map(products.map(p => [p.id, Number(p.unit_price)])), [products]);
   const protocolPrice = useMemo(() => new Map(protocols.map(t => [t.id, Number(t.price ?? 0)])), [protocols]);
-  const unitValueOf = (it: InventoryItem) =>
-    it.product_id ? (productPrice.get(it.product_id) ?? 0)
+  const unitValueOf = (it: InventoryItem) => {
+    const custoMaterial = bomCostByItem.get(it.id) ?? 0;
+    const taxa = Number(it.taxa_producao_m2_hora ?? 0);
+    const altura = Number(it.altura ?? 0);
+    if (taxa > 0 && altura > 0 && custoHora > 0) return custoMaterial + custoHora * (altura / taxa);
+    if (custoMaterial > 0) return custoMaterial;
+    if (Number(it.unit_cost) > 0) return Number(it.unit_cost);
+    return it.product_id ? (productPrice.get(it.product_id) ?? 0)
       : it.protocol_id ? (protocolPrice.get(it.protocol_id) ?? 0)
-        : Number(it.unit_cost);
+        : 0;
+  };
   const totalValue = items.reduce((s, it) => s + Number(it.current_qty) * unitValueOf(it), 0);
   const [expandedAltura, setExpandedAltura] = useState<Set<string>>(new Set());
   const toggleExpand = (id: string) => setExpandedAltura(prev => {
@@ -447,7 +460,13 @@ function ItemModal({
         {form.kind === "produto_acabado" && (
           <div className="md:border-l md:border-slate-100 md:pl-4">
             {savedId ? (
-              <BomEditor productItemId={savedId} productUnit={form.unit} materials={allItems.filter(i => i.id !== savedId && i.kind !== "produto_acabado")} />
+              <BomEditor
+                productItemId={savedId}
+                productUnit={form.unit}
+                materials={allItems.filter(i => i.id !== savedId && i.kind !== "produto_acabado")}
+                taxaProducaoM2Hora={Number(form.taxa_producao_m2_hora) || 0}
+                altura={item?.altura ?? null}
+              />
             ) : (
               <div className="h-full flex flex-col items-center justify-center text-center text-sm text-slate-400 border border-dashed border-slate-200 rounded-xl p-6">
                 <FileStack className="w-8 h-8 mb-2 text-slate-300" />
@@ -464,7 +483,11 @@ function ItemModal({
 // Ficha tecnica: linhas material x quantidade por unidade produzida.
 // Para telas (produto em m²), o qty_per_unit e o kg/m² (media da fabrica): a media kg/m²
 // x preco/kg da materia-prima da o custo de material por m².
-function BomEditor({ productItemId, productUnit, materials }: { productItemId: string; productUnit: string; materials: InventoryItem[] }) {
+function BomEditor({ productItemId, productUnit, materials, taxaProducaoM2Hora, altura }: {
+  productItemId: string; productUnit: string; materials: InventoryItem[];
+  taxaProducaoM2Hora?: number; altura?: number | null;
+}) {
+  const { clinic } = useSettings();
   const { data: bom, add, update, remove } = useProductBom(productItemId);
   const [pick, setPick] = useState("");
   const [qty, setQty] = useState<number>(1);
@@ -474,6 +497,13 @@ function BomEditor({ productItemId, productUnit, materials }: { productItemId: s
   const matById = useMemo(() => new Map(materials.map(m => [m.id, m])), [materials]);
   // Custo de material por unidade de produto = Σ (kg/unidade × preço/kg).
   const costPerUnit = bom.reduce((s, b) => s + Number(b.qty_per_unit) * Number(matById.get(b.material_item_id)?.unit_cost ?? 0), 0);
+  // Custo real = material + mão de obra/custos fixos do tempo de produção CORRIDO (área/taxa), sem
+  // o setup (custo de lote — ratear por unidade distorceria pedidos pequenos/grandes). Só calcula
+  // com taxa e altura cadastradas (senão não há como converter horas por metro).
+  const custoHora = Number(clinic?.custo_mao_obra_hora ?? 0) + Number(clinic?.custo_fixo_hora ?? 0);
+  const custoReal = (taxaProducaoM2Hora && taxaProducaoM2Hora > 0 && altura && altura > 0 && custoHora > 0)
+    ? costPerUnit + custoHora * (altura / taxaProducaoM2Hora)
+    : null;
 
   return (
     <div>
@@ -521,6 +551,15 @@ function BomEditor({ productItemId, productUnit, materials }: { productItemId: s
           <span className="text-sm font-semibold text-slate-500">Custo de material</span>
           <span className="text-sm font-black text-slate-800">{fmtBRL(costPerUnit)}/{unit}</span>
         </div>
+      )}
+      {custoReal != null && (
+        <div className="flex items-center justify-between mt-1">
+          <span className="text-sm font-semibold text-teal-700">Custo real (+ mão de obra/fixos)</span>
+          <span className="text-sm font-black text-teal-700">{fmtBRL(custoReal)}/{unit}</span>
+        </div>
+      )}
+      {costPerUnit > 0 && custoReal == null && (
+        <p className="text-[11px] text-slate-400 mt-1.5">Cadastre a taxa de produção (m²/hora) acima e mão de obra/custos fixos (Configurações) para ver o custo real.</p>
       )}
     </div>
   );

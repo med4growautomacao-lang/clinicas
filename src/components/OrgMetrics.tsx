@@ -80,6 +80,8 @@ const METRICS: MetricDef[] = [
 
 const DEFAULT_VISIBLE = METRICS.map(m => m.id);
 
+const MONTH_NAMES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+
 export function OrgMetrics() {
   const [rows, setRows] = useState<ClinicMetricRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -165,6 +167,40 @@ export function OrgMetrics() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Destaque "Hoje": busca independente do filtro de período, sempre o dia atual.
+  const [todayRows, setTodayRows] = useState<ClinicMetricRow[]>([]);
+  const [todayLoading, setTodayLoading] = useState(true);
+  const todayISO = useMemo(() => toISODate(new Date()), []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setTodayLoading(true);
+      const { data, error } = await supabase.rpc("get_org_clinics_metrics", {
+        p_date_from: todayISO,
+        p_date_to: todayISO,
+      });
+      if (!cancelled && !error && Array.isArray(data)) {
+        setTodayRows((data as any[]).map(r => ({
+          clinicId: r.clinicId,
+          clinicName: r.clinicName,
+          logoUrl: r.logoUrl,
+          isActive: r.isActive !== false,
+          category: r.category,
+          leads: Number(r.leads || 0),
+          patientsCaptured: Number(r.patientsCaptured || 0),
+          sales: Number(r.sales || 0),
+          lost: Number(r.lost || 0),
+          revenue: Number(r.revenue || 0),
+          investment: Number(r.investment || 0),
+          ticketMedio: r.ticketMedio != null ? Number(r.ticketMedio) : null,
+        })));
+      }
+      if (!cancelled) setTodayLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [todayISO]);
+
   const visible = useMemo(
     () => rows.filter(r =>
       (showInactive || r.isActive) &&
@@ -243,8 +279,118 @@ export function OrgMetrics() {
     else { setSortKey(key); setSortDesc(true); }
   };
 
+  // Mesma seleção de clientes/inativas do resto da tela, aplicada ao snapshot de hoje.
+  const todayTotals = useMemo(() => {
+    const visibleToday = todayRows.filter(r =>
+      (showInactive || r.isActive) &&
+      (selectedIds.length === 0 || selectedIds.includes(r.clinicId))
+    );
+    return visibleToday.reduce(
+      (acc, r) => ({
+        leads: acc.leads + r.leads,
+        patients: acc.patients + r.patientsCaptured,
+        sales: acc.sales + r.sales,
+      }),
+      { leads: 0, patients: 0, sales: 0 }
+    );
+  }, [todayRows, showInactive, selectedIds]);
+
+  const todayDateLabel = useMemo(() => {
+    const d = new Date();
+    return `${String(d.getDate()).padStart(2, "0")} de ${MONTH_NAMES[d.getMonth()]}`;
+  }, []);
+
+  const motivation = useMemo(() => {
+    const { leads, patients, sales } = todayTotals;
+    if (sales > 0) {
+      return { emoji: "🔥", text: `Dia forte! ${leads} leads, ${patients} pacientes agendados e ${sales} consultas fechadas até agora. Continue assim! 🚀` };
+    }
+    if (leads > 0) {
+      return { emoji: "💪", text: `Bom ritmo hoje! ${leads} leads captados até agora.` };
+    }
+    return { emoji: "🌅", text: "O dia está começando. Assim que os leads chegarem, você acompanha tudo por aqui." };
+  }, [todayTotals]);
+
   return (
     <div className="flex flex-col gap-4">
+      <style>{`
+        @keyframes orgMetricsTodaySweep {
+          0%   { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
+        }
+        @keyframes orgMetricsTodayGlow {
+          0%, 100% { box-shadow: 0 0 0 0 var(--glow-c0, transparent); }
+          50%      { box-shadow: 0 0 0 6px var(--glow-c1, transparent); }
+        }
+        @keyframes orgMetricsLiveDot {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50%      { opacity: 0.35; transform: scale(0.75); }
+        }
+        .today-shine {
+          background-image: linear-gradient(100deg, rgb(255 255 255) 0%, var(--sweep-c, #fff) 50%, rgb(255 255 255) 100%);
+          background-size: 220% 100%;
+          animation: orgMetricsTodaySweep 6s linear infinite, orgMetricsTodayGlow 2.6s ease-in-out infinite;
+        }
+        .today-live-dot { animation: orgMetricsLiveDot 1.6s ease-in-out infinite; }
+      `}</style>
+
+      {/* Destaque "Hoje" */}
+      <div>
+        <div className="flex items-center gap-2 mb-2.5">
+          <span className="w-2 h-2 bg-violet-500 rounded-full today-live-dot" />
+          <span className="text-[11px] font-black uppercase tracking-wider text-slate-600">Hoje</span>
+          <span className="text-[11px] font-semibold text-slate-400">· {todayDateLabel}</span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+          <div
+            className="today-shine bg-white border border-violet-200 rounded-2xl p-4"
+            style={{ "--sweep-c": "#ede9fe", "--glow-c0": "rgba(124,58,237,0)", "--glow-c1": "rgba(124,58,237,0.18)" } as React.CSSProperties}
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-7 h-7 rounded-lg bg-violet-50 border border-violet-100 flex items-center justify-center shrink-0">
+                <Users className="w-3.5 h-3.5 text-violet-600" />
+              </div>
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">Leads Captados</span>
+            </div>
+            <span className="text-3xl font-black text-violet-600">{todayLoading ? "…" : todayTotals.leads.toLocaleString("pt-BR")}</span>
+          </div>
+
+          <div
+            className="today-shine bg-white border border-sky-200 rounded-2xl p-4"
+            style={{ "--sweep-c": "#e0f2fe", "--glow-c0": "rgba(2,132,199,0)", "--glow-c1": "rgba(2,132,199,0.18)" } as React.CSSProperties}
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-7 h-7 rounded-lg bg-sky-50 border border-sky-100 flex items-center justify-center shrink-0">
+                <CalendarCheck className="w-3.5 h-3.5 text-sky-600" />
+              </div>
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">Pacientes Captados</span>
+            </div>
+            <span className="text-3xl font-black text-sky-600">{todayLoading ? "…" : todayTotals.patients.toLocaleString("pt-BR")}</span>
+          </div>
+
+          <div
+            className="today-shine bg-white border border-emerald-200 rounded-2xl p-4"
+            style={{ "--sweep-c": "#d1fae5", "--glow-c0": "rgba(5,150,105,0)", "--glow-c1": "rgba(5,150,105,0.18)" } as React.CSSProperties}
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-7 h-7 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center shrink-0">
+                <Trophy className="w-3.5 h-3.5 text-emerald-600" />
+              </div>
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">Consultas Realizadas</span>
+            </div>
+            <span className="text-3xl font-black text-emerald-600">{todayLoading ? "…" : todayTotals.sales.toLocaleString("pt-BR")}</span>
+          </div>
+        </div>
+
+        {!todayLoading && (
+          <div className="flex items-center gap-2.5 px-4 py-3 bg-emerald-50 border border-emerald-100 rounded-xl">
+            <span className="text-lg leading-none">{motivation.emoji}</span>
+            <span className="text-xs font-bold text-slate-800">{motivation.text}</span>
+          </div>
+        )}
+      </div>
+
       {/* Período + filtros */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <DateRangePicker

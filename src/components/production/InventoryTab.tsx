@@ -313,6 +313,8 @@ function ItemModal({
     unit: item?.unit ?? "un",
     min_qty: item?.min_qty ?? 0,
     unit_cost: item?.unit_cost ?? 0,
+    lote_minimo: item?.lote_minimo ?? 0,
+    lead_time_producao: item?.lead_time_producao ?? 0,
     location: item?.location ?? "",
     is_active: item?.is_active ?? true,
     notes: item?.notes ?? "",
@@ -349,6 +351,9 @@ function ItemModal({
       // Vinculo com catalogo so faz sentido para produto acabado.
       product_id: isFinished ? form.product_id : null,
       protocol_id: isFinished ? form.protocol_id : null,
+      // Parametros de reposicao/planejamento (usados pelo algoritmo na aprovacao do orcamento).
+      lote_minimo: isFinished ? (Number(form.lote_minimo) || 0) : null,
+      lead_time_producao: isFinished ? (Math.round(Number(form.lead_time_producao)) || 0) : null,
     };
     const created = await onSave(input, savedId ?? undefined);
     if (created) setSavedId(created.id);
@@ -403,6 +408,16 @@ function ItemModal({
             <Field label="Estoque mínimo"><input type="number" min={0} step="any" className={inputCls} value={form.min_qty || ""} onChange={e => set({ min_qty: parseFloat(e.target.value) || 0 })} /></Field>
             <Field label="Custo unitário"><MoneyInput value={form.unit_cost} onChange={v => set({ unit_cost: v })} /></Field>
           </div>
+          {form.kind === "produto_acabado" && (
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Lote mínimo de produção">
+                <input type="number" min={0} step="any" className={inputCls} value={form.lote_minimo || ""} onChange={e => set({ lote_minimo: parseFloat(e.target.value) || 0 })} placeholder="0 = sem lote" />
+              </Field>
+              <Field label="Lead-time de produção (dias)">
+                <input type="number" min={0} step="1" className={inputCls} value={form.lead_time_producao || ""} onChange={e => set({ lead_time_producao: parseInt(e.target.value) || 0 })} />
+              </Field>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <Field label="Categoria"><input className={inputCls} value={form.category} onChange={e => set({ category: e.target.value })} placeholder="opcional" /></Field>
             <Field label="Localização"><input className={inputCls} value={form.location} onChange={e => set({ location: e.target.value })} placeholder="prateleira, setor…" /></Field>

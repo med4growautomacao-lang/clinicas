@@ -1528,6 +1528,7 @@ export interface Clinic {
     show_prices?: boolean;
     format?: 'imagem' | 'pdf';
   } | null;
+  lead_time_expedicao_dias?: number;   // fábrica: folga (dias) entre OP pronta e entrega (separar/expedir)
 }
 
 export interface CompanyPrompt {
@@ -3495,6 +3496,7 @@ export interface Orcamento {
   total: number;
   validade: string | null;
   vencimento: string | null;
+  data_entrega_prevista: string | null;  // data prometida de entrega do pedido (fábrica)
   pagamento: string | null;
   notes: string | null;
   reject_reason: string | null;

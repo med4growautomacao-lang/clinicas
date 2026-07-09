@@ -1144,6 +1144,10 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   const showTotal = clinic?.quote_show_total !== false; // mostra/envia a soma total (config da clínica)
   const activeProducts = useMemo(() => useProd ? products.filter(p => p.is_active) : [], [products, useProd]);
   const activeProtocols = useMemo(() => useProt ? protocols.filter(p => p.is_active) : [], [protocols, useProt]);
+  // No orçamento escolhe-se o MODELO (altura null); a altura é digitada na linha e o SKU daquela
+  // altura é resolvido/criado na aprovação. Os SKUs por altura ficam fora do seletor (só aparecem
+  // se já estiverem escolhidos numa linha antiga — ver pickerProducts).
+  const baseProducts = useMemo(() => activeProducts.filter(p => p.altura == null), [activeProducts]);
 
   // Item unificado (produto OU protocolo). Protocolo = valor fixo, sem unidade/especificações.
   type CatItem = { id: string; kind: 'product' | 'protocol'; name: string; description: string | null; unit: string; unit_price: number; attributes: ProductAttribute[]; charge_by_area?: boolean; altura?: number | null };
@@ -1179,6 +1183,8 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   const [rodape, setRodape] = useState(iq?.rodape ?? String(tpl.rodape ?? 'Qualquer dúvida, estou à disposição! 😊'));
   const [validade, setValidade] = useState(iq?.validade ?? String(tpl.validade ?? ''));
   const [pagamento, setPagamento] = useState(iq?.pagamento ?? String(tpl.pagamento ?? ''));
+  // Data prometida de entrega (fábrica): alimenta o algoritmo de produção na aprovação.
+  const [dataEntrega, setDataEntrega] = useState<string>(iq?.dataEntrega ?? '');
   const [includeSpecs, setIncludeSpecs] = useState<boolean>(iq?.includeSpecs ?? (tpl.include_specs ?? true));
   const [messageText, setMessageText] = useState('');
   const [msgTouched, setMsgTouched] = useState(false);
@@ -1441,7 +1447,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   } as Record<string, string>)[code] || 'Não foi possível enviar. Tente novamente.');
 
   // Snapshot estruturado p/ reabrir o orçamento depois (persistido em tickets.quote_data).
-  const buildQuoteSnapshot = () => ({ lines, manualValue, notes, saudacao, rodape, validade, pagamento, includeSpecs, format, imageIds: selectedImages.map(i => i.id) });
+  const buildQuoteSnapshot = () => ({ lines, manualValue, notes, saudacao, rodape, validade, pagamento, dataEntrega, includeSpecs, format, imageIds: selectedImages.map(i => i.id) });
 
   // Etapa 1: registra o orçamento sem enviar (fluxo antigo — o WhatsApp é opcional).
   const handleRegisterOnly = async () => {
@@ -1590,13 +1596,17 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
                 const pct = linePct(l);
                 const fee = lineFeeValue(l);
                 const isM2 = isAreaItem(p);
+                // Seletor mostra só modelos; se a linha já tem um SKU de altura escolhido (orçamento
+                // antigo), inclui ele para o nome não sumir.
+                const selFull = activeProducts.find(pp => `p:${pp.id}` === l.productId);
+                const pickerProducts = selFull && selFull.altura != null ? [...baseProducts, selFull] : baseProducts;
                 const feeOpenFor = feeOpen[i] ?? (pct > 0 || fee > 0); // aberto se o vendedor mostrou ou já há desconto/frete
                 return (
                   <div key={i} className="rounded-xl border border-slate-200 p-2.5 space-y-2">
                     <div className="flex items-center gap-2">
                       <ProductPicker
                         value={l.productId}
-                        products={activeProducts}
+                        products={pickerProducts}
                         protocols={activeProtocols}
                         useProd={useProd}
                         useProt={useProt}
@@ -1624,18 +1634,15 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
                               </div>
                               <div>
                                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Altura (m)</label>
-                                {p.altura != null ? (
-                                  // SKU com altura fixa: mostra travada (vem do produto), não digita.
-                                  <div className="w-full px-2.5 py-2 border border-slate-200 bg-slate-50 rounded-lg text-sm font-bold text-slate-500 flex items-center gap-1.5" title="Altura do produto">
-                                    {formatQty(Number(p.altura))} <span className="text-[10px] font-semibold text-slate-400">fixa</span>
-                                  </div>
-                                ) : (
-                                  <input
-                                    type="number" min="0" step="any" inputMode="decimal"
-                                    value={l.altura ?? ''}
-                                    onChange={e => updateLine(i, 'altura', e.target.value)}
-                                    className="w-full px-2.5 py-2 border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                                  />
+                                <input
+                                  type="number" min="0" step="any" inputMode="decimal"
+                                  value={l.altura ?? ''}
+                                  onChange={e => updateLine(i, 'altura', e.target.value)}
+                                  placeholder="Ex: 1,5"
+                                  className="w-full px-2.5 py-2 border border-slate-200 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                                />
+                                {p.altura != null && (
+                                  <p className="text-[10px] text-slate-400 mt-0.5">medida do SKU</p>
                                 )}
                               </div>
                             </div>
@@ -1759,6 +1766,19 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
             <div className="flex items-center justify-between rounded-xl bg-slate-50 border border-slate-100 p-3">
               <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Total</span>
               <span className="text-lg font-black text-blue-600">{formatBRL(total)}</span>
+            </div>
+          )}
+
+          {clinic?.category === 'outro' && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Data de entrega prevista</label>
+              <input
+                type="date"
+                value={dataEntrega}
+                onChange={e => setDataEntrega(e.target.value)}
+                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+              />
+              <p className="text-[11px] text-slate-400">Usada no planejamento de produção: uma reposição só cobre este pedido se ficar pronta a tempo.</p>
             </div>
           )}
 

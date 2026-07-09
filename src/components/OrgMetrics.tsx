@@ -7,6 +7,7 @@ import {
   Loader2, Building2, Users, CalendarCheck, Trophy, Wallet, Megaphone,
   ArrowUp, ArrowDown, ChevronDown, Check, Search, Percent, TrendingUp,
   DollarSign, Target, XCircle, SlidersHorizontal, Coins, CalendarClock,
+  Download, Copy, Share2,
 } from "lucide-react";
 
 interface ClinicMetricRow {
@@ -312,6 +313,104 @@ export function OrgMetrics() {
     return { emoji: "🌅", text: "O dia está começando. Assim que os leads chegarem, você acompanha tudo por aqui." };
   }, [todayTotals]);
 
+  // Rótulo humano do período selecionado (usado no pódio e no card de compartilhar).
+  const periodLabel = useMemo(() => {
+    if (!dateFrom && !dateTo) return "Todo o período";
+    const fmt = (iso: string) => { const [, m, d] = iso.split("-"); return `${d}/${m}`; };
+    const now = new Date();
+    const firstOfMonth = toISODate(new Date(now.getFullYear(), now.getMonth(), 1));
+    const today = toISODate(now);
+    if (dateFrom === firstOfMonth && dateTo === today) return "Este mês";
+    if (dateFrom && dateTo) return `${fmt(dateFrom)} a ${fmt(dateTo)}`;
+    if (dateFrom) return `desde ${fmt(dateFrom)}`;
+    return `até ${fmt(dateTo!)}`;
+  }, [dateFrom, dateTo]);
+
+  // Pódio: top 3 por Leads Captados (sempre por leads, independente do sort da tabela).
+  const podiumTop3 = useMemo(
+    () => [...visible].sort((a, b) => b.leads - a.leads || a.clinicName.localeCompare(b.clinicName)).slice(0, 3),
+    [visible]
+  );
+  // Ordem visual de degraus: 2º, 1º, 3º (o 1º no centro e mais alto).
+  const podiumDisplay = useMemo(() => {
+    const withRank = podiumTop3.map((row, i) => ({ row, rank: i }));
+    if (withRank.length === 3) return [withRank[1], withRank[0], withRank[2]];
+    if (withRank.length === 2) return [withRank[1], withRank[0]];
+    return withRank;
+  }, [podiumTop3]);
+
+  // Cliente destaque do card "pronto pra postar": melhor conversão com volume mínimo;
+  // fallback para o de maior volume de leads. Seletor manual sobrepõe (heroId).
+  const [heroId, setHeroId] = useState<string | null>(null);
+  const heroRow = useMemo(() => {
+    if (!visible.length) return null;
+    if (heroId) {
+      const picked = visible.find(r => r.clinicId === heroId);
+      if (picked) return picked;
+    }
+    const candidates = visible.filter(r => r.leads >= 10 && r.sales >= 1);
+    if (candidates.length) {
+      return candidates.reduce((best, r) => (r.sales / r.leads > best.sales / best.leads ? r : best));
+    }
+    return [...visible].sort((a, b) => b.leads - a.leads)[0];
+  }, [visible, heroId]);
+
+  const heroConversion = heroRow && heroRow.leads > 0 ? (heroRow.sales / heroRow.leads) * 100 : 0;
+  const heroMode: "conversion" | "volume" = heroRow && heroRow.sales > 0 ? "conversion" : "volume";
+
+  const [heroMenuOpen, setHeroMenuOpen] = useState(false);
+  const heroMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!heroMenuOpen) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (heroMenuRef.current && !heroMenuRef.current.contains(e.target as Node)) setHeroMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, [heroMenuOpen]);
+
+  // Download da imagem do card (html2canvas-pro; cores hex inline por causa do oklch do Tailwind v4).
+  const shareCardRef = useRef<HTMLDivElement>(null);
+  const [downloadingShare, setDownloadingShare] = useState(false);
+  const [copiedSummary, setCopiedSummary] = useState(false);
+
+  const handleDownloadShare = async () => {
+    if (downloadingShare || !shareCardRef.current) return;
+    setDownloadingShare(true);
+    try {
+      const html2canvas = (await import("html2canvas-pro")).default;
+      const canvas = await html2canvas(shareCardRef.current, { scale: 3, backgroundColor: "#ffffff", useCORS: true, logging: false });
+      const blob = await new Promise<Blob | null>(res => canvas.toBlob(b => res(b), "image/png"));
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `resultado-${(heroRow?.clinicName || "cliente").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}.png`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }
+    } catch { /* ignore */ }
+    setDownloadingShare(false);
+  };
+
+  const handleCopySummary = async () => {
+    if (!heroRow) return;
+    const conv = heroRow.leads > 0 ? (heroRow.sales / heroRow.leads * 100).toFixed(1).replace(".", ",") : "0";
+    const text =
+      `📊 ${heroRow.clinicName} — ${periodLabel}\n` +
+      `• ${heroRow.leads.toLocaleString("pt-BR")} leads captados\n` +
+      `• ${heroRow.patientsCaptured.toLocaleString("pt-BR")} agendamentos\n` +
+      `• ${heroRow.sales.toLocaleString("pt-BR")} consultas realizadas\n` +
+      `• ${conv}% de conversão`;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedSummary(true);
+      setTimeout(() => setCopiedSummary(false), 1800);
+    } catch { /* ignore */ }
+  };
+
   return (
     <div className="flex flex-col gap-4">
       <style>{`
@@ -391,6 +490,169 @@ export function OrgMetrics() {
           </div>
         )}
       </div>
+
+      {/* Pódio Top 3 + Card pronto pra postar */}
+      {!loading && podiumTop3.length > 0 && (
+        <>
+          {/* Pódio do período */}
+          <div>
+            <div className="flex items-baseline justify-between flex-wrap gap-2 mb-3">
+              <span className="text-base font-black text-slate-900">🏆 Pódio do período</span>
+              <span className="text-[11px] font-semibold text-slate-400">Líderes em Leads Captados · {periodLabel}</span>
+            </div>
+            <div className="flex items-end justify-center gap-3 sm:gap-4 flex-wrap">
+              {podiumDisplay.map(({ row, rank }) => {
+                const medal = ["🥇", "🥈", "🥉"][rank];
+                const barH = [104, 74, 52][rank];
+                const styles = [
+                  { bar: "bg-amber-50 border-amber-200", icon: "bg-amber-50 border-amber-100", iconColor: "text-amber-600", value: "text-amber-600" },
+                  { bar: "bg-violet-50 border-violet-200", icon: "bg-violet-50 border-violet-100", iconColor: "text-violet-600", value: "text-violet-600" },
+                  { bar: "bg-rose-50 border-rose-200", icon: "bg-rose-50 border-rose-100", iconColor: "text-rose-600", value: "text-rose-600" },
+                ][rank];
+                return (
+                  <div key={row.clinicId} className="flex flex-col items-center w-[132px] sm:w-[148px]">
+                    <div className={cn("w-10 h-10 rounded-xl border flex items-center justify-center mb-2", styles.icon)}>
+                      {row.logoUrl
+                        ? <img src={row.logoUrl} alt="" className="w-full h-full object-cover rounded-xl" />
+                        : <Building2 className={cn("w-5 h-5", styles.iconColor)} />}
+                    </div>
+                    <span className="text-xs font-black text-slate-900 text-center truncate max-w-full">{row.clinicName}</span>
+                    <span className={cn("text-xl font-black mt-0.5", styles.value)}>{row.leads.toLocaleString("pt-BR")}</span>
+                    <span className="text-[8.5px] font-bold text-slate-400 uppercase tracking-wide mb-2">Leads captados</span>
+                    <div
+                      className={cn("w-full rounded-t-2xl border border-b-0 flex items-start justify-center pt-2.5 text-2xl", styles.bar)}
+                      style={{ height: barH }}
+                    >
+                      {medal}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Pronto pra postar */}
+          {heroRow && (
+            <div>
+              <div className="flex items-baseline justify-between flex-wrap gap-2 mb-3">
+                <span className="text-base font-black text-slate-900">📲 Pronto para postar</span>
+                <span className="text-[11px] font-semibold text-slate-400">Card gerado a partir dos dados reais do cliente</span>
+              </div>
+
+              <div className="flex gap-5 items-start flex-wrap">
+                {/* Card capturável (cores hex inline por causa do oklch do Tailwind v4) */}
+                <div
+                  ref={shareCardRef}
+                  style={{
+                    width: 300, height: 300, borderRadius: 22, padding: 20,
+                    background: "#ffffff", border: "1px solid #e2e8f0",
+                    display: "flex", flexDirection: "column", justifyContent: "space-between",
+                    fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif', boxSizing: "border-box",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10.5, fontWeight: 800, color: "#475569" }}>
+                      <div style={{ width: 18, height: 18, borderRadius: 5, background: "#0d9488", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <span style={{ color: "#fff", fontSize: 11, fontWeight: 900, lineHeight: 1 }}>M</span>
+                      </div>
+                      MedDesk
+                    </div>
+                    <span style={{ fontSize: 8.5, fontWeight: 800, padding: "3px 8px", borderRadius: 999, background: "#f5f3ff", color: "#7c3aed", textTransform: "uppercase", letterSpacing: 0.4 }}>
+                      {periodLabel}
+                    </span>
+                  </div>
+
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>
+                      {heroRow.clinicName}
+                    </div>
+                    <div style={{ fontSize: heroMode === "conversion" ? 54 : 46, fontWeight: 800, color: "#7c3aed", lineHeight: 1, letterSpacing: -1 }}>
+                      {heroMode === "conversion"
+                        ? `${heroConversion.toFixed(1).replace(".", ",")}%`
+                        : heroRow.leads.toLocaleString("pt-BR")}
+                    </div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#475569", marginTop: 6, padding: "0 10px" }}>
+                      {heroMode === "conversion" ? "de conversão de leads em consultas" : "leads captados no período"}
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "center", gap: 16, marginTop: 14 }}>
+                      {[
+                        { v: heroRow.leads, k: "Leads" },
+                        { v: heroRow.patientsCaptured, k: "Agendam." },
+                        { v: heroRow.sales, k: "Consultas" },
+                      ].map(s => (
+                        <div key={s.k} style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                          <b style={{ fontSize: 13, fontWeight: 800, color: "#0f172a" }}>{s.v.toLocaleString("pt-BR")}</b>
+                          <span style={{ fontSize: 8, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.3 }}>{s.k}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 9, fontWeight: 700, color: "#94a3b8", borderTop: "1px solid #f1f5f9", paddingTop: 10 }}>
+                    <span>📈 Resultados reais</span>
+                    <span style={{ color: "#7c3aed" }}>Powered by MedDesk</span>
+                  </div>
+                </div>
+
+                {/* Ações */}
+                <div className="flex-1 min-w-[220px] flex flex-col gap-2 pt-1">
+                  {/* Seletor de cliente destaque */}
+                  <div className="relative" ref={heroMenuRef}>
+                    <button
+                      onClick={() => setHeroMenuOpen(o => !o)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold border bg-white text-slate-600 border-slate-200 hover:border-violet-300 transition-all"
+                    >
+                      <Share2 className="w-3 h-3" />
+                      {heroId ? `Destaque: ${heroRow.clinicName}` : "Destaque automático (melhor resultado)"}
+                      <ChevronDown className={cn("w-3 h-3 transition-transform", heroMenuOpen && "rotate-180")} />
+                    </button>
+                    {heroMenuOpen && (
+                      <div className="absolute left-0 top-full mt-1 z-50 bg-white border border-slate-200 rounded-xl shadow-lg py-1 w-64 max-h-64 overflow-y-auto">
+                        <button
+                          onClick={() => { setHeroId(null); setHeroMenuOpen(false); }}
+                          className="w-full flex items-center justify-between gap-3 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors border-b border-slate-100"
+                        >
+                          <span>Automático (melhor resultado)</span>
+                          {!heroId && <Check className="w-3 h-3 text-violet-600 shrink-0" />}
+                        </button>
+                        {[...visible].sort((a, b) => b.leads - a.leads).map(r => (
+                          <button
+                            key={r.clinicId}
+                            onClick={() => { setHeroId(r.clinicId); setHeroMenuOpen(false); }}
+                            className="w-full flex items-center justify-between gap-3 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                          >
+                            <span className="truncate">{r.clinicName}</span>
+                            {heroId === r.clinicId && <Check className="w-3 h-3 text-violet-600 shrink-0" />}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={handleDownloadShare}
+                    disabled={downloadingShare}
+                    className="self-start flex items-center gap-1.5 px-4 py-2 rounded-lg text-[11px] font-black bg-violet-600 hover:bg-violet-700 text-white transition-colors disabled:opacity-60"
+                  >
+                    {downloadingShare ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                    Baixar imagem
+                  </button>
+                  <button
+                    onClick={handleCopySummary}
+                    className="self-start flex items-center gap-1.5 px-4 py-2 rounded-lg text-[11px] font-black bg-white text-slate-600 border border-slate-200 hover:border-violet-300 transition-colors"
+                  >
+                    {copiedSummary ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copiedSummary ? "Copiado!" : "Copiar resumo"}
+                  </button>
+                  <p className="text-[11px] text-slate-400 font-medium max-w-[280px] mt-1">
+                    Gerado direto dos dados reais do cliente. Pronto pra Stories, feed ou proposta comercial.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
       {/* Período + filtros */}
       <div className="flex items-center justify-between flex-wrap gap-2">

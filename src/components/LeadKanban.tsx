@@ -942,6 +942,9 @@ const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 // Awaited + sequencial => serializa e evita a rajada que o WhatsApp rejeita.
 const DOC_SEND_DELAY_MS = 1000;   // documento do orçamento
 const PHOTO_SEND_DELAY_MS = 1500; // cada foto do banco
+// STANDBY (pedido do usuário 09/07): campo "Data de entrega prevista" do orçamento (fábrica) fica
+// oculto por enquanto — não remover, só reativar aqui quando o usuário pedir.
+const SHOW_DATA_ENTREGA_PREVISTA = false;
 // Espera o arquivo recém-subido ficar acessível publicamente antes de o uazapi buscá-lo pela URL.
 const waitForPublicUrl = async (url: string, tries = 5) => {
   for (let i = 0; i < tries; i++) {
@@ -1769,7 +1772,10 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
             </div>
           )}
 
-          {clinic?.category === 'outro' && (
+          {/* STANDBY (pedido do usuário 09/07): ocultar por enquanto, sem remover — dataEntrega
+              continua no snapshot/state e o backend (save_orcamento/provision_orcamento) já lê
+              normalmente. Reativar trocando SHOW_DATA_ENTREGA_PREVISTA para true. */}
+          {SHOW_DATA_ENTREGA_PREVISTA && clinic?.category === 'outro' && (
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Data de entrega prevista</label>
               <input

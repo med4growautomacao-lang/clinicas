@@ -117,7 +117,7 @@ function AppContent() {
     <div className="flex h-screen bg-slate-50 font-sans text-slate-900 overflow-hidden">
       <Sidebar activeTab={activeTab} setActiveTab={handleSetActiveTab} />
 
-      <main className="flex-1 overflow-y-auto relative">
+      <main className="flex-1 min-w-0 overflow-y-auto relative">
         <div className="absolute top-0 right-0 w-full h-full bg-[radial-gradient(circle_at_top_right,rgba(13,148,136,0.03),transparent_50%)] pointer-events-none" />
 
         <WhatsAppStatusBanner

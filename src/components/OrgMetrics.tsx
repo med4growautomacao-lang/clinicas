@@ -370,7 +370,7 @@ export function OrgMetrics() {
   const toggleHideNames = () => setHidePodiumNames(v => { const next = !v; localStorage.setItem("orgMetricsHideNames", next ? "1" : "0"); return next; });
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4 min-w-0">
       <style>{`
         @keyframes orgMetricsTodaySweep {
           0%   { background-position: 200% 0; }
@@ -453,10 +453,7 @@ export function OrgMetrics() {
       {!loading && podiumTop3.length > 0 && (
         <div>
           <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
-            <div className="flex items-baseline gap-2 flex-wrap">
-              <span className="text-base font-black text-slate-900">🏆 Pódio do período</span>
-              <span className="text-[11px] font-semibold text-slate-400">Líderes em {podiumMetric.label} · {periodLabel}</span>
-            </div>
+            <span className="text-base font-black text-slate-900">🏆 Pódio do período</span>
             <div className="flex items-center gap-2">
               {/* Seletor de métrica do pódio */}
               <div className="relative" ref={podiumMenuRef}>
@@ -502,6 +499,15 @@ export function OrgMetrics() {
               </button>
             </div>
           </div>
+
+          {/* Título centralizado em destaque acima do pódio */}
+          <div className="text-center mb-2">
+            <div className="text-xl sm:text-2xl font-black tracking-tight text-slate-900 leading-tight">
+              Líderes em <span style={{ color: PODIUM_ACCENT[podiumMetricId] ?? "#7c3aed" }}>{podiumMetric.label}</span>
+            </div>
+            <div className="text-[11px] font-black uppercase tracking-[0.15em] text-slate-400 mt-1">{periodLabel}</div>
+          </div>
+
           <div className="flex items-center gap-3 sm:gap-6">
             {/* Ilustração animada por métrica (Lottie do cliente, com fallback SVG) */}
             <div key={podiumMetricId} className="hidden md:block shrink-0 w-[150px] lg:w-[190px]">
@@ -540,6 +546,8 @@ export function OrgMetrics() {
               );
             })}
             </div>
+            {/* Espaçador simétrico à direita: centraliza o pódio sob o título centralizado */}
+            <div className="hidden md:block shrink-0 w-[150px] lg:w-[190px]" aria-hidden="true" />
           </div>
         </div>
       )}

@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { AnimatePresence } from "framer-motion";
 import {
-  Plus, Factory, Play, CheckCircle2, Ban, Pencil, Clock, AlertTriangle, Trash2,
+  Plus, Factory, Play, CheckCircle2, Ban, Pencil, Clock, AlertTriangle, Trash2, ChevronRight, ChevronDown, ArrowLeftRight,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import {
@@ -22,6 +22,21 @@ const isLate = (o: ProductionOrder) =>
   !!o.due_date && o.status !== "concluida" && o.status !== "cancelada" &&
   new Date(o.due_date + "T23:59:59") < new Date();
 
+// Agrupamento visual por produto (mesmo produto = mesma "fila"): o operador vê todos os pedidos
+// pendentes daquele produto juntos e decide qual produzir agora. Cada OP mantém cliente+prazo
+// próprios (não são fundidas em uma só) — só a apresentação agrupa.
+const groupKeyOf = (o: ProductionOrder) => o.product_item_id ?? `label:${o.product_label ?? "—"}`;
+const groupLabelOf = (o: ProductionOrder) => o.product?.name ?? o.product_label ?? "—";
+function groupByProduct(list: ProductionOrder[]): { key: string; label: string; items: ProductionOrder[] }[] {
+  const map = new Map<string, { key: string; label: string; items: ProductionOrder[] }>();
+  list.forEach(o => {
+    const key = groupKeyOf(o);
+    if (!map.has(key)) map.set(key, { key, label: groupLabelOf(o), items: [] });
+    map.get(key)!.items.push(o);
+  });
+  return Array.from(map.values());
+}
+
 export function ProductionOrdersTab() {
   const showToast = useToast();
   const { data: orders, loading, create, update, complete } = useProductionOrders();
@@ -32,6 +47,16 @@ export function ProductionOrdersTab() {
   const [completeOrder, setCompleteOrder] = useState<ProductionOrder | null>(null);
   const [editOrder, setEditOrder] = useState<ProductionOrder | null>(null);
   const [showCancelled, setShowCancelled] = useState(false);
+  // Grupos recolhidos (por chave de produto) — default expandido, só recolhe quem o operador fechar.
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const toggleGroup = (key: string) => setCollapsedGroups(prev => {
+    const n = new Set(prev);
+    if (n.has(key)) n.delete(key); else n.add(key);
+    return n;
+  });
+  // Troca: iniciar uma OP quando outra do MESMO produto já está em produção pede confirmação
+  // (só uma etapa em andamento por produto de cada vez — o operador escolhe qual é urgente).
+  const [switchTarget, setSwitchTarget] = useState<{ toStart: ProductionOrder; running: ProductionOrder } | null>(null);
 
   const open = orders.filter(o => o.status === "planejada" || o.status === "em_producao");
   const late = open.filter(isLate);
@@ -44,8 +69,18 @@ export function ProductionOrdersTab() {
   ];
 
   const startOrder = async (o: ProductionOrder) => {
+    const running = orders.find(x => x.id !== o.id && x.status === "em_producao" && groupKeyOf(x) === groupKeyOf(o));
+    if (running) { setSwitchTarget({ toStart: o, running }); return; }
     await update(o.id, { status: "em_producao", started_at: o.started_at ?? new Date().toISOString() });
     showToast(`OP #${o.number} iniciada.`, "success");
+  };
+  const confirmSwitch = async () => {
+    if (!switchTarget) return;
+    const { toStart, running } = switchTarget;
+    await update(running.id, { status: "planejada", started_at: null });
+    await update(toStart.id, { status: "em_producao", started_at: toStart.started_at ?? new Date().toISOString() });
+    showToast(`OP #${running.number} voltou para planejada — OP #${toStart.number} iniciada.`, "success");
+    setSwitchTarget(null);
   };
   const cancelOrder = async (o: ProductionOrder) => {
     await update(o.id, { status: "cancelada" });
@@ -81,6 +116,7 @@ export function ProductionOrdersTab() {
         <div className="grid md:grid-cols-3 gap-4">
           {columns.map(col => {
             const list = orders.filter(o => o.status === col.status);
+            const groups = groupByProduct(list);
             return (
               <div key={col.status} className="bg-slate-50 rounded-xl p-3 min-h-[120px]">
                 <div className="flex items-center justify-between px-1 mb-2.5">
@@ -88,9 +124,34 @@ export function ProductionOrdersTab() {
                   <span className="text-xs font-bold text-slate-400">{list.length}</span>
                 </div>
                 <div className="space-y-2.5">
-                  {list.map(o => (
-                    <OrderCard key={o.id} o={o} onStart={startOrder} onComplete={setCompleteOrder} onEdit={setEditOrder} onCancel={cancelOrder} />
-                  ))}
+                  {groups.map(g => {
+                    // Grupo com só 1 pedido: mostra o card direto, sem cabeçalho (menos ruído visual).
+                    if (g.items.length === 1) {
+                      return <OrderCard key={g.items[0].id} o={g.items[0]} onStart={startOrder} onComplete={setCompleteOrder} onEdit={setEditOrder} onCancel={cancelOrder} />;
+                    }
+                    const isOpen = !collapsedGroups.has(`${col.status}:${g.key}`);
+                    const anyLate = g.items.some(isLate);
+                    return (
+                      <div key={g.key} className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+                        <button
+                          onClick={() => toggleGroup(`${col.status}:${g.key}`)}
+                          className="w-full flex items-center gap-1.5 px-2.5 py-2 hover:bg-slate-50 transition-colors"
+                        >
+                          {isOpen ? <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />}
+                          <span className="text-sm font-bold text-slate-800 truncate flex-1 text-left">{g.label}</span>
+                          {anyLate && <AlertTriangle className="w-3.5 h-3.5 text-rose-500 shrink-0" />}
+                          <span className="text-xs font-bold text-slate-400 shrink-0">{g.items.length} pedidos</span>
+                        </button>
+                        {isOpen && (
+                          <div className="p-2 pt-0 space-y-2">
+                            {g.items.map(o => (
+                              <OrderCard key={o.id} o={o} onStart={startOrder} onComplete={setCompleteOrder} onEdit={setEditOrder} onCancel={cancelOrder} />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                   {list.length === 0 && <p className="text-xs text-slate-300 text-center py-3">—</p>}
                 </div>
               </div>
@@ -141,6 +202,24 @@ export function ProductionOrdersTab() {
               setCompleteOrder(null);
             }}
           />
+        )}
+        {switchTarget && (
+          <Modal
+            key="switch"
+            title="Trocar produção"
+            subtitle={`OP #${switchTarget.running.number} deste mesmo produto já está em produção.`}
+            onClose={() => setSwitchTarget(null)}
+            footer={<>
+              <Button variant="outline" size="sm" onClick={() => setSwitchTarget(null)}>Cancelar</Button>
+              <Button size="sm" onClick={confirmSwitch}><ArrowLeftRight className="w-3.5 h-3.5 mr-1.5" /> Trocar e iniciar #{switchTarget.toStart.number}</Button>
+            </>}
+          >
+            <p className="text-sm text-slate-600">
+              A OP <b>#{switchTarget.running.number}</b> {switchTarget.running.client_name ? <>(cliente {switchTarget.running.client_name}) </> : null}
+              volta para <b>Planejada</b>, e a OP <b>#{switchTarget.toStart.number}</b>
+              {switchTarget.toStart.client_name ? <> (cliente {switchTarget.toStart.client_name})</> : null} passa a ser produzida agora.
+            </p>
+          </Modal>
         )}
       </AnimatePresence>
     </div>

@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence } from "framer-motion";
-import { FileText, Send, CheckCircle2, XCircle, Search, ExternalLink, Printer, Download, ClipboardList } from "lucide-react";
+import { FileText, Send, CheckCircle2, XCircle, Search, ExternalLink, Printer, Download, Receipt } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useOrcamentos, useSettings, useProducts, useProtocols, Orcamento, OrcamentoStatus } from "../../hooks/useSupabase";
 import { useToast } from "../ui/toast";
 import { Button, Modal, Field, StatCard, StatusBadge, EmptyState, inputCls, fmtDate } from "../production/shared";
 import { useImageDataUrl } from "../QuoteDocument";
-import { OrdemPedidoDocument, OrdemPedidoItem } from "./OrdemPedidoDocument";
+import { ReciboDocument, ReciboItem } from "./ReciboDocument";
 
 function fmtBRL(n: number | null | undefined) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(n ?? 0));
@@ -169,7 +169,7 @@ export function OrcamentosCentral() {
           />
         )}
         {printTarget && (
-          <GerarOrdemPedidoModal orcamento={printTarget} onClose={() => setPrintTarget(null)} />
+          <GerarReciboModal orcamento={printTarget} onClose={() => setPrintTarget(null)} />
         )}
       </AnimatePresence>
     </div>
@@ -212,7 +212,7 @@ function OrcamentoRow({ o, onApprove, onReject, onPrint, onMarkSent }: {
           </>
         )}
         {o.status === "aprovado" && (
-          <Button size="sm" variant="outline" onClick={onPrint}><ClipboardList className="w-3.5 h-3.5 mr-1" /> Ordem de Pedido</Button>
+          <Button size="sm" variant="outline" onClick={onPrint}><Receipt className="w-3.5 h-3.5 mr-1" /> Recibo</Button>
         )}
         <button title="Ver no Kanban" onClick={goToLeadKanban} className="p-2 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded-lg"><ExternalLink className="w-4 h-4" /></button>
       </div>
@@ -304,10 +304,10 @@ function RejectModal({ orcamento, onClose, onConfirm }: {
 // Resolve o snapshot.lines (productId/qty/price/discount/fee/altura) contra o catálogo atual
 // p/ exibir nome + linha de quantidade + valor — mesma fórmula do OrcamentoModal/ProductionOrderModal
 // (qtd × altura × preço p/ itens por área; desconto% + frete por linha).
-function resolveOrcamentoItems(snapshot: any, products: any[], protocols: any[]): OrdemPedidoItem[] {
+function resolveOrcamentoItems(snapshot: any, products: any[], protocols: any[]): ReciboItem[] {
   const lines = Array.isArray(snapshot?.lines) ? snapshot.lines : [];
   const num = (v: any) => Number(String(v ?? "").replace(",", ".")) || 0;
-  const out: OrdemPedidoItem[] = [];
+  const out: ReciboItem[] = [];
   for (const l of lines) {
     const key = String(l.productId || "");
     const id = key.slice(2);
@@ -331,11 +331,11 @@ function resolveOrcamentoItems(snapshot: any, products: any[], protocols: any[])
   return out;
 }
 
-// Gera a Ordem de Pedido imprimível (Via Empresa/Via Cliente) a partir de um orçamento
-// APROVADO — usa orcamentos.number (sem numeração própria, decisão do produto). Doc/endereço/
-// vencimento são coletados aqui e persistidos via set_orcamento_print_info (não trava por
-// status — são campos cosméticos, não afetam a venda já fechada).
-function GerarOrdemPedidoModal({ orcamento, onClose }: { orcamento: Orcamento; onClose: () => void }) {
+// Gera o Recibo de Entrega imprimível (Via Empresa/Via Cliente, com assinatura do cliente) a
+// partir de um orçamento APROVADO — usa orcamentos.number (sem numeração própria). Impresso na
+// hora da entrega, depois do pedido separado. Doc/endereço/vencimento são coletados aqui e
+// persistidos via set_orcamento_print_info (não trava por status — são campos do documento).
+function GerarReciboModal({ orcamento, onClose }: { orcamento: Orcamento; onClose: () => void }) {
   const showToast = useToast();
   const { clinic } = useSettings();
   const { data: products } = useProducts();
@@ -407,7 +407,7 @@ function GerarOrdemPedidoModal({ orcamento, onClose }: { orcamento: Orcamento; o
       const imgData = canvas.toDataURL("image/jpeg", 0.92);
       const pdf = new jsPDF({ orientation: "portrait", unit: "px", format: [canvas.width, canvas.height] });
       pdf.addImage(imgData, "JPEG", 0, 0, canvas.width, canvas.height);
-      pdf.save(`Ordem-Pedido-${orcamento.number}.pdf`);
+      pdf.save(`Recibo-${orcamento.number}.pdf`);
     } catch (_e) {
       showToast("Não foi possível gerar o PDF.", "error");
     }
@@ -424,7 +424,7 @@ function GerarOrdemPedidoModal({ orcamento, onClose }: { orcamento: Orcamento; o
       const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
       const w = window.open("", "_blank");
       if (w) {
-        w.document.write(`<html><head><title>Ordem de Pedido ${orcamento.number}</title><style>@page{size:A4;margin:0}html,body{margin:0;padding:0}img{width:100%;display:block}</style></head><body><img src="${dataUrl}" onload="window.focus();window.print();" /></body></html>`);
+        w.document.write(`<html><head><title>Recibo de Entrega ${orcamento.number}</title><style>@page{size:A4;margin:0}html,body{margin:0;padding:0}img{width:100%;display:block}</style></head><body><img src="${dataUrl}" onload="window.focus();window.print();" /></body></html>`);
         w.document.close();
       }
     } catch (_e) {
@@ -435,7 +435,7 @@ function GerarOrdemPedidoModal({ orcamento, onClose }: { orcamento: Orcamento; o
 
   return (
     <Modal
-      title={`Ordem de Pedido #${orcamento.number}`}
+      title={`Recibo de Entrega — Pedido #${orcamento.number}`}
       subtitle={docProps.clientName}
       onClose={onClose}
       wide
@@ -459,11 +459,11 @@ function GerarOrdemPedidoModal({ orcamento, onClose }: { orcamento: Orcamento; o
 
       {/* Cópia offscreen (tamanho real, sem transform) capturada pelo html2canvas */}
       <div style={{ position: "fixed", left: -99999, top: 0, width: 794, pointerEvents: "none" }} aria-hidden>
-        <OrdemPedidoDocument docRef={docRef} {...docProps} />
+        <ReciboDocument docRef={docRef} {...docProps} />
       </div>
       <div ref={previewWrapRef} style={{ height: ph }} className="relative w-full overflow-hidden border border-slate-200 rounded-xl bg-slate-100">
         <div style={{ position: "absolute", top: 0, left: 0, width: 794, transform: `scale(${scale})`, transformOrigin: "top left" }}>
-          <OrdemPedidoDocument {...docProps} />
+          <ReciboDocument {...docProps} />
         </div>
       </div>
     </Modal>

@@ -1529,6 +1529,7 @@ export interface Clinic {
     format?: 'imagem' | 'pdf';
   } | null;
   lead_time_expedicao_dias?: number;   // fábrica: folga (dias) entre OP pronta e entrega (separar/expedir)
+  horas_uteis_producao_dia?: number;   // fábrica: jornada diária (horas) p/ converter tempo de produção em dias
 }
 
 export interface CompanyPrompt {
@@ -3078,7 +3079,9 @@ export interface InventoryItem {
   altura?: number | null;                 // SKU de tela achatado por altura
   tipo?: string;                          // 'padrao' | 'sob_medida'
   lote_minimo?: number | null;
-  lead_time_producao?: number | null;
+  lead_time_producao?: number | null;     // fallback (dias) enquanto taxa/setup não cadastrados
+  taxa_producao_m2_hora?: number | null;  // m²/hora — mesma p/ qualquer altura do modelo (malha+fio)
+  tempo_setup_horas?: number | null;      // horas p/ configurar a máquina (só se trocar de modelo)
   // Derivados da view vw_inventory_available (presentes só quando lido via view):
   reserved_qty?: number;                  // Σ reservas ativas (ml)
   available_qty?: number;                 // saldo − reservado

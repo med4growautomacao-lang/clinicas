@@ -315,6 +315,8 @@ function ItemModal({
     unit_cost: item?.unit_cost ?? 0,
     lote_minimo: item?.lote_minimo ?? 0,
     lead_time_producao: item?.lead_time_producao ?? 0,
+    taxa_producao_m2_hora: item?.taxa_producao_m2_hora ?? 0,
+    tempo_setup_horas: item?.tempo_setup_horas ?? 0,
     location: item?.location ?? "",
     is_active: item?.is_active ?? true,
     notes: item?.notes ?? "",
@@ -354,6 +356,8 @@ function ItemModal({
       // Parametros de reposicao/planejamento (usados pelo algoritmo na aprovacao do orcamento).
       lote_minimo: isFinished ? (Number(form.lote_minimo) || 0) : null,
       lead_time_producao: isFinished ? (Math.round(Number(form.lead_time_producao)) || 0) : null,
+      taxa_producao_m2_hora: isFinished ? (Number(form.taxa_producao_m2_hora) || 0) : null,
+      tempo_setup_horas: isFinished ? (Number(form.tempo_setup_horas) || 0) : null,
     };
     const created = await onSave(input, savedId ?? undefined);
     if (created) setSavedId(created.id);
@@ -409,14 +413,25 @@ function ItemModal({
             <Field label="Custo unitário"><MoneyInput value={form.unit_cost} onChange={v => set({ unit_cost: v })} /></Field>
           </div>
           {form.kind === "produto_acabado" && (
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Lote mínimo de produção">
-                <input type="number" min={0} step="any" className={inputCls} value={form.lote_minimo || ""} onChange={e => set({ lote_minimo: parseFloat(e.target.value) || 0 })} placeholder="0 = sem lote" />
-              </Field>
-              <Field label="Lead-time de produção (dias)">
-                <input type="number" min={0} step="1" className={inputCls} value={form.lead_time_producao || ""} onChange={e => set({ lead_time_producao: parseInt(e.target.value) || 0 })} />
-              </Field>
-            </div>
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Lote mínimo de produção">
+                  <input type="number" min={0} step="any" className={inputCls} value={form.lote_minimo || ""} onChange={e => set({ lote_minimo: parseFloat(e.target.value) || 0 })} placeholder="0 = sem lote" />
+                </Field>
+                <Field label="Tempo de setup (horas)">
+                  <input type="number" min={0} step="any" className={inputCls} value={form.tempo_setup_horas || ""} onChange={e => set({ tempo_setup_horas: parseFloat(e.target.value) || 0 })} placeholder="troca de malha/fio" />
+                </Field>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Taxa de produção (m²/hora)">
+                  <input type="number" min={0} step="any" className={inputCls} value={form.taxa_producao_m2_hora || ""} onChange={e => set({ taxa_producao_m2_hora: parseFloat(e.target.value) || 0 })} placeholder="0 = usar lead-time abaixo" />
+                </Field>
+                <Field label="Lead-time de produção (dias)">
+                  <input type="number" min={0} step="1" className={inputCls} value={form.lead_time_producao || ""} onChange={e => set({ lead_time_producao: parseInt(e.target.value) || 0 })} placeholder="fallback" />
+                </Field>
+              </div>
+              <p className="text-[11px] text-slate-400 -mt-2">Com taxa cadastrada, o prazo da OP é calculado (setup + área/taxa). Sem taxa, usa o lead-time em dias como estimativa fixa.</p>
+            </>
           )}
           <div className="grid grid-cols-2 gap-3">
             <Field label="Categoria"><input className={inputCls} value={form.category} onChange={e => set({ category: e.target.value })} placeholder="opcional" /></Field>

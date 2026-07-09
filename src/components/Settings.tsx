@@ -835,15 +835,27 @@ export function Settings() {
                                     </Button>
                                     <p className="text-[11px] text-slate-400 mt-2">Define responsável, prazo de entrega, observações, se mostra preços e o formato padrão.</p>
                                     {localClinic.category === 'outro' && (
-                                        <div className="mt-4 pt-4 border-t border-slate-100">
-                                            <label className="text-sm font-bold text-slate-700 block mb-1">Prazo de expedição (dias)</label>
-                                            <input
-                                                type="number" min={0} step="1"
-                                                value={(localClinic as any).lead_time_expedicao_dias ?? 0}
-                                                onChange={e => setLocalClinic(prev => ({ ...prev, lead_time_expedicao_dias: parseInt(e.target.value) || 0 }))}
-                                                className="w-32 px-3 py-2 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
-                                            />
-                                            <p className="text-[11px] text-slate-400 mt-1.5">Folga entre a produção ficar pronta e a entrega (separar/expedir). O planejamento exige que a reposição fique pronta esse tanto de dias antes da data prometida. 0 = sem folga.</p>
+                                        <div className="mt-4 pt-4 border-t border-slate-100 space-y-4">
+                                            <div>
+                                                <label className="text-sm font-bold text-slate-700 block mb-1">Jornada de trabalho (horas/dia)</label>
+                                                <input
+                                                    type="number" min={1} step="any"
+                                                    value={(localClinic as any).horas_uteis_producao_dia ?? 8}
+                                                    onChange={e => setLocalClinic(prev => ({ ...prev, horas_uteis_producao_dia: parseFloat(e.target.value) || 8 }))}
+                                                    className="w-32 px-3 py-2 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
+                                                />
+                                                <p className="text-[11px] text-slate-400 mt-1.5">Usada para converter o tempo de produção (setup + m²/hora, cadastrado por SKU no Estoque) em dias de prazo da OP.</p>
+                                            </div>
+                                            <div>
+                                                <label className="text-sm font-bold text-slate-700 block mb-1">Prazo de expedição (dias)</label>
+                                                <input
+                                                    type="number" min={0} step="1"
+                                                    value={(localClinic as any).lead_time_expedicao_dias ?? 0}
+                                                    onChange={e => setLocalClinic(prev => ({ ...prev, lead_time_expedicao_dias: parseInt(e.target.value) || 0 }))}
+                                                    className="w-32 px-3 py-2 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
+                                                />
+                                                <p className="text-[11px] text-slate-400 mt-1.5">Folga entre a produção ficar pronta e a entrega (separar/expedir). O planejamento exige que a reposição fique pronta esse tanto de dias antes da data prometida. 0 = sem folga.</p>
+                                            </div>
                                         </div>
                                     )}
                                 </CardContent>

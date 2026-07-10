@@ -225,27 +225,47 @@ function OrcamentoRow({ o, onApprove, onReject, onPrint, onMarkSent }: {
 function ApproveModal({ orcamento, onClose, onConfirm }: {
   orcamento: Orcamento;
   onClose: () => void;
-  onConfirm: (opts: { paymentMethod: string; paymentStatus: "pago" | "pendente"; paymentDate: string; dataEntrega?: string | null }) => Promise<void>;
+  onConfirm: (opts: { paymentMethod: string; paymentStatus: "pago" | "pendente"; paymentDate: string; dataEntrega?: string | null; lineKeys?: string[] | null; total?: number | null }) => Promise<void>;
 }) {
   const { clinic } = useSettings();
+  const { data: products } = useProducts();
+  const { data: protocols } = useProtocols();
   const isFactory = clinic?.category === "outro";
   const [paymentMethod, setPaymentMethod] = useState("pix");
   const [paymentStatus, setPaymentStatus] = useState<"pago" | "pendente">("pago");
   const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
-  // Disponibilidade + prazo (fábrica): roda a simulação ao abrir e pré-preenche a data de entrega.
   const [eta, setEta] = useState<any>(null);
-  const [etaLoading, setEtaLoading] = useState(isFactory);
+  const [etaLoading, setEtaLoading] = useState(false);
   const [dataEntrega, setDataEntrega] = useState<string>(orcamento.data_entrega_prevista ?? "");
 
+  // Itens cotados. O vendedor marca quais viram pedido/OP (a fábrica costuma cotar 2 opções — ex.:
+  // fio grosso e fio fino — e o cliente escolhe uma). Todos marcados por padrão.
+  const lines = useMemo(() => resolveOrcamentoLines(orcamento.snapshot, products, protocols), [orcamento.snapshot, products, protocols]);
+  const [selected, setSelected] = useState<Set<string> | null>(null);
+  const sel = selected ?? new Set(lines.map(l => l.key));
+  const toggle = (key: string) => {
+    const next = new Set(sel);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    setSelected(next);
+  };
+  const selectedLines = lines.filter(l => sel.has(l.key));
+  const selectedTotal = selectedLines.reduce((s, l) => s + l.value, 0);
+  const isPartial = lines.length > 1 && selectedLines.length < lines.length;
+  // Chave estável p/ re-rodar a simulação quando a seleção muda.
+  const selKey = selectedLines.map(l => l.key).join(",");
+
+  // Simula disponibilidade/prazo dos itens SELECIONADOS. Depende de isFactory porque `clinic` chega
+  // async (na 1ª renderização é null) — sem isso o efeito rodava cedo demais e nunca chamava a RPC.
   useEffect(() => {
     if (!isFactory) return;
-    const lines = Array.isArray(orcamento.snapshot?.lines) ? orcamento.snapshot.lines : [];
-    const payload = lines
-      .filter((l: any) => String(l.productId || "").startsWith("p:") && (parseFloat(String(l.qty ?? "").replace(",", ".")) || 0) > 0)
-      .map((l: any) => ({ productId: l.productId, qty: l.qty, altura: l.altura ?? "" }));
-    if (payload.length === 0) { setEtaLoading(false); return; }
+    if (selectedLines.length === 0) { setEta(null); setEtaLoading(false); return; }
+    const payload = selectedLines
+      .filter(l => l.productId.startsWith("p:"))
+      .map(l => ({ productId: l.productId, qty: String(l.qty), altura: l.altura ? String(l.altura) : "" }));
+    if (payload.length === 0) { setEta(null); setEtaLoading(false); return; }
     let cancelled = false;
+    setEtaLoading(true);
     (async () => {
       const { data, error } = await supabase.rpc("simulate_production_eta", { p_clinic_id: orcamento.clinic_id, p_lines: payload });
       if (cancelled) return;
@@ -256,7 +276,7 @@ function ApproveModal({ orcamento, onClose, onConfirm }: {
       setDataEntrega(prev => prev || res.resumo?.data_sugerida || "");
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [isFactory, selKey, orcamento.clinic_id]);
 
   const fmtDataBR = (iso?: string) => iso ? new Date(iso + "T00:00:00").toLocaleDateString("pt-BR") : "";
 
@@ -274,7 +294,17 @@ function ApproveModal({ orcamento, onClose, onConfirm }: {
       onClose={onClose}
       footer={<>
         <Button variant="outline" size="sm" onClick={onClose}>Cancelar</Button>
-        <Button size="sm" onClick={async () => { setSaving(true); await onConfirm({ paymentMethod, paymentStatus, paymentDate, dataEntrega: isFactory ? (dataEntrega || null) : null }); setSaving(false); }} disabled={saving}>
+        <Button size="sm" onClick={async () => {
+          setSaving(true);
+          await onConfirm({
+            paymentMethod, paymentStatus, paymentDate,
+            dataEntrega: isFactory ? (dataEntrega || null) : null,
+            // Só manda a seleção quando ela é parcial — sem seleção, o servidor mantém tudo/total cotado.
+            lineKeys: isPartial ? selectedLines.map(l => l.key) : null,
+            total: isPartial ? selectedTotal : null,
+          });
+          setSaving(false);
+        }} disabled={saving || selectedLines.length === 0}>
           {saving ? "Aprovando…" : "Confirmar venda"}
         </Button>
       </>}
@@ -282,8 +312,29 @@ function ApproveModal({ orcamento, onClose, onConfirm }: {
       <div className="space-y-4">
         <div className="bg-emerald-50 rounded-xl px-4 py-3 flex items-center justify-between">
           <span className="text-sm font-bold text-emerald-800">Valor da venda</span>
-          <span className="text-xl font-black text-emerald-700">{fmtBRL(orcamento.total)}</span>
+          <div className="text-right">
+            <span className="text-xl font-black text-emerald-700">{fmtBRL(isPartial ? selectedTotal : orcamento.total)}</span>
+            {isPartial && <div className="text-[11px] text-emerald-700/70">cotado {fmtBRL(orcamento.total)}</div>}
+          </div>
         </div>
+
+        {lines.length > 1 && (
+          <div className="rounded-xl border border-slate-200 p-3 space-y-2">
+            <div className="text-xs font-bold text-slate-500 uppercase tracking-wide">Itens que viram pedido</div>
+            {lines.map(l => (
+              <label key={l.key} className="flex items-center gap-2.5 cursor-pointer select-none">
+                <input type="checkbox" checked={sel.has(l.key)} onChange={() => toggle(l.key)} className="w-4 h-4 accent-teal-600 shrink-0" />
+                <span className={cn("flex-1 min-w-0 text-sm truncate", sel.has(l.key) ? "text-slate-700 font-semibold" : "text-slate-400 line-through")}>
+                  {l.name}
+                </span>
+                <span className="text-xs text-slate-400 shrink-0">{l.qtyLine}</span>
+                <span className={cn("text-sm font-bold tabular-nums shrink-0 w-24 text-right", sel.has(l.key) ? "text-slate-700" : "text-slate-300")}>{fmtBRL(l.value)}</span>
+              </label>
+            ))}
+            {selectedLines.length === 0 && <p className="text-[11px] text-rose-500 font-semibold">Selecione ao menos um item.</p>}
+            <p className="text-[11px] text-slate-400">Só os marcados geram receita, pedido e ordem de produção. Os demais ficam registrados na cotação.</p>
+          </div>
+        )}
 
         {isFactory && (
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
@@ -318,8 +369,12 @@ function ApproveModal({ orcamento, onClose, onConfirm }: {
                   <p className="text-[11px] text-amber-600">Alguma linha sem taxa de produção cadastrada — o prazo pode estar incompleto.</p>
                 )}
               </>
+            ) : eta?.error ? (
+              <p className="text-sm text-amber-600 py-1">Não foi possível verificar a disponibilidade agora.</p>
+            ) : selectedLines.length === 0 ? (
+              <p className="text-sm text-slate-400 py-1">Selecione ao menos um item para verificar.</p>
             ) : (
-              <p className="text-sm text-slate-400 py-1">Não foi possível verificar a disponibilidade agora.</p>
+              <p className="text-sm text-slate-400 py-1">Nenhum item de produção neste orçamento.</p>
             )}
             <Field label="Prazo de entrega (confirme ou ajuste)">
               <input type="date" className={inputCls} value={dataEntrega} onChange={e => setDataEntrega(e.target.value)} />
@@ -373,21 +428,24 @@ function RejectModal({ orcamento, onClose, onConfirm }: {
   );
 }
 
-// Resolve o snapshot.lines (productId/qty/price/discount/fee/altura) contra o catálogo atual
-// p/ exibir nome + linha de quantidade + valor — mesma fórmula do OrcamentoModal/ProductionOrderModal
-// (qtd × altura × preço p/ itens por área; desconto% + frete por linha).
-function resolveOrcamentoItems(snapshot: any, products: any[], protocols: any[]): ReciboItem[] {
+// Uma linha do orçamento resolvida contra o catálogo. `key` é a MESMA chave que o provision usa
+// (orcamento_line_key = 'L' + ordinal da linha no snapshot), por isso o ordinal conta TODAS as linhas
+// cruas — inclusive as puladas — para não desalinhar a seleção do que vira pedido/OP.
+type OrcLine = { ord: number; key: string; name: string; qtyLine: string; value: number; productId: string; qty: number; altura: number };
+
+function resolveOrcamentoLines(snapshot: any, products: any[], protocols: any[]): OrcLine[] {
   const lines = Array.isArray(snapshot?.lines) ? snapshot.lines : [];
   const num = (v: any) => Number(String(v ?? "").replace(",", ".")) || 0;
-  const out: ReciboItem[] = [];
-  for (const l of lines) {
+  const out: OrcLine[] = [];
+  lines.forEach((l: any, i: number) => {
+    const ord = i + 1;
     const key = String(l.productId || "");
     const id = key.slice(2);
     const prod = key.startsWith("p:") ? products.find(p => p.id === id) : null;
     const prot = key.startsWith("t:") ? protocols.find((t: any) => t.id === id) : null;
-    if (!prod && !prot) continue;
+    if (!prod && !prot) return;
     const q = num(l.qty);
-    if (q <= 0) continue;
+    if (q <= 0) return;
     const name = prod?.name ?? prot?.name ?? "—";
     const unit = prod?.unit ?? "serviço";
     const isArea = !!prod?.charge_by_area;
@@ -398,9 +456,18 @@ function resolveOrcamentoItems(snapshot: any, products: any[], protocols: any[])
     const fee = num(l.fee);
     const value = Math.max(0, base - base * (pct / 100)) + fee;
     const qtyLine = isArea ? `${q}m × ${altura}m` : `${q} ${unit}`;
-    out.push({ name, qtyLine, value });
-  }
+    out.push({ ord, key: `L${ord}`, name, qtyLine, value, productId: key, qty: q, altura: isArea ? altura : 0 });
+  });
   return out;
+}
+
+// Itens do documento (recibo). Se o orçamento foi aprovado só com alguns itens (o cliente escolheu
+// uma das opções cotadas), imprime apenas os aprovados.
+function resolveOrcamentoItems(snapshot: any, products: any[], protocols: any[], approvedKeys?: string[] | null): ReciboItem[] {
+  const has = Array.isArray(approvedKeys) && approvedKeys.length > 0;
+  return resolveOrcamentoLines(snapshot, products, protocols)
+    .filter(l => !has || approvedKeys!.includes(l.key))
+    .map(l => ({ name: l.name, qtyLine: l.qtyLine, value: l.value }));
 }
 
 // Gera o Recibo de Entrega imprimível (Via Empresa/Via Cliente, com assinatura do cliente) a
@@ -425,7 +492,10 @@ function GerarReciboModal({ orcamento, onClose }: { orcamento: Orcamento; onClos
   const [scale, setScale] = useState(0.45);
   const [ph, setPh] = useState(520);
 
-  const items = useMemo(() => resolveOrcamentoItems(orcamento.snapshot, products, protocols), [orcamento.snapshot, products, protocols]);
+  const items = useMemo(
+    () => resolveOrcamentoItems(orcamento.snapshot, products, protocols, orcamento.approved_line_keys),
+    [orcamento.snapshot, products, protocols, orcamento.approved_line_keys],
+  );
 
   const docProps = {
     clinicName: clinic?.name ?? "",

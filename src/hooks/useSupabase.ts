@@ -3532,6 +3532,7 @@ export interface Orcamento {
   validade: string | null;
   vencimento: string | null;
   data_entrega_prevista: string | null;  // data prometida de entrega do pedido (fábrica)
+  approved_line_keys?: string[] | null;  // itens aprovados ('L1','L2'…); null = todos do snapshot
   pagamento: string | null;
   notes: string | null;
   reject_reason: string | null;
@@ -3633,7 +3634,7 @@ export function useOrcamentos() {
   };
 
   // Aprovar = fecha a venda (Ganho + receita). Idempotente no servidor.
-  const approve = async (id: string, opts: { paymentMethod: string; paymentStatus: 'pago' | 'pendente'; paymentDate: string; category?: string; dataEntrega?: string | null }): Promise<RpcResult> => {
+  const approve = async (id: string, opts: { paymentMethod: string; paymentStatus: 'pago' | 'pendente'; paymentDate: string; category?: string; dataEntrega?: string | null; lineKeys?: string[] | null; total?: number | null }): Promise<RpcResult> => {
     const { data: res, error } = await supabase.rpc('close_sale_from_orcamento', {
       p_orcamento_id: id,
       p_payment_method: opts.paymentMethod,
@@ -3641,6 +3642,8 @@ export function useOrcamentos() {
       p_payment_date: opts.paymentDate,
       p_category: opts.category ?? 'Venda de produto',
       p_data_entrega: opts.dataEntrega || null,
+      p_line_keys: opts.lineKeys ?? null,
+      p_total: opts.total ?? null,
     });
     await fetch(true);
     if (error) return { success: false, error_code: error.message };

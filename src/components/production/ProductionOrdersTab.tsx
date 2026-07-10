@@ -34,6 +34,13 @@ function groupByProduct(list: ProductionOrder[]): { key: string; label: string; 
     if (!map.has(key)) map.set(key, { key, label: groupLabelOf(o), items: [] });
     map.get(key)!.items.push(o);
   });
+  // Dentro do grupo: pedidos de cliente primeiro, OP de reposição SEMPRE por último (o operador
+  // faz os pedidos e, ao final, repõe o estoque).
+  map.forEach(g => g.items.sort((a, b) => {
+    const ra = a.tipo === "reposicao" ? 1 : 0, rb = b.tipo === "reposicao" ? 1 : 0;
+    if (ra !== rb) return ra - rb;
+    return (b.number ?? 0) - (a.number ?? 0);
+  }));
   return Array.from(map.values());
 }
 
@@ -242,6 +249,7 @@ function OrderCard({ o, onStart, onComplete, onEdit, onCancel }: {
       <div className="flex items-center justify-between gap-2 mb-1.5">
         <span className="text-xs font-black text-slate-400">OP #{o.number}</span>
         <div className="flex items-center gap-1">
+          {o.tipo === "reposicao" && <StatusBadge label="reposição" tone="sky" />}
           {o.priority === "alta" && <StatusBadge label="alta" tone="rose" />}
           <StatusBadge label={STATUS_META[o.status].label} tone={STATUS_META[o.status].tone} />
         </div>
@@ -249,7 +257,7 @@ function OrderCard({ o, onStart, onComplete, onEdit, onCancel }: {
       <p className="font-bold text-slate-800 text-sm leading-snug">{productName}</p>
       <div className="text-xs text-slate-500 mt-1 space-y-0.5">
         <div>Qtd: <span className="font-semibold text-slate-700">{fmtQty(o.qty_planned)} {unit}</span>{o.altura ? <span className="text-slate-400"> · alt {fmtQty(o.altura)}m</span> : null}{o.status === "concluida" && <span className="text-emerald-600"> · produzido {fmtQty(o.qty_produced)}</span>}</div>
-        {o.client_name && <div className="truncate">Cliente: {o.client_name}</div>}
+        {o.tipo === "reposicao" ? <div className="text-sky-600">Repor estoque ao mínimo</div> : o.client_name && <div className="truncate">Cliente: {o.client_name}</div>}
         <div className={cn(late && "text-rose-600 font-semibold flex items-center gap-1")}>
           {late && <AlertTriangle className="w-3 h-3" />}
           Prazo: {fmtDate(o.due_date)}

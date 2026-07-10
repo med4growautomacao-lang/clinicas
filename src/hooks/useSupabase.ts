@@ -3437,6 +3437,8 @@ export interface ProductionOrder {
   notes: string | null;
   created_by: string | null;
   created_at: string;
+  tipo?: string | null;          // 'vinculada' (pedido de cliente) | 'reposicao' (refil de estoque)
+  orcamento_id?: string | null;  // pedido de origem (OPs vinculadas)
   product?: { name: string; unit: string } | null;
 }
 export type ProductionOrderInput = Partial<Omit<ProductionOrder, 'id' | 'clinic_id' | 'number' | 'created_at' | 'product'>>;

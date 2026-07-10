@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { AnimatePresence } from "framer-motion";
 import {
-  Plus, Package, ArrowDownUp, Pencil, Trash2, ScrollText, Boxes,
+  Plus, Package, PackagePlus, ArrowDownUp, Pencil, Trash2, ScrollText, Boxes,
   AlertTriangle, Layers, FileStack, Factory, X, ChevronRight, ChevronDown,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
@@ -62,6 +62,7 @@ export function InventoryTab() {
   const [prodItem, setProdItem] = useState<InventoryItem | null>(null);
   const [extratoItem, setExtratoItem] = useState<InventoryItem | null>(null);
   const [delItem, setDelItem] = useState<InventoryItem | null>(null);
+  const [repoItem, setRepoItem] = useState<InventoryItem | null>(null);
 
   const filtered = useMemo(
     () => (kindFilter === "todos" ? items : items.filter(i => i.kind === kindFilter)),
@@ -163,7 +164,7 @@ export function InventoryTab() {
                   if (row.kind === "single") return (
                     <ItemRowTr key={row.item.id} it={row.item} unitValueOf={unitValueOf}
                       onProduction={setProdItem} onMove={setMovItem} onExtrato={setExtratoItem}
-                      onEdit={it => setItemModal({ item: it })} onDelete={setDelItem} />
+                      onEdit={it => setItemModal({ item: it })} onDelete={setDelItem} onRepor={setRepoItem} />
                   );
                   const { group } = row;
                   const isOpen = expandedAltura.has(group.baseId);
@@ -194,7 +195,7 @@ export function InventoryTab() {
                       {isOpen && group.children.map(child => (
                         <ItemRowTr key={child.id} it={child} indented unitValueOf={unitValueOf}
                           onProduction={setProdItem} onMove={setMovItem} onExtrato={setExtratoItem}
-                          onEdit={it => setItemModal({ item: it })} onDelete={setDelItem} />
+                          onEdit={it => setItemModal({ item: it })} onDelete={setDelItem} onRepor={setRepoItem} />
                       ))}
                     </React.Fragment>
                   );
@@ -260,17 +261,85 @@ export function InventoryTab() {
             <p className="text-sm text-slate-600">Isso remove o item e todo o seu histórico de movimentações. Esta ação não pode ser desfeita.</p>
           </Modal>
         )}
+        {repoItem && (
+          <RepoModal
+            key="repo"
+            item={repoItem}
+            onClose={() => setRepoItem(null)}
+            onDone={() => { refetch(true); setRepoItem(null); }}
+          />
+        )}
       </AnimatePresence>
     </div>
   );
 }
 
+// Gera/atualiza a OP de reposição do SKU (refil até o mínimo), a partir do alerta de estoque.
+// Valor sugerido = mínimo − (disponível + reposição em produção), arredondado ao lote — já preenchido
+// e ajustável. Chama a mesma RPC que o provision usa (create-or-update da única OP de reposição).
+function RepoModal({ item, onClose, onDone }: { item: InventoryItem; onClose: () => void; onDone: () => void }) {
+  const showToast = useToast();
+  const sugerido = useMemo(() => {
+    const min = Number(item.min_qty || 0);
+    if (min <= 0) return 0;
+    const avail = Number(item.available_qty ?? item.current_qty ?? 0);
+    const emProd = Number(item.reposicao_qty ?? 0);
+    const needed = Math.max(0, min - (avail + emProd));
+    const lote = Number(item.lote_minimo || 0);
+    return lote > 0 ? Math.ceil(needed / lote) * lote : needed;
+  }, [item]);
+  const [qty, setQty] = useState<number>(sugerido);
+  const [saving, setSaving] = useState(false);
+
+  return (
+    <Modal
+      title="Gerar OP de reposição"
+      subtitle={item.name}
+      onClose={onClose}
+      footer={<>
+        <Button variant="outline" size="sm" onClick={onClose}>Cancelar</Button>
+        <Button size="sm" onClick={async () => {
+          if (qty <= 0) return;
+          setSaving(true);
+          const { data, error } = await supabase.rpc("generate_reposicao_op", { p_item_id: item.id, p_qty: qty });
+          setSaving(false);
+          if (error || !(data as any)?.success) { showToast("Erro ao gerar OP de reposição.", "error"); return; }
+          showToast((data as any).updated ? "OP de reposição atualizada." : "OP de reposição criada.", "success");
+          onDone();
+        }} disabled={saving || qty <= 0}>{saving ? "Gerando…" : "Gerar OP"}</Button>
+      </>}
+    >
+      <div className="space-y-3">
+        <div className="grid grid-cols-3 gap-2 text-center">
+          <div className="bg-slate-50 rounded-lg py-2">
+            <div className="text-[11px] font-bold text-slate-400 uppercase">Disponível</div>
+            <div className="text-sm font-black text-slate-700 tabular-nums">{fmtQty(Number(item.available_qty ?? item.current_qty ?? 0))}</div>
+          </div>
+          <div className="bg-slate-50 rounded-lg py-2">
+            <div className="text-[11px] font-bold text-slate-400 uppercase">Mínimo</div>
+            <div className="text-sm font-black text-slate-700 tabular-nums">{fmtQty(Number(item.min_qty || 0))}</div>
+          </div>
+          <div className="bg-slate-50 rounded-lg py-2">
+            <div className="text-[11px] font-bold text-slate-400 uppercase">Em produção</div>
+            <div className="text-sm font-black text-slate-700 tabular-nums">{fmtQty(Number(item.reposicao_qty ?? 0))}</div>
+          </div>
+        </div>
+        <Field label={`Quantidade a produzir (${item.unit})`}>
+          <input type="number" min={0} step="any" className={inputCls} value={qty || ""} onChange={e => setQty(parseFloat(e.target.value) || 0)} autoFocus />
+        </Field>
+        <p className="text-[11px] text-slate-400">Sugestão pra repor até o mínimo{Number(item.lote_minimo || 0) > 0 ? " (arredondada ao lote)" : ""}. Atualiza a OP de reposição existente se já houver uma planejada.</p>
+      </div>
+    </Modal>
+  );
+}
+
 // Linha de item na tabela de Estoque — usada tanto para itens avulsos quanto para os SKUs de
 // altura dentro de um grupo (modelo) expandido, indentados.
-function ItemRowTr({ it, indented, unitValueOf, onProduction, onMove, onExtrato, onEdit, onDelete }: {
+function ItemRowTr({ it, indented, unitValueOf, onProduction, onMove, onExtrato, onEdit, onDelete, onRepor }: {
   it: InventoryItem; indented?: boolean; unitValueOf: (it: InventoryItem) => number;
   onProduction: (it: InventoryItem) => void; onMove: (it: InventoryItem) => void;
   onExtrato: (it: InventoryItem) => void; onEdit: (it: InventoryItem) => void; onDelete: (it: InventoryItem) => void;
+  onRepor?: (it: InventoryItem) => void;
 }) {
   const low = it.precisa_reposicao != null
     ? it.precisa_reposicao
@@ -319,6 +388,9 @@ function ItemRowTr({ it, indented, unitValueOf, onProduction, onMove, onExtrato,
       <td className="px-4 py-3 text-right text-slate-700 font-semibold tabular-nums">{fmtBRL(Number(it.current_qty) * unitValueOf(it))}</td>
       <td className="px-4 py-3">
         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          {it.kind === "produto_acabado" && low && it.is_active && onRepor && (
+            <IconBtn title="Gerar OP de reposição" onClick={() => onRepor(it)}><PackagePlus className="w-4 h-4" /></IconBtn>
+          )}
           {it.kind === "produto_acabado" && (
             <IconBtn title="Registrar produção (baixa a matéria-prima)" onClick={() => onProduction(it)}><Factory className="w-4 h-4" /></IconBtn>
           )}

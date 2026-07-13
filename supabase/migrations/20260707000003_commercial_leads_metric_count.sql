@@ -1,6 +1,6 @@
 -- Devolve também metricCount: o total de AGENDAMENTOS (não leads) por trás do recorte
 -- de métrica selecionado, para o cabeçalho da lista reconciliar com os cards do topo
--- (ex.: "Consultas Geradas = 7" mas "5 leads", pois 2 leads têm 2 agendamentos cada).
+-- (ex.: "Agendamentos Gerados = 7" mas "5 leads", pois 2 leads têm 2 agendamentos cada).
 CREATE OR REPLACE FUNCTION public.get_commercial_leads(
   p_clinic_id uuid,
   p_entry_from date, p_entry_to date,

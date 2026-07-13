@@ -1,4 +1,4 @@
--- Nova métrica "Consultas Geradas" no painel Comercial: consultas CRIADAS
+-- Nova métrica "Agendamentos Gerados" no painel Comercial: consultas CRIADAS
 -- (appointments.created_at) dentro do range de CONVERSÃO, SEM o filtro de Entrada
 -- (coorte). Respeita agente/origem/canal. Exposta em appointments.generated.
 -- A métrica "Consultas (realizadas/previstas)" continua intacta.

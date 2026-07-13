@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Route, Instagram, FileText, MousePointerClick, Loader2, Share2 } from "lucide-react";
+import { Route, Instagram, FileText, MousePointerClick, MessageCircle, Store, Loader2, Share2 } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { cn } from "@/src/lib/utils";
 
@@ -22,30 +22,39 @@ interface Touchpoint {
     is_conversion: boolean;
 }
 
+// Duas dimensões independentes:
+//   CANAL  = por onde a pessoa falou (WhatsApp, formulário do site, formulário do Meta, balcão)
+//   ORIGEM = o que a trouxe (anúncio Meta/Google, Instagram, ou orgânico)
+// Antes estavam misturadas: "meta_ads" era gravado como canal, quando é origem — quem clica no
+// anúncio e cai no WhatsApp tem canal=whatsapp + origem=meta_ads.
 const CHANNEL_LABEL: Record<string, string> = {
-    link: 'Link de redirecionamento',
-    meta_ads: 'Anúncio Meta (WhatsApp)',
-    meta_forms: 'Formulário do Meta',
-    site_forms: 'Formulário do site',
     whatsapp: 'WhatsApp',
+    site_forms: 'Formulário do site',
+    meta_forms: 'Formulário do Meta',
+    balcao: 'Balcão',
+    manual: 'Cadastro manual',
 };
 
+// Origem nunca é "balcão": ou veio de anúncio (plataforma), ou é orgânico.
 const SOURCE_LABEL: Record<string, string> = {
     instagram: 'Instagram',
     meta_ads: 'Meta Ads',
     google_ads: 'Google Ads',
 };
 
-// Com vários links (bio, story, cartão), "veio de um link" não diz nada — o que importa é QUAL.
+// Com vários links (bio, story, cartão), "veio pelo WhatsApp" não diz nada — o que importa é por
+// QUAL link ela passou.
 function titleOf(t: Touchpoint) {
-    if (t.channel === 'link' && t.link_name) return t.link_name;
+    if (t.link_name) return t.link_name;
     return CHANNEL_LABEL[t.channel] || t.channel;
 }
 
 function iconOf(t: Touchpoint) {
     if (t.channel === 'meta_forms' || t.channel === 'site_forms') return FileText;
+    if (t.channel === 'balcao' || t.channel === 'manual') return Store;
     if (t.source === 'instagram') return Instagram;
-    return MousePointerClick;
+    if (t.source) return MousePointerClick;   // clique em anúncio
+    return MessageCircle;                      // WhatsApp orgânico
 }
 
 function fmt(iso: string) {
@@ -142,14 +151,16 @@ export function LeadJourney({ leadId, fallbackCampaign, fallbackAd }: {
                                         {titleOf(t)}
                                     </span>
 
-                                    {t.source && (
-                                        <span className={cn(
-                                            "px-1.5 py-0.5 rounded-full text-[9px] font-bold",
-                                            isLast ? "bg-teal-100 text-teal-700" : "bg-slate-100 text-slate-500"
-                                        )}>
-                                            {SOURCE_LABEL[t.source] || t.source}
-                                        </span>
-                                    )}
+                                    {/* A origem é sempre mostrada: sem selo, "orgânico" seria confundido
+                                        com falta de dado. Origem nula = orgânico, por definição. */}
+                                    <span className={cn(
+                                        "px-1.5 py-0.5 rounded-full text-[9px] font-bold",
+                                        !t.source
+                                            ? "bg-slate-100 text-slate-400"
+                                            : isLast ? "bg-teal-100 text-teal-700" : "bg-slate-100 text-slate-500"
+                                    )}>
+                                        {t.source ? (SOURCE_LABEL[t.source] || t.source) : 'Orgânico'}
+                                    </span>
 
                                     <span className={cn("text-[10px]", isLast ? "text-slate-600 font-semibold" : "text-slate-400")}>
                                         {fmt(t.occurred_at)}

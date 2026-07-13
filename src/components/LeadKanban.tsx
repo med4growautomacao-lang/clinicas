@@ -4200,7 +4200,7 @@ export function LeadKanban() {
       <AnimatePresence>
         {showModal && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-[80] flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between p-6 border-b border-slate-100">
                 <h3 className="text-lg font-bold text-slate-900">{selectedLead ? 'Editar Lead' : 'Novo Lead'}</h3>
                 <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
@@ -4216,34 +4216,15 @@ export function LeadKanban() {
                     <p className="mt-2 text-xs text-slate-600 leading-relaxed whitespace-pre-wrap max-h-60 overflow-y-auto pr-1">{selectedLead.ai_summary}</p>
                   </details>
                 )}
-                {selectedLead && (() => {
-                  const utmRows = [
-                    { label: 'Campanha', value: selectedLead.fb_campaign_name || selectedLead.g_campaign_name },
-                    { label: 'Conjunto', value: selectedLead.fb_adset_name || selectedLead.g_adset_name },
-                    { label: 'Anúncio', value: selectedLead.fb_ad_name || selectedLead.g_ad_name },
-                    { label: 'Termo', value: selectedLead.g_term_name },
-                  ].filter(r => r.value);
-                  if (utmRows.length === 0) return null;
-                  return (
-                    <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
-                      <div className="flex items-center gap-1.5 mb-2 text-slate-500">
-                        <Share2 className="w-3.5 h-3.5" />
-                        <span className="text-[10px] font-bold uppercase tracking-wider">UTMs capturadas</span>
-                      </div>
-                      <div className="space-y-1">
-                        {utmRows.map(r => (
-                          <div key={r.label} className="flex items-baseline gap-2 text-xs">
-                            <span className="text-slate-400 font-medium w-16 shrink-0">{r.label}</span>
-                            <span className="font-semibold text-slate-700 truncate" title={r.value as string}>{r.value}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })()}
-                {/* As UTMs acima são só o first-touch (o lead guarda uma atribuição só). A jornada
-                    completa — incluindo os cliques que aconteceram ANTES da conversa — vem daqui. */}
-                {selectedLead?.id && <LeadJourney leadId={selectedLead.id} />}
+                {/* O bloco "UTMs capturadas" foi removido: a jornada já mostra a mesma campanha, com
+                    data e no contexto de cada contato. Manter os dois era repetir a mesma linha. */}
+                {selectedLead?.id && (
+                  <LeadJourney
+                    leadId={selectedLead.id}
+                    fallbackCampaign={selectedLead.fb_campaign_name || selectedLead.g_campaign_name}
+                    fallbackAd={selectedLead.fb_ad_name || selectedLead.g_ad_name}
+                  />
+                )}
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Nome *</label>
                   <input type="text" value={formData.name} onChange={e => setFormData(p => ({ ...p, name: e.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 font-medium text-sm" placeholder="Nome do lead" />

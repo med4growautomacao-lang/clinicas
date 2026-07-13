@@ -11,6 +11,11 @@
 //     no card do Kanban e em Conversas), loga o motivo, NÃO reenvia (terminal).
 //   • envio falhou mas o número é válido (erro transitório do uazapi) → retry LIMITADO
 //     (welcome_attempts < MAX): reverte o claim (welcome_sent=false) p/ o cron tentar de novo.
+//   • falha de INFRA (a conta da clínica está fora do ar ou restrita pelo WhatsApp) → NÃO consome
+//     tentativa. O lead volta para a fila e é atendido quando a conta voltar.
+//     Sem isso, a culpa da infra caía no lead: em 10–13/07 o WhatsApp da Clínica Vaz caiu e depois
+//     foi restringido (erro 463), e 14 leads reais gastaram as 3 tentativas contra uma parede e
+//     ficaram marcados como "enviado" — nunca receberiam nada.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -21,6 +26,30 @@ const corsHeaders = {
 };
 
 const MAX_ATTEMPTS = 3; // tentativas de envio p/ número válido antes de desistir (evita loop)
+
+// A conta da clínica está fora do ar / punida pelo WhatsApp? Então o problema não é o lead.
+//   503 "session is not reconnectable" → WhatsApp desconectado
+//   463 / reachout_timelock            → WhatsApp restringiu a conta de iniciar conversas
+//   status 0                           → a própria uazapi não respondeu
+function isInfraFailure(err: { status: number; body: string } | null): boolean {
+  if (!err) return false;
+  if (err.status === 0 || err.status === 503) return true;
+  const b = (err.body || "").toLowerCase();
+  return b.includes("463")
+    || b.includes("reachout_timelock")
+    || b.includes("temporary restr")
+    || b.includes("disconnected")
+    || b.includes("not reconnectable");
+}
+
+// A uazapi informa até quando a restrição vale — usamos para não martelar a API até lá.
+function blockedUntilFrom(body: string): string | null {
+  try {
+    const m = body.match(/"until"\s*:\s*"([^"]+)"/);
+    if (m && !Number.isNaN(Date.parse(m[1]))) return new Date(m[1]).toISOString();
+  } catch { /* corpo não-JSON: ignora */ }
+  return null;
+}
 
 // Mesma lógica de _shared/phone.ts (inline p/ deploy sem dependência relativa):
 // normaliza p/ o formato BR canônico (sem o 9º dígito), igual ao n8n.
@@ -226,7 +255,27 @@ serve(async (req) => {
     return json({ ok: true, sent: true, bubbles: bubbles.length, lead_id });
   }
 
-  // (6) falha de envio com número (provavelmente) válido → retry LIMITADO
+  // (6a) A CONTA da clínica está fora do ar / restrita → a culpa não é do lead.
+  // Devolve o lead à fila SEM consumir tentativa, e anota até quando a conta está bloqueada para
+  // o selector parar de enfileirar (evita marteladas de 1/min contra uma parede).
+  if (isInfraFailure(lastErr)) {
+    const until = blockedUntilFrom(lastErr?.body ?? "");
+    await logFail("conta da clínica indisponível (não conta como tentativa)", {
+      reason: "infra_unavailable", uazapi: lastErr, blocked_until: until,
+    });
+
+    await supabase.from("whatsapp_instances").update({
+      // sem "until" explícito (ex: desconexão), espera curta e tenta de novo
+      send_blocked_until: until ?? new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+    }).eq("clinic_id", clinic_id);
+
+    // welcome_attempts NÃO é incrementado: o lead não fez nada de errado.
+    await supabase.from("leads").update({ welcome_sent: false }).eq("id", lead_id);
+
+    return json({ ok: false, sent: false, infra_unavailable: true, blocked_until: until, lead_id });
+  }
+
+  // (6b) falha de envio com número (provavelmente) válido → retry LIMITADO
   const attempts = priorAttempts + 1;
   await logFail("falha no envio (uazapi)", { reason: "send_failed", attempt: attempts, uazapi: lastErr });
   if (attempts < MAX_ATTEMPTS) {

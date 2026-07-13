@@ -16,6 +16,7 @@ interface Touchpoint {
     adset: string | null;
     ad: string | null;
     detail: string | null;
+    link_name: string | null;   // qual link do gerenciador trouxe o toque
     is_conversion: boolean;
 }
 
@@ -26,6 +27,12 @@ const CHANNEL_LABEL: Record<string, string> = {
     site_forms: 'Formulário do site',
     whatsapp: 'WhatsApp',
 };
+
+// Com múltiplos links (bio, story, cartão), "veio de um link" não diz nada — o que importa é QUAL.
+function titleOf(t: Touchpoint) {
+    if (t.channel === 'link' && t.link_name) return t.link_name;
+    return CHANNEL_LABEL[t.channel] || t.channel;
+}
 
 function channelIcon(t: Touchpoint) {
     if (t.channel === 'meta_forms' || t.channel === 'site_forms') return FileText;
@@ -100,7 +107,7 @@ export function LeadJourney({ leadId }: { leadId: string }) {
                             <div className={cn("min-w-0 flex-1", last ? "pb-0" : "pb-3")}>
                                 <div className="flex items-baseline gap-2 flex-wrap">
                                     <span className="text-[11px] font-bold text-slate-700">
-                                        {CHANNEL_LABEL[t.channel] || t.channel}
+                                        {titleOf(t)}
                                     </span>
                                     <span className="text-[10px] text-slate-400">{fmt(t.occurred_at)}</span>
                                     {t.is_conversion && (
@@ -112,8 +119,13 @@ export function LeadJourney({ leadId }: { leadId: string }) {
 
                                 {(t.campaign || t.ad || t.detail) && (
                                     <p className="text-[10px] text-slate-500 truncate mt-0.5">
-                                        {[t.campaign, t.ad, !t.campaign && !t.ad ? t.detail : null]
-                                            .filter(Boolean).join(' · ')}
+                                        {[
+                                            // quando o título já é o nome do link, o canal vira o subtítulo
+                                            t.channel === 'link' && t.link_name ? CHANNEL_LABEL.link : null,
+                                            t.campaign,
+                                            t.ad,
+                                            !t.campaign && !t.ad ? t.detail : null,
+                                        ].filter(Boolean).join(' · ')}
                                     </p>
                                 )}
                             </div>

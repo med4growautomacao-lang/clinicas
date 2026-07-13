@@ -15,6 +15,9 @@ const ALLOWED_MODELS = new Set(["claude-haiku-4-5", "claude-sonnet-4-6", "claude
 const MAX_AGENT_STEPS = 15;
 
 // ─── Tabelas que o assistente pode consultar (espelha os grants do assistant_ro) ───
+// `lead_tracking_inbox` hoje é a VIEW de compatibilidade sobre `attribution_inbox` (o assistant_ro
+// tem SELECT nas duas). Trocar o nome aqui junto com a remoção da view, para não deployar esta
+// função — que é sensível (verify_jwt) — só por causa de um rename.
 const ALLOWED_TABLES = [
   "leads", "tickets", "appointments", "patients", "medical_records",
   "financial_transactions", "marketing_data", "conversions", "doctors",

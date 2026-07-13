@@ -68,7 +68,7 @@ serve(async (req) => {
   const desde = new Date(Date.now() - JANELA_DIAS * 86400_000).toISOString();
 
   const { data: pendentes, error } = await supabase
-    .from("lead_tracking_inbox")
+    .from("attribution_inbox")
     .select("id, clinic_id, raw")
     .is("fb_campaign_name", null)
     .not("external_id", "is", null)

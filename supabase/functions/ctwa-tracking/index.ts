@@ -11,7 +11,7 @@
 //   → sem clique de anúncio (nem clid, nem sourceType='ad'): conversa orgânica, ignora
 //   → resolve a clínica pelo `owner` (telefone da instância, normalizado)
 //   → Graph API do Meta: sourceID (id do anúncio) → nome da campanha/conjunto/anúncio
-//   → INSERT em lead_tracking_inbox (staging) — os triggers + sweep de 1 min casam com o lead
+//   → INSERT em attribution_inbox (staging) — os triggers + sweep de 1 min casam com o lead
 //
 // O passo da Graph API é o que dá valor ao dado: o WhatsApp entrega só um id de anúncio; sem essa
 // chamada teríamos o clique, mas não saberíamos de QUAL campanha veio. Mas ele NÃO é obrigatório:
@@ -159,7 +159,7 @@ serve(async (req) => {
   // Staging: os triggers (trg_inbox_reconcile / trg_lead_pull_tracking) + o sweep de 1 min casam
   // isto com o lead por clinic_id + telefone normalizado, nos dois sentidos (tracking antes ou
   // depois do lead) — ver [[lead-tracking-inbox-race-fix]].
-  const { error } = await supabase.from("lead_tracking_inbox").insert({
+  const { error } = await supabase.from("attribution_inbox").insert({
     clinic_id: clinic.id,
     phone: leadPhone,
     source: "meta_ads",

@@ -70,20 +70,35 @@ serve(async (req) => {
     utmTerm        = link.utm_term
   } else {
     // ---- Modo legado: mantido vivo. O link da bio já divulgado usa este formato. ----
-    const { data: instance } = await supabase
+    const { data: instanceByToken } = await supabase
       .from('whatsapp_instances')
       .select('clinic_id')
       .eq('connect_token', connectToken)
       .maybeSingle()
 
-    if (!instance?.clinic_id) return fail('Clínica não encontrada ou WhatsApp não configurado.', 404)
+    if (!instanceByToken?.clinic_id) return fail('Clínica não encontrada ou WhatsApp não configurado.', 404)
 
-    clinicId    = instance.clinic_id
+    clinicId    = instanceByToken.clinic_id
     utmSource   = url.searchParams.get('utm_source')   || 'direto'
     utmMedium   = url.searchParams.get('utm_medium')   || 'link'
     utmCampaign = url.searchParams.get('utm_campaign') || null
     utmContent  = url.searchParams.get('utm_content')  || null
     utmTerm     = url.searchParams.get('utm_term')     || null
+
+    // O link antigo (já impresso na bio do cliente) não carrega o código do gerenciador. Casamos
+    // pelas UTMs para que ele também alimente as métricas por link — assim ninguém precisa trocar
+    // o link que já está publicado.
+    const { data: matched } = await supabase
+      .from('redirect_links')
+      .select('id')
+      .eq('clinic_id', clinicId)
+      .eq('utm_source', utmSource)
+      .eq('utm_medium', utmMedium)
+      .is('archived_at', null)
+      .limit(1)
+      .maybeSingle()
+
+    redirectLinkId = matched?.id ?? null
   }
 
   // Telefone + mensagem pré-preenchida da instância da clínica

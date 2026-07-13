@@ -12,18 +12,29 @@ import { useToast } from "./ui/toast";
 
 const EMPTY_FORM = { name: '', utm_source: '', utm_medium: '', utm_campaign: '', lead_source: '' };
 
+// link_sessions.created_at é timestamptz (UTC). Fixamos o fuso em SP para que o horário mostrado
+// seja o mesmo do resto do sistema, independente do fuso da máquina de quem está olhando.
+function formatUltimoClique(iso: string) {
+    return new Date(iso).toLocaleString('pt-BR', {
+        timeZone: 'America/Sao_Paulo',
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit',
+    });
+}
+
 export function RedirectLinksCard({ connectToken, redirectMessage, onMessageChange }: {
     connectToken?: string | null;
     redirectMessage?: string | null;
     onMessageChange: (v: string) => void;
 }) {
-    const { data: links, loading, create, update, archive } = useRedirectLinks();
+    const { data: links, loading, create, update, remove } = useRedirectLinks();
     const showToast = useToast();
 
     const [copiedId, setCopiedId] = useState<string | null>(null);
     const [adding, setAdding] = useState(false);
     const [saving, setSaving] = useState(false);
     const [form, setForm] = useState(EMPTY_FORM);
+    const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
     const urlFor = (code: string) => `${window.location.origin}/r?l=${code}`;
 
@@ -53,6 +64,12 @@ export function RedirectLinksCard({ connectToken, redirectMessage, onMessageChan
         setAdding(false);
     };
 
+    const confirmDelete = async (l: RedirectLink) => {
+        const ok = await remove(l.id);
+        setConfirmingId(null);
+        showToast(ok ? `Link "${l.name}" excluído` : 'Não foi possível excluir o link', ok ? 'success' : 'error');
+    };
+
     const originLabel = (l: RedirectLink) =>
         l.lead_source === 'instagram' ? 'Instagram'
             : l.lead_source === 'meta_ads' ? 'Meta Ads'
@@ -61,8 +78,8 @@ export function RedirectLinksCard({ connectToken, redirectMessage, onMessageChan
 
     if (!connectToken) return null;
 
-    const ativos = links.filter(l => !l.archived_at);
-    const arquivados = links.filter(l => l.archived_at);
+    // Não há mais "arquivar": o link é excluído de vez, ou pausado (active=false) mantendo o histórico.
+    const ativos = links;
 
     return (
         <Card className="border border-violet-200 shadow-sm bg-white overflow-hidden">
@@ -210,20 +227,44 @@ export function RedirectLinksCard({ connectToken, redirectMessage, onMessageChan
                                             </button>
                                             <button
                                                 onClick={() => update(l.id, { active: !l.active })}
-                                                title={l.active ? 'Pausar link' : 'Reativar link'}
+                                                title={l.active ? 'Pausar link (para de funcionar, mantém o histórico)' : 'Reativar link'}
                                                 className="p-1.5 text-slate-400 hover:text-slate-600 transition-colors"
                                             >
                                                 {l.active ? <ToggleRight className="w-5 h-5" /> : <ToggleLeft className="w-5 h-5" />}
                                             </button>
                                             <button
-                                                onClick={() => archive(l.id)}
-                                                title="Arquivar link"
+                                                onClick={() => setConfirmingId(l.id)}
+                                                title="Excluir link"
                                                 className="p-1.5 text-slate-400 hover:text-red-500 transition-colors"
                                             >
                                                 <Trash2 className="w-4 h-4" />
                                             </button>
                                         </div>
                                     </div>
+
+                                    {confirmingId === l.id && (
+                                        <div className="flex items-center justify-between gap-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                                            <p className="text-xs text-red-700">
+                                                Excluir <span className="font-bold">{l.name}</span> definitivamente?
+                                                {l.cliques > 0 && ` As métricas (${l.cliques} cliques) serão perdidas.`}
+                                                {' '}O link para de funcionar para quem clicar.
+                                            </p>
+                                            <div className="flex items-center gap-2 shrink-0">
+                                                <button
+                                                    onClick={() => confirmDelete(l)}
+                                                    className="px-2.5 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold transition-colors"
+                                                >
+                                                    Excluir
+                                                </button>
+                                                <button
+                                                    onClick={() => setConfirmingId(null)}
+                                                    className="px-2.5 py-1.5 text-slate-500 hover:text-slate-700 text-xs font-bold transition-colors"
+                                                >
+                                                    Cancelar
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
 
                                     <div className="flex items-center gap-6 border-t border-slate-200">
                                         {([
@@ -239,7 +280,7 @@ export function RedirectLinksCard({ connectToken, redirectMessage, onMessageChan
                                         {l.ultimo_clique && (
                                             <div className="pt-2 ml-auto text-right">
                                                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Último clique</p>
-                                                <p className="text-xs text-slate-600">{new Date(l.ultimo_clique).toLocaleDateString('pt-BR')}</p>
+                                                <p className="text-xs text-slate-600">{formatUltimoClique(l.ultimo_clique)}</p>
                                             </div>
                                         )}
                                     </div>
@@ -248,21 +289,6 @@ export function RedirectLinksCard({ connectToken, redirectMessage, onMessageChan
                         </div>
                     )}
 
-                    {arquivados.length > 0 && (
-                        <details className="pt-1">
-                            <summary className="text-xs text-slate-400 cursor-pointer hover:text-slate-600">
-                                {arquivados.length} link{arquivados.length > 1 ? 's' : ''} arquivado{arquivados.length > 1 ? 's' : ''}
-                            </summary>
-                            <div className="mt-2 space-y-1">
-                                {arquivados.map(l => (
-                                    <div key={l.id} className="flex items-center justify-between px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg">
-                                        <p className="text-xs text-slate-500 truncate">{l.name}</p>
-                                        <p className="text-[10px] text-slate-400 shrink-0 ml-3">{l.cliques} cliques · {l.leads} leads</p>
-                                    </div>
-                                ))}
-                            </div>
-                        </details>
-                    )}
                 </div>
 
                 <p className="text-[10px] text-slate-400 leading-relaxed">

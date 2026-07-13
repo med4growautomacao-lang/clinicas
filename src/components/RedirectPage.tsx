@@ -8,14 +8,19 @@ export function RedirectPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const c = params.get('c');
-    if (!c) { setError('Link inválido.'); return; }
+    const c = params.get('c'); // legado: token da instância + UTMs na própria URL
+    const l = params.get('l'); // gerenciador: código do link (UTMs vêm salvas no banco)
+    if (!c && !l) { setError('Link inválido.'); return; }
 
     // Chama edge function em modo JSON
     const url = new URL(EDGE_URL);
-    url.searchParams.set('c', c);
+    if (l) url.searchParams.set('l', l);
+    if (c) url.searchParams.set('c', c);
     url.searchParams.set('format', 'json');
-    params.forEach((v, k) => { if (k !== 'c' && k !== 'format') url.searchParams.set(k, v); });
+    params.forEach((v, k) => {
+      if (k === 'c' || k === 'l' || k === 'format') return;
+      if (v) url.searchParams.set(k, v); // ignora utm vazia: string vazia vira 'direto' na edge
+    });
 
     fetch(url.toString())
       .then(r => r.json())

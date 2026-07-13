@@ -3891,15 +3891,14 @@ export function useRedirectLinks() {
     return !error;
   };
 
-  // Arquivar em vez de deletar: os cliques/leads já atribuídos continuam apontando para o link.
-  const archive = async (id: string) => {
-    const { error } = await supabase
-      .from('redirect_links')
-      .update({ archived_at: new Date().toISOString(), active: false })
-      .eq('id', id);
+  // Exclusão definitiva. Os cliques em link_sessions NÃO são apagados (a FK é ON DELETE SET NULL),
+  // então nenhuma atribuição de lead se perde — o que se perde é a métrica agrupada por este link.
+  // Para tirar um link de circulação sem perder o histórico, use `update({ active: false })`.
+  const remove = async (id: string) => {
+    const { error } = await supabase.from('redirect_links').delete().eq('id', id);
     if (!error) await fetch(true);
     return !error;
   };
 
-  return { data, loading, create, update, archive, refetch: fetch };
+  return { data, loading, create, update, remove, refetch: fetch };
 }

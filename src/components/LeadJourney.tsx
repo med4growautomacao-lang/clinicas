@@ -14,6 +14,7 @@ interface Touchpoint {
     occurred_at: string;
     channel: string;
     source: string | null;
+    ad_platform: string | null;
     campaign: string | null;
     adset: string | null;
     ad: string | null;
@@ -42,6 +43,14 @@ const SOURCE_LABEL: Record<string, string> = {
     google_ads: 'Google Ads',
 };
 
+// "Meta Ads" sozinho esconde metade da informação: o mesmo anúncio roda no Instagram, no Facebook e
+// (desde pouco tempo) no Status do WhatsApp. O próprio WhatsApp diz de qual veio o clique.
+const PLATFORM_LABEL: Record<string, string> = {
+    instagram: 'Instagram',
+    facebook: 'Facebook',
+    whatsapp: 'Status',
+};
+
 // Com vários links (bio, story, cartão), "veio pelo WhatsApp" não diz nada — o que importa é por
 // QUAL link ela passou.
 function titleOf(t: Touchpoint) {
@@ -52,7 +61,7 @@ function titleOf(t: Touchpoint) {
 function iconOf(t: Touchpoint) {
     if (t.channel === 'meta_forms' || t.channel === 'site_forms') return FileText;
     if (t.channel === 'balcao' || t.channel === 'manual') return Store;
-    if (t.source === 'instagram') return Instagram;
+    if (t.source === 'instagram' || t.ad_platform === 'instagram') return Instagram;
     if (t.source) return MousePointerClick;   // clique em anúncio
     return MessageCircle;                      // WhatsApp orgânico
 }
@@ -161,6 +170,19 @@ export function LeadJourney({ leadId, fallbackCampaign, fallbackAd }: {
                                     )}>
                                         {t.source ? (SOURCE_LABEL[t.source] || t.source) : 'Orgânico'}
                                     </span>
+
+                                    {/* Em qual plataforma o anúncio foi visto. Só existe para cliques
+                                        captados a partir de 13/07 — antes disso o dado era descartado. */}
+                                    {t.ad_platform && (
+                                        <span className={cn(
+                                            "px-1.5 py-0.5 rounded-full text-[9px] font-bold border",
+                                            isLast
+                                                ? "border-teal-200 text-teal-700"
+                                                : "border-slate-200 text-slate-400"
+                                        )}>
+                                            {PLATFORM_LABEL[t.ad_platform] || t.ad_platform}
+                                        </span>
+                                    )}
 
                                     <span className={cn("text-[10px]", isLast ? "text-slate-600 font-semibold" : "text-slate-400")}>
                                         {fmt(t.occurred_at)}

@@ -4,6 +4,7 @@ import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import { useToast } from "./ui/toast";
 import { matchesSearch, leadSearchOrFilter } from "../lib/search";
+import { LeadJourney } from "./LeadJourney";
 import {
   Settings,
   GripVertical,
@@ -4240,6 +4241,9 @@ export function LeadKanban() {
                     </div>
                   );
                 })()}
+                {/* As UTMs acima são só o first-touch (o lead guarda uma atribuição só). A jornada
+                    completa — incluindo os cliques que aconteceram ANTES da conversa — vem daqui. */}
+                {selectedLead?.id && <LeadJourney leadId={selectedLead.id} />}
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Nome *</label>
                   <input type="text" value={formData.name} onChange={e => setFormData(p => ({ ...p, name: e.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 font-medium text-sm" placeholder="Nome do lead" />

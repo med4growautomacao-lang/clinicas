@@ -2,6 +2,14 @@ import React, { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 
 const EDGE_URL = 'https://yzpclhuifquhfqpiwysh.supabase.co/functions/v1/whatsapp-redirect';
+const RAST_COOKIE_TTL = 63072000; // 2 anos, igual ao script do site
+
+// O cookie vive neste domínio; a edge roda em outro (supabase.co) e não o enxerga. Então é esta
+// página que lê a identidade do visitante e a repassa — e persiste a que a edge devolver.
+function readCookie(name: string): string | null {
+  const m = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+  return m ? decodeURIComponent(m[1]) : null;
+}
 
 export function RedirectPage() {
   const params = new URLSearchParams(window.location.search);
@@ -22,13 +30,21 @@ export function RedirectPage() {
       if (v) url.searchParams.set(k, v); // ignora utm vazia: string vazia vira 'direto' na edge
     });
 
+    // Se este visitante já tem identidade (clique anterior, ou o script do site), reaproveita —
+    // é o que faz os vários cliques do mesmo navegador caírem na mesma jornada.
+    const existing = readCookie('rast_id');
+    if (existing) url.searchParams.set('rast_id', existing);
+
     fetch(url.toString())
       .then(r => r.json())
       .then(({ rast_id, wa_url, error: err }) => {
         if (err || !wa_url) { setError(err || 'Clínica não encontrada.'); return; }
-        // Seta cookie rast_id por 2 anos (mesmo TTL do rastracking_nod)
-        const expires = new Date(Date.now() + 63072000 * 1000).toUTCString();
-        document.cookie = `rast_id=${rast_id}; expires=${expires}; path=/; SameSite=Lax`;
+        // Persiste a IDENTIDADE (UUID). Antes gravávamos aqui o protocolo, que muda a cada clique
+        // e por isso não identificava ninguém.
+        if (rast_id) {
+          const expires = new Date(Date.now() + RAST_COOKIE_TTL * 1000).toUTCString();
+          document.cookie = `rast_id=${rast_id}; expires=${expires}; path=/; SameSite=Lax`;
+        }
         window.location.href = wa_url;
       })
       .catch(() => setError('Erro ao processar o link.'));

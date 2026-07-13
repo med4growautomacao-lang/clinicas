@@ -6,10 +6,17 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-// link_sessions.rast_id tem UNIQUE global. O gerador antigo sorteava 4 dígitos (9.000 valores) e
-// o insert não checava erro: com ~600 protocolos em uso, ~7% dos cliques colidiam, o insert
-// falhava em silêncio e o clique era PERDIDO — pior, a pessoa seguia para o WhatsApp com um
-// protocolo pertencente a outra sessão. Agora: 6 dígitos (900k) + retry explícito no conflito.
+// Dois identificadores DIFERENTES, que antes estavam confundidos no mesmo campo:
+//
+//  - `protocolo`: o código que vai na mensagem do WhatsApp. Identifica o CLIQUE, é descartável e
+//    muda a cada acesso. Antes eram 4 dígitos (9.000 valores) num campo UNIQUE, inseridos sem
+//    checar erro: com ~600 em uso, ~7% dos cliques colidiam, o insert falhava em silêncio e o
+//    clique era perdido. Agora: 6 dígitos (900k) + retry no conflito.
+//
+//  - `rast_id`: a IDENTIDADE do visitante (UUID v4, mesmo formato do script instalado no site do
+//    cliente). Vive num cookie de 2 anos e se REPETE entre cliques do mesmo navegador — é
+//    justamente isso que permite montar a jornada ("clicou dia 3, voltou dia 8, conversou dia 12").
+//    Antes o cookie guardava o protocolo, que muda toda vez — inútil para agrupar.
 const PROTOCOL_DIGITS = 6
 const MAX_INSERT_ATTEMPTS = 5
 
@@ -18,6 +25,8 @@ function genProtocol(): string {
   const max = 10 ** PROTOCOL_DIGITS - 1
   return String(Math.floor(min + Math.random() * (max - min + 1)))
 }
+
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -28,6 +37,14 @@ serve(async (req) => {
   const linkCode = url.searchParams.get('l')      // novo: link nomeado do gerenciador
   const connectToken = url.searchParams.get('c')  // legado: token da instância + UTMs na querystring
   const format = url.searchParams.get('format')
+
+  // Identidade do visitante. O link publicado é servido pelo app (outro domínio), então o cookie
+  // NÃO chega até aqui — quem o lê é o RedirectPage e o repassa por aqui. Se não vier (1ª visita,
+  // ou acesso direto a esta função), geramos um UUID v4 e devolvemos para ser persistido.
+  const rastFromClient = url.searchParams.get('rast_id')
+  const rastId = rastFromClient && UUID_V4.test(rastFromClient)
+    ? rastFromClient
+    : crypto.randomUUID()
 
   const fail = (msg: string, status: number) => {
     if (format === 'json') {
@@ -112,13 +129,15 @@ serve(async (req) => {
 
   if (!instance?.phone_number) return fail('WhatsApp não configurado para esta clínica.', 404)
 
-  // Grava o clique, re-sorteando o protocolo se colidir com o UNIQUE de rast_id.
+  // Grava o clique. `protocolo` é UNIQUE: em colisão, re-sorteia (antes o erro era ignorado e o
+  // clique se perdia). `rast_id` é a identidade e PODE repetir — é o que agrupa a jornada.
   let protocolo = ''
   let saved = false
   for (let attempt = 0; attempt < MAX_INSERT_ATTEMPTS; attempt++) {
     protocolo = genProtocol()
     const { error } = await supabase.from('link_sessions').insert({
-      rast_id:          protocolo,
+      protocolo:        protocolo,
+      rast_id:          rastId,
       clinic_id:        clinicId,
       redirect_link_id: redirectLinkId,
       utm_source:       utmSource,
@@ -129,7 +148,7 @@ serve(async (req) => {
     })
 
     if (!error) { saved = true; break }
-    if (error.code !== '23505') {  // 23505 = unique_violation -> re-sorteia
+    if (error.code !== '23505') {  // 23505 = unique_violation -> re-sorteia o protocolo
       console.error('link_sessions insert falhou:', error)
       break
     }
@@ -149,8 +168,10 @@ serve(async (req) => {
     : customMsg
   const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(fullText)}`
 
+  // Devolve a IDENTIDADE (não o protocolo) para o app gravar no cookie. Era exatamente o inverso
+  // antes: o cookie guardava o protocolo, que muda a cada clique e portanto não identificava nada.
   if (format === 'json') {
-    return new Response(JSON.stringify({ rast_id: protocolo, wa_url: waUrl }), {
+    return new Response(JSON.stringify({ rast_id: rastId, protocolo, wa_url: waUrl }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     })
@@ -166,7 +187,7 @@ serve(async (req) => {
 <body>
 <script>
   const expires = new Date(Date.now() + 63072000 * 1000).toUTCString();
-  document.cookie = "rast_id=${protocolo}; expires=" + expires + "; path=/; SameSite=Lax";
+  document.cookie = "rast_id=${rastId}; expires=" + expires + "; path=/; SameSite=Lax";
   window.location.href = "${waUrl}";
 <\/script>
 <noscript>

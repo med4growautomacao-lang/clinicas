@@ -3817,3 +3817,89 @@ export function useMaintenanceOrders() {
 
   return { data, loading, create, update, remove, refetch: fetch };
 }
+
+// ---------------------------------------------------------------------------
+// Links de Redirecionamento (gerenciador)
+// A listagem vem da RPC get_redirect_link_stats, que já devolve as métricas
+// (cliques -> leads -> conversões) junto do link, evitando um N+1 na UI.
+// ---------------------------------------------------------------------------
+export interface RedirectLink {
+  id: string;
+  name: string;
+  code: string;
+  utm_source: string | null;
+  utm_medium: string | null;
+  utm_campaign: string | null;
+  lead_source: string | null;   // origem gravada no lead; null = Orgânico
+  active: boolean;
+  archived_at: string | null;
+  created_at: string;
+  cliques: number;
+  leads: number;
+  conversoes: number;
+  ultimo_clique: string | null;
+}
+
+export interface RedirectLinkInput {
+  name: string;
+  utm_source?: string | null;
+  utm_medium?: string | null;
+  utm_campaign?: string | null;
+  lead_source?: string | null;
+}
+
+const LINK_CODE_ALPHABET = 'abcdefghijkmnopqrstuvwxyz23456789'; // sem 0/1/l — evita erro ao ler/digitar
+function genLinkCode(len = 6) {
+  let s = '';
+  for (let i = 0; i < len; i++) s += LINK_CODE_ALPHABET[Math.floor(Math.random() * LINK_CODE_ALPHABET.length)];
+  return s;
+}
+
+export function useRedirectLinks() {
+  const { activeClinicId } = useAuth();
+  const [data, setData] = useState<RedirectLink[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = useCallback(async (silent = false) => {
+    if (!activeClinicId) return;
+    if (!silent) setLoading(true);
+    const { data: rows } = await supabase.rpc('get_redirect_link_stats', { p_clinic_id: activeClinicId });
+    setData((rows as RedirectLink[]) || []);
+    setLoading(false);
+  }, [activeClinicId]);
+
+  useEffect(() => { fetch(); }, [fetch]);
+
+  const create = async (input: RedirectLinkInput) => {
+    if (!activeClinicId) return null;
+    // `code` tem UNIQUE: em caso de colisão, re-sorteia em vez de estourar erro na cara do usuário.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const { data: row, error } = await supabase
+        .from('redirect_links')
+        .insert({ ...input, clinic_id: activeClinicId, code: genLinkCode() })
+        .select()
+        .single();
+      if (!error) { await fetch(true); return row as RedirectLink; }
+      if (error.code !== '23505') return null;
+    }
+    return null;
+  };
+
+  const update = async (id: string, updates: Partial<RedirectLinkInput> & { active?: boolean }) => {
+    const { error } = await supabase.from('redirect_links').update(updates).eq('id', id);
+    if (!error) await fetch(true);
+    return !error;
+  };
+
+  // Arquivar em vez de deletar: os cliques/leads já atribuídos continuam apontando para o link.
+  const archive = async (id: string) => {
+    const { error } = await supabase
+      .from('redirect_links')
+      .update({ archived_at: new Date().toISOString(), active: false })
+      .eq('id', id);
+    if (!error) await fetch(true);
+    return !error;
+  };
+
+  return { data, loading, create, update, archive, refetch: fetch };
+}

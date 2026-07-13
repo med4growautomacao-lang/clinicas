@@ -763,10 +763,10 @@ export function ComercialDashboard() {
   const apptGenerated = (appointments as any).generated ?? 0;
   const convAgendRate = leadsValue > 0 ? (apptGenerated / leadsValue) * 100 : 0;          // agendamentos gerados ÷ leads
   const convConsultaRate = leadsValue > 0 ? (attended / leadsValue) * 100 : 0;          // parcial: realizadas ÷ leads
-  const convConsultaPrevistaRate = leadsValue > 0 ? (apptGenerated / leadsValue) * 100 : 0; // previsto: gerados ÷ leads
   // Custo por agendamento: parcial = invest ÷ realizadas; previsto = invest ÷ (marcadas + realizadas),
   // ou seja os agendamentos que seguem de pé (exclui faltas e cancelados).
   const apptStanding = attended + toRealize; // realizadas + marcadas (pendente/confirmado)
+  const convConsultaPrevistaRate = leadsValue > 0 ? (apptStanding / leadsValue) * 100 : 0; // previsto: (realizadas + marcadas) ÷ leads
   const costPerAppt = apptStanding > 0 && fin.investment > 0 ? fin.investment / apptStanding : null;             // previsto: invest ÷ (marcadas + realizadas)
   const costPerRealizada = attended > 0 && fin.investment > 0 ? fin.investment / attended : null;                // parcial: invest ÷ realizadas
   // CAC = investimento ÷ clientes. Parcial: ÷ vendas reais (ganhos). Previsto: ÷ agendamentos gerados.

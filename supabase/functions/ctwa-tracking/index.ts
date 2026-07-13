@@ -8,7 +8,7 @@
 // Fluxo (idêntico ao do n8n, agora nativo):
 //   webhook uazapi (event=messages) → filtra (não-grupo, não-fromMe)
 //   → extrai ctwaClid + sourceID de message.content.contextInfo.externalAdReply
-//   → sem ctwaClid: não veio de anúncio, ignora
+//   → sem clique de anúncio (nem clid, nem sourceType='ad'): conversa orgânica, ignora
 //   → resolve a clínica pelo `owner` (telefone da instância, normalizado)
 //   → Graph API do Meta: sourceID (id do anúncio) → nome da campanha/conjunto/anúncio
 //   → INSERT em lead_tracking_inbox (staging) — os triggers + sweep de 1 min casam com o lead
@@ -63,6 +63,9 @@ function extractAdReply(message: any) {
   return {
     ctwaClid: ctx?.ctwaClid ?? null,
     sourceId: ctx?.sourceID ?? ctx?.sourceId ?? null,
+    // 'ad' = anúncio pago. Precisamos disto porque o Anúncio no Status NÃO manda ctwaClid — sem
+    // outro sinal de que é anúncio, não teríamos como distingui-lo de um contexto qualquer.
+    isAd: String(ctx?.sourceType ?? "").toLowerCase() === "ad",
     // Instagram ou Facebook? Vem de graça em todo clique e é o que responde "onde meu anúncio
     // rende mais". Medido em 477 cliques: instagram 261, facebook 173, status do WhatsApp 8.
     adPlatform: AD_PLATFORMS.has(app) ? app : null,
@@ -97,7 +100,17 @@ serve(async (req) => {
 
   const adInfo = extractAdReply(msg);
   const { ctwaClid, sourceId } = adInfo;
-  if (!ctwaClid) return json({ ok: true, ignored: "no_ad_click" });  // conversa orgânica
+
+  // O "Anúncio no Status" (colocação nova do Meta, já rodando em cliente nosso) chega COM sourceID
+  // e SEM ctwaClid. Exigir o clid — como o n8n fazia — descartava o clique inteiro e o lead pago
+  // entrava como orgânico. Aceitamos o clique se há clid OU se o contexto se declara anúncio.
+  if (!ctwaClid && !(sourceId && adInfo.isAd)) {
+    return json({ ok: true, ignored: "no_ad_click" });   // conversa orgânica
+  }
+
+  // Chave natural do clique. Sem clid, o id da mensagem é o que temos de estável entre retries.
+  const externalId = ctwaClid ?? (msg.messageid ? `wa_status:${msg.messageid}` : null);
+  if (!externalId) return json({ ok: false, error: "no_external_id" }, 400);
 
   const leadPhone = normalizeBrazilianPhone(msg.chatid);
   const clinicPhone = normalizeBrazilianPhone(body?.owner);
@@ -150,7 +163,10 @@ serve(async (req) => {
     clinic_id: clinic.id,
     phone: leadPhone,
     source: "meta_ads",
+    // Fica NULO no Anúncio no Status — de propósito. Inventar um clid falso mentiria para qualquer
+    // integração que devolva o clid à Meta; quem marca o lead como pago é source + ad_platform.
     ctwa_clid: ctwaClid,
+    external_id: externalId,
     fb_campaign_name: campaign,
     fb_adset_name: adset,
     fb_ad_name: ad,
@@ -172,9 +188,8 @@ serve(async (req) => {
     },
   });
 
-  // O ctwa_clid é único por clique na origem, e a inbox agora tem UNIQUE (clinic_id, ctwa_clid).
-  // Um retry do webhook (ou um replay manual repetido) bate aqui e é ignorado — antes duplicava
-  // o clique em silêncio.
+  // A inbox tem UNIQUE (clinic_id, external_id). Um retry do webhook (ou um replay manual repetido)
+  // bate aqui e é ignorado — antes duplicava o clique em silêncio.
   if (error && error.code === "23505") {
     return json({ ok: true, duplicate: true, clinic_id: clinic.id, phone: leadPhone });
   }

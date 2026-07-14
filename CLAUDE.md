@@ -54,20 +54,30 @@ O n8n já lê essa view: workflow **"Agente IA"** → `Puxa dados Prompt` → `P
 
 ## Agendamento
 
-- **`book_appointment` é a RPC única** — app, Kanban e IA passam por ela. Não inserir em `appointments` direto.
-  - `p_validate_availability` tem **default seguro (valida)**; burlar é explícito.
-  - `p_source = 'ia'` respeita aviso mínimo; manual o ignora **de propósito** (encaixe de recepção).
+- **`book_appointment` é a única coisa que insere em `appointments`** (verificado). App, Kanban e IA passam por ela; `convert_lead_to_appointment` **delega** para ela. **Nunca inserir direto.**
+  - `v_validate := COALESCE(p_validate_availability, true)` → **default seguro (valida)**; burlar é explícito.
+  - `v_ignore_min := COALESCE(p_ignore_min_notice, p_source <> 'ia')` → **só a IA respeita o aviso mínimo**; o manual o ignora **de propósito** (encaixe de recepção).
 - **`get_available_slots` tem 2 overloads.** A versão por **`consultation_type_id` (uuid) é a real**; a de texto é só adaptador de legado.
-- O motor lê a config de **`consultation_types`**, **não** de `doctors`. Campos de agendamento no médico são **letra morta**.
+
+**De onde o motor tira cada coisa** (a divisão não é óbvia):
+
+| vem de `consultation_types` | vem de `doctors` |
+|---|---|
+| duração, `slot_step`, buffers, `min_notice` | `working_hours`, `days_off`, `blocked_times` |
+
+⚠️ `doctors.consultation_duration / slot_step / buffer_* / min_notice_*` **existem e são IGNORADOS** — letra morta. Mas o **expediente** é do médico mesmo (o tipo só pode sobrepô-lo via `working_hours_override`).
 
 ## Tickets
 
-**Três caminhos de criação, nenhum no mesmo lugar:**
+**Quatro caminhos de criação — e um deles não passa por RPC:**
 - WhatsApp → trigger `trg_auto_open_ticket` em `chat_messages` (fn `fn_auto_open_ticket`)
 - Formulários → trigger `trg_auto_open_ticket_forms` em `leads`
-- App → RPC
+- App → RPC `create_lead_with_ticket`
+- App → **`insert` direto em `tickets`** (`useSupabase.ts`, criação avulsa no Kanban)
 
-Ciclo de vida: `move_lead_stage`, `finalize_ticket`, `reopen_ticket`.
+Por isso **a invariante não pode morar na aplicação** — ela é garantida por índice (abaixo).
+
+Ciclo de vida: `move_lead_stage`, `finalize_ticket`, `reopen_ticket`, `move_ticket_keep_outcome`.
 
 ## Dashboards — divergem POR CONSTRUÇÃO
 
@@ -83,28 +93,48 @@ Não são três versões do mesmo número. **Antes de "corrigir" uma divergênci
 
 ## O produto não é só clínicas
 
-`clinics.category = 'outro'` habilita o **módulo de Produção** (estoque, PCP, manutenção) e muda menus.
+**Cerca de 40% dos tenants não são clínica** (`clinics.category = 'outro'`): loja de celular, joalheria, metalúrgica, turismo, café. Isso **não é dado de teste**.
+
+`category = 'outro'` habilita o **módulo de Produção** (estoque, PCP, manutenção) e muda menus. Ao mexer em algo transversal (funil, IA, agenda), lembre que **"paciente" ali é cliente e "consulta" é atendimento/serviço**.
 
 ---
 
-# 2. Invariantes — violar aqui quebra em silêncio
+# 2. Invariantes e armadilhas silenciosas
+
+## As invariantes são garantidas por ÍNDICE, não por código
+Não confie na aplicação para mantê-las (vide o `insert` direto em `tickets`). Elas existem no banco — **não as derrube numa migration sem saber o que está fazendo**:
+
+| índice | garante |
+|---|---|
+| `uq_tickets_one_open_per_lead` | **1 ticket aberto por lead** |
+| `appointments_one_active_per_ticket` | **1 agendamento ativo por ticket** |
+| `uq_leads_clinic_rast_id` | `rast_id` único na clínica |
+| `uq_leads_normalized_phone` | **lead único por telefone normalizado** |
 
 ## `tickets.outcome` é a fonte única da verdade
-Venda = **1 ticket ganho**. `stage` e `outcome` são **acoplados** — mexer num sem o outro corrompe todos os painéis. Invariantes: **1 ticket aberto por lead**, **1 agendamento ativo por ticket**.
+Venda = **1 ticket ganho**. `stage` e `outcome` são **acoplados** — mexer num sem o outro corrompe todos os painéis.
 
 ## Telefone: normalizar os DOIS lados, sempre
-`leads` é normalizado **no n8n**; `patients`, **no banco** (`normalize_br_phone`). Comparar telefone cru gera "não encontrado" fantasma — é o 9º dígito. Em RPC, normalize os dois lados da comparação.
+`leads` chega normalizado **do n8n**; `patients` é normalizado **no banco** (`normalize_br_phone`). Comparar telefone **cru** gera "não encontrado" fantasma — é o **9º dígito**. Em RPC, normalize **os dois lados** da comparação.
 
 ## `rast_id` ≠ protocolo
-- **`rast_id`** (UUID v4) = **identidade do lead**. Todo lead nasce com um. `UNIQUE (clinic_id, rast_id)`.
+- **`rast_id`** (UUID v4) = **identidade do lead**. Todo lead nasce com um (gerado em `fn_handle_lead_uniqueness`).
 - **protocolo** = id **de um clique**.
 
 Já foram o mesmo campo, e confundi-los corrompe a jornada multi-toque.
 
-## Canal ≠ origem
-`capture_channel` (whatsapp / site_forms / meta_forms / **balcao**) é **como** chegou.
-Origem (meta_ads / google_ads / instagram / null=orgânico) é **de onde** veio.
-**"Balcão" é canal, nunca origem.**
+## Canal ≠ origem — e o vocabulário MUDA entre as tabelas
+**Canal** = *como* chegou. **Origem** = *de onde* veio. **"Balcão" é canal, nunca origem.**
+
+⚠️ **Os valores de canal não são os mesmos nas duas tabelas** — não copie de uma para a outra:
+
+| coluna | valores reais |
+|---|---|
+| `leads.capture_channel` | `whatsapp` · `forms` · `manual` · `balcao` |
+| `lead_touchpoints.channel` | `whatsapp` · `site_forms` · `meta_forms` · `manual` |
+| `lead_touchpoints.source` (origem) | `meta_ads` · `google_ads` · `instagram` · `null` = orgânico |
+
+Repare: `leads` diz **`forms`**; `lead_touchpoints` separa em **`site_forms`** e **`meta_forms`**.
 
 ## Nunca reconstruir JSONB do zero
 Formulário que grava um JSONB inteiro sem reler tudo **zera silenciosamente** os campos que não conhece. Já causou 3 bugs de "salvar apaga campo". **Sempre `COALESCE` / merge parcial.**
@@ -120,7 +150,7 @@ Usar **`is_clinic_admin(clinic_id)`** / **`is_super_admin()`**.
 `consultation_types.slug` é **texto livre digitado pela clínica**. Use o **`id`**. Já gerou 3 bugs — incluindo liberar a exclusão de tipos com consultas futuras.
 
 ## Observabilidade
-- Toda chamada HTTP saindo do banco usa **`system_http_post`** (não `net.http_post` cru) — é o que deixa a Central de Erros saber **qual URL** falhou.
+- Toda chamada HTTP saindo do banco usa **`system_http_post`** (não `net.http_post` cru) — é o que deixa a Central de Erros saber **qual URL** falhou. Hoje **nenhuma** função usa `net.http_post` cru: **mantenha assim.**
 - Erros vão para `system_errors` via **`log_system_error`** → **Super Admin › Central de Erros**.
 
 ---
@@ -148,8 +178,12 @@ Usar **`is_clinic_admin(clinic_id)`** / **`is_super_admin()`**.
 - Mensagem de commit: **usar `git commit -F <arquivo>`**. Here-string (`@'...'@`) **quebra** com acento e aspas — já custou chamadas perdidas.
 - PowerShell 5.1: **não existe `&&`/`||`**. Encadear com `;` ou `if ($?) { }`.
 
-## Fuso horário
-Tudo em **`America/Sao_Paulo`**. Campos como `changed_at` já são **SP sem timezone** — **não converter de novo** (converter duas vezes desloca em 3h e ninguém percebe).
+## Fuso horário — o banco MISTURA os dois tipos
+O negócio é todo em **`America/Sao_Paulo`**, mas as colunas **não são uniformes**. **Confira o tipo antes de converter** — converter duas vezes desloca em 3h e **ninguém percebe**:
+
+| `timestamp` **sem** tz (já é SP — não converter) | `timestamptz` (converter para exibir) |
+|---|---|
+| `leads.created_at`, `lead_stage_history.changed_at` | `tickets.outcome_at`, `lead_touchpoints.occurred_at`, `attribution_inbox.occurred_at` |
 
 ## Dados que parecem bug e não são
 **"MedDesk Demonstrativa" é um clone anonimizado da Clínica Vaz.** Registros "duplicados" entre essas duas clínicas (inclusive `rast_id`) são **esperados** — não investigar como corrupção.

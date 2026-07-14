@@ -12,6 +12,7 @@ import {
 import { cn } from '@/src/lib/utils';
 import { useToast } from './ui/toast';
 import { matchesSearch } from '../lib/search';
+import { ErrorCenter } from './ErrorCenter';
 
 // ─── tipos de modal ───────────────────────────────────────────────────────────
 type ModalState =
@@ -1418,7 +1419,7 @@ export default function SuperAdmin() {
   const { data: orgs, loading: orgsLoading, create: createOrg, update: updateOrg, remove: deleteOrg } = useOrganizations();
   const { clinicUsers, orgUsers, usersLoading, addClinicUser, addOrgUser, removeClinicUser, totalUsers, refetchUsers } = useSuperAdminData();
 
-  const [activeTab, setActiveTab] = useState<'gestao' | 'settings'>('gestao');
+  const [activeTab, setActiveTab] = useState<'gestao' | 'settings' | 'erros'>('gestao');
   const [search, setSearch] = useState('');
   const [modal, setModal] = useState<ModalState>(null);
 
@@ -1539,10 +1540,21 @@ export default function SuperAdmin() {
           >
             System Settings
           </button>
+          <button
+            onClick={() => setActiveTab('erros')}
+            className={cn(
+              "px-4 py-2 rounded-lg text-sm font-bold transition-all",
+              activeTab === 'erros' ? "bg-white text-teal-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+            )}
+          >
+            Central de Erros
+          </button>
         </div>
       </div>
 
-      {activeTab === 'gestao' ? (
+      {activeTab === 'erros' ? (
+        <ErrorCenter />
+      ) : activeTab === 'gestao' ? (
         <>
           {/* Stats */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

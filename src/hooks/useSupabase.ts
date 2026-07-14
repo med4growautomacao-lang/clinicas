@@ -3902,3 +3902,52 @@ export function useRedirectLinks() {
 
   return { data, loading, create, update, remove, refetch: fetch };
 }
+
+// ─── Central de Erros (super admin) ───────────────────────────────────────────
+// A RLS de system_errors já restringe a super admin — o hook não precisa (nem deve) refiltrar.
+export interface SystemError {
+  id: string;
+  scope: string;
+  code: string;
+  level: 'warn' | 'error' | 'critical';
+  title: string;
+  clinic_id: string | null;
+  is_monitor: boolean;
+  occurrences: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  status: 'open' | 'ack' | 'resolved';
+  last_context: Record<string, unknown> | null;
+}
+
+export function useSystemErrors() {
+  const [data, setData] = useState<SystemError[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
+    const { data: rows } = await supabase
+      .from('system_errors')
+      .select('*')
+      .order('last_seen_at', { ascending: false })
+      .limit(300);
+    setData((rows as SystemError[]) || []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { fetch(); }, [fetch]);
+
+  // Um MONITOR não se resolve na mão: ele reflete uma condição que ou existe ou não existe, e o cron
+  // reavalia a cada 5 min. Deixar o super admin "resolver" um WhatsApp que continua caído só
+  // esconderia o problema até a próxima rodada. Por isso só eventos podem ser resolvidos aqui.
+  const setStatus = async (id: string, status: 'open' | 'ack' | 'resolved') => {
+    const { error } = await supabase
+      .from('system_errors')
+      .update({ status, resolved_at: status === 'resolved' ? new Date().toISOString() : null })
+      .eq('id', id);
+    if (!error) await fetch(true);
+    return !error;
+  };
+
+  return { data, loading, setStatus, refetch: fetch };
+}

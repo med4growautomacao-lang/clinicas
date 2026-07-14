@@ -24,7 +24,12 @@ const CORS_HEADERS = {
 const UAZAPI_BASE = Deno.env.get('UAZAPI_BASE_URL') ?? 'https://med4growautomacao.uazapi.com';
 const UAZAPI_ADMIN_TOKEN = Deno.env.get('UAZAPI_ADMIN_TOKEN') ?? '';
 const N8N_INBOUND_URL = Deno.env.get('N8N_INBOUND_WEBHOOK_URL') ?? '';
-const N8N_TRACKING_URL = Deno.env.get('N8N_TRACKING_WEBHOOK_URL') ?? '';
+
+// Tracking de anúncio: instância nova nasce apontando para a edge NATIVA, não mais para o n8n.
+// Sem isto, o secret N8N_TRACKING_WEBHOOK_URL faria cada cliente novo renascer no fluxo antigo —
+// o que perde o clique inteiro sempre que a Graph API recusa o token (ver ctwa-tracking).
+const CTWA_TRACKING_URL = Deno.env.get('CTWA_TRACKING_WEBHOOK_URL')
+  ?? `${Deno.env.get('SUPABASE_URL') ?? ''}/functions/v1/ctwa-tracking`;
 
 const COOLDOWN_SECONDS = 15;
 const HTTP_TIMEOUT_MS = 5000;
@@ -232,8 +237,8 @@ async function ensureUazapiWebhooks(
 
   const desired = [
     { url: eventsUrl, events: ['connection'], excludeMessages: [] as string[] },
-    ...(N8N_INBOUND_URL  ? [{ url: N8N_INBOUND_URL,  events: ['messages'], excludeMessages: ['wasSentByApi'] }] : []),
-    ...(N8N_TRACKING_URL ? [{ url: N8N_TRACKING_URL, events: ['messages'], excludeMessages: ['wasSentByApi'] }] : []),
+    ...(N8N_INBOUND_URL     ? [{ url: N8N_INBOUND_URL,     events: ['messages'], excludeMessages: ['wasSentByApi'] }] : []),
+    ...(CTWA_TRACKING_URL   ? [{ url: CTWA_TRACKING_URL,   events: ['messages'], excludeMessages: ['wasSentByApi'] }] : []),
   ];
 
   const created: string[] = [];

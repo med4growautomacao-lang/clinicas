@@ -1024,9 +1024,10 @@ function PromptTemplatesManager() {
             <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
               <Sparkles className="w-5 h-5 text-teal-600" />
               Prompts Fixos (Biblioteca de IA)
+              <span className="text-[10px] font-black text-teal-700 bg-teal-50 border border-teal-200 rounded-md px-1.5 py-0.5 tracking-wider">PROMPT DO SISTEMA</span>
             </h2>
             <p className="text-sm text-slate-500 mt-1">
-              Modelos de comportamento do agente por tipo de negócio. Cada clínica escolhe qual usar na aba Configurações IA; as informações da empresa do cliente são combinadas automaticamente.
+              O agente é montado a partir de <strong className="text-slate-700">dois prompts</strong>. Este é o <strong className="text-slate-700">1º — o do Sistema</strong>: define <strong className="text-slate-700">como</strong> o agente age (tom, etapas, uso das ferramentas de agendamento) e é <strong className="text-slate-700">compartilhado entre clínicas</strong> — editar aqui muda o comportamento de todas as que usam este modelo. O <strong className="text-slate-700">2º</strong> é o prompt individual de cada clínica (Configurações IA › Informações da Clínica), que traz médicos, horários e valores e é concatenado <strong className="text-slate-700">logo depois</strong> deste.
             </p>
           </div>
           <button onClick={() => setModal({ type: 'new' })}

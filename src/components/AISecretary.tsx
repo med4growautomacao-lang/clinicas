@@ -2001,6 +2001,57 @@ function ChatsView() {
   );
 }
 
+// O agente é montado a partir de DOIS prompts. A ordem e o separador espelham a view
+// `v_clinic_ai_prompt`, que é quem de fato concatena (template + "\n\n---\n\n" + prompt da clínica).
+function PromptLayersExplainer() {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/60">
+        <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
+          <Bot className="w-4 h-4 text-teal-600" />
+          A IA é montada a partir de dois prompts
+        </h3>
+      </div>
+
+      <div className="p-5 space-y-3">
+        <div className="flex gap-3">
+          <span className="shrink-0 w-6 h-6 rounded-md bg-teal-600 text-white text-xs font-black flex items-center justify-center">1</span>
+          <p className="text-xs text-slate-600 leading-relaxed">
+            <strong className="text-slate-900 font-bold">Prompt do Sistema</strong> — o <em>Modelo de Atendimento</em> abaixo.
+            Diz <strong className="text-slate-700">como</strong> o agente age: tom de voz, etapas da conversa e quando usar cada ferramenta
+            (ver horários, marcar, remarcar). É mantido pela WakeDesk e compartilhado entre clínicas — a clínica escolhe, mas não edita.
+          </p>
+        </div>
+
+        <div className="flex gap-3">
+          <span className="shrink-0 w-6 h-6 rounded-md bg-slate-700 text-white text-xs font-black flex items-center justify-center">2</span>
+          <p className="text-xs text-slate-600 leading-relaxed">
+            <strong className="text-slate-900 font-bold">Prompt da Clínica</strong> — as <em>Informações da Clínica</em>.
+            Diz <strong className="text-slate-700">o que</strong> ele sabe: médicos, horários, valores, endereço, convênios.
+            É exclusivo desta clínica e escrito por ela.
+          </p>
+        </div>
+
+        <div className="rounded-lg bg-slate-50 border border-slate-200 px-4 py-3">
+          <p className="text-[11px] text-slate-600 leading-relaxed">
+            Os dois são <strong className="text-slate-900">unidos em um só texto</strong> e enviados ao agente a cada conversa,
+            nesta ordem: <strong className="text-slate-900">Sistema primeiro, Clínica depois</strong>.
+            Como o texto da clínica vem por último, ele é lido como o detalhe mais específico — mas
+            <strong className="text-slate-900"> não serve para revogar</strong> uma regra do sistema. Se precisar mudar o comportamento,
+            é o Modelo de Atendimento que muda.
+          </p>
+        </div>
+
+        <p className="text-[11px] text-slate-400 leading-relaxed pl-1">
+          Fora dos dois prompts: as <strong className="text-slate-500">descrições dos tipos de consulta</strong> não ficam aqui.
+          O agente as lê direto do cadastro (Agenda › Tipos de Consulta) na hora de oferecer horários — é lá que se ensina
+          quando usar cada tipo.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function ConfigView() {
   const { aiConfig, updateAI, loading } = useSettings();
   const { templates: promptTemplates } = usePromptTemplates();
@@ -2158,14 +2209,17 @@ function ConfigView() {
       {subTab === "handoff" && <div className="flex-1 min-h-0"><HandoffView /></div>}
       <div className={cn("grid grid-cols-1 md:grid-cols-2 gap-8 flex-1", subTab !== "config" && "hidden")}>
       <div className="space-y-8">
+      <PromptLayersExplainer />
+
       <Card className="border border-slate-200 shadow-sm">
         <CardHeader className="pb-4">
           <CardTitle className="text-xl font-bold text-slate-900 flex items-center gap-3">
             <Sparkles className="w-6 h-6 text-teal-600" />
             Modelo de Atendimento
+            <span className="text-[10px] font-black text-teal-700 bg-teal-50 border border-teal-200 rounded-md px-1.5 py-0.5 tracking-wider">PROMPT 1 · SISTEMA</span>
           </CardTitle>
           <CardDescription className="text-slate-500 font-medium">
-            Escolha o tipo que melhor se encaixa no seu negócio. As Informações da Clínica (abaixo) serão combinadas com este modelo.
+            Define <strong className="text-slate-700 font-bold">como</strong> o agente age. É escrito pela WakeDesk e serve a várias clínicas — aqui você só escolhe qual usar.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -2214,10 +2268,11 @@ function ConfigView() {
         <CardHeader className="pb-4">
           <CardTitle className="text-xl font-bold text-slate-900 flex items-center gap-3">
             <Bot className="w-6 h-6 text-teal-600" />
-            Configuracoes do Comercial
+            Configurações do Comercial
+            <span className="text-[10px] font-black text-slate-600 bg-slate-100 border border-slate-200 rounded-md px-1.5 py-0.5 tracking-wider">PROMPT 2 · CLÍNICA</span>
           </CardTitle>
           <CardDescription className="text-slate-500 font-medium">
-            Personalize as informacoes da clinica para orientar a automacao comercial.
+            Define <strong className="text-slate-700 font-bold">o que</strong> o agente sabe desta clínica: médicos, horários, valores, endereço e convênios. Só vale aqui.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -2262,7 +2317,7 @@ function ConfigView() {
               <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
             <p className="text-[11px] text-slate-400 pl-1">
-              O prompt selecionado é combinado com o Modelo de Atendimento e enviado ao agente.
+              Você pode manter vários prompts, mas só o selecionado vai para o agente — entrando logo depois do Modelo de Atendimento.
             </p>
           </div>
 

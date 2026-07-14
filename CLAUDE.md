@@ -17,10 +17,19 @@ O sistema **não vive só neste repo**. Antes de procurar um comportamento aqui,
 |---|---|
 | **Repo (React/TS)** | telas, hooks (`src/hooks/useSupabase.ts`), configuração |
 | **Banco (Postgres)** | RPCs, triggers, invariantes, RLS, crons (`pg_cron`) |
-| **Edge Functions** (`supabase/functions/`) | integrações que falam com o mundo: `ai-scheduler`, `ctwa-tracking`, `whatsapp-redirect`, `meta-forms-sync`, `whatsapp-orchestrator` |
+| **Edge Functions** (`supabase/functions/`) | integrações que falam com o mundo (~18 — `supabase/functions/` é a lista) |
 | **n8n** | recepção do WhatsApp, o agente de IA e os disparos de follow-up |
 
 **Regra prática:** comportamento do agente → n8n + prompt. Regra de negócio → banco. Integração externa → edge. Tela → repo.
+
+### ⚠️ O repo NÃO é a fonte completa das edge functions
+
+Há funções **ativas em produção sem código-fonte aqui** — hoje: **`webhook-proxy`**, **`validate-medico-email`** e `mcp-deploy-test`. As duas primeiras **são chamadas pelo frontend**. Antes de concluir "essa função não existe", **liste as deployadas** (MCP `list_edge_functions`), não só o disco.
+
+### Os nomes de WhatsApp enganam
+
+- **`whatsapp-orchestrator`** — é quem **faz o trabalho**: máquina de estados da conexão (`start`, `cancel`, `disconnect`, `reset`, `status`).
+- **`whatsapp-bridge`** — **não** é "a ponte". É um **roteador fino de retrocompatibilidade** (clientes em cache): repassa conexão → `orchestrator`, e grupos → n8n. **Mexer aqui achando que é o caminho principal é perda de tempo** — o próprio arquivo diz que pode ser removido.
 
 ## Como o agente de IA é instruído
 
@@ -41,7 +50,7 @@ O n8n já lê essa view: workflow **"Agente IA"** → `Puxa dados Prompt` → `P
 
 **Uma terceira fonte, que não é prompt:** as **descrições dos tipos de consulta** (`consultation_types.description`) chegam ao agente em tempo de execução, pela tool `LISTAR_TIPOS_CONSULTA`. **É lá que se ensina quando usar cada tipo.**
 
-Espelhado na UI (manter em sincronia): `AISecretary.tsx` → `PromptLayersExplainer`; `SuperAdmin.tsx` → `PromptTemplatesManager`.
+⚠️ Essa regra também está **explicada na UI** (Configurações IA e Super Admin › Prompts Fixos). Se ela mudar, **os textos da tela mudam junto** — senão o app passa a mentir para o cliente.
 
 ## Agendamento
 
@@ -128,16 +137,12 @@ Usar **`is_clinic_admin(clinic_id)`** / **`is_super_admin()`**.
 
 ## Supabase
 - **project_id: `yzpclhuifquhfqpiwysh`** — o MCP **exige** esse parâmetro em toda chamada; sem ele a chamada falha.
-- **Migrations:** `supabase/migrations/`, nome `AAAAMMDDNNNNNN_descricao.sql`. Aplicar via MCP `apply_migration` (não rodar SQL solto para mudança de schema).
+- **Migrations:** aplicar via MCP `apply_migration` — **não rodar SQL solto** para mudança de schema.
 - **Deploy de edge function:** Supabase CLI. O **PAT já está no `.mcp.json`** — que é **gitignored**.
   ⚠️ **Nunca** commitar o token, nem colá-lo em arquivo rastreado. Referencie a origem, não o valor.
 
-## Comandos
-| | |
-|---|---|
-| type-check | `npm run lint` (é `tsc --noEmit` — **não** é ESLint) |
-| dev | `npm run dev` (porta 3000) |
-| build | `npm run build` |
+## Type-check
+**`npm run lint` é `tsc --noEmit`** — **não** é ESLint, e **não existe** script `typecheck`. (Os demais scripts estão no `package.json`.)
 
 ## Windows / PowerShell
 - Mensagem de commit: **usar `git commit -F <arquivo>`**. Here-string (`@'...'@`) **quebra** com acento e aspas — já custou chamadas perdidas.

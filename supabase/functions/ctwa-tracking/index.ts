@@ -159,21 +159,26 @@ serve(async (req) => {
   // Staging: os triggers (trg_inbox_reconcile / trg_lead_pull_tracking) + o sweep de 1 min casam
   // isto com o lead por clinic_id + telefone normalizado, nos dois sentidos (tracking antes ou
   // depois do lead) — ver [[lead-tracking-inbox-race-fix]].
-  const { error } = await supabase.from("attribution_inbox").insert({
-    clinic_id: clinic.id,
-    phone: leadPhone,
-    source: "meta_ads",
+  //
+  // UPSERT, não INSERT: enquanto o n8n "Tracking Meta" seguir ligado para comparação, os dois
+  // gravam o mesmo clique e um perde a corrida. Se o perdedor fosse simplesmente descartado e o
+  // n8n vencesse, o clique ficaria PARA SEMPRE sem plataforma, sem criativo e sem source_id — e sem
+  // source_id nem o ctwa-enrich resgata a campanha depois. A RPC completa o que falta em vez de
+  // descartar, então a ordem de chegada deixa de importar. Também cobre retry de webhook.
+  const { data: result, error } = await supabase.rpc("ctwa_ingest_click", {
+    p_clinic_id: clinic.id,
+    p_phone: leadPhone,
+    p_external_id: externalId,
     // Fica NULO no Anúncio no Status — de propósito. Inventar um clid falso mentiria para qualquer
     // integração que devolva o clid à Meta; quem marca o lead como pago é source + ad_platform.
-    ctwa_clid: ctwaClid,
-    external_id: externalId,
-    fb_campaign_name: campaign,
-    fb_adset_name: adset,
-    fb_ad_name: ad,
-    ad_platform: adInfo.adPlatform,
+    p_ctwa_clid: ctwaClid,
+    p_campaign: campaign,
+    p_adset: adset,
+    p_ad: ad,
+    p_ad_platform: adInfo.adPlatform,
     // `source_id` fica guardado de propósito: é o que permite reprocessar a Graph API depois e
     // preencher a campanha dos cliques que entraram com o token bloqueado.
-    raw: {
+    p_raw: {
       source_id: sourceId,
       ad_title: adInfo.adTitle,
       ad_body: adInfo.adBody,
@@ -188,18 +193,14 @@ serve(async (req) => {
     },
   });
 
-  // A inbox tem UNIQUE (clinic_id, external_id). Um retry do webhook (ou um replay manual repetido)
-  // bate aqui e é ignorado — antes duplicava o clique em silêncio.
-  if (error && error.code === "23505") {
-    return json({ ok: true, duplicate: true, clinic_id: clinic.id, phone: leadPhone });
-  }
   if (error) {
-    console.error("[ctwa-tracking] insert falhou:", error);
+    console.error("[ctwa-tracking] ingest falhou:", error);
     return json({ ok: false, error: error.message }, 500);
   }
 
   return json({
     ok: true, clinic_id: clinic.id, phone: leadPhone,
+    inserted: result?.inserted ?? null,   // false = a linha já existia e foi COMPLETADA
     campaign, adset, ad, platform: adInfo.adPlatform,
   });
 });

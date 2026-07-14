@@ -81,15 +81,11 @@ Ciclo de vida: `move_lead_stage`, `finalize_ticket`, `reopen_ticket`, `move_tick
 
 ## Dashboards — divergem POR CONSTRUÇÃO
 
-Não são três versões do mesmo número. **Antes de "corrigir" uma divergência, confirme que ela não é o desenho:**
+Três painéis, três RPCs: **Visão Geral** (`Dashboard.tsx` → `get_dashboard_stats`), **Comercial** (`ComercialDashboard.tsx` → `get_commercial_dashboard`) e **Marketing** (`MarketingAnalytics.tsx` → `marketing_*_funnel_cohort`).
 
-| painel | arquivo | eixo |
-|---|---|---|
-| Visão Geral | `Dashboard.tsx` (`get_dashboard_stats`) | por **período** |
-| Comercial | `ComercialDashboard.tsx` (`get_commercial_dashboard`) | por **coorte** |
-| Marketing | `MarketingAnalytics.tsx` | funil por **ticket** |
+⚠️ **Eles não são três versões do mesmo número.** Dentro de um mesmo painel convivem **três eixos de data diferentes** — criação do lead (`created_at`), conversão (`outcome_at`) e realização da consulta (`appointments.date`). Duas telas podem mostrar números diferentes **e ambas estarem certas**.
 
-⚠️ A atribuição IA × Humano **também diverge entre Visão Geral e Comercial por construção**.
+**Antes de "corrigir" uma divergência, confirme qual eixo cada lado usa.** A atribuição IA × Humano também diverge entre Visão Geral e Comercial **por desenho**.
 
 ## O produto não é só clínicas
 
@@ -118,10 +114,12 @@ Venda = **1 ticket ganho**. `stage` e `outcome` são **acoplados** — mexer num
 `leads` chega normalizado **do n8n**; `patients` é normalizado **no banco** (`normalize_br_phone`). Comparar telefone **cru** gera "não encontrado" fantasma — é o **9º dígito**. Em RPC, normalize **os dois lados** da comparação.
 
 ## `rast_id` ≠ protocolo
-- **`rast_id`** (UUID v4) = **identidade do lead**. Todo lead nasce com um (gerado em `fn_handle_lead_uniqueness`).
-- **protocolo** = id **de um clique**.
+- **`rast_id`** (UUID v4) = **identidade do lead**. **protocolo** = id **de um clique**.
+- Já foram o mesmo campo, e confundi-los corrompe a jornada multi-toque.
 
-Já foram o mesmo campo, e confundi-los corrompe a jornada multi-toque.
+**Todo lead NOVO nasce com `rast_id`** (gerado em `fn_handle_lead_uniqueness`) — vale a partir de **13/07/2026 15:45**, quando a migration subiu.
+
+⚠️ **Mas ~20 mil leads ANTIGOS têm `rast_id` NULL** — o backfill foi **dispensado de propósito** (UUID inventado para lead de março não amarra jornada nenhuma). **`JOIN`/`GROUP BY` por `rast_id` descarta esses 20 mil em silêncio.** Para histórico, use o telefone normalizado.
 
 ## Canal ≠ origem — e o vocabulário MUDA entre as tabelas
 **Canal** = *como* chegou. **Origem** = *de onde* veio. **"Balcão" é canal, nunca origem.**

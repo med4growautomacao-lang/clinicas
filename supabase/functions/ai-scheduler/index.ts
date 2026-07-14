@@ -13,6 +13,37 @@ const STATUS_LABEL: Record<string, string> = {
 
 const UAZAPI_BASE = "https://med4growautomacao.uazapi.com";
 
+// ─── Central de Erros ─────────────────────────────────────────────────────────
+// Esta é a função mais crítica do produto (agenda, remarca, cancela consulta) e era a MENOS
+// observável de todas: 3 `console.error` em 839 linhas. Quando ela falha, a IA responde ao paciente
+// com naturalidade ("vou acionar o atendimento humano"), a conversa segue — e o paciente
+// simplesmente não é agendado. Ninguém fica sabendo.
+//
+// ⚠️ SÓ REGISTRAMOS FALHA DE VERDADE. Os `success:false` de NEGÓCIO (horário ocupado, paciente já
+// tem consulta, tipo inválido) são o funcionamento NORMAL: a IA sabe lidar com cada um deles e
+// oferece alternativa. Registrá-los inundaria a Central e faria todo mundo parar de olhar — que é
+// como um monitoramento morre.
+async function registrarErro(
+  code: string,
+  title: string,
+  level: string,
+  clinicId: string | null,
+  ctx: unknown,
+): Promise<void> {
+  try {
+    const supa = createClient(
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+    );
+    await supa.rpc("log_system_error", {
+      p_scope: "ai-scheduler", p_code: code, p_title: title,
+      p_level: level, p_clinic_id: clinicId, p_context: ctx,
+    });
+  } catch (e) {
+    console.error("[ai-scheduler] log falhou:", e);
+  }
+}
+
 // Data "hoje" no fuso da clínica (America/Sao_Paulo). O runtime do edge é UTC, então
 // new Date().toISOString() vira o dia seguinte entre 21h-00h de SP — o que fazia consultas
 // de hoje à noite serem classificadas como "passadas".
@@ -64,6 +95,7 @@ function preferType(matches: any[]): any {
 
 async function fetchSlotsForDoctorDate(
   supabaseClient: any,
+  clinicId: string | null,
   doctorId: string,
   date: string,
   modality: string = "presencial",
@@ -77,6 +109,15 @@ async function fetchSlotsForDoctorDate(
   });
   if (error) {
     console.error("get_available_slots error", { doctorId, date, typeId, msg: error.message });
+    // Devolver [] aqui faz a IA dizer ao paciente "não há horários" — quando na verdade HÁ, e a
+    // consulta é que quebrou. É uma falha cara e completamente muda: o paciente desiste achando
+    // que a agenda está cheia.
+    await registrarErro(
+      "consulta_de_horarios_falhou",
+      "A busca de horários quebrou — a IA vai dizer ao paciente que não há vagas mesmo que existam",
+      "critical", clinicId,
+      { erro: error.message, doctor_id: doctorId, data: date, tipo_consulta: typeId },
+    );
     return [];
   }
   return (data || []).map((s: any) => (s.slot_time || "").toString().substring(0, 5));
@@ -85,6 +126,7 @@ async function fetchSlotsForDoctorDate(
 // Busca alternativas de horario para a IA oferecer: tenta a data pedida e os 14 dias seguintes.
 async function findAlternativeSlots(
   supabaseClient: any,
+  clinicId: string | null,
   doctorId: string,
   fromDate: string,
   modality: string,
@@ -92,13 +134,15 @@ async function findAlternativeSlots(
 ): Promise<{ date: string; slots: string[] } | null> {
   for (let i = 0; i <= 14; i++) {
     const d = addDays(fromDate, i);
-    const slots = await fetchSlotsForDoctorDate(supabaseClient, doctorId, d, modality, consultationTypeId);
+    const slots = await fetchSlotsForDoctorDate(supabaseClient, clinicId, doctorId, d, modality, consultationTypeId);
     if (slots.length > 0) return { date: d, slots: slots.slice(0, 8) };
   }
   return null;
 }
 
-async function sendWhatsAppText(token: string, number: string, text: string): Promise<boolean> {
+async function sendWhatsAppText(
+  token: string, number: string, text: string, clinicId: string | null, oQue: string,
+): Promise<boolean> {
   if (!token || !number || !text) return false;
   try {
     const resp = await fetch(`${UAZAPI_BASE}/send/text`, {
@@ -110,15 +154,35 @@ async function sendWhatsAppText(token: string, number: string, text: string): Pr
       },
       body: JSON.stringify({ number, text, delay: 0 }),
     });
-    return resp.ok;
+    if (!resp.ok) {
+      const corpo = (await resp.text()).slice(0, 200);
+      console.error("uazapi send falhou", resp.status, corpo);
+      await registrarErro(
+        "envio_falhou_" + oQue,
+        "A IA achou que avisou (" + oQue + "), mas a mensagem não saiu",
+        "error", clinicId, { status: resp.status, resposta: corpo, o_que: oQue },
+      );
+      return false;
+    }
+    return true;
   } catch (e) {
     console.error("uazapi send error", e);
+    await registrarErro(
+      "envio_falhou_" + oQue,
+      "A IA achou que avisou (" + oQue + "), mas a mensagem não saiu",
+      "error", clinicId, { erro: String(e), o_que: oQue },
+    );
     return false;
   }
 }
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  // Declarados FORA do try para que o `catch` saiba QUAL ferramenta quebrou e em QUAL clínica.
+  // Sem isso o erro chega na Central como "algo explodiu" — o que não é acionável.
+  let acaoAtual: string | null = null;
+  let clinicAtual: string | null = null;
 
   try {
     const supabaseClient = createClient(
@@ -128,6 +192,8 @@ serve(async (req) => {
 
     const payload = await req.json();
     const { action, clinic_id } = payload;
+    acaoAtual = action ?? null;
+    clinicAtual = clinic_id ?? null;
 
     if (!clinic_id) {
       return new Response(JSON.stringify({ success: false, error: "clinic_id is required" }), {
@@ -195,7 +261,7 @@ serve(async (req) => {
       for (const d of dateList) {
         const perDoctor = await Promise.all(
           (doctors || []).map(async (doc: any) => {
-            const available_slots = await fetchSlotsForDoctorDate(supabaseClient, doc.id, d, modality, ctId);
+            const available_slots = await fetchSlotsForDoctorDate(supabaseClient, clinic_id, doc.id, d, modality, ctId);
             return {
               doctor_id: doc.id,
               doctor_name: doc.name || doc.clinic_users?.full_name || "Médico sem nome",
@@ -218,7 +284,7 @@ serve(async (req) => {
               (doctors || []).map(async (doc: any) => ({
                 doctor_id: doc.id,
                 doctor_name: doc.name || doc.clinic_users?.full_name || "Médico sem nome",
-                available_slots: await fetchSlotsForDoctorDate(supabaseClient, doc.id, tryDate, modality, ctId),
+                available_slots: await fetchSlotsForDoctorDate(supabaseClient, clinic_id, doc.id, tryDate, modality, ctId),
               }))
             );
             const probeTotal = probe.reduce((s, a) => s + a.available_slots.length, 0);
@@ -346,7 +412,7 @@ serve(async (req) => {
           errorMsg = code === "slot_conflict"
             ? `O horário ${time} de ${date} acabou de ser reservado por outra pessoa.`
             : `O horário ${time} de ${date} está fora da agenda do médico (expediente, bloqueio ou antecedência mínima).`;
-          const alt = await findAlternativeSlots(supabaseClient, doctor_id, date, finalModality, resolvedTypeId);
+          const alt = await findAlternativeSlots(supabaseClient, clinic_id, doctor_id, date, finalModality, resolvedTypeId);
           if (alt) {
             extra.alternatives = alt;
             next_step = `NÃO repita o mesmo horário. Ofereça ao paciente estes horários disponíveis em ${alt.date}: ${alt.slots.join(", ")}. Quando ele escolher, chame MARCAR_HORARIO novamente com o horário escolhido.`;
@@ -376,6 +442,17 @@ serve(async (req) => {
         } else if (code === "doctor_not_found" || code === "doctor_inactive" || code === "doctor_clinic_mismatch") {
           errorMsg = "Médico inválido ou indisponível nesta clínica.";
           next_step = "Chame LISTAR_TIPOS_CONSULTA para obter os médicos válidos e use o doctor_id correto.";
+        } else {
+          // Todos os casos acima são NEGÓCIO: a IA sabe o que fazer e oferece alternativa ao
+          // paciente. Cair aqui é diferente — é um erro que não sabemos explicar, e a IA vai
+          // apenas pedir desculpas e acionar o humano. O paciente fica sem agendamento e o motivo
+          // se perde. Este é o único ramo que merece a Central.
+          await registrarErro(
+            "agendamento_falhou_sem_motivo_conhecido",
+            'A RPC de agendamento recusou com um motivo desconhecido ("' + code + '") — o paciente não foi agendado',
+            "critical", clinic_id,
+            { error_code: code, resultado: result, doctor_id, data: date, horario: time },
+          );
         }
 
         return new Response(
@@ -437,7 +514,7 @@ serve(async (req) => {
           // Alternativas pelo tipo real do agendamento (consultation_type_slug), não pela
           // coluna modality (que não é slug e devolvia lista vazia p/ agendamentos legados).
           const altModality = curApt.consultation_type_slug || curApt.modality || "presencial";
-          const alt = await findAlternativeSlots(supabaseClient, targetDoctor, date, altModality, rctId);
+          const alt = await findAlternativeSlots(supabaseClient, clinic_id, targetDoctor, date, altModality, rctId);
           if (alt) {
             extra.alternatives = alt;
             next_step = `Ofereça ao paciente os horários disponíveis em ${alt.date}: ${alt.slots.join(", ")} e chame REAGENDAR_HORARIO novamente com o escolhido.`;
@@ -728,7 +805,7 @@ serve(async (req) => {
             .replace(/\{lead_name\}/g, lead.name || "")
             .replace(/\{lead_phone\}/g, lead.phone || "")
             .replace(/\{trigger_keyword\}/g, tk);
-          notified = await sendWhatsAppText(uazapiToken, groupId, rendered);
+          notified = await sendWhatsAppText(uazapiToken, groupId, rendered, clinic_id, "aviso_ao_grupo");
           if (notified) actionsTaken.push("group_notified");
         }
       }
@@ -737,7 +814,7 @@ serve(async (req) => {
       let farewell_sent = false;
       if (willFarewell && uazapiToken) {
         const contactNum = lead_phone.includes("@") ? lead_phone : `${lead_phone}@s.whatsapp.net`;
-        farewell_sent = await sendWhatsAppText(uazapiToken, contactNum, matched.farewell_message);
+        farewell_sent = await sendWhatsAppText(uazapiToken, contactNum, matched.farewell_message, clinic_id, "despedida");
         if (farewell_sent) actionsTaken.push("farewell_sent");
       }
 
@@ -833,6 +910,15 @@ serve(async (req) => {
     }
   } catch (error) {
     console.error(error);
+    // Qualquer exceção aqui significa que a ferramenta da IA explodiu no meio de um atendimento
+    // real. A IA recebe um erro, se desculpa e segue conversando — e o paciente NÃO é agendado.
+    // Era o buraco mais caro do sistema: 839 linhas e este `console.error` como única testemunha.
+    await registrarErro(
+      "ferramenta_quebrou_" + (acaoAtual ?? "desconhecida"),
+      'A ferramenta "' + (acaoAtual ?? "?") + '" da IA quebrou durante um atendimento',
+      "critical", clinicAtual,
+      { acao: acaoAtual, erro: (error as Error).message, stack: (error as Error).stack?.slice(0, 500) },
+    );
     return new Response(JSON.stringify({ success: false, error: (error as Error).message }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 });
   }

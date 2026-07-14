@@ -62,6 +62,14 @@ serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
   )
 
+  // Esta função é chamada pelo NAVEGADOR, então a Central de Erros não a vê pelo coletor de pg_net
+  // (que só enxerga o que o banco chamou). Ela precisa registrar as próprias falhas.
+  const registrar = (code: string, title: string, level: string, clinicId: string | null, ctx: unknown) =>
+    supabase.rpc('log_system_error', {
+      p_scope: 'whatsapp-redirect', p_code: code, p_title: title,
+      p_level: level, p_clinic_id: clinicId, p_context: ctx,
+    }).then(() => {}, (e) => console.error('[whatsapp-redirect] log falhou:', e))
+
   let clinicId: string | null = null
   let redirectLinkId: string | null = null
   let utmSource: string, utmMedium: string
@@ -127,12 +135,22 @@ serve(async (req) => {
     .limit(1)
     .maybeSingle()
 
-  if (!instance?.phone_number) return fail('WhatsApp não configurado para esta clínica.', 404)
+  // A pessoa clicou no link publicado e não tem para onde ir. Antes isso só devolvia um texto na
+  // tela dela — do nosso lado, silêncio absoluto.
+  if (!instance?.phone_number) {
+    await registrar(
+      'clinica_sem_whatsapp',
+      'Alguém clicou no link de redirecionamento mas a clínica não tem WhatsApp configurado',
+      'critical', clinicId, { link: linkCode ?? null, token_legado: connectToken ? 'sim' : 'não' },
+    )
+    return fail('WhatsApp não configurado para esta clínica.', 404)
+  }
 
   // Grava o clique. `protocolo` é UNIQUE: em colisão, re-sorteia (antes o erro era ignorado e o
   // clique se perdia). `rast_id` é a identidade e PODE repetir — é o que agrupa a jornada.
   let protocolo = ''
   let saved = false
+  let lastError: string | null = null
   for (let attempt = 0; attempt < MAX_INSERT_ATTEMPTS; attempt++) {
     protocolo = genProtocol()
     const { error } = await supabase.from('link_sessions').insert({
@@ -150,14 +168,24 @@ serve(async (req) => {
     if (!error) { saved = true; break }
     if (error.code !== '23505') {  // 23505 = unique_violation -> re-sorteia o protocolo
       console.error('link_sessions insert falhou:', error)
+      lastError = error.message
       break
     }
   }
 
   // Sem sessão gravada o clique não vira atribuição. Melhor mandar a pessoa para o WhatsApp
   // sem protocolo (conversa acontece, lead fica orgânico) do que com um protocolo de outra sessão.
+  //
+  // É o modo de falha mais caro que esta função tem, e era 100% invisível: a pessoa conversa
+  // normalmente, o lead entra normalmente — só que como ORGÂNICO. Ninguém percebe nada.
   if (!saved) {
     console.error('não foi possível registrar o clique após', MAX_INSERT_ATTEMPTS, 'tentativas')
+    await registrar(
+      'clique_nao_registrado',
+      'Clique no link não foi gravado — o lead vai entrar sem origem',
+      'critical', clinicId,
+      { tentativas: MAX_INSERT_ATTEMPTS, erro: lastError, link: linkCode ?? null },
+    )
     protocolo = ''
   }
 

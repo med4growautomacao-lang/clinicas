@@ -50,6 +50,16 @@ serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
   )
 
+  // Esta função responde 200 mesmo quando o ciclo de uma clínica falha (é de propósito: uma clínica
+  // com token ruim não pode derrubar as outras). O efeito colateral é que o coletor de pg_net, que
+  // só olha o status HTTP, NÃO enxerga essa falha — o lead pago simplesmente não entra, em silêncio.
+  // Por isso o registro tem que ser explícito e POR CLÍNICA.
+  const registrar = (code: string, title: string, level: string, clinicId: string | null, ctx: unknown) =>
+    supabase.rpc('log_system_error', {
+      p_scope: 'meta-forms-sync', p_code: code, p_title: title,
+      p_level: level, p_clinic_id: clinicId, p_context: ctx,
+    }).then(() => {}, (e) => console.error('[meta-forms-sync] log falhou:', e))
+
   const { data: clinics, error } = await supabase
     .from('clinics')
     .select('id, meta_forms_id, meta_token, meta_forms_last_synced_at')
@@ -98,6 +108,12 @@ serve(async (req) => {
           // Token expirado / form inválido / rate limit: marca o ciclo como falho p/ NÃO avançar o cursor.
           ok = false
           console.error(`[meta-forms-sync] clinic ${c.id} graph error:`, json.error?.message)
+          await registrar(
+            'graph_api_recusou',
+            'A Meta recusou a busca dos leads do formulário — leads pagos podem estar não entrando',
+            'critical', c.id,
+            { erro: json.error?.message, codigo: json.error?.code, forms_id: c.meta_forms_id },
+          )
           break
         }
 
@@ -133,6 +149,11 @@ serve(async (req) => {
             // Falha ao gravar este lead: não avança o cursor (re-tenta no próximo ciclo).
             ok = false
             console.error(`[meta-forms-sync] rpc clinic ${c.id}:`, rpcErr.message)
+            await registrar(
+              'gravacao_do_lead_falhou',
+              'Lead do formulário do Meta chegou mas NÃO foi gravado',
+              'error', c.id, { erro: rpcErr.message, lead_do_meta: String(lead.id) },
+            )
             continue
           }
           if (res?.created) ingested++
@@ -144,6 +165,11 @@ serve(async (req) => {
       // 1 token ruim de uma clínica não derruba as demais; cursor não avança.
       ok = false
       console.error(`[meta-forms-sync] clinic ${c.id} exception:`, e instanceof Error ? e.message : e)
+      await registrar(
+        'ciclo_falhou',
+        'A sincronização do formulário do Meta quebrou nesta clínica',
+        'critical', c.id, { erro: e instanceof Error ? e.message : String(e) },
+      )
     }
 
     // Avança o cursor SOMENTE se o ciclo foi 100% ok e vimos algo mais novo (avanço monotônico).

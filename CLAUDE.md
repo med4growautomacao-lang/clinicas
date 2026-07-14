@@ -121,3 +121,30 @@ Usar **`is_clinic_admin(clinic_id)`** / **`is_super_admin()`**.
 - **Não alterar "Receptor de mensagens" sem permissão explícita** — alimenta a IA.
 - **Não alterar "Agente IA" sem ordem explícita.**
 - n8n tem modelo **draft/publish**: editar salva **rascunho**. Sempre confirmar com **`mode: 'active'`** que a mudança está na versão publicada.
+
+---
+
+# 4. Ambiente
+
+## Supabase
+- **project_id: `yzpclhuifquhfqpiwysh`** — o MCP **exige** esse parâmetro em toda chamada; sem ele a chamada falha.
+- **Migrations:** `supabase/migrations/`, nome `AAAAMMDDNNNNNN_descricao.sql`. Aplicar via MCP `apply_migration` (não rodar SQL solto para mudança de schema).
+- **Deploy de edge function:** Supabase CLI. O **PAT já está no `.mcp.json`** — que é **gitignored**.
+  ⚠️ **Nunca** commitar o token, nem colá-lo em arquivo rastreado. Referencie a origem, não o valor.
+
+## Comandos
+| | |
+|---|---|
+| type-check | `npm run lint` (é `tsc --noEmit` — **não** é ESLint) |
+| dev | `npm run dev` (porta 3000) |
+| build | `npm run build` |
+
+## Windows / PowerShell
+- Mensagem de commit: **usar `git commit -F <arquivo>`**. Here-string (`@'...'@`) **quebra** com acento e aspas — já custou chamadas perdidas.
+- PowerShell 5.1: **não existe `&&`/`||`**. Encadear com `;` ou `if ($?) { }`.
+
+## Fuso horário
+Tudo em **`America/Sao_Paulo`**. Campos como `changed_at` já são **SP sem timezone** — **não converter de novo** (converter duas vezes desloca em 3h e ninguém percebe).
+
+## Dados que parecem bug e não são
+**"MedDesk Demonstrativa" é um clone anonimizado da Clínica Vaz.** Registros "duplicados" entre essas duas clínicas (inclusive `rast_id`) são **esperados** — não investigar como corrupção.

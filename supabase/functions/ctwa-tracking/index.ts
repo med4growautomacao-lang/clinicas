@@ -127,8 +127,23 @@ serve(async (req) => {
     .eq("phone", clinicPhone)
     .maybeSingle();
 
+  // Esta edge é disparada por WEBHOOK, então o coletor de pg_net (que só vê o que o banco chamou)
+  // não a enxerga: ela precisa registrar as próprias falhas na Central de Erros.
+  const registrar = (code: string, title: string, level: string, clinicId: string | null, ctx: unknown) =>
+    supabase.rpc("log_system_error", {
+      p_scope: "ctwa-tracking", p_code: code, p_title: title,
+      p_level: level, p_clinic_id: clinicId, p_context: ctx,
+    }).then(() => {}, (e) => console.error("[ctwa-tracking] log falhou:", e));
+
   if (!clinic?.id) {
     console.error("[ctwa-tracking] clínica não encontrada para o telefone", clinicPhone);
+    // Clique pago chegando de uma instância que não bate com nenhuma clínica: a atribuição some
+    // inteira e nada mais no sistema perceberia.
+    await registrar(
+      "clinica_nao_encontrada",
+      "Clique de anúncio de uma instância sem clínica correspondente (" + clinicPhone + ")",
+      "critical", null, { telefone_instancia: clinicPhone, telefone_lead: leadPhone },
+    );
     return json({ ok: false, error: "clinic_not_found", clinicPhone }, 404);
   }
 
@@ -149,10 +164,24 @@ serve(async (req) => {
         adset = d?.adset?.name ?? null;
         campaign = d?.campaign?.name ?? null;
       } else {
-        console.error("[ctwa-tracking] graph falhou:", resp.status, (await resp.text()).slice(0, 200));
+        const corpo = (await resp.text()).slice(0, 300);
+        console.error("[ctwa-tracking] graph falhou:", resp.status, corpo);
+        // O monitor `campanha_nao_resolvida` já acusa o SINTOMA (cliques sem campanha). Aqui
+        // registramos a CAUSA, com a mensagem da própria Meta — é a diferença entre "o token está
+        // ruim" e "o app foi deletado" / "acesso bloqueado", que exigem ações diferentes.
+        await registrar(
+          "graph_api_recusou",
+          "A Meta recusou a consulta do anúncio (" + resp.status + ") — o clique foi gravado, mas sem campanha",
+          "warn", clinic.id, { status: resp.status, resposta: corpo, source_id: sourceId },
+        );
       }
     } catch (e) {
       console.error("[ctwa-tracking] graph erro:", e);
+      await registrar(
+        "graph_api_indisponivel",
+        "Não foi possível falar com a Graph API da Meta — o clique foi gravado, mas sem campanha",
+        "warn", clinic.id, { erro: String(e), source_id: sourceId },
+      );
     }
   }
 
@@ -200,6 +229,12 @@ serve(async (req) => {
 
   if (error) {
     console.error("[ctwa-tracking] ingest falhou:", error);
+    // Pior caso: o clique chegou, a Meta respondeu, e mesmo assim o lead vai ficar sem origem.
+    await registrar(
+      "gravacao_do_clique_falhou",
+      "Clique de anúncio recebido mas NÃO gravado — o lead vai entrar sem origem",
+      "critical", clinic.id, { erro: error.message, telefone_lead: leadPhone },
+    );
     return json({ ok: false, error: error.message }, 500);
   }
 

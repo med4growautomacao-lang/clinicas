@@ -98,7 +98,9 @@ function Linha({ e, clinica, onResolver }: {
           )}
 
           <div className="flex items-center justify-between gap-3 text-[11px] text-slate-400">
-            <span>Primeira vez: {quando(e.first_seen_at)}</span>
+            {/* Condição não tem "quantas vezes" — tem HÁ QUANTO TEMPO dura. O contador só faz
+                sentido para evento ("51 welcome falharam"). */}
+            <span>{e.is_monitor ? 'Dura desde' : 'Primeira vez'}: {quando(e.first_seen_at)}</span>
 
             {e.is_monitor ? (
               // Sem botão de propósito: quem resolve é o próprio monitor, quando a condição sumir.

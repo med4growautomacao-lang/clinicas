@@ -169,6 +169,11 @@ serve(async (req) => {
     p_clinic_id: clinic.id,
     p_phone: leadPhone,
     p_external_id: externalId,
+    // Hora REAL do clique, não a do insert. É o que decide o last-touch da atribuição — sem isso,
+    // um replay de clique antigo (fizemos vários) sobrescreveria a atribuição de um clique novo.
+    p_occurred_at: msg.messageTimestamp
+      ? new Date(Number(msg.messageTimestamp)).toISOString()
+      : null,
     // Fica NULO no Anúncio no Status — de propósito. Inventar um clid falso mentiria para qualquer
     // integração que devolva o clid à Meta; quem marca o lead como pago é source + ad_platform.
     p_ctwa_clid: ctwaClid,

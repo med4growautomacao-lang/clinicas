@@ -2566,6 +2566,9 @@ function ReopenChoiceModal({ info, targetStageName, checkAppointment, onKeep, on
   const isGanho = info.outcome === 'ganho';
   const noun = isGanho ? 'venda' : 'perda';
   const leadName = info.ticket.lead?.name ?? '';
+  // Card ARQUIVADO (Resolver já clicado): "Manter" não faz sentido — ele moveria de coluna mas
+  // continuaria arquivado (sumindo da tela). Só oferecemos "Cancelar", que reabre o card.
+  const isArquivado = info.ticket.status === 'closed';
   const [phase, setPhase] = useState<'choice' | 'appt'>('choice');
   const [appt, setAppt] = useState<{ id: string; date: string; time: string; status: string; doctorName?: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -2603,22 +2606,33 @@ function ReopenChoiceModal({ info, targetStageName, checkAppointment, onKeep, on
           {phase === 'choice' ? (
             <>
               <p className="text-sm text-slate-600">
-                Este card está marcado como <strong>{noun}</strong>. O que fazer ao movê-lo para <strong>{targetStageName}</strong>?
+                {isArquivado
+                  ? <>Este card está <strong>arquivado</strong> (já foi resolvido) e marcado como <strong>{noun}</strong>.</>
+                  : <>Este card está marcado como <strong>{noun}</strong>. O que fazer ao movê-lo para <strong>{targetStageName}</strong>?</>}
               </p>
               <div className="space-y-2">
-                <button onClick={handleKeep} disabled={busy}
-                  className="w-full text-left px-4 py-3 rounded-xl border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/60 transition-all disabled:opacity-50">
-                  <div className="flex items-center gap-2 font-bold text-sm text-slate-800"><Check className="w-4 h-4 text-emerald-600 shrink-0" /> Manter {noun}</div>
-                  <p className="text-xs text-slate-500 mt-1">Move o card para a nova etapa <strong>continuando como {noun}</strong> — o valor e o botão "Resolver" seguem com ele; continua contando nos relatórios.</p>
-                </button>
+                {!isArquivado && (
+                  <button onClick={handleKeep} disabled={busy}
+                    className="w-full text-left px-4 py-3 rounded-xl border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/60 transition-all disabled:opacity-50">
+                    <div className="flex items-center gap-2 font-bold text-sm text-slate-800"><Check className="w-4 h-4 text-emerald-600 shrink-0" /> Manter {noun}</div>
+                    <p className="text-xs text-slate-500 mt-1">Move o card para a nova etapa <strong>continuando como {noun}</strong> — o valor e o botão "Resolver" seguem com ele; continua contando nos relatórios.</p>
+                  </button>
+                )}
                 <button onClick={handleCancelClick} disabled={busy}
                   className="w-full text-left px-4 py-3 rounded-xl border border-slate-200 hover:border-rose-300 hover:bg-rose-50/60 transition-all disabled:opacity-50">
                   <div className="flex items-center gap-2 font-bold text-sm text-slate-800"><RotateCcw className="w-4 h-4 text-rose-500 shrink-0" /> Cancelar {noun}</div>
                   <p className="text-xs text-slate-500 mt-1">
-                    {isGanho ? 'Desfaz a venda e remove a receita lançada. ' : 'Desfaz a perda. '}O lead volta ativo nesta etapa.
+                    {isGanho ? 'Desfaz a venda e remove a receita lançada. ' : 'Desfaz a perda. '}
+                    {isArquivado ? 'Isso também DESARQUIVA o card — ele volta ativo nesta etapa.' : 'O lead volta ativo nesta etapa.'}
                   </p>
                 </button>
               </div>
+              {isArquivado && (
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  "Manter" não aparece aqui porque o card continuaria arquivado (sumiria da tela). Para
+                  trazê-lo de volta ao quadro, use "Cancelar {noun}".
+                </p>
+              )}
             </>
           ) : (
             <>
@@ -3812,14 +3826,20 @@ export function LeadKanban() {
                     const lead = ticket.lead!;
                     const isClosed = ticket.status === 'closed';
                     const isPerdido = stage.slug === 'perdido';
-                    const isGanho = stage.slug === 'ganho';
                     const semMotivo = isPerdido && !lead.loss_reason && !ticket.loss_reason && !isClosed;
                     const lastContact = lead.last_activity_at ?? lead.created_at;
                     const frozen = isClosed || !!lead.converted_patient_id || isPerdido;
-                    // Cards na etapa "Ganho" (ticket fechado/convertido) podem ser arrastados p/ outra
-                    // etapa: o move_lead_stage preserva o ganho e abre um ticket NOVO (novo ciclo) na
-                    // etapa-alvo — ver migration 20260622000006.
-                    const canDrag = isGanho || (!isClosed && !lead.converted_patient_id);
+                    // Arrastável pelo DESFECHO, não pela etapa nem por converted_patient_id.
+                    //  - Card RESOLVIDO (ganho/perdido) sempre arrasta, em qualquer coluna e mesmo
+                    //    ARQUIVADO — é a única forma de desarquivar (arrastar → "Cancelar" reabre).
+                    //    O modal Manter/Cancelar é a proteção do desfecho.
+                    //  - Card ATIVO arrasta se não estiver arquivado. A trava antiga por
+                    //    converted_patient_id foi removida: ela congelava tanto a venda (GanhoModal
+                    //    cria um "paciente") quanto o card de paciente agendado das clínicas —
+                    //    bloqueando o próprio arraste Agendado→Compareceu que o
+                    //    fn_sync_appointment_status_from_ticket existe para servir (esse gatilho só
+                    //    mexe na consulta nas etapas 'compareceu'/'faltou_cancelou'; nas demais, nada).
+                    const canDrag = !!ticket.outcome || !isClosed;
                     // Contagem persistente do banco + ciclo atual estourado
                     const currentCycleBreach = (() => {
                       if (frozen || !aiConfig?.sla_minutes || !aiConfig?.business_hours || !lead.last_message_at) return false;

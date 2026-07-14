@@ -147,9 +147,22 @@ Usar **`is_clinic_admin(clinic_id)`** / **`is_super_admin()`**.
 ## Slug de tipo de consulta não é chave
 `consultation_types.slug` é **texto livre digitado pela clínica**. Use o **`id`**. Já gerou 3 bugs — incluindo liberar a exclusão de tipos com consultas futuras.
 
-## Observabilidade
-- Toda chamada HTTP saindo do banco usa **`system_http_post`** (não `net.http_post` cru) — é o que deixa a Central de Erros saber **qual URL** falhou. Hoje **nenhuma** função usa `net.http_post` cru: **mantenha assim.**
-- Erros vão para `system_errors` via **`log_system_error`** → **Super Admin › Central de Erros**.
+## Observabilidade — a Central de Erros é o único olho que temos
+
+**Não há Sentry.** O que não for registrado em `system_errors` **não existe**: falha em silêncio, e ninguém fica sabendo. Quase todo bug grave deste sistema foi **perda silenciosa**, não exceção barulhenta.
+
+### 📌 REGRA: toda função nova que importa PRECISA registrar erro na Central
+
+Vale para **edge function, RPC, trigger e cron**. "Importa" = **se falhar, alguém perde dado, dinheiro ou atendimento** — e ninguém percebe na hora.
+
+- **Edge function:** copie o helper **`registrarErro()`** (veja `ai-scheduler/index.ts`) — chama `log_system_error`.
+  Já instrumentadas: `ai-scheduler`, `ctwa-tracking`, `meta-forms-sync`, `whatsapp-redirect`.
+- **Banco:** chame **`log_system_error(scope, code, title, level, clinic_id, context, is_monitor)`**.
+- **Chamada HTTP saindo do banco:** use **`system_http_post`**, nunca `net.http_post` cru — é o que permite saber **qual URL** falhou. Hoje **nenhuma** função usa o cru: **mantenha assim.**
+
+⚠️ **Não engula o erro no `catch`.** Um `catch` que só faz `console.error` é **invisível** — o log da edge some, a Central não vê, e o bug vira "sumiu o lead".
+
+Aparece em **Super Admin › Central de Erros** (fingerprint agregado; EVENTO conta ocorrências, CONDIÇÃO se auto-resolve).
 
 ---
 

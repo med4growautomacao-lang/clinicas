@@ -602,6 +602,20 @@ function ConsultationTypeEditor({ doctorId, clinicId, existing, doctorWorkingHou
     if (!name.trim()) { setError('Informe o nome do tipo.'); return; }
     const finalSlug = (slug.trim() || slugify(name)).toLowerCase();
     if (!finalSlug) { setError('Slug inválido.'); return; }
+
+    // "presencial" e "online" são as palavras que o motor de agendamento usa como MODALIDADE. Um
+    // tipo pode se chamar assim (é o caso de 14 dos 19 tipos hoje, e funciona), mas o identificador
+    // não pode MENTIR: um tipo presencial identificado como "online" seria devolvido a quem pede
+    // consulta online. O banco também barra (consultation_types_slug_nao_mente) — aqui só evitamos
+    // que a clínica veja um erro técnico de constraint.
+    if ((finalSlug === 'presencial' || finalSlug === 'online') && finalSlug !== modality) {
+      setError(
+        `O identificador "${finalSlug}" é reservado para a modalidade ${finalSlug}, mas este tipo é ` +
+        `${modality}. Use outro identificador (ex.: "${slugify(name)}-${modality}").`
+      );
+      return;
+    }
+
     setSaving(true);
     try {
       await onSaved({
@@ -631,11 +645,21 @@ function ConsultationTypeEditor({ doctorId, clinicId, existing, doctorWorkingHou
     if (!confirmDelete) { setConfirmDelete(true); return; }
     setSaving(true);
     try {
+      // Conta pelo ID do tipo, não pelo slug.
+      //
+      // Antes comparava `appointments.modality` com o SLUG — e slug não é modalidade. Nos tipos que
+      // fugiram do padrão (Lorena: "primeira-consulta", "seguimento") a conta dava ZERO e a trava
+      // LIBERAVA a exclusão de um tipo com consultas futuras marcadas. Medido: 6 consultas no
+      // Seguimento Presencial, 1 na Primeira Presencial, 1 na Primeira Online, 1 no Retorno do Tyago.
+      //
+      // O estrago não seria visível: a FK é ON DELETE SET NULL, então as consultas NÃO somem — elas
+      // ficam órfãs do tipo. E como o motor de horários descobre o buffer da consulta existente pelo
+      // tipo dela, o buffer dessas consultas viraria ZERO e o sistema passaria a marcar em cima delas.
       const { count } = await supabase
         .from('appointments')
         .select('id', { count: 'exact', head: true })
         .eq('doctor_id', doctorId)
-        .eq('modality', existing.slug)
+        .eq('consultation_type_id', existing.id)
         .in('status', ['pendente', 'confirmado']);
       if ((count ?? 0) > 0) {
         setError(`Existem ${count} agendamento(s) futuros desse tipo. Desative em vez de excluir.`);

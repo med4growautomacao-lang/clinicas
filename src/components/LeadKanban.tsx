@@ -2893,13 +2893,21 @@ export function LeadKanban() {
       return;
     }
 
-    await moveTicket(ticket.id, targetStageId);
-
+    // Ganho / Perdido: NÃO move aqui. O GanhoModal/LossModal faz o move só ao CONFIRMAR.
+    // (Mover antes e reverter via moveTicket no "Cancelar" disparava "novo ciclo" em ticket
+    // resolvido → ticket duplicado + purgava a conversão antes de confirmar. Agora Cancelar = no-op.)
     if (targetStage?.slug === 'ganho') {
       setGanhoLead({ id: ticket.lead_id, name: ticket.lead?.name ?? '', phone: ticket.lead?.phone ?? null, patientId: ticket.lead?.converted_patient_id ?? null, prevStageId: ticket.stage_id, ticketId: ticket.id });
-    } else if (targetStage?.slug === 'perdido') {
+      return;
+    }
+    if (targetStage?.slug === 'perdido') {
       setLossLead({ id: ticket.lead_id, name: ticket.lead?.name ?? '', prevStageId: ticket.stage_id, ticketId: ticket.id });
-    } else if (targetStage?.slug === 'orcamento') {
+      return;
+    }
+
+    await moveTicket(ticket.id, targetStageId);
+
+    if (targetStage?.slug === 'orcamento') {
       // Registra valor + produto/serviço (NÃO gera conversão; só metadados no lead/ticket).
       setOrcamentoLead({ id: ticket.lead_id, name: ticket.lead?.name ?? '', phone: ticket.lead?.phone ?? null, prevStageId: ticket.stage_id, ticketId: ticket.id });
     }
@@ -4654,11 +4662,7 @@ export function LeadKanban() {
           createPatient={createPatient}
           updateLead={update}
           onClose={() => setGanhoLead(null)}
-          onCancel={() => {
-            const { ticketId, prevStageId } = ganhoLead;
-            setGanhoLead(null);
-            if (prevStageId) moveTicket(ticketId, prevStageId);
-          }}
+          onCancel={() => setGanhoLead(null)}
           onCreate={async (data) => {
             // Grava ticket_id na conversão p/ o "Cancelar venda" apagá-la com precisão depois.
             const ok = await createConversion({ ...data, ticket_id: ganhoLead.ticketId });
@@ -4677,11 +4681,7 @@ export function LeadKanban() {
         <LossModal
           lead={lossLead}
           onClose={() => setLossLead(null)}
-          onCancel={() => {
-            const { ticketId, prevStageId } = lossLead;
-            setLossLead(null);
-            if (prevStageId) moveTicket(ticketId, prevStageId);
-          }}
+          onCancel={() => setLossLead(null)}
           onConfirm={async (reason) => {
             await update(lossLead.id, { loss_reason: reason || null });
             const perdidoStage = stages.find(s => s.slug === 'perdido');

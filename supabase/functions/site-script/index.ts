@@ -47,7 +47,7 @@ async function registrarErro(
 ): Promise<void> {
   try {
     const supa = createClient(SUPABASE_URL, SERVICE_KEY);
-    await supa.rpc('log_system_error', {
+    const { error: rpcError } = await supa.rpc('log_system_error', {
       p_scope: 'site-script',
       p_code: code,
       p_title: title,
@@ -56,6 +56,9 @@ async function registrarErro(
       p_context: ctx ?? {},
       p_is_monitor: false,
     });
+    // supabase-js NÃO lança em erro de RPC — sem esta linha a falha é invisível (foi assim que
+    // 'warning' × CHECK 'warn' passou despercebido até 15/07).
+    if (rpcError) console.error('[site-script] log_system_error falhou:', rpcError.message);
   } catch (e) {
     console.error('[site-script] falhou ao registrar erro', e);
   }

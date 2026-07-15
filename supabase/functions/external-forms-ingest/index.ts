@@ -42,7 +42,7 @@ async function registrarErro(
 ): Promise<void> {
   try {
     const supa = createClient(SUPABASE_URL, SERVICE_KEY);
-    await supa.rpc('log_system_error', {
+    const { error: rpcError } = await supa.rpc('log_system_error', {
       p_scope: 'external-forms-ingest',
       p_code: code,
       p_title: title,
@@ -51,6 +51,9 @@ async function registrarErro(
       p_context: ctx ?? {},
       p_is_monitor: false,
     });
+    // supabase-js NÃO lança em erro de RPC — sem esta linha a falha é invisível (foi assim que
+    // 'warning' × CHECK 'warn' passou despercebido até 15/07).
+    if (rpcError) console.error('[external-forms-ingest] log_system_error falhou:', rpcError.message);
   } catch (e) {
     console.error('[external-forms-ingest] falhou ao registrar erro', e);
   }
@@ -77,20 +80,40 @@ const META_KEYS = new Set([
   'gclid', 'fbclid', 'wbraid', 'gbraid', 'rast_id', 'rastracking_visitor_id',
   'remote ip', 'user agent', 'powered by', 'date', 'time',
 ]);
-function isLeadField(key: string): boolean {
+function isLeadField(key: string, value: unknown): boolean {
   const lk = key.toLowerCase();
   if (META_KEYS.has(lk)) return false;
   if (lk.startsWith('utm_')) return false;
+  // Blindagem por VALOR, não só por nome: URL nunca é nome/telefone/email de lead — cobre
+  // variantes de chave que não conhecemos ("page_link", "source_url"…) sem lista infinita.
+  if (/^https?:\/\//i.test(String(value ?? ''))) return false;
   return true;
 }
 
 // Acha uma chave do corpo por fragmento (case-insensitive), como o "findField" do n8n,
 // ignorando as chaves de metadado.
 function findByFragments(body: Record<string, unknown>, fragments: string[]): string {
-  const keys = Object.keys(body).filter(isLeadField);
+  const keys = Object.keys(body).filter((k) => isLeadField(k, body[k]));
   const k = keys.find((key) => fragments.some((f) => key.toLowerCase().includes(f)));
   const v = k ? body[k] : '';
   return v == null ? '' : String(v).trim();
+}
+
+// Acha a URL da página no corpo, qualquer que seja o nome da chave. Prioridade para nomes
+// óbvios; queda para QUALQUER chave cujo valor seja uma URL http(s) com querystring — é onde
+// moram as UTMs e o rast_id que a lib propaga.
+function acharUrlDaPagina(body: Record<string, unknown>): string {
+  const explicitas = ['url', 'page url', 'page_url', 'pageurl', 'page_link', 'source_url', 'pagina'];
+  for (const k of Object.keys(body)) {
+    if (explicitas.includes(k.toLowerCase()) && /^https?:\/\//i.test(String(body[k] ?? ''))) {
+      return String(body[k]);
+    }
+  }
+  for (const k of Object.keys(body)) {
+    const v = String(body[k] ?? '');
+    if (/^https?:\/\//i.test(v) && v.includes('?')) return v;
+  }
+  return '';
 }
 
 serve(async (req) => {
@@ -102,20 +125,38 @@ serve(async (req) => {
 
   const supa = createClient(SUPABASE_URL, SERVICE_KEY);
 
-  // ── Corpo: JSON ou x-www-form-urlencoded ────────────────────────────────────────────────────
+  // ── Corpo: JSON, x-www-form-urlencoded OU multipart/form-data ──────────────────────────────
+  // Cada construtor de site manda de um jeito; o contrato aqui é "aceite o que vier".
   let body: Record<string, unknown> = {};
   try {
-    const raw = await req.text();
-    if (raw) {
-      try {
-        body = JSON.parse(raw);
-      } catch {
-        const params = new URLSearchParams(raw);
-        for (const [k, v] of params) body[k] = v;
+    const ct = (req.headers.get('content-type') ?? '').toLowerCase();
+    if (ct.includes('multipart/form-data')) {
+      const fd = await req.formData();
+      for (const [k, v] of fd.entries()) if (typeof v === 'string') body[k] = v;
+    } else {
+      const raw = await req.text();
+      if (raw) {
+        try {
+          body = JSON.parse(raw);
+        } catch {
+          const params = new URLSearchParams(raw);
+          for (const [k, v] of params) body[k] = v;
+        }
       }
     }
   } catch {
     return json({ ok: false, error: 'invalid_body' }, 400);
+  }
+
+  // Ferramentas que ANINHAM os campos ({fields:{...}}, {data:{...}}, {form_response:{...}}):
+  // achata UM nível — chaves internas viram chaves de topo, sem sobrescrever as existentes.
+  // O raw original vai INTEIRO para o ledger de qualquer forma; isto só alimenta o extrator.
+  for (const v of Object.values(body)) {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      for (const [ik, iv] of Object.entries(v as Record<string, unknown>)) {
+        if (!(ik in body) && (typeof iv === 'string' || typeof iv === 'number')) body[ik] = iv;
+      }
+    }
   }
   // Token também aceito no corpo (algumas ferramentas só mandam body)
   const effToken = token || String(body['k'] ?? body['token'] ?? '').trim();
@@ -132,7 +173,16 @@ serve(async (req) => {
     await registrarErro('config_lookup_falhou', 'Falha ao resolver clínica pelo token do webhook', 'error', null, { erro: cfgErr.message });
     return json({ ok: false, error: 'server_error' }, 200);
   }
-  if (!cfg) return json({ ok: false, error: 'invalid_token' }, 401);
+  if (!cfg) {
+    // Formulário apontando para token que não existe mais (regenerado? colado errado?) é PERDA
+    // SILENCIOSA de lead se ninguém vir — por isso vai para a Central (fingerprint agrega repetições).
+    await registrarErro('token_invalido', 'Webhook de formulário chamado com token inválido — formulário do site desatualizado?', 'warning', null, {
+      token_prefixo: effToken.slice(0, 8),
+      referer: req.headers.get('referer'),
+      user_agent: req.headers.get('user-agent'),
+    });
+    return json({ ok: false, error: 'invalid_token' }, 401);
+  }
   if (cfg.capture_enabled === false) return json({ ok: false, error: 'capture_disabled' }, 403);
 
   const clinicId = cfg.clinic_id as string;
@@ -155,11 +205,10 @@ serve(async (req) => {
     const email = mapped('email') || findByFragments(body, ['e-mail', 'email', 'mail']);
 
     // ── UTMs: da querystring da URL da página e/ou de chaves utm_* no topo ─────────────────────
-    // O nome da chave varia por ferramenta: Elementor manda "Page URL"; outras mandam "url".
+    // O nome da chave varia por ferramenta (Elementor: "Page URL"; outras: "url", "page_link"…).
     // 🐛 Pego no piloto (Rs cafe, 15/07): só se lia body.url → a querystring do Elementor era
-    //    ignorada e o rast_id/gclid que a lib injeta na URL se perdiam.
-    const pageUrl = String(body['url'] ?? body['Page URL'] ?? body['page_url'] ?? body['pageUrl'] ?? '');
-    const urlParams = parseQuery(pageUrl);
+    //    ignorada e o rast_id/gclid que a lib injeta na URL se perdiam. Agora a busca é genérica.
+    const urlParams = parseQuery(acharUrlDaPagina(body));
     const pick = (k: string) => (urlParams[k] || String(body[k] ?? '')).trim();
     const utms = {
       utm_source: pick('utm_source'),

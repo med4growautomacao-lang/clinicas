@@ -1715,6 +1715,9 @@ function ClinicSettings({ data, onChange }: { data: Partial<Clinic>, onChange: (
 // Base pública das edges nativas (mesma origem usada em ConnectPage/RedirectPage).
 const EXTERNAL_FORMS_INGEST_URL = 'https://yzpclhuifquhfqpiwysh.supabase.co/functions/v1/external-forms-ingest';
 const EXTERNAL_CRM_STATUS_URL = 'https://yzpclhuifquhfqpiwysh.supabase.co/functions/v1/external-crm-status';
+// Serve o script de rastreamento POR CLÍNICA (placeholders resolvidos na edge). O site cola só a
+// linha do <script src> — atualizar o script no banco atualiza todos os sites sozinho.
+const SITE_SCRIPT_URL = 'https://yzpclhuifquhfqpiwysh.supabase.co/functions/v1/site-script';
 
 interface ExternalIntegrationRow {
     capture_token: string;
@@ -2046,6 +2049,34 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
     const [showScripts, setShowScripts] = useState(false);
     const [googleIdSaving, setGoogleIdSaving] = useState(false);
     const [googleIdSaved, setGoogleIdSaved] = useState(false);
+
+    // Token do webhook nativo de formulários (external-forms-ingest?k=…). Mesmo padrão da aba
+    // Integração Externa: carrega a linha da clínica e, se não existir, cria (o token nasce por
+    // default no banco). Substitui a URL global do n8n (forms_tracking), que era igual para todas
+    // as clínicas e identificava a clínica pelo telefone dentro do form_name — frágil.
+    const [captureToken, setCaptureToken] = useState<string | null>(null);
+    useEffect(() => {
+        let cancelled = false;
+        if (activeIntTab !== 'google' || !clinic?.id) return;
+        (async () => {
+            let { data, error } = await supabase
+                .from('clinic_external_integrations')
+                .select('capture_token')
+                .eq('clinic_id', clinic.id)
+                .maybeSingle();
+            if (!error && !data) {
+                const ins = await supabase
+                    .from('clinic_external_integrations')
+                    .upsert({ clinic_id: clinic.id }, { onConflict: 'clinic_id' })
+                    .select('capture_token')
+                    .single();
+                data = ins.data as any;
+            }
+            if (!cancelled) setCaptureToken(data?.capture_token ?? null);
+        })();
+        return () => { cancelled = true; };
+    }, [activeIntTab, clinic?.id]);
+    const formsWebhookUrl = captureToken ? `${EXTERNAL_FORMS_INGEST_URL}?k=${captureToken}` : '';
 
     const addParticipant = () => setParticipants(p => [...p, { name: '', phone: '' }]);
     const removeParticipant = (i: number) => setParticipants(p => p.filter((_, idx) => idx !== i));
@@ -2475,21 +2506,22 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                                     Integração de Formulários e Webhook <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-md text-[9px] uppercase tracking-wider ml-2">LP / Forms</span>
                                 </label>
                                 <p className="text-[12px] text-slate-500 font-medium leading-relaxed max-w-3xl">
-                                    Utilize este endereço de Webhook e siga o padrão exato de nomenclatura ao criar os formulários na sua Landing Page para capturar os leads diretamente no sistema.
+                                    Utilize este endereço de Webhook nos formulários da sua Landing Page para capturar os leads diretamente no sistema. O endereço é <strong>exclusivo desta clínica</strong> — o nome do formulário pode ser livre; mantenha apenas os rótulos dos campos abaixo.
                                 </p>
-                                
-                                {/* URL Webhook */}
+
+                                {/* URL Webhook — nativa, por clínica (external-forms-ingest?k=token) */}
                                 <div className="flex flex-col sm:flex-row gap-3 pt-1">
                                     <div className="flex-1 px-4 py-3 bg-[#0d1117] border border-slate-800 rounded-xl flex items-center shadow-inner overflow-x-auto custom-scrollbar">
                                         <code className="text-[13px] font-mono text-blue-400 whitespace-nowrap">
-                                            {systemSettings?.webhook_lead_catch_url || "https://webhook.med4growautomacao.com.br/webhook/clinica/forms_tracking"}
+                                            {formsWebhookUrl || 'Gerando endereço exclusivo…'}
                                         </code>
                                     </div>
-                                    <Button 
-                                        variant="outline" 
+                                    <Button
+                                        variant="outline"
+                                        disabled={!formsWebhookUrl}
                                         onClick={(e) => {
-                                            const url = systemSettings?.webhook_lead_catch_url || "https://webhook.med4growautomacao.com.br/webhook/clinica/forms_tracking";
-                                            navigator.clipboard.writeText(url);
+                                            if (!formsWebhookUrl) return;
+                                            navigator.clipboard.writeText(formsWebhookUrl);
                                             const btn = e.currentTarget;
                                             const orig = btn.innerHTML;
                                             btn.innerHTML = '<svg class="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg> Copiado!';
@@ -2674,10 +2706,10 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                                 <div className="absolute top-0 left-0 w-1 h-full bg-slate-400"></div>
                                 <label className="text-xs font-bold text-slate-700 flex items-center gap-2">
                                     <Shield className="w-4 h-4 text-slate-500" />
-                                    Script Global de Rastreamento <span className="px-2 py-0.5 bg-slate-200 text-slate-600 rounded-md text-[9px] uppercase tracking-wider ml-2">Navstracking Core v1.0</span>
+                                    Script Global de Rastreamento <span className="px-2 py-0.5 bg-slate-200 text-slate-600 rounded-md text-[9px] uppercase tracking-wider ml-2">Navstracking Core v2.0 · Hospedado</span>
                                 </label>
                                 <p className="text-[12px] text-slate-500 font-medium leading-relaxed max-w-3xl">
-                                    Copie este código e insira no <strong>Header/Body</strong> de todas as suas Landing Pages (Elementor, Wordpress, etc). Ele blinda as UTMs, GCLID e captura magicamente os cliques injetando a sua mensagem padrão.
+                                    Copie esta <strong>única linha</strong> e insira no <strong>Header</strong> de todas as suas Landing Pages (Elementor, Wordpress, etc). Ela carrega o rastreamento completo — blindagem de UTMs e cliques pagos (Google e Meta), identidade do visitante e captura do clique de WhatsApp com a sua mensagem padrão. O código é atualizado automaticamente: <strong>não é mais preciso recolar nada no site</strong> quando o rastreamento evoluir.
                                 </p>
                                 <div className="relative group mt-3 rounded-xl overflow-hidden border border-slate-800 bg-[#0d1117] shadow-xl">
                                     {/* Mac OS Window Header */}
@@ -2690,24 +2722,14 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                                         <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">navstracking.js</div>
                                         <div className="w-10"></div>
                                     </div>
-                                    <pre className="p-5 text-slate-300 text-[12px] font-mono overflow-x-auto whitespace-pre-wrap max-h-[350px] custom-scrollbar leading-relaxed">
-{(() => {
-    let script = systemSettings?.global_tracking_script || '<!-- Script Global não configurado no banco system_settings -->';
-    script = script.replace(/{{WA_PRE_MSG}}/g, clinicData.wa_pre_msg || 'Olá! Vim do site.');
-    script = script.replace(/{{PHONE}}/g, clinicData.phone ? clinicData.phone.replace(/\D/g, '') : 'SEUNUMERO');
-    script = script.replace(/{{CLINIC_ID}}/g, clinicData.id || '');
-    return script;
-})()}
+                                    <pre className="p-5 text-slate-300 text-[12px] font-mono overflow-x-auto whitespace-pre-wrap custom-scrollbar leading-relaxed">
+{`<script src="${SITE_SCRIPT_URL}?c=${clinicData.id || ''}" defer></script>`}
                                     </pre>
                                     <div className="absolute top-12 right-6 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                                         <Button
                                             variant="ghost"
                                             onClick={(e) => {
-                                                const script = systemSettings?.global_tracking_script || '<!-- Script Global não configurado no banco system_settings -->';
-                                                const finalScript = script.replace(/{{WA_PRE_MSG}}/g, clinicData.wa_pre_msg || 'Olá! Vim do site.')
-                                                                          .replace(/{{PHONE}}/g, clinicData.phone ? clinicData.phone.replace(/\D/g, '') : 'SEUNUMERO')
-                                                                          .replace(/{{CLINIC_ID}}/g, clinicData.id || '');
-                                                
+                                                const finalScript = `<script src="${SITE_SCRIPT_URL}?c=${clinicData.id || ''}" defer></script>`;
                                                 navigator.clipboard.writeText(finalScript);
                                                 const btn = e.currentTarget;
                                                 const orig = btn.innerHTML;

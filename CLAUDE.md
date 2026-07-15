@@ -121,6 +121,13 @@ Venda = **1 ticket ganho**. `stage` e `outcome` são **acoplados** — mexer num
 
 ⚠️ **Mas ~20 mil leads ANTIGOS têm `rast_id` NULL** — o backfill foi **dispensado de propósito** (UUID inventado para lead de março não amarra jornada nenhuma). **`JOIN`/`GROUP BY` por `rast_id` descarta esses 20 mil em silêncio.** Para histórico, use o telefone normalizado.
 
+## Rastreamento do site — uma máquina, duas chaves, uma régua de UTM
+
+- **`attribution_inbox` tem DUAS chaves de reconciliação:** telefone (`phone_norm`, usada pelo CTWA) e **`protocolo`** (usada pelo clique do site — o lead ainda não tem telefone quando clica). Linha sem telefone é ignorada pelos reconciliadores de telefone **de propósito**.
+- **`external-forms-ingest` é O caminho nativo de formulário** (token `?k=` por clínica, criado sozinho pela UI). O n8n "Webhook Forms" só existe para sites não migrados.
+- **Convenção de UTM é SOURCE-AWARE e mora em `_shared/attribution.ts`** — não invente mapeamento novo: Google → adset=`utm_medium`, ad=`utm_content`, term=`utm_term`; Meta → adset=`utm_term` (`{{adset.name}}`), ad=`utm_content`, e o posicionamento (`utm_medium`) vira `ad_platform`. Meta grava em `fb_*`, o resto em `g_*`.
+- **O script dos sites é SERVIDO pela edge `site-script`** (`?c=<clinic_id>`, cache 1h) a partir de `system_settings.global_tracking_script` — mudou o blob no banco, todos os sites atualizam sozinhos. **Nunca** volte a distribuir o script inline.
+
 ## Canal ≠ origem — e o vocabulário MUDA entre as tabelas
 **Canal** = *como* chegou. **Origem** = *de onde* veio. **"Balcão" é canal, nunca origem.**
 

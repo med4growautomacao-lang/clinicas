@@ -15,6 +15,7 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { mapearAtribuicao } from '../_shared/attribution.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -55,27 +56,8 @@ async function registrarErro(
   }
 }
 
-// utm_medium (Posicionamento) carrega a PLATAFORMA: "Facebook_Mobile_Reels" -> facebook,
-// "Instagram_Reels" -> instagram. Encaixa no enum já existente leads.ad_platform (instagram/facebook/
-// whatsapp) que hoje só o CTWA preenche. O texto cru do posicionamento continua no ledger raw.
-function derivarPlataforma(utmMedium: string, utmSource: string): string | null {
-  const m = (utmMedium ?? '').toLowerCase();
-  const s = (utmSource ?? '').trim().toLowerCase();
-  if (m.includes('instagram') || s === 'instagram' || s === 'ig') return 'instagram';
-  if (m.includes('facebook') || m.includes('messenger') || /(^|_)fb(_|$)/.test(m)) return 'facebook';
-  return null;
-}
-
-// utm_source (+ click ids) -> a ORIGEM do nosso modelo. NULL = orgânico (não inventamos origem).
-function mapearOrigem(utmSource: string, gclid: string, fbclid: string): string | null {
-  const s = (utmSource ?? '').trim().toLowerCase();
-  if (gclid) return 'google_ads';
-  if (fbclid) return 'meta_ads';
-  if (s === 'google' || s === 'google_ads' || s === 'googleads' || s === 'adwords') return 'google_ads';
-  if (s === 'facebook' || s === 'fb' || s === 'meta' || s === 'facebook_ads' || s === 'meta_ads' || s === 'metaads') return 'meta_ads';
-  if (s === 'instagram' || s === 'ig') return 'instagram';
-  return null;
-}
+// Origem e convenção de UTM moram em _shared/attribution.ts — a MESMA régua da site-tracking.
+// Antes cada rota tinha a sua e o mesmo UTM caía em colunas diferentes conforme o caminho.
 
 function parseQuery(url: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -90,7 +72,7 @@ function parseQuery(url: string): Record<string, string> {
 // Chaves de metadado NUNCA são o nome/telefone/email do lead. Excluí-las antes do match evita o
 // clássico "form_name contém 'name' → vira o nome do lead". (Payload real do cliente traz form_name,
 // form_id, utm_* no mesmo corpo.)
-const META_KEYS = new Set(['url', 'k', 'token', 'form_id', 'form_name', 'utm_id', 'gclid', 'fbclid']);
+const META_KEYS = new Set(['url', 'k', 'token', 'form_id', 'form_name', 'utm_id', 'gclid', 'fbclid', 'wbraid', 'gbraid', 'rast_id', 'rastracking_visitor_id']);
 function isLeadField(key: string): boolean {
   const lk = key.toLowerCase();
   if (META_KEYS.has(lk)) return false;
@@ -171,31 +153,41 @@ serve(async (req) => {
     // ── UTMs: da querystring de body.url e/ou de chaves utm_* no topo ──────────────────────────
     const urlParams = parseQuery(String(body['url'] ?? ''));
     const pick = (k: string) => (urlParams[k] || String(body[k] ?? '')).trim();
-    const utmSource = pick('utm_source');
-    const utmCampaign = pick('utm_campaign');
-    const utmMedium = pick('utm_medium');
-    const utmContent = pick('utm_content');
-    const utmTerm = pick('utm_term');
+    const utms = {
+      utm_source: pick('utm_source'),
+      utm_medium: pick('utm_medium'),
+      utm_campaign: pick('utm_campaign'),
+      utm_content: pick('utm_content'),
+      utm_term: pick('utm_term'),
+    };
     const gclid = pick('gclid');
     const fbclid = pick('fbclid');
 
-    const origem = mapearOrigem(utmSource, gclid, fbclid);
-    const adPlatform = derivarPlataforma(utmMedium, utmSource);
+    // rast_id = identidade do visitante (cookie de 2 anos). O script do site injeta o campo
+    // oculto `rastracking_visitor_id` em todo formulário — é o que liga este form aos toques
+    // anteriores da mesma pessoa (jornada multi-toque). Sem isso o lead nasce órfão de jornada.
+    const rastId = pick('rast_id') || String(body['rastracking_visitor_id'] ?? '').trim();
+
+    const at = mapearAtribuicao(utms, gclid, fbclid);
 
     // ── Ingestão ──────────────────────────────────────────────────────────────────────────────
+    // O RPC recebe SEMÂNTICA (campanha/conjunto/anúncio/termo) e roteia para g_*/fb_* pela origem.
     const { data: res, error: rpcErr } = await supa.rpc('ingest_external_form_lead', {
       p_clinic_id: clinicId,
       p_name: nome || null,
       p_phone: telefone || null,
       p_email: email || null,
-      p_source: origem,
-      p_campaign: utmCampaign || null,
-      p_adset: utmTerm || null,      // no padrão do n8n: Conjunto = utm_term
-      p_ad: utmContent || null,      // Anúncio = utm_content
-      p_term: utmMedium || null,     // Posicionamento = utm_medium
-      p_utm_source: utmSource || null,
-      p_ad_platform: adPlatform,     // plataforma derivada do posicionamento -> leads.ad_platform
+      p_source: at.origem,
+      p_campaign: at.campaign,
+      p_adset: at.adset,
+      p_ad: at.ad,
+      p_term: at.term,
+      p_utm_source: utms.utm_source || null,
+      p_ad_platform: at.adPlatform,
       p_raw: body,
+      p_g_clid: gclid || null,       // sem isto o gclid ficava só no raw — inútil p/ conversão offline
+      p_fb_clid: fbclid || null,
+      p_rast_id: rastId || null,
     });
 
     if (rpcErr) {

@@ -23,6 +23,7 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { mapearAtribuicao } from '../_shared/attribution.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -78,22 +79,8 @@ function normalizarTelefone(raw: string): string | null {
   return p.length >= 12 && p.length <= 13 ? p : null;
 }
 
-// utm_source -> a ORIGEM do nosso modelo. O n8n não fazia isso: carimbava google_ads em tudo.
-// NULL = orgânico. Não inventamos origem: "direto"/"referral"/vazio permanecem sem atribuição,
-// que é o que eles são.
-function mapearOrigem(utmSource: string, gclid: string, fbclid: string): string | null {
-  const s = (utmSource ?? '').trim().toLowerCase();
-
-  // O click-id é prova mais forte que a UTM (a UTM o cliente digita; o clid o anunciante emite).
-  if (gclid) return 'google_ads';
-  if (fbclid) return 'meta_ads';
-
-  if (s === 'google' || s === 'google_ads' || s === 'googleads' || s === 'adwords') return 'google_ads';
-  if (s === 'facebook' || s === 'fb' || s === 'meta' || s === 'facebook_ads' || s === 'meta_ads') return 'meta_ads';
-  if (s === 'instagram' || s === 'ig') return 'instagram';
-
-  return null; // direto / referral / orgânico / desconhecido
-}
+// Origem e convenção de UTM moram em _shared/attribution.ts — a MESMA régua da
+// external-forms-ingest. Uma régua só: o mesmo UTM cai na mesma coluna em qualquer rota.
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -142,24 +129,31 @@ serve(async (req) => {
 
     // ── Atribuição ────────────────────────────────────────────────────────────────────────────
     const gclid = txt('gclid');
-    const fbclid = txt('fbclid'); // hoje o script não manda; quando mandar, já é aproveitado
-    const utmSource = txt('utm_source');
-    const origem = mapearOrigem(utmSource, gclid, fbclid);
+    const fbclid = txt('fbclid'); // o script novo (Etapa 2) manda; o antigo não — chega vazio
+    const utms = {
+      utm_source: txt('utm_source'),
+      utm_medium: txt('utm_medium'),
+      utm_campaign: txt('utm_campaign'),
+      utm_content: txt('utm_content'),
+      utm_term: txt('utm_term'),
+    };
+    const at = mapearAtribuicao(utms, gclid, fbclid);
 
     const { data: proto, error } = await supa.rpc('site_ingest_click', {
       p_clinic_id: clinicId,
-      p_source: origem,
+      p_source: at.origem,
       p_g_clid: gclid || null,
       p_fb_clid: fbclid || null,
-      p_campaign: txt('utm_campaign') || null,
-      p_adset: txt('utm_medium') || null,
-      p_ad: txt('utm_content') || null,
-      p_term: txt('utm_term') || null,
-      p_utm_source: utmSource || null,
+      p_campaign: at.campaign,
+      p_adset: at.adset,
+      p_ad: at.ad,
+      p_term: at.term,
+      p_utm_source: utms.utm_source || null,
       p_rast_id: txt('rast_id') || null,
       p_raw: {
         pagina: txt('pagina') || null,
         src_historico: txt('src_historico') || null,
+        utm_medium: utms.utm_medium || null, // posicionamento cru (no caminho meta ele não vira "term")
         wbraid: txt('wbraid') || null,
         gbraid: txt('gbraid') || null,
         telefone_destino: telefoneDestino || null,
@@ -174,7 +168,7 @@ serve(async (req) => {
         'Não consegui gravar o clique do site',
         'critical',
         clinicId,
-        { erro: error.message, gclid, utm_source: utmSource, pagina: txt('pagina') },
+        { erro: error.message, gclid, utm_source: utms.utm_source, pagina: txt('pagina') },
       );
       return json({ id_protocolo: '' }, 200);
     }

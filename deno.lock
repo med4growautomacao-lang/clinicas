@@ -1,5 +1,8 @@
 {
   "version": "5",
+  "redirects": {
+    "https://esm.sh/@supabase/supabase-js@2": "https://esm.sh/@supabase/supabase-js@2.110.6"
+  },
   "remote": {
     "https://deno.land/std@0.168.0/async/abortable.ts": "80b2ac399f142cc528f95a037a7d0e653296352d95c681e284533765961de409",
     "https://deno.land/std@0.168.0/async/deadline.ts": "2c2deb53c7c28ca1dda7a3ad81e70508b1ebc25db52559de6b8636c9278fd41f",
@@ -12,6 +15,7 @@
     "https://deno.land/std@0.168.0/async/retry.ts": "e8e5173623915bbc0ddc537698fa418cf875456c347eda1ed453528645b42e67",
     "https://deno.land/std@0.168.0/async/tee.ts": "3a47cc4e9a940904fd4341f0224907e199121c80b831faa5ec2b054c6d2eff5e",
     "https://deno.land/std@0.168.0/http/server.ts": "e99c1bee8a3f6571ee4cdeb2966efad465b8f6fe62bec1bdb59c1f007cc4d155",
+    "https://esm.sh/@supabase/supabase-js@2.110.6": "c7330c52c7c1b6215fd602626401ab0ff93bc7a7b75c77ffa80497de1a1733ee",
     "https://esm.sh/@supabase/supabase-js@2.7.1": "be4ce96f1e7e5c9fc4b2b77a7feb75ac03796dd2c6988e99b229c0cefc28309b"
   },
   "workspace": {
@@ -32,6 +36,9 @@
         "npm:date-fns@^4.1.0",
         "npm:dotenv@^17.2.3",
         "npm:express@^4.21.2",
+        "npm:html2canvas-pro@^2.2.1",
+        "npm:jspdf@^4.2.1",
+        "npm:lottie-react@^2.4.1",
         "npm:lucide-react@0.546",
         "npm:motion@^12.23.24",
         "npm:react-day-picker@^9.14.0",

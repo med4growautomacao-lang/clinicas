@@ -1836,13 +1836,6 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
         else setRow(r => r ? { ...r, [field]: next } : r);
     };
 
-    const nomeTemplate = (() => {
-        const template = systemSettings?.form_default_name || 'formulario {{CLINIC_NAME}} {{PHONE}}';
-        return template.replace(/{{CLINIC_NAME}}/g, clinicData.name || 'clinica')
-                       .replace(/{{PHONE}}/g, clinicData.phone?.replace(/\D/g, '') || '')
-                       .toLowerCase();
-    })();
-
     const copyChip = (e: React.MouseEvent, text: string) => {
         navigator.clipboard.writeText(text);
         const icon = (e.currentTarget as HTMLElement).querySelector('svg');
@@ -1859,7 +1852,7 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
                                 <Webhook className="w-6 h-6 text-blue-600" />
                             </div>
                             <div>
-                                <CardTitle className="text-xl font-bold text-slate-800">Webhook de Captação</CardTitle>
+                                <CardTitle className="text-xl font-bold text-slate-800">Webhook de Captação para Formulários de LP</CardTitle>
                                 <p className="text-[12px] text-slate-500 font-medium mt-0.5">Recebe leads do formulário do site do cliente direto no sistema.</p>
                             </div>
                         </div>
@@ -1960,14 +1953,9 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
                                         <code className="text-xs font-mono text-slate-700 font-bold block">email, e-mail</code>
                                     </div>
                                 </div>
-                                <div className="p-3.5 bg-white border border-slate-200 rounded-xl shadow-sm hover:border-blue-300 transition-colors cursor-pointer"
-                                     onClick={(e) => copyChip(e, nomeTemplate)}>
-                                    <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-1.5 flex justify-between items-center">
-                                        Sugestão de nome do formulário
-                                        <Copy className="w-3.5 h-3.5 text-slate-300" />
-                                    </p>
-                                    <code className="text-xs font-mono text-slate-700 font-bold truncate block">{nomeTemplate}</code>
-                                </div>
+                                <p className="text-[11px] text-slate-400 font-medium pl-1">
+                                    O nome do formulário é livre — a clínica é identificada pelo endereço acima, não pelo nome.
+                                </p>
                             </div>
                         </>
                     )}

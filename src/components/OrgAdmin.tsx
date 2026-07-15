@@ -4,6 +4,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { Building2, Users, ArrowRight, LogIn, Loader2, X, Eye, EyeOff, Search, MoreVertical, UserPlus, Wifi, WifiOff, Settings, UserCheck, TrendingUp, UserCog, ChevronDown, Check, Trash2, MessageCircle, Globe, FileText, BarChart3, Search as SearchIcon, LayoutGrid, List as ListIcon, Stethoscope, Briefcase, AlertCircle, Plus, Building, Activity, ListTodo } from "lucide-react";
 import { OrgTasks } from "./OrgTasks";
 import { OrgMetrics } from "./OrgMetrics";
+import { ClinicInfoModal } from "./ClinicInfoModal";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { matchesSearch } from "../lib/search";
@@ -144,6 +145,12 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
   // Modal: editar clínica
   const [editClinicTarget, setEditClinicTarget] = useState<Clinic | null>(null);
 
+  // Modal: informações da clínica (dados do cliente + acessos)
+  const [clinicInfoTarget, setClinicInfoTarget] = useState<Clinic | null>(null);
+
+  // Investimento por clínica e canal (verba estipulada + investido do mês), para a coluna da lista
+  const [investmentMap, setInvestmentMap] = useState<Record<string, { metaEst: number; metaInv: number; googleEst: number; googleInv: number }>>({});
+
   // Modal: responsáveis da clínica
   const [responsibleTarget, setResponsibleTarget] = useState<Clinic | null>(null);
   const [responsibleForm, setResponsibleForm] = useState<Record<string, string>>({});
@@ -208,6 +215,21 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
     setClinics(mapped);
     setClinicMembers(membersData || []);
     setLoadingClinics(false);
+
+    // Investimento por clínica (só gestores da org têm permissão no RPC)
+    if (canSeeAll) {
+      const { data: invData } = await supabase.rpc('get_org_clinics_investment', { p_org_id: profile.organization_id });
+      setInvestmentMap(Object.fromEntries(
+        (invData || []).map((r: any) => [r.clinic_id, {
+          metaEst: Number(r.meta_estimated) || 0,
+          metaInv: Number(r.meta_invested) || 0,
+          googleEst: Number(r.google_estimated) || 0,
+          googleInv: Number(r.google_invested) || 0,
+        }])
+      ));
+    } else {
+      setInvestmentMap({});
+    }
   }, [profile?.organization_id, profile?.org_user_id, userRole]);
 
   const fetchOrgUsers = useCallback(async () => {
@@ -741,13 +763,14 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
             <div className="bg-white border border-slate-200 rounded-2xl shadow-sm flex-1 min-h-0 flex flex-col">
               <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar rounded-2xl">
               <table className="w-full">
-                <thead className="sticky top-0 z-10 bg-slate-50">
+                <thead className="sticky top-0 z-20 bg-slate-50">
                   <tr className="text-left text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-100">
                     <th className="px-6 py-3">Cliente</th>
                     <th className="px-4 py-3">Status</th>
                     <th className="px-6 py-3">Responsáveis</th>
                     <th className="px-6 py-3">Integrações</th>
                     <th className="px-6 py-3">Plano</th>
+                    <th className="px-6 py-3">Investimento</th>
                     <th className="px-6 py-3 text-right">Ações</th>
                   </tr>
                 </thead>
@@ -884,6 +907,61 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                           )}>{clinic.plan}</span>
                         </td>
                         <td className="px-6 py-4">
+                          {(() => {
+                            const inv = investmentMap[clinic.id];
+                            const fmt = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 0, maximumFractionDigits: 0 });
+                            // Mostra a barra do canal que EXISTE (ativo ou inativo). Se o canal não existe
+                            // ('none'/nulo), nem aparece. Inativo é exibido esmaecido.
+                            const channels = [
+                              { key: 'meta',   label: 'Meta',   logo: MetaLogo,   base: 'from-blue-400 to-blue-600',      ring: 'border-blue-300',    status: clinic.meta_status,   est: inv?.metaEst || 0,   spent: inv?.metaInv || 0 },
+                              { key: 'google', label: 'Google', logo: GoogleLogo, base: 'from-emerald-400 to-emerald-600', ring: 'border-emerald-300', status: clinic.google_status, est: inv?.googleEst || 0, spent: inv?.googleInv || 0 },
+                            ].filter(c => c.status === 'active' || c.status === 'inactive');
+                            if (channels.length === 0) {
+                              return <span className="text-[11px] text-slate-300 italic">—</span>;
+                            }
+                            const Bar = ({ label, logo, est, spent, base, ringColor, active }: { label: string; logo: string; est: number; spent: number; base: string; ringColor: string; active: boolean }) => {
+                              const pct = est > 0 ? Math.round((spent / est) * 100) : (spent > 0 ? 100 : 0);
+                              const over = est > 0 && spent > est;
+                              // Estourou a verba: barra cheia = total investido; fração dentro da verba na cor
+                              // do canal, excesso em vermelho. Sem verba: cheio se gastou, vazio se R$ 0.
+                              const inRatio = est > 0 ? (over ? (est / spent) * 100 : Math.min(100, pct)) : (spent > 0 ? 100 : 0);
+                              const ring = over ? "border-rose-300" : ringColor;
+                              return (
+                                <div
+                                  className={cn("flex items-center", !active && "opacity-45 grayscale")}
+                                  title={`${label}${!active ? ' (inativo)' : ''}: ${est > 0 ? `${fmt(spent)} de ${fmt(est)} (${pct}%)${over ? ` — excesso de ${fmt(spent - est)}` : ''}` : `${fmt(spent)} investido (sem verba definida)`}`}
+                                >
+                                  {/* Badge com a logo do canal (no lugar do %) */}
+                                  <div className={cn("relative z-[1] w-5 h-5 rounded-full bg-white border shadow-sm flex items-center justify-center shrink-0", ring)}>
+                                    <img src={logo} alt={label} className="w-3 h-3 object-contain" />
+                                  </div>
+                                  {/* Barra de fundo claro com investido / configurado dentro */}
+                                  <div className="relative flex-1 h-3.5 -ml-1.5 rounded-full bg-slate-100 border border-slate-200 overflow-hidden">
+                                    {/* parte dentro da verba */}
+                                    <div className={cn("absolute inset-y-0 left-0 bg-gradient-to-b transition-all", base)} style={{ width: `${inRatio}%` }} />
+                                    {/* excesso acima da verba */}
+                                    {over && (
+                                      <div className="absolute inset-y-0 right-0 bg-gradient-to-b from-rose-400 to-rose-600 transition-all" style={{ left: `${inRatio}%` }} />
+                                    )}
+                                    <div className="absolute inset-0 flex items-center justify-center pl-1.5">
+                                      <span className="text-[8px] font-black text-slate-800 leading-none [text-shadow:0_0_2px_rgba(255,255,255,0.95)]">
+                                        {fmt(spent)} / {est > 0 ? fmt(est) : '—'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            };
+                            return (
+                              <div className="w-40 space-y-1">
+                                {channels.map(c => (
+                                  <Bar key={c.key} label={c.label} logo={c.logo} est={c.est} spent={c.spent} base={c.base} ringColor={c.ring} active={c.status === 'active'} />
+                                ))}
+                              </div>
+                            );
+                          })()}
+                        </td>
+                        <td className="px-6 py-4">
                           <div className="flex items-center justify-end gap-2">
                             <button
                               onClick={() => {
@@ -905,6 +983,15 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                             >
                               {activeClinicId === clinic.id ? (<><LogIn className="w-3 h-3" /> Visualizando</>) : (<><ArrowRight className="w-3 h-3" /> Visualizar</>)}
                             </button>
+                            {canManageClinics && (
+                              <button
+                                onClick={e => { e.stopPropagation(); setClinicInfoTarget(clinic); }}
+                                title="Informações da Clínica"
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 hover:border-slate-300 transition-all"
+                              >
+                                <FileText className="w-3 h-3 text-violet-500" /> Informações
+                              </button>
+                            )}
                             <div className="relative">
                               <button
                                 onClick={e => {
@@ -1674,6 +1761,15 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
               </div>
             </motion.div>
           </div>
+        )}
+
+        {clinicInfoTarget && (
+          <ClinicInfoModal
+            clinic={{ id: clinicInfoTarget.id, name: clinicInfoTarget.name }}
+            canEdit={canManageClinics}
+            onClose={() => setClinicInfoTarget(null)}
+            onSaved={fetchClinics}
+          />
         )}
       </AnimatePresence>
     </div>

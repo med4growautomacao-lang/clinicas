@@ -72,7 +72,11 @@ function parseQuery(url: string): Record<string, string> {
 // Chaves de metadado NUNCA são o nome/telefone/email do lead. Excluí-las antes do match evita o
 // clássico "form_name contém 'name' → vira o nome do lead". (Payload real do cliente traz form_name,
 // form_id, utm_* no mesmo corpo.)
-const META_KEYS = new Set(['url', 'k', 'token', 'form_id', 'form_name', 'utm_id', 'gclid', 'fbclid', 'wbraid', 'gbraid', 'rast_id', 'rastracking_visitor_id']);
+const META_KEYS = new Set([
+  'url', 'page url', 'page_url', 'pageurl', 'k', 'token', 'form_id', 'form_name', 'utm_id',
+  'gclid', 'fbclid', 'wbraid', 'gbraid', 'rast_id', 'rastracking_visitor_id',
+  'remote ip', 'user agent', 'powered by', 'date', 'time',
+]);
 function isLeadField(key: string): boolean {
   const lk = key.toLowerCase();
   if (META_KEYS.has(lk)) return false;
@@ -150,8 +154,12 @@ serve(async (req) => {
       findByFragments(body, ['telefone', 'whatsapp', 'celular', 'phone', 'fone', 'tel', 'field_ab']);
     const email = mapped('email') || findByFragments(body, ['e-mail', 'email', 'mail']);
 
-    // ── UTMs: da querystring de body.url e/ou de chaves utm_* no topo ──────────────────────────
-    const urlParams = parseQuery(String(body['url'] ?? ''));
+    // ── UTMs: da querystring da URL da página e/ou de chaves utm_* no topo ─────────────────────
+    // O nome da chave varia por ferramenta: Elementor manda "Page URL"; outras mandam "url".
+    // 🐛 Pego no piloto (Rs cafe, 15/07): só se lia body.url → a querystring do Elementor era
+    //    ignorada e o rast_id/gclid que a lib injeta na URL se perdiam.
+    const pageUrl = String(body['url'] ?? body['Page URL'] ?? body['page_url'] ?? body['pageUrl'] ?? '');
+    const urlParams = parseQuery(pageUrl);
     const pick = (k: string) => (urlParams[k] || String(body[k] ?? '')).trim();
     const utms = {
       utm_source: pick('utm_source'),

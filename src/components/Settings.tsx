@@ -1712,14 +1712,18 @@ function ClinicSettings({ data, onChange }: { data: Partial<Clinic>, onChange: (
     );
 }
 
-// Base pública da edge de captação nativa (mesma origem usada em ConnectPage/RedirectPage).
+// Base pública das edges nativas (mesma origem usada em ConnectPage/RedirectPage).
 const EXTERNAL_FORMS_INGEST_URL = 'https://yzpclhuifquhfqpiwysh.supabase.co/functions/v1/external-forms-ingest';
+const EXTERNAL_CRM_STATUS_URL = 'https://yzpclhuifquhfqpiwysh.supabase.co/functions/v1/external-crm-status';
 
 interface ExternalIntegrationRow {
     capture_token: string;
     capture_enabled: boolean;
     capture_count: number;
     last_capture_at: string | null;
+    crm_token: string;
+    won_enabled: boolean;
+    lost_enabled: boolean;
 }
 
 // Painel "Integração Externa" — webhook nativo por clínica para o formulário do site do cliente
@@ -1738,6 +1742,7 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
     const [copied, setCopied] = useState(false);
     const [regenerating, setRegenerating] = useState(false);
     const [togglingCapture, setTogglingCapture] = useState(false);
+    const [copiedCrm, setCopiedCrm] = useState<'ganho' | 'perdido' | null>(null);
 
     // Carrega (ou cria, se ainda não existir) a linha de config desta clínica.
     useEffect(() => {
@@ -1745,7 +1750,7 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
         if (!effClinicId) { setLoading(true); return; }
         (async () => {
             setLoading(true);
-            const cols = 'capture_token, capture_enabled, capture_count, last_capture_at';
+            const cols = 'capture_token, capture_enabled, capture_count, last_capture_at, crm_token, won_enabled, lost_enabled';
             let { data, error } = await supabase
                 .from('clinic_external_integrations')
                 .select(cols)
@@ -1796,16 +1801,36 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
     };
 
     const toggleCapture = async () => {
-        if (!clinicId || !row || togglingCapture) return;
+        if (!effClinicId || !row || togglingCapture) return;
         setTogglingCapture(true);
         const next = !row.capture_enabled;
         const { error } = await supabase
             .from('clinic_external_integrations')
             .update({ capture_enabled: next })
-            .eq('clinic_id', clinicId);
+            .eq('clinic_id', effClinicId);
         if (error) showToast('Falha ao atualizar.', 'error');
         else setRow(r => r ? { ...r, capture_enabled: next } : r);
         setTogglingCapture(false);
+    };
+
+    // ── Ganho/Perdido (entrada do CRM do cliente) ──────────────────────────────────────────────
+    const crmUrl = (tipo: 'ganho' | 'perdido') => row?.crm_token ? `${EXTERNAL_CRM_STATUS_URL}?k=${row.crm_token}&tipo=${tipo}` : '';
+    const copyCrm = (tipo: 'ganho' | 'perdido') => {
+        const u = crmUrl(tipo);
+        if (!u) return;
+        navigator.clipboard.writeText(u);
+        setCopiedCrm(tipo);
+        setTimeout(() => setCopiedCrm(null), 2000);
+    };
+    const toggleCrm = async (field: 'won_enabled' | 'lost_enabled') => {
+        if (!effClinicId || !row) return;
+        const next = !row[field];
+        const { error } = await supabase
+            .from('clinic_external_integrations')
+            .update({ [field]: next })
+            .eq('clinic_id', effClinicId);
+        if (error) showToast('Falha ao atualizar.', 'error');
+        else setRow(r => r ? { ...r, [field]: next } : r);
     };
 
     const nomeTemplate = (() => {
@@ -1945,6 +1970,56 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
                     )}
                 </CardContent>
             </Card>
+
+            {/* Ganho / Perdido — entrada do CRM do cliente */}
+            {row && (
+                <Card className="border border-slate-200 shadow-sm bg-white overflow-hidden">
+                    <CardHeader className="bg-slate-50 border-b border-slate-200 pb-6 px-8">
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-200">
+                                <RefreshCw className="w-6 h-6 text-slate-600" />
+                            </div>
+                            <div>
+                                <CardTitle className="text-xl font-bold text-slate-800">Ganho / Perdido (CRM do cliente)</CardTitle>
+                                <p className="text-[12px] text-slate-500 font-medium mt-0.5">Recebe o status do CRM do cliente e reflete no funil, achando o lead por telefone/e-mail. Se não existir aqui, cria já com o status.</p>
+                            </div>
+                        </div>
+                    </CardHeader>
+                    <CardContent className="p-8 space-y-4">
+                        {([
+                            { tipo: 'ganho' as const, field: 'won_enabled' as const, enabled: row.won_enabled, label: 'Ganho', desc: 'negócio ganho', emerald: true },
+                            { tipo: 'perdido' as const, field: 'lost_enabled' as const, enabled: row.lost_enabled, label: 'Perdido', desc: 'negócio perdido', emerald: false },
+                        ]).map(({ tipo, field, enabled, label, desc, emerald }) => (
+                            <div key={tipo} className="space-y-3 p-5 bg-slate-50 border border-slate-100 rounded-2xl relative overflow-hidden">
+                                <div className={cn("absolute top-0 left-0 w-1 h-full", emerald ? 'bg-emerald-500' : 'bg-rose-500')}></div>
+                                <div className="flex items-center justify-between gap-3">
+                                    <label className="text-xs font-bold text-slate-700 flex items-center gap-2">
+                                        <span className={cn("px-2 py-0.5 rounded-md text-[9px] uppercase tracking-wider", emerald ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700')}>{label}</span>
+                                        Webhook de {desc}
+                                    </label>
+                                    <button onClick={() => toggleCrm(field)} className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-slate-900 shrink-0">
+                                        {enabled ? <ToggleRight className="w-5 h-5 text-emerald-500" /> : <ToggleLeft className="w-5 h-5 text-slate-400" />}
+                                        {enabled ? 'Ativo' : 'Desligado'}
+                                    </button>
+                                </div>
+                                <div className="flex flex-col sm:flex-row gap-3">
+                                    <div className="flex-1 px-4 py-3 bg-[#0d1117] border border-slate-800 rounded-xl flex items-center shadow-inner overflow-x-auto custom-scrollbar">
+                                        <code className="text-[13px] font-mono text-blue-400 whitespace-nowrap">{crmUrl(tipo)}</code>
+                                    </div>
+                                    <Button
+                                        variant="outline"
+                                        onClick={() => copyCrm(tipo)}
+                                        className={cn("gap-2 shrink-0 h-10 sm:h-auto rounded-xl shadow-sm transition-all font-bold border",
+                                            copiedCrm === tipo ? "bg-blue-600 text-white border-blue-600" : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50")}
+                                    >
+                                        {copiedCrm === tipo ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />} {copiedCrm === tipo ? 'Copiado!' : 'Copiar'}
+                                    </Button>
+                                </div>
+                            </div>
+                        ))}
+                    </CardContent>
+                </Card>
+            )}
         </div>
     );
 }

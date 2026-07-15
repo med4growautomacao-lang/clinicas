@@ -2539,35 +2539,11 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                                     </Button>
                                 </div>
 
-                                {/* Campos Padronizados */}
-                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-                                    <div className="p-3.5 bg-white border border-slate-200 rounded-xl shadow-sm hover:border-blue-300 transition-colors cursor-pointer group/copy"
-                                         onClick={(e) => {
-                                             const template = systemSettings?.form_default_name || 'formulario {{CLINIC_NAME}} {{PHONE}}';
-                                             const text = template.replace(/{{CLINIC_NAME}}/g, clinicData.name || 'clinica vaz')
-                                                                  .replace(/{{PHONE}}/g, clinicData.phone?.replace(/\D/g, '') || '5521973603891')
-                                                                  .toLowerCase();
-                                             navigator.clipboard.writeText(text);
-                                             const icon = e.currentTarget.querySelector('svg');
-                                             if (icon) {
-                                                 icon.classList.add('text-blue-500');
-                                                 setTimeout(() => icon.classList.remove('text-blue-500'), 1500);
-                                             }
-                                         }}>
-                                        <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-1.5 flex justify-between items-center">
-                                            Nome do Formulário
-                                            <Copy className="w-3.5 h-3.5 text-slate-300 transition-colors" />
-                                        </p>
-                                        <code className="text-xs font-mono text-slate-700 font-bold truncate block">
-                                            {(() => {
-                                                const template = systemSettings?.form_default_name || 'formulario {{CLINIC_NAME}} {{PHONE}}';
-                                                return template.replace(/{{CLINIC_NAME}}/g, clinicData.name || 'clinica vaz')
-                                                               .replace(/{{PHONE}}/g, clinicData.phone?.replace(/\D/g, '') || '5521973603891')
-                                                               .toLowerCase();
-                                            })()}
-                                        </code>
-                                    </div>
-                                    
+                                {/* Rótulos recomendados — o nome do FORMULÁRIO é livre (a clínica é identificada
+                                    pelo token da URL, não mais pelo telefone dentro do form_name). Os rótulos dos
+                                    CAMPOS seguem recomendados: a captação reconhece variações (nome/name,
+                                    whatsapp/celular/telefone…), mas rótulos criativos demais não são reconhecidos. */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
                                     <div className="p-3.5 bg-white border border-slate-200 rounded-xl shadow-sm hover:border-blue-300 transition-colors cursor-pointer group/copy"
                                          onClick={(e) => {
                                              navigator.clipboard.writeText(systemSettings?.form_default_label_name || "Nome completo");
@@ -2578,7 +2554,7 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                                              }
                                          }}>
                                         <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-1.5 flex justify-between items-center">
-                                            Rótulo (Label) do Nome
+                                            Rótulo do Nome (recomendado)
                                             <Copy className="w-3.5 h-3.5 text-slate-300 transition-colors" />
                                         </p>
                                         <code className="text-xs font-mono text-slate-700 font-bold block">
@@ -2596,7 +2572,7 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                                              }
                                          }}>
                                         <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-1.5 flex justify-between items-center">
-                                            Rótulo (Label) do Número
+                                            Rótulo do Número (recomendado)
                                             <Copy className="w-3.5 h-3.5 text-slate-300 transition-colors" />
                                         </p>
                                         <code className="text-xs font-mono text-slate-700 font-bold block">

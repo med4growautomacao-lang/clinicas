@@ -38,6 +38,8 @@ import {
     Maximize2,
     ChevronUp,
     ChevronDown,
+    Webhook,
+    KeyRound,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -69,7 +71,7 @@ export function Settings() {
     const showToast = useToast();
     const { clinic, aiConfig, whatsapp, loading, updateClinic, updateAI, updateWhatsapp, generateConnectToken } = useSettings();
     const [activeTab, setActiveTab] = useState<"clinic" | "integrations" | "protocols" | "products">(() => (localStorage.getItem('settingsTab') as any) || "clinic");
-    const [activeIntTab, setActiveIntTab] = useState<'whatsapp' | 'meta' | 'google'>(() => (localStorage.getItem('settingsIntTab') as any) || 'whatsapp');
+    const [activeIntTab, setActiveIntTab] = useState<'whatsapp' | 'meta' | 'google' | 'external'>(() => (localStorage.getItem('settingsIntTab') as any) || 'whatsapp');
     
     // Local states for editing
     const [localClinic, setLocalClinic] = useState<Partial<Clinic>>({});
@@ -285,7 +287,7 @@ export function Settings() {
     const restrictedIntegrations = isSecretaria || isVendedor;
 
     useEffect(() => {
-        if (restrictedIntegrations && (activeIntTab === 'meta' || activeIntTab === 'google')) {
+        if (restrictedIntegrations && (activeIntTab === 'meta' || activeIntTab === 'google' || activeIntTab === 'external')) {
             setActiveIntTab('whatsapp');
             localStorage.setItem('settingsIntTab', 'whatsapp');
         }
@@ -468,6 +470,20 @@ export function Settings() {
                         >
                             <img src={GoogleLogo} alt="Google" className={cn("w-4 h-4 object-contain filter transition-all", activeIntTab === 'google' ? 'brightness-0 invert' : 'brightness-100 opacity-60')} />
                             Google Ads
+                        </button>
+                    )}
+                    {!restrictedIntegrations && (
+                        <button
+                            onClick={() => { setActiveIntTab('external'); localStorage.setItem('settingsIntTab', 'external'); }}
+                            className={cn(
+                                "flex items-center gap-2.5 px-6 py-2 text-sm font-bold rounded-lg transition-all duration-200",
+                                activeIntTab === 'external'
+                                    ? "bg-teal-600 text-white shadow-md shadow-teal-100"
+                                    : "text-slate-500 hover:text-slate-900 hover:bg-white"
+                            )}
+                        >
+                            <Webhook className={cn("w-4 h-4", activeIntTab === 'external' ? "text-white" : "text-blue-500")} />
+                            Integração Externa
                         </button>
                     )}
                 </div>
@@ -1696,6 +1712,243 @@ function ClinicSettings({ data, onChange }: { data: Partial<Clinic>, onChange: (
     );
 }
 
+// Base pública da edge de captação nativa (mesma origem usada em ConnectPage/RedirectPage).
+const EXTERNAL_FORMS_INGEST_URL = 'https://yzpclhuifquhfqpiwysh.supabase.co/functions/v1/external-forms-ingest';
+
+interface ExternalIntegrationRow {
+    capture_token: string;
+    capture_enabled: boolean;
+    capture_count: number;
+    last_capture_at: string | null;
+}
+
+// Painel "Integração Externa" — webhook nativo por clínica para o formulário do site do cliente
+// disparar leads direto no nosso banco (substitui a planilha/n8n "Webhook Forms | Leads Captados").
+function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
+    clinicId?: string;
+    clinicData: Partial<Clinic>;
+    systemSettings: any;
+}) {
+    const showToast = useToast();
+    const { clinic } = useSettings();
+    // O id confiável vem do useSettings (reflete a clínica em visualização); o prop é só fallback.
+    const effClinicId = clinicId || clinic?.id;
+    const [row, setRow] = useState<ExternalIntegrationRow | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [copied, setCopied] = useState(false);
+    const [regenerating, setRegenerating] = useState(false);
+    const [togglingCapture, setTogglingCapture] = useState(false);
+
+    // Carrega (ou cria, se ainda não existir) a linha de config desta clínica.
+    useEffect(() => {
+        let cancelled = false;
+        if (!effClinicId) { setLoading(true); return; }
+        (async () => {
+            setLoading(true);
+            const cols = 'capture_token, capture_enabled, capture_count, last_capture_at';
+            let { data, error } = await supabase
+                .from('clinic_external_integrations')
+                .select(cols)
+                .eq('clinic_id', effClinicId)
+                .maybeSingle();
+            if (!error && !data) {
+                // Primeira vez: cria a linha (token nasce por default no banco).
+                // upsert (não insert) para ser à prova de corrida — se outra montagem já criou,
+                // não estoura conflito de PK.
+                const ins = await supabase
+                    .from('clinic_external_integrations')
+                    .upsert({ clinic_id: effClinicId }, { onConflict: 'clinic_id' })
+                    .select(cols)
+                    .single();
+                data = ins.data as any;
+                error = ins.error as any;
+            }
+            if (!cancelled) {
+                if (error) showToast('Não foi possível carregar a Integração Externa.', 'error');
+                setRow((data as ExternalIntegrationRow) ?? null);
+                setLoading(false);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [effClinicId]);
+
+    const webhookUrl = row?.capture_token ? `${EXTERNAL_FORMS_INGEST_URL}?k=${row.capture_token}` : '';
+
+    const copyUrl = () => {
+        if (!webhookUrl) return;
+        navigator.clipboard.writeText(webhookUrl);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
+
+    const regenerate = async () => {
+        if (!effClinicId || regenerating) return;
+        if (!confirm('Gerar um novo endereço? O link atual deixa de funcionar imediatamente e o formulário precisará ser atualizado.')) return;
+        setRegenerating(true);
+        const novo = (crypto.randomUUID() + crypto.randomUUID()).replace(/-/g, '');
+        const { error } = await supabase
+            .from('clinic_external_integrations')
+            .update({ capture_token: novo })
+            .eq('clinic_id', effClinicId);
+        if (error) showToast('Falha ao gerar novo endereço.', 'error');
+        else { setRow(r => r ? { ...r, capture_token: novo } : r); showToast('Novo endereço gerado.', 'success'); }
+        setRegenerating(false);
+    };
+
+    const toggleCapture = async () => {
+        if (!clinicId || !row || togglingCapture) return;
+        setTogglingCapture(true);
+        const next = !row.capture_enabled;
+        const { error } = await supabase
+            .from('clinic_external_integrations')
+            .update({ capture_enabled: next })
+            .eq('clinic_id', clinicId);
+        if (error) showToast('Falha ao atualizar.', 'error');
+        else setRow(r => r ? { ...r, capture_enabled: next } : r);
+        setTogglingCapture(false);
+    };
+
+    const nomeTemplate = (() => {
+        const template = systemSettings?.form_default_name || 'formulario {{CLINIC_NAME}} {{PHONE}}';
+        return template.replace(/{{CLINIC_NAME}}/g, clinicData.name || 'clinica')
+                       .replace(/{{PHONE}}/g, clinicData.phone?.replace(/\D/g, '') || '')
+                       .toLowerCase();
+    })();
+
+    const copyChip = (e: React.MouseEvent, text: string) => {
+        navigator.clipboard.writeText(text);
+        const icon = (e.currentTarget as HTMLElement).querySelector('svg');
+        if (icon) { icon.classList.add('text-blue-500'); setTimeout(() => icon.classList.remove('text-blue-500'), 1500); }
+    };
+
+    return (
+        <div className="max-w-4xl mx-auto space-y-6">
+            <Card className="border border-blue-200 shadow-sm bg-white overflow-hidden">
+                <CardHeader className="bg-blue-50 border-b border-blue-200 pb-6 px-8">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm border border-blue-200">
+                                <Webhook className="w-6 h-6 text-blue-600" />
+                            </div>
+                            <div>
+                                <CardTitle className="text-xl font-bold text-slate-800">Webhook de Captação</CardTitle>
+                                <p className="text-[12px] text-slate-500 font-medium mt-0.5">Recebe leads do formulário do site do cliente direto no sistema.</p>
+                            </div>
+                        </div>
+                        {row && (
+                            <div className={cn(
+                                "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border bg-white",
+                                row.capture_enabled ? "text-emerald-700 border-emerald-300" : "text-slate-500 border-slate-300"
+                            )}>
+                                <span className={cn("w-2 h-2 rounded-full", row.capture_enabled ? "bg-emerald-500" : "bg-slate-400")}></span>
+                                {row.capture_enabled ? 'Ativo' : 'Pausado'}
+                            </div>
+                        )}
+                    </div>
+                </CardHeader>
+                <CardContent className="p-8 space-y-6">
+                    {loading ? (
+                        <div className="flex items-center justify-center py-10 text-slate-400">
+                            <Loader2 className="w-5 h-5 animate-spin mr-2" /> Carregando…
+                        </div>
+                    ) : !row ? (
+                        <div className="flex items-center gap-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm font-medium">
+                            <AlertTriangle className="w-4 h-4 shrink-0" /> Selecione uma clínica para configurar a integração.
+                        </div>
+                    ) : (
+                        <>
+                            {/* URL do Webhook */}
+                            <div className="space-y-4 p-5 bg-slate-50 border border-slate-100 rounded-2xl relative overflow-hidden">
+                                <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
+                                <label className="text-xs font-bold text-slate-700 flex items-center gap-2">
+                                    <Globe className="w-4 h-4 text-blue-500" />
+                                    Endereço do Webhook <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-md text-[9px] uppercase tracking-wider ml-2">Exclusivo desta clínica</span>
+                                </label>
+                                <p className="text-[12px] text-slate-500 font-medium leading-relaxed max-w-3xl">
+                                    Cole este endereço no destino (webhook) do formulário do site do cliente. Cada envio vira um lead novo, com ticket aberto e origem (UTMs) preservada. É um link secreto — trate como senha.
+                                </p>
+                                <div className="flex flex-col sm:flex-row gap-3 pt-1">
+                                    <div className="flex-1 px-4 py-3 bg-[#0d1117] border border-slate-800 rounded-xl flex items-center shadow-inner overflow-x-auto custom-scrollbar">
+                                        <code className="text-[13px] font-mono text-blue-400 whitespace-nowrap">{webhookUrl}</code>
+                                    </div>
+                                    <Button
+                                        variant="outline"
+                                        onClick={copyUrl}
+                                        className={cn(
+                                            "gap-2 shrink-0 h-10 sm:h-auto rounded-xl shadow-sm transition-all font-bold border",
+                                            copied ? "bg-blue-600 text-white border-blue-600" : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+                                        )}
+                                    >
+                                        {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />} {copied ? 'Copiado!' : 'Copiar Link'}
+                                    </Button>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-3 pt-1">
+                                    <button
+                                        onClick={toggleCapture}
+                                        disabled={togglingCapture}
+                                        className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-slate-900 transition-colors disabled:opacity-50"
+                                    >
+                                        {row.capture_enabled ? <ToggleRight className="w-5 h-5 text-emerald-500" /> : <ToggleLeft className="w-5 h-5 text-slate-400" />}
+                                        {row.capture_enabled ? 'Recebendo leads' : 'Recebimento pausado'}
+                                    </button>
+                                    <span className="text-slate-300">•</span>
+                                    <button
+                                        onClick={regenerate}
+                                        disabled={regenerating}
+                                        className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-rose-600 transition-colors disabled:opacity-50"
+                                    >
+                                        {regenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />} Gerar novo endereço
+                                    </button>
+                                    {typeof row.capture_count === 'number' && (
+                                        <>
+                                            <span className="text-slate-300">•</span>
+                                            <span className="text-xs font-medium text-slate-400">{row.capture_count} lead(s) recebido(s)</span>
+                                        </>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Nomenclatura dos campos */}
+                            <div className="space-y-4 p-5 bg-slate-50 border border-slate-100 rounded-2xl relative overflow-hidden">
+                                <div className="absolute top-0 left-0 w-1 h-full bg-slate-400"></div>
+                                <label className="text-xs font-bold text-slate-700 flex items-center gap-2">
+                                    <ClipboardList className="w-4 h-4 text-slate-500" />
+                                    Campos reconhecidos
+                                </label>
+                                <p className="text-[12px] text-slate-500 font-medium leading-relaxed max-w-3xl">
+                                    O sistema identifica os campos pelo nome (não precisa ser exato — reconhece variações). As UTMs vêm de um campo <code className="px-1 py-0.5 bg-slate-200 rounded text-[11px]">url</code> com a URL da página, ou de campos <code className="px-1 py-0.5 bg-slate-200 rounded text-[11px]">utm_source</code>, <code className="px-1 py-0.5 bg-slate-200 rounded text-[11px]">utm_campaign</code> etc.
+                                </p>
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                                    <div className="p-3.5 bg-white border border-slate-200 rounded-xl shadow-sm">
+                                        <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-1.5">Nome</p>
+                                        <code className="text-xs font-mono text-slate-700 font-bold block">nome, name</code>
+                                    </div>
+                                    <div className="p-3.5 bg-white border border-slate-200 rounded-xl shadow-sm">
+                                        <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-1.5">Telefone / WhatsApp</p>
+                                        <code className="text-xs font-mono text-slate-700 font-bold block">telefone, whatsapp, celular, phone</code>
+                                    </div>
+                                    <div className="p-3.5 bg-white border border-slate-200 rounded-xl shadow-sm">
+                                        <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-1.5">E-mail</p>
+                                        <code className="text-xs font-mono text-slate-700 font-bold block">email, e-mail</code>
+                                    </div>
+                                </div>
+                                <div className="p-3.5 bg-white border border-slate-200 rounded-xl shadow-sm hover:border-blue-300 transition-colors cursor-pointer"
+                                     onClick={(e) => copyChip(e, nomeTemplate)}>
+                                    <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-1.5 flex justify-between items-center">
+                                        Sugestão de nome do formulário
+                                        <Copy className="w-3.5 h-3.5 text-slate-300" />
+                                    </p>
+                                    <code className="text-xs font-mono text-slate-700 font-bold truncate block">{nomeTemplate}</code>
+                                </div>
+                            </div>
+                        </>
+                    )}
+                </CardContent>
+            </Card>
+        </div>
+    );
+}
+
 function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSaveClinic, onConnect, onCancel, onDisconnect, connecting, onCopyLink, linkCopied, activeIntTab }: {
     data: Partial<WhatsappInstance>,
     onChange: (updates: Partial<WhatsappInstance>) => void,
@@ -1708,7 +1961,7 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
     connecting: boolean,
     onCopyLink: () => void,
     linkCopied: boolean,
-    activeIntTab: 'whatsapp' | 'meta' | 'google'
+    activeIntTab: 'whatsapp' | 'meta' | 'google' | 'external'
 }) {
     const { clinic, refetch, systemSettings } = useSettings();
     const [groupName, setGroupName] = useState('Informativos do Agente IA');
@@ -2406,6 +2659,10 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                 </CardContent>
             </Card>
                 </div>
+            )}
+
+            {activeIntTab === 'external' && (
+                <ExternalIntegrationSettings clinicId={clinicData.id} clinicData={clinicData} systemSettings={systemSettings} />
             )}
 
 

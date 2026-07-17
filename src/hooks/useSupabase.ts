@@ -1505,7 +1505,8 @@ export interface Clinic {
   google_ad_account_id?: string | null;
   google_ad_mcc_id?: string | null;
   google_ad_mcc_token?: string | null;
-  features?: { feature_followup?: boolean; feature_ia?: boolean; agenda_via_funil?: boolean } | null;
+  // feature_chat_send é opt-in (só vale com === true); as demais são opt-out (!== false).
+  features?: { feature_followup?: boolean; feature_ia?: boolean; agenda_via_funil?: boolean; feature_chat_send?: boolean } | null;
   meta_status?: 'none' | 'inactive' | 'active';
   google_status?: 'none' | 'inactive' | 'active';
   site_status?: 'none' | 'inactive' | 'active';
@@ -1941,79 +1942,32 @@ export function useChatMessages(leadId?: string, leadPhone?: string | null) {
     return () => { supabase.removeChannel(channel); };
   }, [fetch, activeClinicId, leadId, leadPhone]);
 
-  const send = async (msg: Partial<ChatMessage>) => {
-    if (!activeClinicId) return null;
-    
-    let rawPhone = msg.phone || null;
+  // Envia texto ao lead pelo WhatsApp da clínica via edge `chat-send` (uazapi) — a edge
+  // é quem grava em chat_messages, com sender='human'. Gravar aqui pelo cliente colocaria
+  // a mensagem na conversa SEM ter sido entregue ao lead. A mensagem aparece na tela pelo
+  // realtime de INSERT (que já deduplica por id), então não há inserção otimista.
+  // Erros são devolvidos ao chamador para a UI decidir; a Central de Erros registra o lado servidor.
+  const send = async (text: string): Promise<{ ok: boolean; error?: string }> => {
+    if (!activeClinicId) return { ok: false, error: 'sem_clinica' };
+    const clean = (text || '').trim();
+    if (!clean) return { ok: false, error: 'texto_vazio' };
 
-    // If the phone is actually a session_id (clinicPhone + leadPhone concatenated),
-    // extract only the lead phone by stripping the clinic phone prefix
+    // leadPhone pode vir como session_id (telefone da clínica + telefone do lead concatenados).
+    let rawPhone = leadPhone || null;
     if (rawPhone && clinicPhone && rawPhone.startsWith(clinicPhone) && rawPhone.length > clinicPhone.length) {
       rawPhone = rawPhone.slice(clinicPhone.length);
     }
+    if (!rawPhone) return { ok: false, error: 'sem_telefone' };
 
-    const leadPhone = rawPhone;
-    const finalSessionId = msg.session_id || (clinicPhone && leadPhone ? `${clinicPhone}${leadPhone}` : null);
-
-    // Prepare message object to ensure it matches the JSONB structure
-    const messageObject = msg.message || {
-      role: 'user',
-      content: msg.message?.content || '' // Fallback if someone tried to pass partially
-    };
-
-    // If content was passed directly (legacy support while transitioning), wrap it
-    if ((msg as any).content && !msg.message) {
-      messageObject.content = (msg as any).content;
+    const { data: res, error: fnError } = await supabase.functions.invoke('chat-send', {
+      body: { clinic_id: activeClinicId, lead_id: leadId ?? null, phone: rawPhone, text: clean },
+    });
+    if (fnError || !(res as any)?.ok) {
+      const code = (res as any)?.error || fnError?.message || 'falha_no_envio';
+      setError(code);
+      return { ok: false, error: code };
     }
-
-    const insertData: any = { 
-      clinic_id: activeClinicId, 
-      direction: 'outbound', 
-      sender: 'user',
-      lead_id: leadId || msg.lead_id,
-      session_id: finalSessionId,
-      message: messageObject,
-      phone: leadPhone
-    };
-
-    // Auto-create lead if missing and phone is present
-    if (!insertData.lead_id && leadPhone) {
-      // 1. Check if lead already exists for this phone
-      const { data: existingLead } = await supabase
-        .from('leads')
-        .select('id')
-        .eq('clinic_id', activeClinicId)
-        .eq('phone', leadPhone)
-        .maybeSingle();
-
-      if (existingLead) {
-        insertData.lead_id = existingLead.id;
-      } else if (leadPhone !== clinicPhone) {
-        // 2. Create new lead if not found and NOT the clinic phone
-        const { data: newLead, error: leadError } = await supabase
-          .from('leads')
-          .insert({
-            clinic_id: activeClinicId,
-            name: `Lead ${leadPhone}`,
-            phone: leadPhone,
-            source: null
-          })
-          .select()
-          .single();
-        
-        if (!leadError && newLead) {
-          insertData.lead_id = newLead.id;
-        }
-      }
-    }
-
-    const { data, error } = await supabase
-      .from('chat_messages')
-      .insert(insertData)
-      .select()
-      .single();
-    if (error) { setError(error.message); return null; }
-    return data;
+    return { ok: true };
   };
 
   return { data, loading, error, refetch: fetch, send };

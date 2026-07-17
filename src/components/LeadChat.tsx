@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useChatMessages, Lead, useLeads, useFunnelStages, useConversions } from "../hooks/useSupabase";
 import { cn } from "@/src/lib/utils";
 import { ChatThread } from "./ChatThread";
+import { ChatComposer } from "./ChatComposer";
 
 // Reexports — outros módulos importam daqui (ex.: AISecretary)
 export { extractMessageText, detectMedia, MediaBubble } from "./ChatThread";
@@ -22,7 +23,7 @@ interface LeadChatProps {
 }
 
 export function LeadChat({ lead, onClose, isDragging = false, ticketId, currentStageId, onGanho, onPerdido, onStageChange, onEdit }: LeadChatProps) {
-  const { data: messages, loading } = useChatMessages(lead.id, lead.phone);
+  const { data: messages, loading, send } = useChatMessages(lead.id, lead.phone);
   const { update: updateLead } = useLeads();
   const { byLead: conversionsByLead } = useConversions();
   const [showConversions, setShowConversions] = useState(false);
@@ -161,6 +162,12 @@ export function LeadChat({ lead, onClose, isDragging = false, ticketId, currentS
         loading={loading}
         leadAvatarUrl={lead.avatar_url}
         leadName={lead.name}
+      />
+
+      <ChatComposer
+        onSend={send}
+        disabled={!lead.phone || !!lead.whatsapp_invalid}
+        disabledReason={lead.whatsapp_invalid ? "Este número não está no WhatsApp." : !lead.phone ? "Este lead não tem telefone." : undefined}
       />
     </motion.div>
 

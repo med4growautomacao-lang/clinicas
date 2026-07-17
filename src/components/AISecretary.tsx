@@ -46,6 +46,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { LeadKanban } from "./LeadKanban";
 import { ComercialDashboard } from "./ComercialDashboard";
 import { ChatThread } from "./ChatThread";
+import { ChatComposer } from "./ChatComposer";
 import { useLeads, useNotLeads, useChatMessages, useSettings, useFunnelStages, usePromptTemplates, FunnelStage, useFollowupSteps, FollowupStep } from "../hooks/useSupabase";
 import { NotLeadPanel, NotLeadButton } from "./NotLeadPanel";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
@@ -1692,7 +1693,7 @@ function ChatsView() {
     return searchResults.filter(l => !l.is_not_lead && matchesSearch(leadSearch, { name: l.name, email: l.email, phone: l.phone }, ['phone']));
   }, [leads, leadSearch, searchResults]);
   const selectedLead = leads.find(l => l.id === selectedLeadId) || searchResults.find(l => l.id === selectedLeadId);
-  const { data: messages, loading: messagesLoading } = useChatMessages(selectedLeadId || undefined, selectedLead?.phone);
+  const { data: messages, loading: messagesLoading, send: sendMessage } = useChatMessages(selectedLeadId || undefined, selectedLead?.phone);
 
   // Auto-select first lead if none selected (ignora Não Leads, que não são listados)
   useEffect(() => {
@@ -1993,6 +1994,12 @@ function ChatsView() {
               leadName={selectedLead.name}
               emptyTitle="Aguardando primeira mensagem..."
               className="bg-slate-50/20"
+            />
+
+            <ChatComposer
+              onSend={sendMessage}
+              disabled={!selectedLead.phone || !!selectedLead.whatsapp_invalid}
+              disabledReason={selectedLead.whatsapp_invalid ? "Este número não está no WhatsApp." : !selectedLead.phone ? "Este lead não tem telefone." : undefined}
             />
           </>
         )}

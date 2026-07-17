@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { DateRangePicker } from "./DateRangePicker";
 import {
   Card,
@@ -79,6 +79,7 @@ import { FilterChips } from "./filters/FilterChips";
 import { GranularityToggle } from "./filters/GranularityToggle";
 import { DateRangePopover } from "./filters/DateRangePopover";
 import { type Period, RANGE_PRESETS } from "../lib/dateRange";
+import { useAuth } from "../contexts/AuthContext";
 
 type Platform = 'meta_ads' | 'google_ads' | 'no_track';
 
@@ -108,6 +109,38 @@ const METRICS_CONFIG = [
   { id: 'lead_to_conv_rate', label: 'Lead p/ Conv.', color: '#06b6d4', type: 'percent', icon: Activity, bgColor: 'bg-cyan-50 text-cyan-600' },
   { id: 'apt_to_conv_rate', label: 'Agend. p/ Conv.', color: '#8b5cf6', type: 'percent', icon: Activity, bgColor: 'bg-purple-50 text-purple-600' },
 ];
+
+// --- Persistência da config de exibição (cards de métricas + Funil de Vendas) POR CLÍNICA ---
+// As etapas do Funil têm UUID próprio de cada clínica; com uma chave global, configurar uma
+// clínica sobrescrevia a config das outras — o que aparecia como "reset" ao trocar de clínica.
+// Escopamos cada chave por activeClinicId (mesma fonte do AuthContext: sessionStorage). Na 1ª
+// leitura caímos na chave legada global, para não zerar quem já tinha config salva.
+const scopeCfgKey = (base: string) => `${base}::${sessionStorage.getItem('activeClinicId') ?? 'none'}`;
+const readCfg = (base: string): string | null =>
+  localStorage.getItem(scopeCfgKey(base)) ?? localStorage.getItem(base);
+const writeCfg = (base: string, value: string) => localStorage.setItem(scopeCfgKey(base), value);
+
+const loadVisibleMetrics = (base: string): string[] => {
+  const saved = readCfg(base);
+  return saved ? JSON.parse(saved) : METRICS_CONFIG.map(m => m.id);
+};
+const loadMetricsOrder = (base: string): string[] => {
+  const initial = METRICS_CONFIG.map(m => m.id);
+  const saved = readCfg(base);
+  if (!saved) return initial;
+  const parsed: string[] = JSON.parse(saved);
+  const valid = parsed.filter((id) => initial.includes(id));
+  const missing = initial.filter((id) => !valid.includes(id));
+  return [...valid, ...missing];
+};
+const loadFunnelOrder = (): string[] => {
+  const saved = readCfg('mkt_funnel_order');
+  return saved ? JSON.parse(saved) : [];
+};
+const loadFunnelHidden = (): string[] | null => {
+  const saved = readCfg('mkt_funnel_hidden');
+  return saved ? JSON.parse(saved) : null;
+};
 
 // Paleta de cores (hex) para as etapas do Funil de Vendas configurável
 const FUNNEL_PALETTE = ['#0d9488', '#8b5cf6', '#10b981', '#0ea5e9', '#f59e0b', '#ec4899', '#6366f1', '#ef4444'];
@@ -213,6 +246,7 @@ function buildDimTrend(rows: any[], dim: string, stageSet: Set<string>, periods:
 }
 
 export function MarketingAnalytics() {
+  const { activeClinicId } = useAuth();
   const [period, setPeriod] = useState<Period>('dia');
   const [viewMode, setViewMode] = useState<'dashboard' | 'table'>(() => (localStorage.getItem('marketingViewMode') as any) || 'dashboard');
   const [dateRange, setDateRange] = useState({
@@ -256,45 +290,29 @@ export function MarketingAnalytics() {
   const [selectedPlatform, setSelectedPlatform] = useState<string[]>([]);
   const [selectedChannel, setSelectedChannel] = useState<string[]>([]);
 
-  const [dashboardVisibleMetrics, setDashboardVisibleMetrics] = useState<string[]>(() => {
-    const saved = localStorage.getItem('mkt_dash_visible_metrics');
-    return saved ? JSON.parse(saved) : METRICS_CONFIG.map(m => m.id);
-  });
-
-  const [dashboardMetricsOrder, setDashboardMetricsOrder] = useState<string[]>(() => {
-    const saved = localStorage.getItem('mkt_dash_metrics_order');
-    const initial = METRICS_CONFIG.map(m => m.id);
-    if (!saved) return initial;
-    const parsed = JSON.parse(saved);
-    const valid = parsed.filter((id: string) => initial.includes(id));
-    const missing = initial.filter(id => !valid.includes(id));
-    return [...valid, ...missing];
-  });
-
-  const [tableVisibleMetrics, setTableVisibleMetrics] = useState<string[]>(() => {
-    const saved = localStorage.getItem('mkt_table_visible_metrics');
-    return saved ? JSON.parse(saved) : METRICS_CONFIG.map(m => m.id);
-  });
-
-  const [tableMetricsOrder, setTableMetricsOrder] = useState<string[]>(() => {
-    const saved = localStorage.getItem('mkt_table_metrics_order');
-    const initial = METRICS_CONFIG.map(m => m.id);
-    if (!saved) return initial;
-    const parsed = JSON.parse(saved);
-    const valid = parsed.filter((id: string) => initial.includes(id));
-    const missing = initial.filter(id => !valid.includes(id));
-    return [...valid, ...missing];
-  });
+  const [dashboardVisibleMetrics, setDashboardVisibleMetrics] = useState<string[]>(() => loadVisibleMetrics('mkt_dash_visible_metrics'));
+  const [dashboardMetricsOrder, setDashboardMetricsOrder] = useState<string[]>(() => loadMetricsOrder('mkt_dash_metrics_order'));
+  const [tableVisibleMetrics, setTableVisibleMetrics] = useState<string[]>(() => loadVisibleMetrics('mkt_table_visible_metrics'));
+  const [tableMetricsOrder, setTableMetricsOrder] = useState<string[]>(() => loadMetricsOrder('mkt_table_metrics_order'));
 
   // Configuração das etapas do Funil de Vendas (escolhidas a partir das etapas do funil de oportunidades)
-  const [funnelStagesOrder, setFunnelStagesOrder] = useState<string[]>(() => {
-    const saved = localStorage.getItem('mkt_funnel_order');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [funnelHiddenStages, setFunnelHiddenStages] = useState<string[] | null>(() => {
-    const saved = localStorage.getItem('mkt_funnel_hidden');
-    return saved ? JSON.parse(saved) : null;
-  });
+  const [funnelStagesOrder, setFunnelStagesOrder] = useState<string[]>(() => loadFunnelOrder());
+  const [funnelHiddenStages, setFunnelHiddenStages] = useState<string[] | null>(() => loadFunnelHidden());
+
+  // Ao trocar de clínica (agência), recarrega a config salva daquela clínica — cada uma tem a
+  // sua. Sem isso, o estado continuaria com a config da clínica anterior. Pula a 1ª execução
+  // (os initializers acima já leram a config correta da clínica atual).
+  const cfgClinicRef = useRef(activeClinicId);
+  useEffect(() => {
+    if (cfgClinicRef.current === activeClinicId) return;
+    cfgClinicRef.current = activeClinicId;
+    setDashboardVisibleMetrics(loadVisibleMetrics('mkt_dash_visible_metrics'));
+    setDashboardMetricsOrder(loadMetricsOrder('mkt_dash_metrics_order'));
+    setTableVisibleMetrics(loadVisibleMetrics('mkt_table_visible_metrics'));
+    setTableMetricsOrder(loadMetricsOrder('mkt_table_metrics_order'));
+    setFunnelStagesOrder(loadFunnelOrder());
+    setFunnelHiddenStages(loadFunnelHidden());
+  }, [activeClinicId]);
 
   // Padrão: o topo do funil é "Contato via WhatsApp". As etapas de entrada
   // (Sincronização/Forms) entram ocultas por padrão — todo lead delas passa
@@ -315,7 +333,7 @@ export function MarketingAnalytics() {
       ? effectiveFunnelHidden.filter(x => x !== id)
       : [...effectiveFunnelHidden, id];
     setFunnelHiddenStages(next);
-    localStorage.setItem('mkt_funnel_hidden', JSON.stringify(next));
+    writeCfg('mkt_funnel_hidden', JSON.stringify(next));
   };
 
   const moveFunnelStage = (id: string, direction: 'up' | 'down') => {
@@ -327,18 +345,18 @@ export function MarketingAnalytics() {
     const next = [...cur];
     [next[i], next[j]] = [next[j], next[i]];
     setFunnelStagesOrder(next);
-    localStorage.setItem('mkt_funnel_order', JSON.stringify(next));
+    writeCfg('mkt_funnel_order', JSON.stringify(next));
   };
 
   const toggleMetric = (id: string, view: 'dashboard' | 'table') => {
     if (view === 'dashboard') {
       const next = dashboardVisibleMetrics.includes(id) ? dashboardVisibleMetrics.filter(m => m !== id) : [...dashboardVisibleMetrics, id];
       setDashboardVisibleMetrics(next);
-      localStorage.setItem('mkt_dash_visible_metrics', JSON.stringify(next));
+      writeCfg('mkt_dash_visible_metrics', JSON.stringify(next));
     } else {
       const next = tableVisibleMetrics.includes(id) ? tableVisibleMetrics.filter(m => m !== id) : [...tableVisibleMetrics, id];
       setTableVisibleMetrics(next);
-      localStorage.setItem('mkt_table_visible_metrics', JSON.stringify(next));
+      writeCfg('mkt_table_visible_metrics', JSON.stringify(next));
     }
   };
 
@@ -351,7 +369,7 @@ export function MarketingAnalytics() {
       const next = [...dashboardMetricsOrder];
       [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
       setDashboardMetricsOrder(next);
-      localStorage.setItem('mkt_dash_metrics_order', JSON.stringify(next));
+      writeCfg('mkt_dash_metrics_order', JSON.stringify(next));
     } else {
       const index = tableMetricsOrder.indexOf(id);
       if (index === -1) return;
@@ -360,7 +378,7 @@ export function MarketingAnalytics() {
       const next = [...tableMetricsOrder];
       [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
       setTableMetricsOrder(next);
-      localStorage.setItem('mkt_table_metrics_order', JSON.stringify(next));
+      writeCfg('mkt_table_metrics_order', JSON.stringify(next));
     }
   };
 

@@ -1,0 +1,16 @@
+-- =============================================================================
+-- C5-b fix — mídia anexada ANTES do insert (realtime só escuta INSERT)
+--
+-- Problema: o realtime da tela (useChatMessages) só escuta INSERT. A mídia era
+-- anexada via UPDATE pós-insert (attach_chat_media) → a tela não recebia o UPDATE
+-- → mídia nova aparecia como placeholder de texto até um refetch.
+--
+-- Fix: ingest_wa_message ganhou params de mídia (p_media_kind/mime/path/filename/
+-- duration). A edge wa-inbound baixa+sobe a mídia ANTES e passa esses campos, então
+-- a mensagem NASCE completa e o INSERT do realtime já entrega o player.
+-- attach_chat_media (UPDATE) permanece como fallback/uso avulso.
+--
+-- Aplicada via MCP (ingest_wa_message_with_media). O overload antigo de 7 params
+-- foi DROPADO (evitar ambiguidade de função). Rollback: recriar o de 7 params.
+-- =============================================================================
+-- (DDL completo no histórico de migrations remoto)

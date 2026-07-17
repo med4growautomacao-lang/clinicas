@@ -1,0 +1,15 @@
+-- =============================================================================
+-- Fase C5-b — attach_chat_media: anexa mídia a uma mensagem já persistida
+--
+-- Aplicada via MCP em 17/07. O hub wa-inbound (edge) baixa a mídia da uazapi
+-- (POST /message/download -> {fileURL,mimetype}; GET fileURL -> bytes), sobe no
+-- bucket privado chat-media em <clinic_id>/<wa_message_id>.<ext> e chama esta RPC
+-- para MERGE (||) dos campos que detectMedia/MediaBubble (B3) leem:
+--   message.fileURL = <path storage> (não-http → resolvido p/ signed URL na UI),
+--   message.mimetype, message.kind, filename?, duration? — + espelho em metadata.
+-- content textual é preservado como fallback do player.
+-- REVOKE anon/authenticated (só service role, via edge).
+--
+-- Rollback: supabase/_rollbacks/20260717000015_attach_chat_media_ROLLBACK.sql
+-- =============================================================================
+-- (DDL completo no histórico de migrations remoto)

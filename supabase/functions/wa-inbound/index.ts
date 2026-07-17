@@ -12,8 +12,12 @@
 // Gatilhos de etapa NÃO são fan-out daqui: disparam por trigger no INSERT
 // (trg_zz_apply_stage_rules) — agnóstico de transporte.
 //
-// v1 = texto. Mídia (download→chat-media→transcrição) entra na C5-b; até lá,
-// mensagens não-texto são persistidas com placeholder para nada se perder.
+// C5-b: mídia (áudio/imagem/vídeo/doc) é baixada da uazapi (POST /message/download
+// -> {fileURL,mimetype}; GET fileURL -> bytes), subida no bucket PRIVADO chat-media
+// e anexada à mensagem (attach_chat_media) nos campos que o MediaBubble renderiza.
+// A transcrição para a IA (Gemini) fica para a próxima camada — hoje a IA recebe
+// o placeholder textual. Persistência primeiro, mídia depois: falha de mídia NUNCA
+// perde a mensagem (fica como placeholder + log na Central).
 //
 // Auth: ?k=<WA_INBOUND_SECRET> na URL configurada na uazapi (que não envia
 // headers). Retorna 500 em falha de persistência (uazapi reenvia; o dedup torna
@@ -22,9 +26,26 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+const UAZAPI_BASE = "https://med4growautomacao.uazapi.com";
 const HUB_AI_WEBHOOK_URL = Deno.env.get("HUB_AI_WEBHOOK_URL") ?? "";
 const HUB_AI_SECRET = Deno.env.get("HUB_AI_SECRET") ?? "";
 const WA_INBOUND_SECRET = Deno.env.get("WA_INBOUND_SECRET") ?? "";
+
+function kindFromMime(mime: string): "image" | "audio" | "video" | "document" {
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("audio/")) return "audio";
+  if (mime.startsWith("video/")) return "video";
+  return "document";
+}
+function extFromMime(mime: string): string {
+  const map: Record<string, string> = {
+    "audio/ogg": "ogg", "audio/opus": "ogg", "audio/mpeg": "mp3", "audio/mp4": "m4a", "audio/amr": "amr", "audio/wav": "wav",
+    "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif",
+    "video/mp4": "mp4", "video/3gpp": "3gp", "video/quicktime": "mov",
+    "application/pdf": "pdf",
+  };
+  return map[mime.split(";")[0].trim()] || "bin";
+}
 
 serve(async (req) => {
   const json = (b: unknown, s = 200) =>
@@ -55,7 +76,7 @@ serve(async (req) => {
   const isText = (msg.type === "text" || msg.messageType === "Conversation" || msg.messageType === "ExtendedTextMessage");
   const content = isText
     ? String(msg.text ?? msg.content ?? "")
-    : `[${msg.messageType || msg.mediaType || "mídia"} recebida]`; // C5-b: mídia real
+    : (String(msg.caption ?? "").trim() || `[${msg.messageType || msg.mediaType || "mídia"} recebida]`);
 
   const direction = msg.fromMe ? "outbound" : "inbound";
   const waMessageId = String(msg.messageid || msg.id || "");
@@ -75,7 +96,60 @@ serve(async (req) => {
     } catch (_e) { /* nunca derrubar a resposta por causa do log */ }
   };
 
-  // (2) PERSISTIR — se falhar, 500 (uazapi reenvia; dedup segura o replay)
+  // (2a) Mídia PRIMEIRO (antes do insert): baixa da uazapi → sobe no bucket privado.
+  // Assim a mensagem NASCE com a mídia e o realtime (que só escuta INSERT) já
+  // entrega o player — sem depender de UPDATE pós-insert (que a tela não recebe).
+  // Falha aqui NÃO impede a persistência: cai como placeholder + log.
+  let mediaKind: string | null = null, mediaMime: string | null = null,
+      mediaPath: string | null = null, mediaFilename: string | null = null;
+  if (!isText && waMessageId) {
+    try {
+      const { data: inst } = await supabase.from("whatsapp_instances")
+        .select("clinic_id").eq("api_token", String(body.token || "")).maybeSingle();
+      const clinicId = (inst as any)?.clinic_id ?? null;
+      if (clinicId) {
+        const dl = await fetch(`${UAZAPI_BASE}/message/download`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "token": String(body.token || "") },
+          body: JSON.stringify({ id: waMessageId }),
+        });
+        const dlJson = await dl.json().catch(() => ({}));
+        const fileURL = (dlJson as any)?.fileURL;
+        const mime = String((dlJson as any)?.mimetype || "");
+        if (fileURL && mime) {
+          const binResp = await fetch(fileURL);
+          if (binResp.ok) {
+            const bytes = new Uint8Array(await binResp.arrayBuffer());
+            const path = `${clinicId}/${waMessageId}.${extFromMime(mime)}`;
+            const { error: upErr } = await supabase.storage.from("chat-media")
+              .upload(path, bytes, { contentType: mime, upsert: true });
+            if (upErr) {
+              await registrarErro("media_upload_failed", "Falha ao subir mídia no bucket",
+                { detail: upErr.message, wa_message_id: waMessageId, mime }, clinicId);
+            } else {
+              mediaKind = kindFromMime(mime); mediaMime = mime; mediaPath = path;
+              mediaFilename = msg.filename ?? null;
+            }
+          } else {
+            await registrarErro("media_download_failed", "Falha ao baixar bytes da mídia",
+              { status: binResp.status, wa_message_id: waMessageId }, clinicId);
+          }
+        } else {
+          // Containers sem mídia própria (ex.: AlbumMessage) NÃO são erro.
+          const errTxt = String((dlJson as any)?.error || "");
+          if (!/downloadable|no media|not.*media/i.test(errTxt)) {
+            await registrarErro("media_no_url", "uazapi /message/download sem fileURL/mimetype",
+              { wa_message_id: waMessageId, detail: errTxt }, clinicId);
+          }
+        }
+      }
+    } catch (e) {
+      await registrarErro("media_error", "Erro ao processar mídia recebida",
+        { detail: String(e), wa_message_id: waMessageId }, null);
+    }
+  }
+
+  // (2b) PERSISTIR (com a mídia já pronta) — se falhar, 500 (uazapi reenvia; dedup segura o replay)
   const { data: res, error: rpcErr } = await supabase.rpc("ingest_wa_message", {
     p_instance_token: String(body.token || ""),
     p_direction: direction,
@@ -84,6 +158,10 @@ serve(async (req) => {
     p_wa_message_id: waMessageId || null,
     p_lead_name: leadName || null,
     p_sender: "human",
+    p_media_kind: mediaKind,
+    p_media_mime: mediaMime,
+    p_media_path: mediaPath,
+    p_media_filename: mediaFilename,
   });
   const r = res as any;
   if (rpcErr || !r?.success) {
@@ -93,6 +171,7 @@ serve(async (req) => {
     return json({ ok: false, error: rpcErr?.message || r?.error_code || "persist_failed" }, 500);
   }
   if (r.duplicate) return json({ ok: true, duplicate: true });
+  const mediaAttached = !!mediaPath;
 
   // (3) Fan-out: Agente IA (fire-and-forget lógico; SEM retry — o buffer de turno
   // concatena e um retry duplicaria texto no turno).
@@ -136,6 +215,7 @@ serve(async (req) => {
     lead_id: r.lead_id,
     lead_created: r.lead_created,
     message_id: r.message_id,
+    media_attached: mediaAttached,
     ai_forwarded: aiForwarded,
     ai_skipped_reason: r.forward_ai ? null : "gates",
   });

@@ -25,6 +25,13 @@ const UAZAPI_BASE = Deno.env.get('UAZAPI_BASE_URL') ?? 'https://med4growautomaca
 const UAZAPI_ADMIN_TOKEN = Deno.env.get('UAZAPI_ADMIN_TOKEN') ?? '';
 const N8N_INBOUND_URL = Deno.env.get('N8N_INBOUND_WEBHOOK_URL') ?? '';
 
+// Hub nativo de ingestão (wa-inbound). Clínicas com whatsapp_instances.inbound_route
+// = 'hub' recebem 'messages' AQUI em vez do n8n. O secret é o mesmo do hub.
+const WA_INBOUND_SECRET = Deno.env.get('WA_INBOUND_SECRET') ?? '';
+const WA_INBOUND_URL = WA_INBOUND_SECRET
+  ? `${Deno.env.get('SUPABASE_URL') ?? ''}/functions/v1/wa-inbound?k=${WA_INBOUND_SECRET}`
+  : '';
+
 // Tracking de anúncio: instância nova nasce apontando para a edge NATIVA, não mais para o n8n.
 // Sem isto, o secret N8N_TRACKING_WEBHOOK_URL faria cada cliente novo renascer no fluxo antigo —
 // o que perde o clique inteiro sempre que a Graph API recusa o token (ver ctwa-tracking).
@@ -223,7 +230,8 @@ async function ensureUazapiInstance(
 // URLs nao reconhecidos (configs custom do cliente) ficam intactos.
 async function ensureUazapiWebhooks(
   api_token: string,
-): Promise<{ created: string[]; removed_duplicates: { url: string; ids: string[] }[] }> {
+  route: 'n8n' | 'hub' = 'n8n',
+): Promise<{ created: string[]; removed_duplicates: { url: string; ids: string[] }[]; removed_stale: string[] }> {
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
   const eventsUrl = `${SUPABASE_URL}/functions/v1/uazapi-events`;
 
@@ -235,14 +243,28 @@ async function ensureUazapiWebhooks(
     existing = [];
   }
 
+  // Destino do evento 'messages': hub nativo (wa-inbound) ou n8n, por clínica.
+  const messagesUrl = route === 'hub' ? WA_INBOUND_URL : N8N_INBOUND_URL;
+  // URL que NÃO deve mais existir para esta rota (evita dupla entrega na reconexão).
+  const staleUrl = route === 'hub' ? N8N_INBOUND_URL : WA_INBOUND_URL;
+
   const desired = [
     { url: eventsUrl, events: ['connection'], excludeMessages: [] as string[] },
-    ...(N8N_INBOUND_URL     ? [{ url: N8N_INBOUND_URL,     events: ['messages'], excludeMessages: ['wasSentByApi'] }] : []),
-    ...(CTWA_TRACKING_URL   ? [{ url: CTWA_TRACKING_URL,   events: ['messages'], excludeMessages: ['wasSentByApi'] }] : []),
+    ...(messagesUrl        ? [{ url: messagesUrl,        events: ['messages'], excludeMessages: ['wasSentByApi'] }] : []),
+    ...(CTWA_TRACKING_URL  ? [{ url: CTWA_TRACKING_URL,  events: ['messages'], excludeMessages: ['wasSentByApi'] }] : []),
   ];
 
   const created: string[] = [];
   const removed_duplicates: { url: string; ids: string[] }[] = [];
+  const removed_stale: string[] = [];
+
+  // Remove o webhook da rota antiga (n8n<->hub), se existir — self-healing.
+  if (staleUrl) {
+    for (const w of existing.filter((w: any) => w?.url === staleUrl && w?.id)) {
+      const res = await uazapi('/webhook', { method: 'POST', token: api_token, body: { action: 'delete', id: w.id } });
+      if (res.ok) removed_stale.push(w.id);
+    }
+  }
 
   for (const want of desired) {
     const matches = existing.filter((w: any) => w?.url === want.url && w?.id);
@@ -274,7 +296,7 @@ async function ensureUazapiWebhooks(
     // matches.length === 1 -> idempotente, nao faz nada
   }
 
-  return { created, removed_duplicates };
+  return { created, removed_duplicates, removed_stale };
 }
 
 function isWithinCooldown(row: InstanceRow): boolean {
@@ -312,10 +334,14 @@ async function handleStart(supa: SupabaseClient, row: InstanceRow, source: strin
   }
   row = ensured.row;
 
-  // Configura webhooks (idempotente: cria os que faltam, dedup os duplicados)
+  // Configura webhooks (idempotente: cria os que faltam, dedup os duplicados).
+  // A rota de ingestão ('messages') é por-clínica: hub nativo (wa-inbound) ou n8n.
   try {
-    const whResult = await ensureUazapiWebhooks(ensured.api_token);
-    if (whResult.created.length > 0 || whResult.removed_duplicates.length > 0) {
+    const { data: routeRow } = await supa
+      .from('whatsapp_instances').select('inbound_route').eq('id', row.id).maybeSingle();
+    const route: 'n8n' | 'hub' = routeRow?.inbound_route === 'hub' ? 'hub' : 'n8n';
+    const whResult = await ensureUazapiWebhooks(ensured.api_token, route);
+    if (whResult.created.length > 0 || whResult.removed_duplicates.length > 0 || whResult.removed_stale.length > 0) {
       await logEvent(supa, {
         clinic_id: row.clinic_id, instance_id: row.id, event_type: 'webhook_ensured', source,
         payload: whResult,

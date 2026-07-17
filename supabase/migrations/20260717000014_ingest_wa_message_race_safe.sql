@@ -1,0 +1,15 @@
+-- =============================================================================
+-- Fix (canário C3): criação de lead race-safe no ingest_wa_message
+--
+-- Bug pego pelo canário em São Lucas: rajada de mensagens de um lead NOVO faz
+-- duas execuções paralelas passarem pelo SELECT (nada encontrado) e ambas
+-- tentarem INSERT → colisão em leads_clinic_id_phone_key → persist_failed (500)
+-- → mensagem só persistia no retry do uazapi.
+--
+-- Fix: INSERT do lead agora trata unique_violation re-buscando o lead existente
+-- (por phone cru OU normalizado). A corrida vira no-op idempotente.
+--
+-- Corpo canônico aplicado via MCP (migration ingest_wa_message_race_safe_lead).
+-- Rollback: recriar a versão anterior (20260717000012) — mas NÃO reverter com
+-- canário ativo (reintroduz a perda de mensagem em rajada).
+-- =============================================================================

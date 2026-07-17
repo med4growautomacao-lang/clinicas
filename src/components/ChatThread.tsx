@@ -1,8 +1,9 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Bot, User, Loader2, MessageSquare, FileText, Download } from "lucide-react";
 import { format, isToday, isYesterday } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/src/lib/utils";
+import { supabase } from "../lib/supabase";
 import type { ChatMessage } from "../hooks/useSupabase";
 
 // ─── Texto: extrai content de mensagens em qualquer formato ──────────────────
@@ -72,12 +73,19 @@ export function isToolTrace(message: any): boolean {
 }
 
 // ─── Mídia: detecta áudio/imagem/vídeo/documento via fileURL + mimetype ──────
+// `fileURL` pode ser uma URL pública (http) OU um path do bucket PRIVADO chat-media
+// (ingestão nativa — a mídia do paciente é PII, então não fica em bucket público).
+// No 2º caso o MediaBubble resolve o path para uma signed URL sob demanda.
 export type MediaKind = 'image' | 'audio' | 'video' | 'document' | null;
 
-export function detectMedia(message: any): { kind: MediaKind; url: string; mime: string; caption?: string; filename?: string; duration?: number } | null {
+export function detectMedia(message: any): { kind: MediaKind; url?: string; storagePath?: string; mime: string; caption?: string; filename?: string; duration?: number } | null {
   if (!message || typeof message !== 'object') return null;
-  const url = message.fileURL || message.file_url || message.media_url || message.url;
-  if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) return null;
+  const raw = message.fileURL || message.file_url || message.media_url || message.url || '';
+  const explicitPath = message.storagePath || message.storage_path;
+  const isHttp = typeof raw === 'string' && /^https?:\/\//i.test(raw);
+  const url = isHttp ? (raw as string) : undefined;
+  const storagePath = explicitPath || (raw && !isHttp ? String(raw) : undefined);
+  if (!url && !storagePath) return null;
   const mime = String(message.mimetype || message.mime || '');
   const explicit = String(message.kind || message.media_kind || '').toLowerCase();
   let kind: MediaKind = null;
@@ -87,11 +95,45 @@ export function detectMedia(message: any): { kind: MediaKind; url: string; mime:
   else if (mime.startsWith('video/')) kind = 'video';
   else if (mime) kind = 'document';
   else return null;
-  return { kind, url, mime, caption: message.caption, filename: message.filename, duration: message.duration };
+  return { kind, url, storagePath, mime, caption: message.caption, filename: message.filename, duration: message.duration };
+}
+
+// Signed URLs do bucket privado, com cache de módulo p/ não re-assinar a cada render.
+const signedUrlCache = new Map<string, { url: string; exp: number }>();
+function useSignedUrl(path: string | undefined): string | null {
+  const [url, setUrl] = useState<string | null>(() => {
+    if (!path) return null;
+    const c = signedUrlCache.get(path);
+    return c && c.exp > Date.now() ? c.url : null;
+  });
+  useEffect(() => {
+    if (!path) { setUrl(null); return; }
+    const cached = signedUrlCache.get(path);
+    if (cached && cached.exp > Date.now()) { setUrl(cached.url); return; }
+    let cancelled = false;
+    supabase.storage.from('chat-media').createSignedUrl(path, 3600).then(({ data }) => {
+      if (cancelled || !data?.signedUrl) return;
+      signedUrlCache.set(path, { url: data.signedUrl, exp: Date.now() + 55 * 60 * 1000 });
+      setUrl(data.signedUrl);
+    });
+    return () => { cancelled = true; };
+  }, [path]);
+  return url;
 }
 
 export function MediaBubble({ media, dark }: { media: NonNullable<ReturnType<typeof detectMedia>>; dark: boolean }) {
-  const { kind, url, mime, caption, filename } = media;
+  const { kind, mime, caption, filename } = media;
+  const signed = useSignedUrl(media.url ? undefined : media.storagePath);
+  const url = media.url ?? signed;
+  if (!url) {
+    const rotulo = kind === 'image' ? 'imagem' : kind === 'audio' ? 'áudio' : kind === 'video' ? 'vídeo' : 'arquivo';
+    return (
+      <div className={cn("flex items-center gap-2 px-3 py-2.5 rounded-lg text-xs", dark ? "bg-white/10" : "bg-slate-50 border border-slate-200")}>
+        <Loader2 className="w-3.5 h-3.5 animate-spin opacity-60" />
+        <span className="opacity-70">Carregando {rotulo}…</span>
+      </div>
+    );
+  }
   if (kind === 'image') {
     return (
       <div className="space-y-2">

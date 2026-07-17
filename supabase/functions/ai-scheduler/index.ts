@@ -769,20 +769,31 @@ serve(async (req) => {
         actionsTaken.push("ai_paused");
       }
 
-      // 2. Move etapa (se configurado)
-      // A etapa do lead vive no ticket aberto (tickets.stage_id), nao em leads.stage_id
-      // (campo deprecado). Atualizar o ticket dispara trg_log_ticket_stage_change,
-      // que registra o historico e mantem o funil/vw_lead_active_stage corretos.
+      // 2. Move etapa (se configurado) — via RPC-dona set_ticket_stage.
+      // A etapa do lead vive no ticket aberto (tickets.stage_id, nao em leads.stage_id).
+      // set_ticket_stage audita a origem (source='ia'), dispara o log de historico e,
+      // com p_on_resolved='block', NUNCA mexe num ticket ja resolvido (nao desganha venda).
       let stage_changed = false;
       if (matched.move_to_stage) {
-        const { data: movedTickets } = await supabaseClient.from("tickets")
-          .update({ stage_id: matched.move_to_stage })
+        const { data: openTicket } = await supabaseClient.from("tickets")
+          .select("id")
           .eq("lead_id", lead.id)
           .eq("status", "open")
-          .select("id");
-        if (movedTickets && movedTickets.length > 0) {
-          actionsTaken.push("stage_moved");
-          stage_changed = true;
+          .order("opened_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (openTicket?.id) {
+          const { data: moveRes } = await supabaseClient.rpc("set_ticket_stage", {
+            p_ticket_id: openTicket.id,
+            p_new_stage_id: matched.move_to_stage,
+            p_source: "ia",
+            p_on_resolved: "block",
+          });
+          const res = moveRes as any;
+          if (res?.success && !res?.blocked && !res?.noop) {
+            actionsTaken.push("stage_moved");
+            stage_changed = true;
+          }
         }
       }
 

@@ -84,6 +84,9 @@ serve(async (req) => {
   const { data: cu } = await supabase
     .from("clinic_users").select("id").eq("id", uid).eq("clinic_id", clinic_id).maybeSingle();
   let allowed = !!cu;
+  // chat_messages.user_id referencia clinic_users(id); usuario de organizacao NAO esta
+  // em clinic_users -> gravar o uid dele viola o FK. Preenche so quando for clinic_user.
+  const messageUserId = cu?.id ?? null;
 
   // (2) Gate da feature (opt-in) — lido junto do organization_id p/ evitar 2 selects.
   const { data: clinic } = await supabase
@@ -134,7 +137,7 @@ serve(async (req) => {
     clinic_id,
     lead_id: lead_id ?? null,
     phone: number,
-    user_id: uid,
+    user_id: messageUserId,
     sender: "human",
     direction: "outbound",
     message: { type: "human", content: cleanText, additional_kwargs: {}, response_metadata: {} },

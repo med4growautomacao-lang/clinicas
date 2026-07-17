@@ -1,0 +1,14 @@
+-- =============================================================================
+-- Resets de teste limpam também o buffer de turno da IA (ai_turn_buffer)
+--
+-- Antes a limpeza do buffer era feita por nós Redis no Receptor (n8n) DEPOIS de
+-- chamar estas RPCs. Com o debounce em Postgres (20260717000010), a limpeza
+-- pertence ao próprio reset — os nós Redis do Receptor foram removidos.
+-- session_id = telefone_da_clinica || telefone_do_lead → sufixo casa o lead.
+-- (Única mudança em cada função: o DELETE FROM ai_turn_buffer no final.)
+-- =============================================================================
+
+-- Corpos completos aplicados via MCP em 17/07 (test_reset_for_rebook e
+-- test_reset_full idênticos aos anteriores + linha:
+--   DELETE FROM ai_turn_buffer WHERE session_id LIKE '%' || p_phone;
+-- Rollback: supabase/_rollbacks/20260717000011_*_ROLLBACK.sql restaura sem a linha.

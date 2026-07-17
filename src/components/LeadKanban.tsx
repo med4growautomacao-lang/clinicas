@@ -612,7 +612,7 @@ function LossModal({ lead, onClose, onCancel, onConfirm }: {
   const [customText, setCustomText] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const REASONS = ['Preço alto', 'Escolheu concorrente', 'Não respondeu', 'Sem interesse', 'Fora do perfil', 'Fora do raio', 'Agendou e não compareceu', 'Tentativas de follow-up esgotadas', 'Outro'];
+  const REASONS = ['Preço alto', 'Escolheu concorrente', 'Não respondeu', 'Sem interesse', 'Fora do perfil', 'Fora do raio', 'Agendou e não compareceu', 'Tentativas de follow-up esgotadas', 'Tentativas esgotadas', 'Sem dinheiro', 'Sem perfil', 'Sem limite no cartão', 'Comprou com outra empresa', 'Outro'];
   const isOutro = selected === 'Outro';
   const finalReason = isOutro ? customText.trim() : selected;
   const canConfirm = !saving && finalReason.length > 0;
@@ -4362,6 +4362,11 @@ export function LeadKanban() {
                       <option value="Fora do raio">Fora do raio</option>
                       <option value="Agendou e nao compareceu">Agendou e nao compareceu</option>
                       <option value="Tentativas de follow-up esgotadas">Tentativas de follow-up esgotadas</option>
+                      <option value="Tentativas esgotadas">Tentativas esgotadas</option>
+                      <option value="Sem dinheiro">Sem dinheiro</option>
+                      <option value="Sem perfil">Sem perfil</option>
+                      <option value="Sem limite no cartão">Sem limite no cartão</option>
+                      <option value="Comprou com outra empresa">Comprou com outra empresa</option>
                       <option value="Outro">Outro</option>
                     </select>
                   </div>

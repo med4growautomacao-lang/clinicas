@@ -66,6 +66,10 @@ serve(async (req) => {
   const { data: cu } = await supabase
     .from("clinic_users").select("id").eq("id", uid).eq("clinic_id", clinic_id).maybeSingle();
   let allowed = !!cu;
+  // chat_messages.user_id referencia clinic_users(id); usuario de organizacao NAO esta
+  // em clinic_users -> gravar o uid dele viola o FK e a mensagem some da conversa
+  // (mesmo bug corrigido no chat-send). Preenche so quando for clinic_user.
+  const messageUserId = cu?.id ?? null;
   if (!allowed) {
     const { data: clinic } = await supabase
       .from("clinics").select("organization_id").eq("id", clinic_id).maybeSingle();
@@ -127,7 +131,7 @@ serve(async (req) => {
       clinic_id,
       lead_id: lead_id ?? null,
       phone: number,
-      user_id: uid,
+      user_id: messageUserId,
       sender: "human",
       direction: "outbound",
       message: { type: "human", content: logContent, additional_kwargs: {}, response_metadata: {} },

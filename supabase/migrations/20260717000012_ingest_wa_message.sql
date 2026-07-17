@@ -1,0 +1,19 @@
+-- =============================================================================
+-- Fase C2 — RPC de ingestão de mensagem WhatsApp (coração do hub wa-inbound)
+--
+-- Aplicada via MCP em 17/07 em duas etapas (ingest_wa_message +
+-- ingest_wa_message_fix_test_numbers — ai_config.test_numbers é text[]).
+-- Corpo canônico = o da segunda migration remota.
+--
+-- UMA viagem ao banco: resolve a clínica pelo api_token da instância, resolve/
+-- cria o lead por telefone NORMALIZADO (2 lados), insere a mensagem (dedup por
+-- wa_message_id/C1; triggers canônicos: auto_open_ticket, gatilhos, session_id,
+-- seq) e devolve os gates de IA (auto_schedule, test_mode com normalização nos
+-- test_numbers, ai_enabled/is_not_lead do lead) + config p/ o forward
+-- (response_wait_seconds, handoff, transition_rules).
+-- REVOKE de anon/authenticated — só service role chama.
+--
+-- Rollback: supabase/_rollbacks/20260717000012_ingest_wa_message_ROLLBACK.sql
+-- =============================================================================
+-- (DDL completo no histórico de migrations remoto; edge consumidora:
+--  supabase/functions/wa-inbound/index.ts)

@@ -112,10 +112,24 @@ export function detectMedia(message: any): { kind: MediaKind; url?: string; stor
 // thumb) com URLs distintas, então o cache não pode colidir por path.
 type SignItem = { id: string; path: string; width?: number; height?: number; quality?: number };
 type SignEntry = { url: string; exp: number };
+// transient=true → a CHAMADA em lote falhou (rede/edge) e vale tentar de novo;
+// transient=false → o lote respondeu mas este id não veio (sem acesso / objeto
+// ausente): retry não resolve. O placeholder usa isso p/ não oferecer "tentar
+// de novo" à toa numa negação permanente.
+type SignResult = { url: string | null; transient: boolean };
+const SIGN_CACHE_MAX = 500; // teto do cache de módulo (não crescer sem limite numa sessão longa)
 const signCache = new Map<string, SignEntry>();                              // por id
-const signWaiters = new Map<string, Array<(u: string | null) => void>>();    // por id
+const signWaiters = new Map<string, Array<(r: SignResult) => void>>();       // por id
 let signQueue = new Map<string, SignItem>();                                 // por id (dedup)
 let signTimer: ReturnType<typeof setTimeout> | null = null;
+
+function cacheSet(id: string, entry: SignEntry) {
+  if (!signCache.has(id) && signCache.size >= SIGN_CACHE_MAX) {
+    const oldest = signCache.keys().next().value; // Map preserva ordem de inserção → FIFO
+    if (oldest !== undefined) signCache.delete(oldest);
+  }
+  signCache.set(id, entry);
+}
 
 async function flushSignQueue() {
   signTimer = null;
@@ -123,29 +137,33 @@ async function flushSignQueue() {
   signQueue = new Map();
   if (items.length === 0) return;
   const ids = items.map((i) => i.id);
-  const resolveAll = (map: Record<string, string | null>) => {
+  const resolveAll = (results: Record<string, SignResult>) => {
     for (const id of ids) {
       const w = signWaiters.get(id); signWaiters.delete(id);
-      w?.forEach((fn) => fn(map[id] ?? null));
+      const r = results[id] ?? { url: null, transient: true };
+      w?.forEach((fn) => fn(r));
     }
   };
   try {
     const { data, error } = await supabase.functions.invoke("chat-media-sign", { body: { items } });
-    if (error || !data?.urls) { resolveAll({}); return; }
+    if (error || !data?.urls) { resolveAll({}); return; } // chamada falhou → transient p/ todos
     const ttlMs = Math.max(60, (Number(data.ttl) || 3600) - 300) * 1000; // margem de 5min antes do vencimento
     const urls: Record<string, string> = data.urls;
-    for (const [id, u] of Object.entries(urls)) {
-      if (u) signCache.set(id, { url: u, exp: Date.now() + ttlMs });
+    const results: Record<string, SignResult> = {};
+    for (const id of ids) {
+      const u = urls[id];
+      if (u) { cacheSet(id, { url: u, exp: Date.now() + ttlMs }); results[id] = { url: u, transient: false }; }
+      else results[id] = { url: null, transient: false }; // respondeu sem este id → sem acesso/ausente
     }
-    resolveAll(urls);
+    resolveAll(results);
   } catch {
-    resolveAll({});
+    resolveAll({}); // exceção da chamada → transient
   }
 }
 
-function requestSigned(item: SignItem): Promise<string | null> {
+function requestSigned(item: SignItem): Promise<SignResult> {
   const c = signCache.get(item.id);
-  if (c && c.exp > Date.now()) return Promise.resolve(c.url);
+  if (c && c.exp > Date.now()) return Promise.resolve({ url: c.url, transient: false });
   return new Promise((resolve) => {
     const arr = signWaiters.get(item.id) ?? [];
     arr.push(resolve);
@@ -185,6 +203,7 @@ function useSigned(items: SignItem[], enabled: boolean) {
   const [settled, setSettled] = useState(() => items.length > 0 && items.every((it) => {
     const c = signCache.get(it.id); return !!(c && c.exp > Date.now());
   }));
+  const [transient, setTransient] = useState(false);
   const [nonce, setNonce] = useState(0);
   useEffect(() => {
     if (!enabled || items.length === 0) return;
@@ -192,17 +211,18 @@ function useSigned(items: SignItem[], enabled: boolean) {
     setSettled(false);
     Promise.all(items.map((it) => {
       const c = signCache.get(it.id);
-      if (c && c.exp > Date.now()) return Promise.resolve([it.id, c.url] as const);
-      return requestSigned(it).then((u) => [it.id, u] as const);
+      if (c && c.exp > Date.now()) return Promise.resolve([it.id, { url: c.url, transient: false }] as const);
+      return requestSigned(it).then((r) => [it.id, r] as const);
     })).then((pairs) => {
       if (cancelled) return;
-      setUrls((prev) => { const n = { ...prev }; for (const [id, u] of pairs) n[id] = u; return n; });
+      setUrls((prev) => { const n = { ...prev }; for (const [id, r] of pairs) n[id] = r.url; return n; });
+      setTransient(pairs.some(([, r]) => r.url == null && r.transient));
       setSettled(true);
     });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, enabled, nonce]);
-  return { urls, settled, retry: () => setNonce((n) => n + 1) };
+  return { urls, settled, transient, retry: () => setNonce((n) => n + 1) };
 }
 
 export function MediaBubble({ media, dark }: { media: NonNullable<ReturnType<typeof detectMedia>>; dark: boolean }) {
@@ -217,7 +237,7 @@ export function MediaBubble({ media, dark }: { media: NonNullable<ReturnType<typ
     items.push({ id: path, path });
     if (kind === 'image') items.push({ id: `${path}@thumb`, path, width: 520, quality: 60 });
   }
-  const { urls, settled, retry } = useSigned(items, inView);
+  const { urls, settled, transient, retry } = useSigned(items, inView);
 
   const fullUrl = media.url ?? (path ? urls[path] ?? null : null);
   const thumbUrl = media.url ?? (path ? urls[`${path}@thumb`] ?? null : null) ?? fullUrl;
@@ -229,7 +249,8 @@ export function MediaBubble({ media, dark }: { media: NonNullable<ReturnType<typ
   // observer não anexa enquanto carrega e a assinatura nunca dispara (deadlock).
   const inner = (() => {
     if (!displayUrl) {
-      if (failed) {
+      // erro transitório (rede/edge) → oferece retry; negação/ausência → não (retry não ajuda)
+      if (failed && transient) {
         return (
           <button
             type="button"
@@ -240,6 +261,14 @@ export function MediaBubble({ media, dark }: { media: NonNullable<ReturnType<typ
             <RefreshCw className="w-3.5 h-3.5 opacity-60" />
             <span className="opacity-70">Erro ao carregar {rotulo} — tocar p/ tentar de novo</span>
           </button>
+        );
+      }
+      if (failed) {
+        return (
+          <div className={cn("flex items-center gap-2 px-3 py-2.5 rounded-lg text-xs", dark ? "bg-white/10" : "bg-slate-50 border border-slate-200")}>
+            <FileText className="w-3.5 h-3.5 opacity-50" />
+            <span className="opacity-70">{rotulo.charAt(0).toUpperCase() + rotulo.slice(1)} indisponível</span>
+          </div>
         );
       }
       return (

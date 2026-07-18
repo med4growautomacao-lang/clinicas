@@ -62,7 +62,9 @@ serve(async (req) => {
     const path = typeof raw?.path === "string" ? raw.path : "";
     if (!id || !path || seen.has(id)) continue;
     seen.add(id);
-    const num = (v: unknown) => (typeof v === "number" && v > 0 && v <= 4000 ? Math.round(v) : undefined);
+    // dimensão inválida/ausente → undefined (sem transform nesse eixo); acima do teto
+    // → CLAMP (mantém sendo um thumb), nunca descarta virando full-res sob o id @thumb.
+    const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.min(4000, Math.round(v)) : undefined);
     items.push({
       id, path,
       width: num(raw?.width), height: num(raw?.height),
@@ -126,10 +128,14 @@ serve(async (req) => {
       await registrarErro("sign_failed", "Falha ao assinar URLs (lote)",
         { detail: signErr.message, count: plainPaths.length }, clinicIds[0] ?? null);
     } else {
+      // Casa por igualdade normalizada (só remove barra inicial), NÃO por endsWith —
+      // endsWith casaria path errado se o prefixo não fosse uuid de tamanho fixo.
+      const norm = (x: string) => x.replace(/^\/+/, "");
       const byPath = new Map<string, string>();
       for (const s of signed ?? []) {
         if (s?.signedUrl && s?.path) {
-          const match = plainPaths.find((p) => p === s.path || p.endsWith(s.path!));
+          const sp = norm(String(s.path));
+          const match = plainPaths.find((p) => norm(p) === sp);
           if (match) byPath.set(match, s.signedUrl);
         }
       }

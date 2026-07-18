@@ -1219,6 +1219,56 @@ function HandoffView() {
       )}
 
       <div className="flex flex-col gap-6 mt-2">
+        <div className="p-6 rounded-2xl bg-white border border-slate-200">
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                <Clock className="w-4 h-4 text-teal-600" />
+                Religar a IA automaticamente
+              </h4>
+              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                Depois de um handoff, a IA volta a atender o lead sozinha após um tempo sem mensagens do atendente humano. Cada mensagem do atendente reinicia a contagem.
+              </p>
+            </div>
+            <button
+              onClick={() => updateAI({ ...(aiConfig || {}), handoff_auto_return_enabled: !(aiConfig as any)?.handoff_auto_return_enabled } as any)}
+              className={cn(
+                "w-10 h-5 rounded-full relative transition-all shrink-0",
+                (aiConfig as any)?.handoff_auto_return_enabled ? "bg-teal-600" : "bg-slate-300"
+              )}
+              title="Religar a IA automaticamente após o handoff"
+            >
+              <div className={cn(
+                "w-3.5 h-3.5 bg-white rounded-full absolute top-[3px] transition-all shadow-sm",
+                (aiConfig as any)?.handoff_auto_return_enabled ? "right-[3px]" : "left-[3px]"
+              )} />
+            </button>
+          </div>
+          {(aiConfig as any)?.handoff_auto_return_enabled && (
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <label className="text-xs font-semibold text-slate-600">Religar após</label>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={(aiConfig as any)?.handoff_auto_return_minutes ?? ''}
+                onChange={e => {
+                  const v = e.target.value === '' ? null : Math.max(1, parseInt(e.target.value, 10) || 0);
+                  updateAI({ ...(aiConfig || {}), handoff_auto_return_minutes: v } as any);
+                }}
+                className="w-24 px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-200"
+                placeholder="120"
+              />
+              <span className="text-xs text-slate-500">
+                minutos de silêncio
+                {(aiConfig as any)?.handoff_auto_return_minutes
+                  ? ` (≈ ${((aiConfig as any).handoff_auto_return_minutes / 60).toFixed(1).replace('.0', '')} h)`
+                  : ''}
+              </span>
+            </div>
+          )}
+        </div>
+
         <div className="p-6 rounded-2xl bg-amber-50 border border-amber-100 relative overflow-hidden">
           <div className="relative z-10">
             <h4 className="text-sm font-bold text-amber-900 mb-2 flex items-center gap-2">

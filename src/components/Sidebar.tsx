@@ -23,6 +23,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserRole } from "../contexts/AuthContext";
 import { supabase } from "../lib/supabase";
 import { matchesSearch } from "../lib/search";
+import { NotificationCenter } from "./NotificationCenter";
 
 // Logo removed for professional medicine icon
 
@@ -237,13 +238,16 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
                 </span>
               </div>
             </button>
-            <button
-              onClick={() => signOut()}
-              className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
-              title="Sair do sistema"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-0.5 shrink-0">
+              <NotificationCenter onNavigate={(tab) => setActiveTab(tab)} />
+              <button
+                onClick={() => signOut()}
+                className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
+                title="Sair do sistema"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
       </div>

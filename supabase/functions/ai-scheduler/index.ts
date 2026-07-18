@@ -829,6 +829,22 @@ serve(async (req) => {
         if (farewell_sent) actionsTaken.push("farewell_sent");
       }
 
+      // 5b. Registro in-app no centro de notificações (o grupo já foi avisado no passo 4,
+      // se aplicável; p_notify_group=false evita duplicar o envio ao WhatsApp).
+      try {
+        await supabaseClient.rpc("notify_ops", {
+          p_clinic_id: clinic_id,
+          p_event: "handoff",
+          p_title: matchedAction === "transfer"
+            ? "Transbordo para humano"
+            : matchedAction === "pause_ai" ? "IA pausada" : "Equipe notificada",
+          p_body: `${lead.name || lead.phone} — gatilho: "${tk}"`,
+          p_level: "warning",
+          p_lead_id: lead.id,
+          p_notify_group: false,
+        });
+      } catch (_e) { /* in-app é best-effort; nunca quebra o handoff */ }
+
       // 6. Mensagem de instrução pro LLM (next_step)
       let next_step: string;
       if (matchedAction === "transfer") {

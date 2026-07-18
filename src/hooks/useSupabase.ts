@@ -3998,3 +3998,69 @@ export function useSystemErrors() {
 
   return { data, loading, setStatus, refetch: fetch };
 }
+
+// ── Centro de notificações (sino da Sidebar) ─────────────────────────────────
+// Feed operacional da clínica ativa. Alimentado pelo notify_ops (banco), que também
+// espelha no grupo do WhatsApp — por isso "vemos por 2 locais". Read state é
+// compartilhado pela equipe (v1); marcar como lida via RPC mark_notifications_read.
+export type OpsNotification = {
+  id: string;
+  clinic_id: string;
+  event: string;
+  level: string; // info | success | warning
+  title: string;
+  body: string | null;
+  lead_id: string | null;
+  ticket_id: string | null;
+  appointment_id: string | null;
+  link: string | null;
+  payload: any;
+  read_at: string | null;
+  created_at: string;
+};
+
+export function useNotifications() {
+  const { activeClinicId } = useAuth();
+  const [data, setData] = useState<OpsNotification[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const fetch = useCallback(async () => {
+    if (!activeClinicId) { setData([]); return; }
+    setLoading(true);
+    const { data: rows } = await supabase
+      .from('notifications')
+      .select('*')
+      .eq('clinic_id', activeClinicId)
+      .order('created_at', { ascending: false })
+      .limit(50);
+    setData((rows as OpsNotification[]) || []);
+    setLoading(false);
+  }, [activeClinicId]);
+
+  useEffect(() => {
+    fetch();
+    if (!activeClinicId) return;
+    // Realtime: INSERT (nova notificação) e UPDATE (marcada como lida por outro membro).
+    const channel = supabase
+      .channel(`notifications:${activeClinicId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter: `clinic_id=eq.${activeClinicId}` }, () => { fetch(); })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [activeClinicId, fetch]);
+
+  const unreadCount = data.reduce((n, x) => n + (x.read_at ? 0 : 1), 0);
+
+  const markAllRead = useCallback(async () => {
+    if (!activeClinicId) return;
+    setData(prev => prev.map(x => (x.read_at ? x : { ...x, read_at: new Date().toISOString() }))); // otimista
+    await supabase.rpc('mark_notifications_read', { p_clinic_id: activeClinicId, p_ids: null });
+  }, [activeClinicId]);
+
+  const markRead = useCallback(async (id: string) => {
+    if (!activeClinicId) return;
+    setData(prev => prev.map(x => (x.id === id && !x.read_at ? { ...x, read_at: new Date().toISOString() } : x)));
+    await supabase.rpc('mark_notifications_read', { p_clinic_id: activeClinicId, p_ids: [id] });
+  }, [activeClinicId]);
+
+  return { data, loading, unreadCount, markAllRead, markRead, refetch: fetch };
+}

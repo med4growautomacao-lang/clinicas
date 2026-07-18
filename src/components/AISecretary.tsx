@@ -178,7 +178,6 @@ function ConfirmationsView() {
     }
   };
 
-  const beforeMsgRef = useRef<HTMLTextAreaElement>(null);
   const insertBeforeVar = (tag: string) => {
     const ta = beforeMsgRef.current;
     const cur = localConfig.confirm_message || '';

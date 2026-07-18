@@ -51,7 +51,7 @@ import {
 import { cn } from "@/src/lib/utils";
 import { TrendBarChart, fmtByType } from "./TrendBarChart";
 import { motion, AnimatePresence } from "framer-motion";
-import { useLeads, useMarketing, MarketingData, Lead, useAppointments, useFunnelStages, useConversions, useUtmFunnelCohort, useConversionStageEntries } from "../hooks/useSupabase";
+import { useMarketing, MarketingData, useFunnelStages, useUtmFunnelCohort, useMarketingKpis, MarketingKpiRow, useConversionStageEntries } from "../hooks/useSupabase";
 import {
   format,
   startOfDay,
@@ -223,6 +223,11 @@ function buildPie(rows: any[], dim: string, stageSet: Set<string>, compareRows?:
   };
 }
 
+// Canal → bucket dos cards. Régua única do lado TS (bucketStages + loop de KPIs);
+// espelhada no SQL da RPC marketing_kpis — mudou aqui, mude lá também.
+const channelBucket = (ch: string | null | undefined): 'forms' | 'balcao' | 'whatsapp' =>
+  ch === 'forms' ? 'forms' : ch === 'balcao' ? 'balcao' : 'whatsapp';
+
 // Série temporal (por período) das chaves UTM em `keys`, para uma dimensão — alimenta o
 // mini-gráfico de tendência dentro do card de pizza.
 function buildDimTrend(rows: any[], dim: string, stageSet: Set<string>, periods: any[], keys: string[]) {
@@ -254,11 +259,15 @@ export function MarketingAnalytics() {
     end: subDays(new Date(), 1)
   });
 
-  const { data: leads, loading: leadsLoading } = useLeads();
-  const { data: appointments, loading: aptsLoading } = useAppointments();
   const { data: marketingData, loading: mktLoading, fetch: fetchMkt, upsert: upsertMkt } = useMarketing();
-  const { data: conversions } = useConversions();
   const { data: stages } = useFunnelStages();
+  // Leads criados + valor de conversões: agregados no BANCO (RPC marketing_kpis).
+  // NUNCA contar KPI sobre useLeads()/useConversions(): o PostgREST clampa a resposta
+  // em max_rows e o array capado zera os cards em clínica grande (bug de 18/07/2026).
+  const marketingKpis = useMarketingKpis(
+    format(dateRange.start, 'yyyy-MM-dd'),
+    format(dateRange.end, 'yyyy-MM-dd')
+  );
   // Coorte ÚNICO do funil (por ticket / última entrada) com dimensões de UTM e o motivo de
   // perda do ticket. Alimenta cards, Funil, pizza, Tendência e a seção UTM × Etapa, e é a
   // base dos filtros GLOBAIS de UTM e Motivo de Perda.
@@ -282,6 +291,11 @@ export function MarketingAnalytics() {
 
   // Cohort do funil para o período de comparação (mesma fonte do funil principal).
   const utmCohortCompare = useUtmFunnelCohort(
+    isComparing ? format(compareDateRange.start, 'yyyy-MM-dd') : null,
+    isComparing ? format(compareDateRange.end, 'yyyy-MM-dd') : null
+  );
+  // KPIs (leads/valor de conversão) do período de comparação — mesma RPC do principal.
+  const marketingKpisCompare = useMarketingKpis(
     isComparing ? format(compareDateRange.start, 'yyyy-MM-dd') : null,
     isComparing ? format(compareDateRange.end, 'yyyy-MM-dd') : null
   );
@@ -516,13 +530,6 @@ export function MarketingAnalytics() {
     return eachDayOfInterval({ start: dateRange.start, end: dateRange.end });
   }, [dateRange]);
 
-  const getPlatformForLead = (lead: Lead): Platform => {
-    const source = lead.source?.toLowerCase() || '';
-    if (source === 'meta_ads') return 'meta_ads';
-    if (source === 'google_ads') return 'google_ads';
-    return 'no_track';
-  };
-
   // Bucketiza as linhas do RPC do funil (marketing_funnel_cohort, por ticket/última entrada)
   // em Agendamentos (etapa 'agendado') e Conversões (etapa de conversão), por período/plataforma/canal.
   // É a MESMA fonte do Funil de Vendas — garante que cards, gráfico, tabela e funil batam.
@@ -541,15 +548,18 @@ export function MarketingAnalytics() {
       if (!bucket) return;
       const key = isAgend ? 'appointments' : 'convs';
       const n = Number(r.leads) || 0;
-      const ch = r.channel === 'forms' ? 'forms' : r.channel === 'balcao' ? 'balcao' : 'whatsapp';
+      const ch = channelBucket(r.channel);
       bucket[key] += n;
       bucket.ch[ch][key] += n;
     });
     return out;
   };
 
-  const calculateStats = (targetPeriods: typeof periods, stageBucket?: Record<string, Record<Platform, any>>) => {
+  const calculateStats = (targetPeriods: typeof periods, stageBucket?: Record<string, Record<Platform, any>>, kpiRows?: MarketingKpiRow[]) => {
     const stats: Record<string, Record<Platform, any>> = {};
+    // Índice (dia|plataforma) → linha manual: evita marketingData.find() dentro do
+    // loop de kpiRows (era O(períodos × linhas × marketingData) na visão diária).
+    const manualByKey = new Map(marketingData.map(m => [`${m.date}|${m.platform}`, m]));
     const mkStat = () => ({
       leads: 0, convs: 0, investment: 0, conv_value: 0, appointments: 0, whatsapp_leads: 0, forms_leads: 0,
       ch: {
@@ -580,41 +590,31 @@ export function MarketingAnalytics() {
         }
       });
 
-      // Count leads by created_at
-      leads.forEach(lead => {
-        const leadDate = lead.created_at ? parseISO(lead.created_at) : null;
-        if (leadDate && leadDate >= p.start && leadDate <= p.end) {
-          const platform = getPlatformForLead(lead);
-          const dateStr = format(leadDate, 'yyyy-MM-dd');
-          const manualLeads = marketingData.find(d => d.date === dateStr && d.platform === platform)?.manual_leads_count;
-
-          if (manualLeads === null || manualLeads === undefined || manualLeads === 0) {
-            const ch = lead.capture_channel === 'forms' ? 'forms' : lead.capture_channel === 'balcao' ? 'balcao' : 'whatsapp';
-            stats[pKey][platform].leads += 1;
-            stats[pKey][platform].ch[ch].leads += 1;
-            if (ch === 'forms') stats[pKey][platform].forms_leads += 1;
-            else if (ch === 'whatsapp') stats[pKey][platform].whatsapp_leads += 1;
-          }
+      // Leads criados + VALOR de conversões: agregados no BANCO (RPC marketing_kpis,
+      // por dia × plataforma × canal) — imune ao clamp de max_rows do PostgREST.
+      // Override manual por (dia, plataforma) continua valendo: manual_leads_count
+      // preenchido substitui a contagem real do dia (já somado no loop do marketingData
+      // acima); idem conversions_value. Exclusão de "Orçamento Enviado" mora na RPC.
+      const pStartStr = format(p.start, 'yyyy-MM-dd');
+      const pEndStr = format(p.end, 'yyyy-MM-dd');
+      (kpiRows || []).forEach(row => {
+        if (row.day < pStartStr || row.day > pEndStr) return;
+        const platform = (row.platform || 'no_track') as Platform;
+        if (!stats[pKey][platform]) return;
+        const manual = manualByKey.get(`${row.day}|${platform}`);
+        const ch = channelBucket(row.channel);
+        const nLeads = Number(row.leads) || 0;
+        const manualLeads = manual?.manual_leads_count;
+        if (nLeads > 0 && (manualLeads === null || manualLeads === undefined || manualLeads === 0)) {
+          stats[pKey][platform].leads += nLeads;
+          stats[pKey][platform].ch[ch].leads += nLeads;
+          if (ch === 'forms') stats[pKey][platform].forms_leads += nLeads;
+          else if (ch === 'whatsapp') stats[pKey][platform].whatsapp_leads += nLeads;
         }
-      });
-
-      // VALOR das conversões: fonte = tabela `conversions` por converted_at.
-      // Exclui "Orçamento Enviado" (orçamento não conta como conversão — vale p/ histórico tb).
-      conversions.forEach(conv => {
-        if (conv.description === 'Orçamento Enviado') return;
-        const convDate = parseISO(conv.converted_at);
-        if (convDate >= p.start && convDate <= p.end) {
-          const lead = leads.find(l => l.id === conv.lead_id);
-          const platform = lead ? getPlatformForLead(lead) : 'no_track';
-          const dateStr = format(convDate, 'yyyy-MM-dd');
-          const manualConvValue = marketingData.find(d => d.date === dateStr && d.platform === platform)?.conversions_value;
-          if (!manualConvValue) {
-            stats[pKey][platform].conv_value += Number(conv.value || 0);
-            if (lead) {
-              const ch = lead.capture_channel === 'forms' ? 'forms' : lead.capture_channel === 'balcao' ? 'balcao' : 'whatsapp';
-              stats[pKey][platform].ch[ch].conv_value += Number(conv.value || 0);
-            }
-          }
+        const vConv = Number(row.conv_value) || 0;
+        if (vConv > 0 && !manual?.conversions_value) {
+          stats[pKey][platform].conv_value += vConv;
+          stats[pKey][platform].ch[ch].conv_value += vConv;
         }
       });
 
@@ -639,7 +639,7 @@ export function MarketingAnalytics() {
     return stats;
   };
 
-  const metricsByPeriod = useMemo(() => calculateStats(periods, bucketStages(utmCohort, periods)), [periods, leads, marketingData, conversions, conversionStageId, agendadoStageId, utmCohort]);
+  const metricsByPeriod = useMemo(() => calculateStats(periods, bucketStages(utmCohort, periods), marketingKpis), [periods, marketingKpis, marketingData, conversionStageId, agendadoStageId, utmCohort]);
 
   const comparisonMetricsByPeriod = useMemo(() => {
     if (!isComparing) return {};
@@ -659,17 +659,22 @@ export function MarketingAnalytics() {
       };
     });
 
-    return calculateStats(compPeriods as any, bucketStages(utmCohortCompare, compPeriods as any));
-  }, [isComparing, periods, dateRange, compareDateRange, leads, marketingData, conversions, conversionStageId, agendadoStageId, utmCohortCompare]);
+    return calculateStats(compPeriods as any, bucketStages(utmCohortCompare, compPeriods as any), marketingKpisCompare);
+  }, [isComparing, periods, dateRange, compareDateRange, marketingKpisCompare, marketingData, conversionStageId, agendadoStageId, utmCohortCompare]);
 
   const handleEditData = () => {
     const initial: Record<string, any> = {};
+    // Pré-preenche o editor com as MESMAS fontes da tela: stageBucket (funil) +
+    // kpiRows (RPC marketing_kpis). Sem elas, Leads/Agendamentos/Conversões/Valor
+    // pré-preenchiam 0 — e salvar gravaria manual_leads_count=0 por cima do real.
+    // Um único calculateStats para todos os dias (antes era um por dia).
+    const dayPeriods = days.map(day => ({ start: day, end: day, label: format(day, 'yyyy-MM-dd') }));
+    const statsByDay = calculateStats(dayPeriods as any, bucketStages(utmCohort, dayPeriods as any), marketingKpis);
     days.forEach(day => {
       const dateStr = format(day, 'yyyy-MM-dd');
       ['meta_ads', 'google_ads', 'no_track'].forEach(p => {
         const key = `${dateStr}-${p}`;
-        // Para pre-encher o editor, calculamos os stats ATUAIS desse dia específico
-        const dayStats = calculateStats([{ start: day, end: day, label: dateStr }])[dateStr][p];
+        const dayStats = statsByDay[dateStr][p];
 
         initial[`${key}-investment`] = dayStats.investment || 0;
         initial[`${key}-leads`] = dayStats.leads || 0;

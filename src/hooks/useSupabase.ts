@@ -15,6 +15,40 @@ function getCached<T>(key: string): T | null {
 function setCached(key: string, data: any) { _cache.set(key, { data, ts: Date.now() }); }
 function invalidateCache(key: string) { _cache.delete(key); }
 
+// ── Central de Erros a partir do front ───────────────────────────────────────
+// Wrapper fino do RPC log_system_error (fire-and-forget). A falha do próprio logger
+// é engolida de propósito — o logger nunca pode derrubar o fluxo que está reportando.
+// (.then de dois args em vez de .catch: o builder do supabase-js é PromiseLike.)
+function logSystemError(code: string, title: string, clinicId?: string | null, context?: Record<string, any>, level: string = 'warn') {
+  supabase.rpc('log_system_error', {
+    p_scope: 'frontend',
+    p_code: code,
+    p_title: title,
+    p_level: level,
+    p_clinic_id: clinicId ?? null,
+    p_context: context ?? null,
+    p_is_monitor: false,
+  }).then(() => {}, () => {});
+}
+
+// ── Detector de clamp do PostgREST ──────────────────────────────────────────
+// O PostgREST corta TODA resposta em max_rows (config do projeto) — inclusive
+// quando o código pede .limit() maior. Resposta com EXATAMENTE esse tamanho em
+// query sem paginação é quase certamente truncamento silencioso (foi assim que o
+// KPI do Marketing zerou com 39 leads reais no dia, 18/07/2026). Loga na Central
+// de Erros para o corte deixar de ser invisível. Throttle de 6h por hook+clínica.
+const POSTGREST_MAX_ROWS = 5000; // manter em sincronia com o max_rows do projeto (Settings → API)
+const _clampWarned = new Map<string, number>();
+function warnPostgrestClamp(hook: string, rows: number, clinicId?: string | null) {
+  if (rows !== POSTGREST_MAX_ROWS) return;
+  const key = `${hook}|${clinicId ?? ''}`;
+  const last = _clampWarned.get(key) || 0;
+  if (Date.now() - last < 6 * 3600_000) return;
+  _clampWarned.set(key, Date.now());
+  console.warn(`[${hook}] resposta com exatamente ${rows} linhas — provável clamp do PostgREST (max_rows); dados truncados em silêncio.`);
+  logSystemError('POSTGREST_CLAMP', `${hook}: resposta bateu o max_rows (${rows}) — dados possivelmente truncados`, clinicId, { hook, rows });
+}
+
 // ==========================================
 // DOCTORS
 // ==========================================
@@ -291,8 +325,9 @@ export function usePatients() {
       .select('*')
       .eq('clinic_id', activeClinicId)
       .order('name');
-    
+
     if (error) { setError(error.message); if (!silent) setLoading(false); return; }
+    warnPostgrestClamp('usePatients', (data || []).length, activeClinicId);
     setData(data || []);
     setError(null);
     if (!silent) setLoading(false);
@@ -411,6 +446,7 @@ export function useAppointments(options?: { daysBack?: number; daysForward?: num
       .order('time', { ascending: true });
 
     if (error) { setError(error.message); if (!silent) setLoading(false); return; }
+    warnPostgrestClamp('useAppointments', (data || []).length, activeClinicId);
     setData(data || []);
     setError(null);
     if (!silent) setLoading(false);
@@ -765,6 +801,8 @@ export function useLeads(options?: { pageSize?: number }) {
     const { data, error } = await query;
     if (error) { setError(error.message); if (!silent) setLoading(false); return; }
     const result = data || [];
+    // Sem paginação explícita, resposta no tamanho do max_rows = truncamento provável.
+    if (!PAGE_SIZE) warnPostgrestClamp('useLeads', result.length, activeClinicId);
     setData(result);
     loadedCountRef.current = result.length;
     setHasMore(!!PAGE_SIZE && result.length >= PAGE_SIZE);
@@ -934,24 +972,50 @@ export interface Ticket {
   lead?: Lead;
 }
 
+// ── Hook genérico para RPCs de leitura do painel ─────────────────────────────
+// Um único molde para hooks que só chamam um RPC e devolvem linhas (antes eram 3
+// clones divergindo). Centraliza o que NENHUM clone fazia: (1) erro do RPC vai para
+// a Central de Erros em vez de virar [] silencioso — RPC que falha exibindo zero é
+// indistinguível de período vazio (classe do bug de 18/07); (2) detector de clamp —
+// a resposta de RPC também é cortada pelo max_rows; (3) mapper opcional por linha
+// (numeric/bigint chegam como string no JSON do PostgREST).
+function useRpcRows<T>(fn: string, params: Record<string, any> | null, mapRow?: (r: any) => T): T[] {
+  const { activeClinicId } = useAuth();
+  const [data, setData] = useState<T[]>([]);
+  const paramsKey = params ? JSON.stringify(params) : null;
+
+  useEffect(() => {
+    if (!activeClinicId || !paramsKey) { setData([]); return; }
+    let cancelled = false;
+    supabase
+      .rpc(fn, { p_clinic_id: activeClinicId, ...JSON.parse(paramsKey) })
+      .then(({ data: rows, error }: any) => {
+        if (cancelled) return;
+        if (error) {
+          console.error(`[${fn}] RPC falhou:`, error);
+          logSystemError('RPC_FETCH_FAIL', `${fn}: falha ao buscar dados — painel pode exibir zero`, activeClinicId, { fn, error: error?.message ?? String(error) }, 'error');
+          setData([]);
+          return;
+        }
+        const list = Array.isArray(rows) ? rows : [];
+        warnPostgrestClamp(fn, list.length, activeClinicId);
+        setData(mapRow ? list.map(mapRow) : list);
+      });
+    return () => { cancelled = true; };
+    // mapRow fora das deps de propósito: é mapper puro passado inline; incluí-lo
+    // refaria o fetch a cada render.
+  }, [activeClinicId, fn, paramsKey]);
+
+  return data;
+}
+
 // Funil de coorte da tela de marketing: dos leads criados em [start, end],
 // quantos entraram em cada etapa (lead_stage_history). Chama o RPC marketing_funnel_cohort.
 export function useFunnelCohort(start: string | null, end: string | null) {
-  const { activeClinicId } = useAuth();
-  const [data, setData] = useState<{ stage_id: string; platform: string; channel: string; entry_date: string; leads: number }[]>([]);
-
-  useEffect(() => {
-    if (!activeClinicId || !start || !end) { setData([]); return; }
-    let cancelled = false;
-    supabase
-      .rpc('marketing_funnel_cohort', { p_clinic_id: activeClinicId, p_start: start, p_end: end })
-      .then(({ data: rows }: any) => {
-        if (!cancelled) setData(Array.isArray(rows) ? rows : []);
-      });
-    return () => { cancelled = true; };
-  }, [activeClinicId, start, end]);
-
-  return data;
+  return useRpcRows<{ stage_id: string; platform: string; channel: string; entry_date: string; leads: number }>(
+    'marketing_funnel_cohort',
+    start && end ? { p_start: start, p_end: end } : null
+  );
 }
 
 // Igual ao useFunnelCohort, mas chama o RPC marketing_utm_funnel_cohort, que adiciona
@@ -973,21 +1037,33 @@ export interface UtmFunnelRow {
 }
 
 export function useUtmFunnelCohort(start: string | null, end: string | null) {
-  const { activeClinicId } = useAuth();
-  const [data, setData] = useState<UtmFunnelRow[]>([]);
+  return useRpcRows<UtmFunnelRow>(
+    'marketing_utm_funnel_cohort',
+    start && end ? { p_start: start, p_end: end } : null
+  );
+}
 
-  useEffect(() => {
-    if (!activeClinicId || !start || !end) { setData([]); return; }
-    let cancelled = false;
-    supabase
-      .rpc('marketing_utm_funnel_cohort', { p_clinic_id: activeClinicId, p_start: start, p_end: end })
-      .then(({ data: rows }: any) => {
-        if (!cancelled) setData(Array.isArray(rows) ? rows : []);
-      });
-    return () => { cancelled = true; };
-  }, [activeClinicId, start, end]);
+// KPIs do Marketing agregados no BANCO: leads criados (por created_at) e valor de
+// conversões atribuído, por dia × plataforma × canal (RPC marketing_kpis). Substitui a
+// contagem client-side sobre useLeads()/useConversions() — o PostgREST clampa TODA
+// resposta em max_rows, então contar num array capado zerava os KPIs em clínicas
+// grandes (>1000 leads). KPI nunca nasce de array do client.
+export interface MarketingKpiRow {
+  day: string;
+  platform: string;
+  channel: string;
+  leads: number;
+  conv_value: number;
+}
 
-  return data;
+export function useMarketingKpis(start: string | null, end: string | null) {
+  // Number() nos campos: bigint/numeric chegam como STRING no JSON do PostgREST —
+  // converter aqui mantém a interface MarketingKpiRow honesta para os consumidores.
+  return useRpcRows<MarketingKpiRow>(
+    'marketing_kpis',
+    start && end ? { p_start: start, p_end: end } : null,
+    (r) => ({ ...r, leads: Number(r.leads) || 0, conv_value: Number(r.conv_value) || 0 })
+  );
 }
 
 // Entradas na etapa de conversão (lead_stage_history), por evento (changed_at).
@@ -1019,34 +1095,68 @@ export function useTickets() {
   const { activeClinicId, profile, activeClinicName, clinicName } = useAuth();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
+  // Geração do fetch: invalida loops paginados em voo quando a clínica troca ou o
+  // hook desmonta. Sem isso, o fetch lento da clínica ANTIGA (N páginas) podia
+  // terminar por último e sobrescrever o board com tickets de outra clínica.
+  const fetchGenRef = useRef(0);
 
   const fetch = useCallback(async (silent = false) => {
     if (!activeClinicId) return;
+    const gen = ++fetchGenRef.current;
     if (!silent) setLoading(true);
     const ninetyDaysAgo = new Date(Date.now() - 90 * 86400000).toISOString();
-    const { data, error } = await supabase
-      .from('tickets')
-      .select('*, lead:leads(*)')
-      .eq('clinic_id', activeClinicId)
-      .or(`status.eq.open,closed_at.gte.${ninetyDaysAgo}`)
-      .order('opened_at', { ascending: false })
-      .limit(5000);
-
-    if (error) {
-      console.error('Erro ao buscar tickets:', error);
-      setTickets([]);
-    } else {
-      setTickets(data || []);
+    // Busca PAGINADA em blocos de 1000: o PostgREST clampa QUALQUER resposta em
+    // max_rows — o antigo .limit(5000) devolvia 1000 em silêncio e o board escondia
+    // os tickets mais antigos nas clínicas grandes (Metaltres ~3,3k na janela).
+    // PAGE=1000 DE PROPÓSITO (menor que o max_rows): blocos maiores quebrariam se a
+    // config baixasse — um PAGE=5000 com max_rows=1000 pararia na 1ª página achando
+    // que acabou. Tiebreaker por id mantém a paginação estável entre páginas.
+    const PAGE = 1000;
+    const MAX_PAGES = 10;
+    let all: Ticket[] = [];
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const { data, error } = await supabase
+        .from('tickets')
+        .select('*, lead:leads(*)')
+        .eq('clinic_id', activeClinicId)
+        .or(`status.eq.open,closed_at.gte.${ninetyDaysAgo}`)
+        .order('opened_at', { ascending: false })
+        .order('id', { ascending: true })
+        .range(page * PAGE, page * PAGE + PAGE - 1);
+      if (gen !== fetchGenRef.current) return; // um fetch mais novo assumiu — descarta este
+      if (error) {
+        // Mantém o snapshot anterior (board completo antigo vale mais que parcial
+        // novo) e registra na Central — console.error sozinho é invisível (CLAUDE.md).
+        console.error('Erro ao buscar tickets:', error);
+        logSystemError('TICKETS_FETCH_FAIL', `useTickets: falha na página ${page + 1} — board manteve o snapshot anterior`, activeClinicId, { page: page + 1, error: (error as any)?.message ?? String(error) }, 'error');
+        if (!silent) setLoading(false);
+        return;
+      }
+      all = all.concat((data || []) as Ticket[]);
+      if (!data || data.length < PAGE) break;
+      if (page === MAX_PAGES - 1) {
+        // Saiu pelo teto de páginas com a última cheia: corte provável — nunca silenciar.
+        logSystemError('TICKETS_PAGE_CAP', `useTickets: atingiu MAX_PAGES (${MAX_PAGES * PAGE} linhas) — tickets antigos podem estar ocultos do board`, activeClinicId, { max_rows_loaded: MAX_PAGES * PAGE });
+      }
     }
+    if (gen !== fetchGenRef.current) return;
+    setTickets(all);
     if (!silent) setLoading(false);
   }, [activeClinicId]);
 
   useEffect(() => {
     fetch();
     if (!activeClinicId) return;
+    // Debounce do refetch por realtime: rajada de eventos (triagem movendo vários
+    // cards) colapsa num único reload paginado em vez de N reloads completos.
+    let refetchTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleSilentFetch = () => {
+      if (refetchTimer) clearTimeout(refetchTimer);
+      refetchTimer = setTimeout(() => { fetch(true); }, 1500);
+    };
     const channel = supabase
       .channel(`tickets_realtime_${activeClinicId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets', filter: `clinic_id=eq.${activeClinicId}` }, () => { fetch(true); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets', filter: `clinic_id=eq.${activeClinicId}` }, () => { scheduleSilentFetch(); })
       .subscribe();
 
     // Polling defensivo: cobre WebSocket caído / aba em background
@@ -1055,6 +1165,8 @@ export function useTickets() {
     document.addEventListener('visibilitychange', onVisible);
 
     return () => {
+      fetchGenRef.current++; // invalida qualquer loop paginado em voo (troca de clínica/desmonte)
+      if (refetchTimer) clearTimeout(refetchTimer);
       supabase.removeChannel(channel);
       clearInterval(interval);
       document.removeEventListener('visibilitychange', onVisible);
@@ -2493,6 +2605,7 @@ export function useConversions() {
       .select('*')
       .eq('clinic_id', activeClinicId)
       .order('converted_at', { ascending: false });
+    warnPostgrestClamp('useConversions', (data || []).length, activeClinicId);
     setData(data || []);
     setLoading(false);
   }, [activeClinicId]);

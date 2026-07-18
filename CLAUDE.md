@@ -154,6 +154,9 @@ Usar **`is_clinic_admin(clinic_id)`** / **`is_super_admin()`**.
 ## Slug de tipo de consulta não é chave
 `consultation_types.slug` é **texto livre digitado pela clínica**. Use o **`id`**. Já gerou 3 bugs — incluindo liberar a exclusão de tipos com consultas futuras.
 
+## KPI nunca nasce de array do client
+O PostgREST clampa **TODA** resposta REST em `max_rows` — **inclusive quando o código pede `.limit()` maior** (um `.limit(5000)` devolvia 1000 em silêncio). Contar/agregar sobre um hook (`useLeads` etc.) mente em clínica grande — foi assim que o KPI do Marketing zerou com 39 leads reais no dia. **Agregação = RPC no banco** (`get_dashboard_stats`, `marketing_kpis`, `marketing_funnel_cohort`…). Lista grande = paginação com `.range()`. O helper `warnPostgrestClamp` (`useSupabase.ts`) loga na Central de Erros toda resposta que bate o teto — mantenha `CLAMP_SIZES` em sincronia com o `max_rows` do projeto.
+
 ## Observabilidade — a Central de Erros é o único olho que temos
 
 **Não há Sentry.** O que não for registrado em `system_errors` **não existe**: falha em silêncio, e ninguém fica sabendo. Quase todo bug grave deste sistema foi **perda silenciosa**, não exceção barulhenta.

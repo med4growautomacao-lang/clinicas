@@ -349,8 +349,12 @@ serve(async (req) => {
                     }
                     if (t) {
                       const cap = String(msg.caption ?? "").trim();
+                      // Imagem: frase AUTOEXPLICATIVA — o prefixo "[Imagem]" cru fazia o
+                      // modelo responder "não consigo ver fotos" mesmo COM a descrição
+                      // (nenhum prompt explica o prefixo; não dependemos de prompt).
+                      const imgContent = `(O paciente enviou uma imagem. Você consegue vê-la por descrição automática. Conteúdo da imagem: ${t})`;
                       content = mediaKind === "image"
-                        ? (cap ? `${cap}\n[Imagem] ${t}` : `[Imagem] ${t}`)
+                        ? (cap ? `${cap}\n${imgContent}` : imgContent)
                         : t; // áudio: transcrição limpa (a IA lê como fala do paciente)
                       if (fails.length) {
                         // sucesso via fallback: registra warning p/ o operador corrigir a config

@@ -32,21 +32,22 @@ const TIER_META: Record<TierId, { label: string; icon: typeof DollarSign; color:
 };
 
 // 3 opções por tipo. Áudio: Claude não transcreve áudio → Gemini/OpenAI.
+// gemini-2.0-flash foi APOSENTADO pelo Google (404 em 18/07/26) — tiers usam 2.5.
 const TIERS: Record<"audio" | "image", Tier[]> = {
   audio: [
-    { id: "economica", provider: "gemini", model: "gemini-2.0-flash",        hint: "Mais barata. Transcreve nativo, rápida." },
+    { id: "economica", provider: "gemini", model: "gemini-2.5-flash",        hint: "Mais barata. Transcreve nativo, rápida." },
     { id: "custo",     provider: "openai", model: "gpt-4o-mini-transcribe",  hint: "Boa precisão por baixo custo." },
     { id: "avancada",  provider: "openai", model: "gpt-4o-transcribe",       hint: "Máxima precisão de transcrição." },
   ],
   image: [
-    { id: "economica", provider: "gemini",    model: "gemini-2.0-flash",  hint: "Mais barata. Descrição/OCR rápida." },
+    { id: "economica", provider: "gemini",    model: "gemini-2.5-flash",  hint: "Mais barata. Descrição/OCR rápida." },
     { id: "custo",     provider: "anthropic", model: "claude-haiku-4-5",  hint: "Ótima leitura de documento/exame." },
     { id: "avancada",  provider: "anthropic", model: "claude-sonnet-4-6", hint: "Visão mais capaz p/ casos difíceis." },
   ],
 };
 
 const DEFAULT_CONFIG: Config = {
-  audio: { provider: "gemini", model: "gemini-2.0-flash" },
+  audio: { provider: "gemini", model: "gemini-2.5-flash" },
   image: { provider: "anthropic", model: "claude-haiku-4-5" },
 };
 

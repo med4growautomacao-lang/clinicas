@@ -39,8 +39,9 @@ const WA_INBOUND_SECRET = Deno.env.get("WA_INBOUND_SECRET") ?? "";
 // (Claude não faz áudio). Imagem: anthropic|gemini|openai.
 const AUDIO_PROMPT = "Transcreva este áudio em português do Brasil. Responda APENAS com a transcrição literal, sem comentários nem aspas.";
 const IMAGE_PROMPT = "Descreva de forma objetiva o que há nesta imagem enviada por um paciente/cliente no WhatsApp (foto, documento, exame, print, etc.). Se houver texto legível, transcreva-o. Responda em português, em 1 a 3 frases, sem preâmbulo.";
+// gemini-2.0-flash foi APOSENTADO pelo Google (404 em 18/07/26) — usar 2.5-flash.
 const DEFAULT_MEDIA_AI = {
-  audio: { provider: "gemini", model: "gemini-2.0-flash" },
+  audio: { provider: "gemini", model: "gemini-2.5-flash" },
   image: { provider: "anthropic", model: "claude-haiku-4-5" },
 };
 

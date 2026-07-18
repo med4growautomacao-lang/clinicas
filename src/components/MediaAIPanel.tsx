@@ -61,7 +61,7 @@ export function MediaAIPanel() {
   const [status, setStatus] = useState<Record<Provider, boolean>>({ gemini: false, anthropic: false, openai: false });
   const [loading, setLoading] = useState(true);
   const [savingCfg, setSavingCfg] = useState(false);
-  const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [msg, setMsg] = useState<{ kind: "ok" | "err" | "warn"; text: string } | null>(null);
 
   const [keyInput, setKeyInput] = useState<Record<Provider, string>>({ gemini: "", anthropic: "", openai: "" });
   const [savingKey, setSavingKey] = useState<Provider | null>(null);
@@ -84,9 +84,9 @@ export function MediaAIPanel() {
 
   useEffect(() => { load(); }, []);
 
-  const flash = (kind: "ok" | "err", text: string) => {
+  const flash = (kind: "ok" | "err" | "warn", text: string) => {
     setMsg({ kind, text });
-    setTimeout(() => setMsg(null), 4000);
+    setTimeout(() => setMsg(null), kind === "warn" ? 7000 : 4000);
   };
 
   const pickTier = (which: "audio" | "image", tier: Tier) =>
@@ -96,8 +96,15 @@ export function MediaAIPanel() {
     setSavingCfg(true);
     const { error } = await supabase.rpc("set_media_ai_config", { p_config: config });
     setSavingCfg(false);
-    if (error) flash("err", `Erro ao salvar configuração: ${error.message}`);
-    else flash("ok", "Configuração salva.");
+    if (error) { flash("err", `Erro ao salvar configuração: ${error.message}`); return; }
+    // avisa (não bloqueia) se um provedor escolhido não tem chave no Vault
+    const used = new Set<Provider>([config.audio.provider, config.image.provider]);
+    const missing = [...used].filter(p => !status[p]);
+    if (missing.length) {
+      flash("warn", `Configuração salva. Sem chave no Vault para ${missing.map(p => PROVIDER_LABEL[p]).join(" e ")} — se não houver chave no servidor, a transcrição desse tipo ficará indisponível.`);
+    } else {
+      flash("ok", "Configuração salva.");
+    }
   };
 
   const saveKey = async (provider: Provider) => {
@@ -147,10 +154,12 @@ export function MediaAIPanel() {
 
       {msg && (
         <div className={cn(
-          "flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium border",
-          msg.kind === "ok" ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-rose-50 border-rose-200 text-rose-700"
+          "flex items-start gap-2 px-3 py-2.5 rounded-xl text-sm font-medium border",
+          msg.kind === "ok" ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+            : msg.kind === "warn" ? "bg-amber-50 border-amber-200 text-amber-700"
+            : "bg-rose-50 border-rose-200 text-rose-700"
         )}>
-          {msg.kind === "ok" ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />} {msg.text}
+          {msg.kind === "ok" ? <Check className="w-4 h-4 shrink-0 mt-0.5" /> : msg.kind === "warn" ? <KeyRound className="w-4 h-4 shrink-0 mt-0.5" /> : <X className="w-4 h-4 shrink-0 mt-0.5" />} {msg.text}
         </div>
       )}
 
@@ -197,7 +206,7 @@ export function MediaAIPanel() {
                       <p className="text-[11px] text-slate-500 mt-1 leading-snug">{tier.hint}</p>
                       {needsKey && (
                         <p className="text-[10px] font-bold text-amber-600 mt-1.5 flex items-center gap-1">
-                          <KeyRound className="w-3 h-3" /> requer chave {PROVIDER_LABEL[tier.provider]}
+                          <KeyRound className="w-3 h-3" /> sem chave no Vault
                         </p>
                       )}
                     </button>

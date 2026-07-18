@@ -1052,8 +1052,10 @@ export interface MarketingKpiRow {
   day: string;
   platform: string;
   channel: string;
-  leads: number;
-  conv_value: number;
+  leads: number;       // v_kpi_leads (created_at)
+  conv_value: number;  // v_kpi_sales_value (converted_at, sem 'Orçamento Enviado')
+  wins: number;        // v_kpi_wins = tickets.outcome='ganho' (fonte única) — Conversões
+  scheduled: number;   // v_kpi_scheduled = união agendamento∪etapa dedupe — Agendamentos
 }
 
 export function useMarketingKpis(start: string | null, end: string | null) {
@@ -1062,33 +1064,8 @@ export function useMarketingKpis(start: string | null, end: string | null) {
   return useRpcRows<MarketingKpiRow>(
     'marketing_kpis',
     start && end ? { p_start: start, p_end: end } : null,
-    (r) => ({ ...r, leads: Number(r.leads) || 0, conv_value: Number(r.conv_value) || 0 })
+    (r) => ({ ...r, leads: Number(r.leads) || 0, conv_value: Number(r.conv_value) || 0, wins: Number(r.wins) || 0, scheduled: Number(r.scheduled) || 0 })
   );
-}
-
-// Entradas na etapa de conversão (lead_stage_history), por evento (changed_at).
-// Alimenta o card "Conversões" do Marketing no modelo por evento, igual ao módulo
-// Comercial. Carrega todas as entradas da etapa (como useConversions); o
-// calculateStats filtra por período. Volume pequeno (≈ nº de conversões da clínica).
-export function useConversionStageEntries(stageId: string | null) {
-  const { activeClinicId } = useAuth();
-  const [data, setData] = useState<{ lead_id: string; changed_at: string }[]>([]);
-
-  useEffect(() => {
-    if (!activeClinicId || !stageId) { setData([]); return; }
-    let cancelled = false;
-    supabase
-      .from('lead_stage_history')
-      .select('lead_id, changed_at')
-      .eq('clinic_id', activeClinicId)
-      .eq('new_stage_id', stageId)
-      .then(({ data: rows }: any) => {
-        if (!cancelled) setData(Array.isArray(rows) ? rows : []);
-      });
-    return () => { cancelled = true; };
-  }, [activeClinicId, stageId]);
-
-  return data;
 }
 
 export function useTickets() {

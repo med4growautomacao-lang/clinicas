@@ -51,7 +51,7 @@ import {
 import { cn } from "@/src/lib/utils";
 import { TrendBarChart, fmtByType } from "./TrendBarChart";
 import { motion, AnimatePresence } from "framer-motion";
-import { useMarketing, MarketingData, useFunnelStages, useUtmFunnelCohort, useMarketingKpis, MarketingKpiRow, useConversionStageEntries } from "../hooks/useSupabase";
+import { useMarketing, MarketingData, useFunnelStages, useUtmFunnelCohort, useMarketingKpis, MarketingKpiRow } from "../hooks/useSupabase";
 import {
   format,
   startOfDay,
@@ -275,13 +275,10 @@ export function MarketingAnalytics() {
     format(dateRange.start, 'yyyy-MM-dd'),
     format(dateRange.end, 'yyyy-MM-dd')
   );
-  // Etapa de conversão configurável por clínica (flag is_conversion). Fallback: 'ganho'.
-  const conversionStage = stages.find(s => s.is_conversion) ?? stages.find(s => s.slug === 'ganho') ?? null;
-  const conversionStageId = conversionStage?.id ?? null;
-  // Entradas na etapa de conversão (por evento, changed_at) — fonte da CONTAGEM de conversões.
-  const conversionEntries = useConversionStageEntries(conversionStageId);
-  // Etapa "Agendado" (para alinhar o card "Agendamentos" ao funil, por ticket).
-  const agendadoStageId = stages.find(s => s.slug === 'agendado')?.id ?? null;
+  // Conversões e Agendamentos dos CARDS vêm da RPC marketing_kpis (wins/scheduled,
+  // fonte única = tickets.outcome / união agendamento∪etapa). A contagem por ETAPA
+  // (is_conversion / 'agendado') era usada só pelo bucketStages, removido — o funil
+  // VISUAL continua lendo utmCohort direto.
   const [isEditing, setIsEditing] = useState(false);
   const [isComparing, setIsComparing] = useState(false);
   const [compareDateRange, setCompareDateRange] = useState<{ start: Date, end: Date }>({
@@ -530,32 +527,7 @@ export function MarketingAnalytics() {
     return eachDayOfInterval({ start: dateRange.start, end: dateRange.end });
   }, [dateRange]);
 
-  // Bucketiza as linhas do RPC do funil (marketing_funnel_cohort, por ticket/última entrada)
-  // em Agendamentos (etapa 'agendado') e Conversões (etapa de conversão), por período/plataforma/canal.
-  // É a MESMA fonte do Funil de Vendas — garante que cards, gráfico, tabela e funil batam.
-  const bucketStages = (cohort: any[], targetPeriods: typeof periods) => {
-    const mk = () => ({ appointments: 0, convs: 0, ch: { forms: { appointments: 0, convs: 0 }, whatsapp: { appointments: 0, convs: 0 }, balcao: { appointments: 0, convs: 0 } } });
-    const out: Record<string, Record<Platform, any>> = {};
-    targetPeriods.forEach(p => { out[p.label] = { meta_ads: mk(), google_ads: mk(), no_track: mk() }; });
-    (cohort || []).forEach((r: any) => {
-      const isAgend = agendadoStageId && r.stage_id === agendadoStageId;
-      const isConv = conversionStageId && r.stage_id === conversionStageId;
-      if (!isAgend && !isConv) return;
-      const d: string = r.entry_date;
-      const period = targetPeriods.find(p => d >= format(p.start, 'yyyy-MM-dd') && d <= format(p.end, 'yyyy-MM-dd'));
-      if (!period) return;
-      const bucket = out[period.label]?.[r.platform as Platform];
-      if (!bucket) return;
-      const key = isAgend ? 'appointments' : 'convs';
-      const n = Number(r.leads) || 0;
-      const ch = channelBucket(r.channel);
-      bucket[key] += n;
-      bucket.ch[ch][key] += n;
-    });
-    return out;
-  };
-
-  const calculateStats = (targetPeriods: typeof periods, stageBucket?: Record<string, Record<Platform, any>>, kpiRows?: MarketingKpiRow[]) => {
+  const calculateStats = (targetPeriods: typeof periods, kpiRows?: MarketingKpiRow[]) => {
     const stats: Record<string, Record<Platform, any>> = {};
     // Índice (dia|plataforma) → linha manual: evita marketingData.find() dentro do
     // loop de kpiRows (era O(períodos × linhas × marketingData) na visão diária).
@@ -616,30 +588,27 @@ export function MarketingAnalytics() {
           stats[pKey][platform].conv_value += vConv;
           stats[pKey][platform].ch[ch].conv_value += vConv;
         }
-      });
-
-      // Agendamentos (etapa 'agendado') e Conversões (etapa de conversão): MESMA fonte do
-      // Funil de Vendas (RPC marketing_funnel_cohort, por ticket / última entrada),
-      // pré-bucketizada por período em stageBucket. Garante cards = gráfico = tabela = funil.
-      const sb = stageBucket?.[pKey];
-      (['meta_ads', 'google_ads', 'no_track'] as Platform[]).forEach((platform) => {
-        const b = sb?.[platform];
-        if (!b) return;
-        stats[pKey][platform].appointments = b.appointments || 0;
-        stats[pKey][platform].convs = b.convs || 0;
-        stats[pKey][platform].ch.forms.appointments = b.ch?.forms?.appointments || 0;
-        stats[pKey][platform].ch.whatsapp.appointments = b.ch?.whatsapp?.appointments || 0;
-        stats[pKey][platform].ch.balcao.appointments = b.ch?.balcao?.appointments || 0;
-        stats[pKey][platform].ch.forms.convs = b.ch?.forms?.convs || 0;
-        stats[pKey][platform].ch.whatsapp.convs = b.ch?.whatsapp?.convs || 0;
-        stats[pKey][platform].ch.balcao.convs = b.ch?.balcao?.convs || 0;
+        // Conversões e Agendamentos: MESMA fonte da verdade que VG/Comercial —
+        // wins = tickets.outcome='ganho'; scheduled = união agendamento∪etapa (dedupe).
+        // Vêm da RPC marketing_kpis v2 (views v_kpi_*). O Funil de Vendas visual segue
+        // por ETAPA (utmCohort) — é outra pergunta (movimento no funil, não desfecho).
+        const nWins = Number(row.wins) || 0;
+        if (nWins > 0) {
+          stats[pKey][platform].convs += nWins;
+          stats[pKey][platform].ch[ch].convs += nWins;
+        }
+        const nSched = Number(row.scheduled) || 0;
+        if (nSched > 0) {
+          stats[pKey][platform].appointments += nSched;
+          stats[pKey][platform].ch[ch].appointments += nSched;
+        }
       });
     });
 
     return stats;
   };
 
-  const metricsByPeriod = useMemo(() => calculateStats(periods, bucketStages(utmCohort, periods), marketingKpis), [periods, marketingKpis, marketingData, conversionStageId, agendadoStageId, utmCohort]);
+  const metricsByPeriod = useMemo(() => calculateStats(periods, marketingKpis), [periods, marketingKpis, marketingData]);
 
   const comparisonMetricsByPeriod = useMemo(() => {
     if (!isComparing) return {};
@@ -659,17 +628,16 @@ export function MarketingAnalytics() {
       };
     });
 
-    return calculateStats(compPeriods as any, bucketStages(utmCohortCompare, compPeriods as any), marketingKpisCompare);
-  }, [isComparing, periods, dateRange, compareDateRange, marketingKpisCompare, marketingData, conversionStageId, agendadoStageId, utmCohortCompare]);
+    return calculateStats(compPeriods as any, marketingKpisCompare);
+  }, [isComparing, periods, dateRange, compareDateRange, marketingKpisCompare, marketingData]);
 
   const handleEditData = () => {
     const initial: Record<string, any> = {};
-    // Pré-preenche o editor com as MESMAS fontes da tela: stageBucket (funil) +
-    // kpiRows (RPC marketing_kpis). Sem elas, Leads/Agendamentos/Conversões/Valor
-    // pré-preenchiam 0 — e salvar gravaria manual_leads_count=0 por cima do real.
-    // Um único calculateStats para todos os dias (antes era um por dia).
+    // Pré-preenche o editor com a MESMA fonte da tela (RPC marketing_kpis: leads, valor,
+    // wins, scheduled). Sem ela, Leads/Agendamentos/Conversões/Valor pré-preenchiam 0 — e
+    // salvar gravaria manual_leads_count=0 por cima do real. Um só calculateStats p/ todos os dias.
     const dayPeriods = days.map(day => ({ start: day, end: day, label: format(day, 'yyyy-MM-dd') }));
-    const statsByDay = calculateStats(dayPeriods as any, bucketStages(utmCohort, dayPeriods as any), marketingKpis);
+    const statsByDay = calculateStats(dayPeriods as any, marketingKpis);
     days.forEach(day => {
       const dateStr = format(day, 'yyyy-MM-dd');
       ['meta_ads', 'google_ads', 'no_track'].forEach(p => {

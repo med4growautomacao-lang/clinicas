@@ -39,10 +39,28 @@ const WA_INBOUND_SECRET = Deno.env.get("WA_INBOUND_SECRET") ?? "";
 // (Claude não faz áudio). Imagem: anthropic|gemini|openai.
 const AUDIO_PROMPT = "Transcreva este áudio em português do Brasil. Responda APENAS com a transcrição literal, sem comentários nem aspas.";
 const IMAGE_PROMPT = "Descreva de forma objetiva o que há nesta imagem enviada por um paciente/cliente no WhatsApp (foto, documento, exame, print, etc.). Se houver texto legível, transcreva-o. Responda em português, em 1 a 3 frases, sem preâmbulo.";
-// gemini-2.0-flash foi APOSENTADO pelo Google (404 em 18/07/26) — usar 2.5-flash.
+// Modelos verificados 18/07/26 (Google matou o 2.0-flash em 01/06/26; whisper-1
+// saiu do catálogo OpenAI; sonnet-5 substitui sonnet-4-6).
 const DEFAULT_MEDIA_AI = {
-  audio: { provider: "gemini", model: "gemini-2.5-flash" },
+  audio: { provider: "gemini", model: "gemini-3.1-flash-lite" },
   image: { provider: "anthropic", model: "claude-haiku-4-5" },
+};
+
+// Escada de CUSTO por tipo (mais barato → mais caro). É a ordem de FALLBACK:
+// se o modelo configurado falhar (erro do provider, modelo aposentado, sem
+// chave), tenta o próximo mais barato disponível. Manter em sincronia com
+// TIERS do MediaAIPanel.tsx.
+const COST_LADDER: Record<"audio" | "image", Array<{ provider: string; model: string }>> = {
+  audio: [
+    { provider: "gemini", model: "gemini-3.1-flash-lite" },
+    { provider: "openai", model: "gpt-4o-mini-transcribe" },
+    { provider: "openai", model: "gpt-4o-transcribe" },
+  ],
+  image: [
+    { provider: "gemini", model: "gemini-3.1-flash-lite" },
+    { provider: "anthropic", model: "claude-haiku-4-5" },
+    { provider: "anthropic", model: "claude-sonnet-5" },
+  ],
 };
 
 function kindFromMime(mime: string): "image" | "audio" | "video" | "document" {
@@ -149,6 +167,9 @@ async function anthropicImage(model: string, key: string, bytes: Uint8Array, mim
     headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
     body: JSON.stringify({
       model, max_tokens: 400,
+      // sonnet-5 liga adaptive thinking quando o campo é omitido → queimaria o
+      // max_tokens em raciocínio; disabled é aceito em sonnet-5 e haiku-4-5.
+      thinking: { type: "disabled" },
       messages: [{ role: "user", content: [
         { type: "text", text: IMAGE_PROMPT },
         { type: "image", source: { type: "base64", media_type: mime.split(";")[0].trim(), data: toBase64(bytes) } },
@@ -301,19 +322,44 @@ serve(async (req) => {
 
               // Transcrição p/ a IA (C5-b): só INBOUND e só se a clínica usa IA
               // (senão a transcrição não teria consumidor — poupa custo de LLM).
-              // Enriquece o `content` (memória + forward). Falha NUNCA quebra o fluxo.
+              // FALLBACK em escada de custo: tenta o configurado; se falhar (erro,
+              // modelo aposentado, sem chave), cai pro próximo MAIS BARATO da
+              // COST_LADDER. Falha total NUNCA quebra o fluxo (placeholder + log).
               if (direction === "inbound" && (mediaKind === "audio" || mediaKind === "image")) {
                 try {
                   if (await clinicUsesAi(supabase, clinicId)) {
                     const cfg = await getMediaAiConfig(supabase);
                     const spec = mediaKind === "audio" ? cfg.audio : cfg.image;
-                    const key = spec?.provider ? await llmKey(supabase, spec.provider) : null;
-                    const t = key ? await transcribeMedia(mediaKind, bytes, mime, spec.provider, spec.model, key) : null;
+                    const ladder = COST_LADDER[mediaKind];
+                    const candidates = [spec, ...ladder.filter((c) =>
+                      !(c.provider === spec?.provider && c.model === spec?.model))]
+                      .filter((c) => c?.provider && c?.model);
+                    let t: string | null = null;
+                    const fails: string[] = [];
+                    for (const cand of candidates) {
+                      const key = await llmKey(supabase, cand.provider);
+                      if (!key) { fails.push(`${cand.provider}/${cand.model}: sem chave`); continue; }
+                      try {
+                        t = await transcribeMedia(mediaKind, bytes, mime, cand.provider, cand.model, key);
+                        if (t) break;
+                        fails.push(`${cand.provider}/${cand.model}: resposta vazia`);
+                      } catch (e) {
+                        fails.push(`${cand.provider}/${cand.model}: ${String(e).slice(0, 200)}`);
+                      }
+                    }
                     if (t) {
                       const cap = String(msg.caption ?? "").trim();
                       content = mediaKind === "image"
                         ? (cap ? `${cap}\n[Imagem] ${t}` : `[Imagem] ${t}`)
                         : t; // áudio: transcrição limpa (a IA lê como fala do paciente)
+                      if (fails.length) {
+                        // sucesso via fallback: registra warning p/ o operador corrigir a config
+                        await registrarErro("transcribe_fallback", "Transcrição caiu para modelo alternativo",
+                          { attempts: fails, kind: mediaKind, wa_message_id: waMessageId }, clinicId);
+                      }
+                    } else if (fails.length) {
+                      await registrarErro("transcribe_failed", "Falha ao transcrever mídia (todas as opções)",
+                        { attempts: fails, kind: mediaKind, mime, wa_message_id: waMessageId }, clinicId);
                     }
                   }
                 } catch (e) {

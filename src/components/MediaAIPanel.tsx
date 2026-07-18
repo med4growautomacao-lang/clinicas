@@ -32,22 +32,25 @@ const TIER_META: Record<TierId, { label: string; icon: typeof DollarSign; color:
 };
 
 // 3 opções por tipo. Áudio: Claude não transcreve áudio → Gemini/OpenAI.
-// gemini-2.0-flash foi APOSENTADO pelo Google (404 em 18/07/26) — tiers usam 2.5.
+// Modelos verificados em 18/07/26 nas fontes oficiais (Google matou o 2.0-flash
+// em 01/06/26; whisper-1 saiu do catálogo OpenAI; sonnet-5 substitui sonnet-4-6).
+// A ordem econômica→avançada é TAMBÉM a escada de fallback da edge (wa-inbound
+// COST_LADDER): se o escolhido falhar, cai pro próximo mais barato disponível.
 const TIERS: Record<"audio" | "image", Tier[]> = {
   audio: [
-    { id: "economica", provider: "gemini", model: "gemini-2.5-flash",        hint: "Mais barata. Transcreve nativo, rápida." },
+    { id: "economica", provider: "gemini", model: "gemini-3.1-flash-lite",   hint: "Mais barata. Transcreve nativo, rápida." },
     { id: "custo",     provider: "openai", model: "gpt-4o-mini-transcribe",  hint: "Boa precisão por baixo custo." },
     { id: "avancada",  provider: "openai", model: "gpt-4o-transcribe",       hint: "Máxima precisão de transcrição." },
   ],
   image: [
-    { id: "economica", provider: "gemini",    model: "gemini-2.5-flash",  hint: "Mais barata. Descrição/OCR rápida." },
-    { id: "custo",     provider: "anthropic", model: "claude-haiku-4-5",  hint: "Ótima leitura de documento/exame." },
-    { id: "avancada",  provider: "anthropic", model: "claude-sonnet-4-6", hint: "Visão mais capaz p/ casos difíceis." },
+    { id: "economica", provider: "gemini",    model: "gemini-3.1-flash-lite", hint: "Mais barata. Descrição/OCR rápida." },
+    { id: "custo",     provider: "anthropic", model: "claude-haiku-4-5",      hint: "Ótima leitura de documento/exame." },
+    { id: "avancada",  provider: "anthropic", model: "claude-sonnet-5",       hint: "Visão de ponta p/ casos difíceis." },
   ],
 };
 
 const DEFAULT_CONFIG: Config = {
-  audio: { provider: "gemini", model: "gemini-2.5-flash" },
+  audio: { provider: "gemini", model: "gemini-3.1-flash-lite" },
   image: { provider: "anthropic", model: "claude-haiku-4-5" },
 };
 
@@ -149,7 +152,8 @@ export function MediaAIPanel() {
         </h2>
         <p className="text-xs text-slate-500 mt-1">
           Escolha qual LLM transcreve o <b>áudio</b> e qual descreve a <b>imagem</b> recebida no WhatsApp — a transcrição
-          alimenta o Agente IA. Vale para todas as clínicas.
+          alimenta o Agente IA. Vale para todas as clínicas. Se o modelo escolhido falhar (ou faltar chave), o sistema
+          usa automaticamente a <b>próxima opção mais barata</b> disponível.
         </p>
       </div>
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { matchesSearch, leadSearchOrFilter } from "../lib/search";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -177,9 +177,20 @@ function ConfirmationsView() {
     }
   };
 
+  const beforeMsgRef = useRef<HTMLTextAreaElement>(null);
+  const insertBeforeVar = (tag: string) => {
+    const ta = beforeMsgRef.current;
+    const cur = localConfig.confirm_message || '';
+    if (!ta) { setConfig({ confirm_message: cur + tag }); return; }
+    const start = ta.selectionStart ?? cur.length;
+    const end = ta.selectionEnd ?? cur.length;
+    setConfig({ confirm_message: cur.slice(0, start) + tag + cur.slice(end) });
+    requestAnimationFrame(() => { ta.focus(); const pos = start + tag.length; ta.setSelectionRange(pos, pos); });
+  };
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-8 h-full">
-      <ValidationModal 
+      <ValidationModal
         isOpen={showValidation} 
         onClose={() => setShowValidation(false)} 
         missingTags={missingTags} 
@@ -213,7 +224,7 @@ function ConfirmationsView() {
                 tab === 'after' ? "bg-white text-teal-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
               )}
             >
-              Após Confirmação
+              Resposta condicional
             </button>
           </div>
         </CardHeader>
@@ -272,15 +283,26 @@ function ConfirmationsView() {
               <div className="space-y-2">
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Template da Mensagem</label>
                 <textarea
-                  rows={6}
+                  ref={beforeMsgRef}
+                  rows={5}
                   value={localConfig.confirm_message || ""}
                   onChange={(e) => setConfig({ confirm_message: e.target.value })}
                   className="w-full p-4 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all resize-none text-sm leading-relaxed"
                   placeholder="Use {paciente}, {data} e {hora} para personalizar..."
                 />
-                <p className="text-[10px] text-slate-400 font-medium italic pl-1">
-                  Variáveis obrigatórias: {"{paciente}"}, {"{data}"} e {"{hora}"}.
-                </p>
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Personalizar:</span>
+                  {['{paciente}', '{data}', '{hora}'].map(tag => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => insertBeforeVar(tag)}
+                      className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-teal-50 text-teal-700 border border-teal-100 hover:bg-teal-100 transition-colors"
+                    >
+                      + {tag}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           ) : (
@@ -369,16 +391,25 @@ function ConfirmationsView() {
                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-16 h-1 bg-slate-700 rounded-b-lg" />
                <div className="space-y-4 pt-4">
                  <div className="bg-white/10 w-2/3 h-8 rounded-lg animate-pulse" />
-                 <div className="bg-teal-600 text-white p-4 rounded-2xl rounded-tr-none text-sm font-medium shadow-lg whitespace-pre-wrap">
+                 <div className="bg-white text-slate-800 p-3.5 rounded-2xl rounded-tl-none text-sm font-medium shadow-lg whitespace-pre-wrap max-w-[92%]">
                     {(tab === 'before' ? (localConfig.confirm_message || '') : (localConfig.confirm_post_message || ''))
                       .replace(/\{paciente\}/g, 'João Silva')
                       .replace(/\{data\}/g, '15/05')
-                      .replace(/\{hora\}/g, '14:30') || (tab === 'after' ? 'Mensagem pós-confirmação ainda não configurada.' : '')}
+                      .replace(/\{hora\}/g, '14:30') || (tab === 'before' ? 'Escreva a mensagem ao lado para ver o preview…' : 'Mensagem ainda não configurada.')}
                  </div>
-                 {tab === 'after' && (
+                 {tab === 'before' ? (
+                   <div className="space-y-1.5 max-w-[92%]">
+                     {['Confirmar consulta', 'Remarcar consulta', 'Cancelar consulta'].map(b => (
+                       <div key={b} className="bg-white/95 text-teal-700 text-center py-2 rounded-lg text-xs font-bold shadow-sm">
+                         {b}
+                       </div>
+                     ))}
+                     <p className="text-[10px] text-white/40 italic px-1 pt-0.5">Por favor, clique em uma das opções abaixo.</p>
+                   </div>
+                 ) : (
                    <div className="flex justify-end">
-                     <div className="bg-white/10 text-white px-3 py-1.5 rounded-2xl rounded-br-none text-xs font-medium">
-                       Confirmo 👍
+                     <div className="bg-teal-600 text-white px-3 py-1.5 rounded-2xl rounded-br-none text-xs font-medium">
+                       Confirmar consulta
                      </div>
                    </div>
                  )}

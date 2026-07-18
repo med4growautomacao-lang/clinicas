@@ -52,7 +52,7 @@ function kindFromMime(mime: string): "image" | "audio" | "video" | "document" {
 }
 function extFromMime(mime: string): string {
   const map: Record<string, string> = {
-    "audio/ogg": "ogg", "audio/opus": "ogg", "audio/mpeg": "mp3", "audio/mp4": "m4a", "audio/amr": "amr", "audio/wav": "wav",
+    "audio/ogg": "ogg", "audio/opus": "ogg", "audio/mpeg": "mp3", "audio/mp4": "m4a", "audio/amr": "amr", "audio/wav": "wav", "audio/webm": "webm", "audio/aac": "aac",
     "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif",
     "video/mp4": "mp4", "video/3gpp": "3gp", "video/quicktime": "mov",
     "application/pdf": "pdf",
@@ -68,16 +68,39 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
-// ── Config + chave (lidas por request, só quando há mídia inbound) ───────────
-async function loadMediaAiConfig(supabase: any): Promise<{ audio: { provider: string; model: string }; image: { provider: string; model: string } }> {
-  try {
-    const { data } = await supabase.from("system_settings").select("value").eq("id", "media_ai_config").maybeSingle();
-    if (data?.value) {
-      const c = JSON.parse(data.value);
-      return { audio: c?.audio ?? DEFAULT_MEDIA_AI.audio, image: c?.image ?? DEFAULT_MEDIA_AI.image };
-    }
-  } catch { /* config ausente/inválida → default */ }
-  return DEFAULT_MEDIA_AI;
+// ── Cache de módulo (instância quente reusa entre invocações) — TTL curto ────
+// Evita 1 round-trip por mensagem p/ dados que quase nunca mudam (config global,
+// chave do Vault, flag de IA da clínica). Chamada de LLM >> query, então cachear
+// aqui é seguro; 60s de defasagem é aceitável.
+const _cache = new Map<string, { v: any; exp: number }>();
+async function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T> {
+  const c = _cache.get(key);
+  if (c && c.exp > Date.now()) return c.v as T;
+  const v = await fn();
+  _cache.set(key, { v, exp: Date.now() + ttlMs });
+  return v;
+}
+
+// A clínica usa IA? (ai_config.auto_schedule é o gate mestre do forward_ai). Se não,
+// NÃO transcreve — a transcrição só serve à IA/memória; poupa custo de LLM.
+function clinicUsesAi(supabase: any, clinicId: string): Promise<boolean> {
+  return cached(`ai_on:${clinicId}`, 60000, async () => {
+    const { data } = await supabase.from("ai_config").select("auto_schedule").eq("clinic_id", clinicId).maybeSingle();
+    return (data as any)?.auto_schedule === true;
+  });
+}
+
+function getMediaAiConfig(supabase: any): Promise<{ audio: { provider: string; model: string }; image: { provider: string; model: string } }> {
+  return cached("media_ai_config", 60000, async () => {
+    try {
+      const { data } = await supabase.from("system_settings").select("value").eq("id", "media_ai_config").maybeSingle();
+      if (data?.value) {
+        const c = JSON.parse(data.value);
+        return { audio: c?.audio ?? DEFAULT_MEDIA_AI.audio, image: c?.image ?? DEFAULT_MEDIA_AI.image };
+      }
+    } catch { /* config ausente/inválida → default */ }
+    return DEFAULT_MEDIA_AI;
+  });
 }
 
 async function llmKey(supabase: any, provider: string): Promise<string | null> {
@@ -85,11 +108,17 @@ async function llmKey(supabase: any, provider: string): Promise<string | null> {
     : provider === "anthropic" ? "ANTHROPIC_API_KEY"
     : provider === "openai" ? "OPENAI_API_KEY" : "";
   if (!name) return null;
+  const ck = `key:${name}`;
+  const c = _cache.get(ck);
+  if (c && c.exp > Date.now()) return c.v as string;
+  let key: string | null = null;
   try {
     const { data } = await supabase.rpc("get_llm_secret", { p_name: name }); // Vault (service role)
-    if (data && String(data).trim()) return String(data);
+    if (data && String(data).trim()) key = String(data);
   } catch { /* sem Vault → tenta env */ }
-  return Deno.env.get(name) || null; // fallback: edge secret (ex.: ANTHROPIC_API_KEY já existe)
+  if (!key) key = Deno.env.get(name) || null; // fallback: edge secret (ex.: ANTHROPIC_API_KEY já existe)
+  if (key) _cache.set(ck, { v: key, exp: Date.now() + 60000 }); // só cacheia HIT (chave nova entra em <60s)
+  return key;
 }
 
 // ── Provedores ──────────────────────────────────────────────────────────────
@@ -131,8 +160,12 @@ async function anthropicImage(model: string, key: string, bytes: Uint8Array, mim
 }
 
 async function openaiTranscribe(model: string, key: string, bytes: Uint8Array, mime: string): Promise<string | null> {
+  const base = mime.split(";")[0].trim();
+  // extensão que a OpenAI reconhece: usa o map se conhecido, senão o subtipo do mime
+  const mapped = extFromMime(base);
+  const ext = mapped !== "bin" ? mapped : (base.split("/")[1] || "ogg");
   const form = new FormData();
-  form.append("file", new Blob([bytes], { type: mime.split(";")[0].trim() }), `audio.${extFromMime(mime)}`);
+  form.append("file", new Blob([bytes], { type: base }), `audio.${ext}`);
   form.append("model", model);
   const resp = await fetch("https://api.openai.com/v1/audio/transcriptions", {
     method: "POST",
@@ -265,19 +298,22 @@ serve(async (req) => {
               mediaKind = kindFromMime(mime); mediaMime = mime; mediaPath = path;
               mediaFilename = msg.filename ?? null;
 
-              // Transcrição p/ a IA (C5-b): só INBOUND; enriquece o `content` (memória +
-              // forward da IA). Falha NUNCA quebra o fluxo (cai no placeholder + log).
+              // Transcrição p/ a IA (C5-b): só INBOUND e só se a clínica usa IA
+              // (senão a transcrição não teria consumidor — poupa custo de LLM).
+              // Enriquece o `content` (memória + forward). Falha NUNCA quebra o fluxo.
               if (direction === "inbound" && (mediaKind === "audio" || mediaKind === "image")) {
                 try {
-                  const cfg = await loadMediaAiConfig(supabase);
-                  const spec = mediaKind === "audio" ? cfg.audio : cfg.image;
-                  const key = spec?.provider ? await llmKey(supabase, spec.provider) : null;
-                  const t = key ? await transcribeMedia(mediaKind, bytes, mime, spec.provider, spec.model, key) : null;
-                  if (t) {
-                    const cap = String(msg.caption ?? "").trim();
-                    content = mediaKind === "image"
-                      ? (cap ? `${cap}\n[Imagem] ${t}` : `[Imagem] ${t}`)
-                      : t; // áudio: transcrição limpa (a IA lê como fala do paciente)
+                  if (await clinicUsesAi(supabase, clinicId)) {
+                    const cfg = await getMediaAiConfig(supabase);
+                    const spec = mediaKind === "audio" ? cfg.audio : cfg.image;
+                    const key = spec?.provider ? await llmKey(supabase, spec.provider) : null;
+                    const t = key ? await transcribeMedia(mediaKind, bytes, mime, spec.provider, spec.model, key) : null;
+                    if (t) {
+                      const cap = String(msg.caption ?? "").trim();
+                      content = mediaKind === "image"
+                        ? (cap ? `${cap}\n[Imagem] ${t}` : `[Imagem] ${t}`)
+                        : t; // áudio: transcrição limpa (a IA lê como fala do paciente)
+                    }
                   }
                 } catch (e) {
                   await registrarErro("transcribe_failed", "Falha ao transcrever mídia recebida",

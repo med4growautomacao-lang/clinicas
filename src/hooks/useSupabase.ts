@@ -1309,7 +1309,8 @@ export function useTickets() {
 // ==========================================
 export interface DashboardStats {
   totalAppointments: number;
-  totalRevenue: number;
+  totalRevenue: number;        // caixa (financeiro) — DEPRECATED nos painéis, use salesValue
+  salesValue: number;          // faturamento canônico = vendas lançadas (conversions s/ orçamento)
   pendingRevenue: number;
   totalConversionsValue: number;
   totalLeads: number;
@@ -1335,6 +1336,7 @@ export function useDashboardStats(dateRange?: { start: string; end: string }, or
   const [data, setData] = useState<DashboardStats>({
     totalAppointments: 0,
     totalRevenue: 0,
+    salesValue: 0,
     pendingRevenue: 0,
     totalConversionsValue: 0,
     totalLeads: 0,
@@ -1370,6 +1372,7 @@ export function useDashboardStats(dateRange?: { start: string; end: string }, or
       setData({
         totalAppointments: r?.totalAppointments || 0,
         totalRevenue: Number(r?.totalRevenue || 0),
+        salesValue: Number(r?.salesValue ?? r?.totalConversionsValue ?? 0),
         pendingRevenue: Number(r?.pendingRevenue || 0),
         totalConversionsValue: Number(r?.totalConversionsValue || 0),
         totalLeads: r?.totalLeads || 0,

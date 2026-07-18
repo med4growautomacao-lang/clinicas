@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import { useState, useMemo } from "react";
 import "react-day-picker/dist/style.css";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import {
@@ -11,9 +11,6 @@ import {
   ShoppingCart,
   DollarSign,
   Target,
-  BarChart3,
-  Calendar,
-  Clock,
   Bot,
   UserCheck,
   FileText,
@@ -22,12 +19,11 @@ import {
 import { TrendBarChart, fmtByType } from "./TrendBarChart";
 import { cn } from "@/src/lib/utils";
 import { motion } from "framer-motion";
-import { useDashboardStats, useAppointments, useDoctors } from "../hooks/useSupabase";
+import { useDashboardStats } from "../hooks/useSupabase";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
 import SemOrigemLogo from "../assets/logos/Logo Sem origem.png";
 import WhatsAppLogo from "../assets/logos/Logo Whatsapp.png";
-import { CalendarView } from "./CalendarView";
 import { FilterChips } from "./filters/FilterChips";
 import { GranularityToggle } from "./filters/GranularityToggle";
 import { DateRangePopover } from "./filters/DateRangePopover";
@@ -41,10 +37,13 @@ import {
   endOfMonth,
   subMonths,
   subWeeks,
-  addMonths,
-  parseISO
+  addMonths
 } from "date-fns";
 
+// Visão Geral = leitura RÁPIDA do dono: números essenciais do período + tendência.
+// Fonte ÚNICA (mesmas views/RPC que Comercial e Marketing): faturamento = VENDAS
+// LANÇADAS (conversions sem 'Orçamento Enviado'), vendas = tickets.outcome, agendados =
+// união agenda∪etapa. Detalhe por coorte/UTM fica em Comercial e Marketing.
 export function Dashboard() {
   const [period, setPeriod] = useState<Period>('mês');
   const [isPeriodOpen, setIsPeriodOpen] = useState(false);
@@ -69,9 +68,6 @@ export function Dashboard() {
     channel.length ? channel.join(',') : 'todos',
     agent
   );
-  const { data: appointments } = useAppointments();
-  const { data: doctors } = useDoctors();
-  const [calendarMonth, setCalendarMonth] = useState(new Date());
   const [calMonth1, setCalMonth1] = useState<Date>(() => subDays(new Date(), 7));
   const [calMonth2, setCalMonth2] = useState<Date>(() => addMonths(subDays(new Date(), 7), 1));
 
@@ -138,55 +134,50 @@ export function Dashboard() {
     setIsPeriodOpen(false);
   };
 
-  const [selectedMetric, setSelectedMetric] = useState<string>('agendamentos');
+  const [selectedMetric, setSelectedMetric] = useState<string>('vendas');
 
   const chartMetrics = [
-    { id: 'faturamento', label: 'FATURAMENTO', type: 'currency', color: '#0d9488' },
+    { id: 'faturamento', label: 'VENDAS (R$)', type: 'currency', color: '#0d9488' },
     { id: 'investimento', label: 'INVESTIMENTO', type: 'currency', color: '#f59e0b' },
     { id: 'roas', label: 'ROAS', type: 'number', color: '#8b5cf6' },
     { id: 'leads', label: 'LEADS', type: 'number', color: '#4f46e5' },
-    { id: 'agendamentos', label: 'AGENDAMENTOS', type: 'number', color: '#0ea5e9' },
+    { id: 'agendamentos', label: 'AGENDADOS', type: 'number', color: '#0ea5e9' },
     { id: 'vendas', label: 'VENDAS', type: 'number', color: '#10b981' },
   ];
 
   const processedChartData = useMemo(() => {
-    return stats.chartData.map(d => {
+    return stats.chartData.map((d: any) => {
       // Formatar data dd/MM sem parseISO para evitar problemas de timezone
-      const [year, month, day] = d.date.split('-');
-      const formattedDate = `${day}/${month}`;
-
+      const [, month, day] = d.date.split('-');
       return {
         ...d,
-        name: formattedDate,
+        name: `${day}/${month}`,
         roas: d.investimento > 0 ? Number((d.faturamento / d.investimento).toFixed(2)) : 0,
-        cpl: d.leads > 0 ? Number((d.investimento / d.leads).toFixed(2)) : 0,
-        cac: d.vendas > 0 ? Number((d.investimento / d.vendas).toFixed(2)) : 0,
-        cpApt: d.agendamentos > 0 ? Number((d.investimento / d.agendamentos).toFixed(2)) : 0,
-        convRate: d.leads > 0 ? Number(((d.vendas / d.leads) * 100).toFixed(1)) : 0,
-        ticketMed: d.vendas > 0 ? Number((d.faturamento / d.vendas).toFixed(0)) : 0,
       };
     });
   }, [stats.chartData]);
 
-  // Métricas de conversão derivadas
-  const cac = stats.totalInvestment > 0 && stats.totalSales > 0
-    ? (stats.totalInvestment / stats.totalSales)
-    : 0;
-
+  // Faturamento canônico = VENDAS LANÇADAS (salesValue). Fallback p/ totalConversionsValue
+  // durante a transição do deploy (a RPC v2 já devolve salesValue).
+  const salesValue = Number(stats.salesValue ?? stats.totalConversionsValue ?? 0);
+  const roas = stats.totalInvestment > 0 && salesValue > 0 ? (salesValue / stats.totalInvestment) : 0;
   const conversionRate = stats.totalLeads > 0 && stats.totalSales > 0
     ? ((stats.totalSales / stats.totalLeads) * 100)
     : 0;
-
   const configuredTicket = stats.defaultTicket > 0 ? stats.defaultTicket : 0;
-  const convLeadAppt = stats.totalLeads > 0 ? (stats.totalAppointments / stats.totalLeads) * 100 : 0;
 
-  const roas = stats.totalInvestment > 0 && stats.totalRevenue > 0
-    ? (stats.totalRevenue / stats.totalInvestment)
-    : 0;
-
-  const trendLabel = activeRangeLabel === "Personalizado" 
-    ? "Período selecionado" 
-    : activeRangeLabel.toLowerCase();
+  const cards = [
+    // Dinheiro
+    { title: "Vendas lançadas", value: `R$ ${salesValue.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: "Valor lançado no fechamento", icon: DollarSign, color: "bg-emerald-50 text-emerald-600" },
+    { title: "Investimento", value: `R$ ${stats.totalInvestment.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: "Em mídia paga", icon: TrendingUp, color: "bg-amber-50 text-amber-600" },
+    { title: "ROAS", value: roas > 0 ? `${roas.toFixed(2).replace('.', ',')}x` : "—", trend: "Vendas ÷ Investimento", icon: Activity, color: "bg-teal-50 text-teal-600" },
+    { title: "Ticket Médio", value: configuredTicket > 0 ? `R$ ${configuredTicket.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}` : "—", trend: "Definido em Dados da Clínica", icon: Target, color: "bg-violet-50 text-violet-600" },
+    // Funil
+    { title: "Leads", value: `${stats.totalLeads}`, trend: "Novos no período", icon: MessageSquare, color: "bg-indigo-50 text-indigo-600" },
+    { title: "Agendados", value: `${stats.totalAppointments}`, trend: "Gerados (agenda ∪ funil)", icon: CalendarCheck, color: "bg-sky-50 text-sky-600" },
+    { title: "Vendas", value: `${stats.totalSales}`, trend: "Ganhos no período", icon: ShoppingCart, color: "bg-rose-50 text-rose-600" },
+    { title: "Conversão Lead → Venda", value: conversionRate > 0 ? `${conversionRate.toFixed(1).replace('.', ',')}%` : "—", trend: "Vendas ÷ Leads", icon: TrendingUp, color: "bg-cyan-50 text-cyan-600" },
+  ];
 
   return (
     <div className="space-y-8 relative">
@@ -283,68 +274,24 @@ export function Dashboard() {
         </div>
       </div>
 
-      {/* Grid de Cards - Reordenado conforme solicitação */}
-      {/* Layout Superior: Cards + Métricas de Conversão */}
-      <div className="grid gap-6 lg:grid-cols-4">
-        {/* Lado Esquerdo: Grid de Cards Principais (3 colunas) */}
-        <div className="lg:col-span-3 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {[
-            // Dinheiro
-            { title: "Recebido", value: `R$ ${stats.totalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: "Pago no caixa", icon: TrendingUp, color: "bg-emerald-50 text-emerald-600" },
-            { title: "A Receber", value: `R$ ${stats.pendingRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: "Agend. a realizar × ticket", icon: Clock, color: "bg-amber-50 text-amber-600" },
-            { title: "Investimento", value: `R$ ${stats.totalInvestment.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: "Em mídia paga", icon: DollarSign, color: "bg-sky-50 text-sky-600" },
-            { title: "ROAS", value: roas > 0 ? `${roas.toFixed(2).replace('.', ',')}x` : "—", trend: "Recebido ÷ Investimento", icon: Activity, color: "bg-teal-50 text-teal-600" },
-
-            // Comercial
-            { title: "Novos Leads", value: `+${stats.totalLeads}`, trend: "Interações no período", icon: MessageSquare, color: "bg-indigo-50 text-indigo-600" },
-            { title: "Agendamentos", value: stats.totalAppointments.toString(), trend: "Consultas com data no período", icon: CalendarCheck, color: "bg-teal-50 text-teal-600" },
-            { title: "Vendas (Leads)", value: stats.totalSales.toString(), trend: "Convertidos no período", icon: ShoppingCart, color: "bg-rose-50 text-rose-600" },
-          ].map((stat, i) => (
-            <motion.div key={stat.title} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }}>
-              <Card className="overflow-hidden border border-slate-100 shadow-sm h-full">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{stat.title}</CardTitle>
-                  <div className={cn("p-1.5 rounded-lg", stat.color)}>
-                    <stat.icon className="h-4 w-4" />
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-slate-900">{stat.value}</div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          ))}
-        </div>
-
-        {/* Lado Direito: Métricas de Conversão (1 coluna) */}
-        <Card className="lg:col-span-1 border border-slate-100 shadow-sm flex flex-col">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
-              <BarChart3 className="w-5 h-5 text-teal-600" />
-              Métricas Secundárias
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex-1">
-            <div className="space-y-3">
-              {[
-                { label: "Conversão Lead → Venda", value: conversionRate > 0 ? `${conversionRate.toFixed(1).replace('.', ',')}%` : "—", description: "Vendas ÷ Leads", icon: TrendingUp, color: "text-emerald-600 bg-emerald-50" },
-                { label: "Conversão Lead → Agendamento", value: convLeadAppt > 0 ? `${convLeadAppt.toFixed(1).replace('.', ',')}%` : "—", description: "Agendamentos ÷ Leads", icon: CalendarCheck, color: "text-cyan-600 bg-cyan-50" },
-                { label: "Ticket Médio", value: configuredTicket > 0 ? `R$ ${configuredTicket.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—", description: "Definido em Dados da Clínica", icon: DollarSign, color: "text-teal-600 bg-teal-50" },
-                { label: "CAC (Custo p/ Venda)", value: cac > 0 ? `R$ ${cac.toFixed(2).replace('.', ',')}` : "—", description: "Investimento ÷ Vendas", icon: Users, color: "text-indigo-600 bg-indigo-50" },
-              ].map((metric) => (
-                <div key={metric.label} className="flex items-center gap-3 p-2 rounded-xl bg-slate-50/80 border border-slate-100">
-                  <div className={cn("p-2 rounded-lg", metric.color)}>
-                    <metric.icon className="w-3.5 h-3.5" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[10px] font-bold text-slate-900 leading-tight">{metric.label}</p>
-                  </div>
-                  <span className="text-xs font-bold text-slate-900 tabular-nums">{metric.value}</span>
+      {/* Grid enxuto: 8 cards essenciais em 2 linhas (dinheiro em cima, funil embaixo) */}
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+        {cards.map((stat, i) => (
+          <motion.div key={stat.title} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
+            <Card className="overflow-hidden border border-slate-100 shadow-sm h-full">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{stat.title}</CardTitle>
+                <div className={cn("p-1.5 rounded-lg", stat.color)}>
+                  <stat.icon className="h-4 w-4" />
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-slate-900">{stat.value}</div>
+                <p className="text-[11px] text-slate-400 font-medium mt-1">{stat.trend}</p>
+              </CardContent>
+            </Card>
+          </motion.div>
+        ))}
       </div>
 
       {/* Gráfico de Tendência (Largura Total) */}
@@ -356,7 +303,7 @@ export function Dashboard() {
               Tendência de Performance
             </CardTitle>
           </div>
-          
+
           {/* Metric Selector Pill */}
           <div className="flex items-center gap-2 bg-slate-50 p-1 rounded-2xl border border-slate-100 overflow-x-auto no-scrollbar">
             {chartMetrics.map((m) => (
@@ -365,8 +312,8 @@ export function Dashboard() {
                 onClick={() => setSelectedMetric(m.id)}
                 className={cn(
                   "whitespace-nowrap px-3 py-1.5 rounded-xl text-[9px] font-black tracking-widest transition-all",
-                  selectedMetric === m.id 
-                    ? "bg-white text-teal-600 shadow-sm border border-slate-200" 
+                  selectedMetric === m.id
+                    ? "bg-white text-teal-600 shadow-sm border border-slate-200"
                     : "text-slate-400 hover:text-slate-600"
                 )}
               >
@@ -388,38 +335,6 @@ export function Dashboard() {
           })()}
         </CardContent>
       </Card>
-
-      {/* Calendário de Agendamentos */}
-      <Card className="border border-slate-100 shadow-sm overflow-hidden">
-        <CardHeader className="flex flex-row items-center gap-2 pb-4">
-          <Calendar className="w-5 h-5 text-teal-600" />
-          <CardTitle className="text-lg font-bold text-slate-900">Calendário de Agendamentos</CardTitle>
-        </CardHeader>
-        <CardContent className="px-6 pb-6">
-          <CalendarView
-            currentMonth={calendarMonth}
-            setCurrentMonth={setCalendarMonth}
-            appointments={appointments}
-            onDayClick={() => {}}
-            doctors={doctors}
-          />
-        </CardContent>
-      </Card>
     </div>
   );
 }
-
-function PeriodOption({ label, onClick, active }: { label: string; onClick: () => void; active?: boolean }) {
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        "w-full text-left px-3 py-2 rounded-xl text-[10px] font-black tracking-widest transition-all",
-        active ? "bg-teal-600 text-white shadow-lg shadow-teal-100" : "text-slate-400 hover:bg-slate-50 hover:text-slate-600"
-      )}
-    >
-      {label}
-    </button>
-  );
-}
-

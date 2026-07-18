@@ -13,6 +13,7 @@ import { cn } from '@/src/lib/utils';
 import { useToast } from './ui/toast';
 import { matchesSearch } from '../lib/search';
 import { ErrorCenter } from './ErrorCenter';
+import { MediaAIPanel } from './MediaAIPanel';
 
 // ─── tipos de modal ───────────────────────────────────────────────────────────
 type ModalState =
@@ -1099,13 +1100,14 @@ function PromptTemplatesManager() {
 
 // ─── SystemSettingsTab (wrapper com sub-abas) ─────────────────────────────────
 function SystemSettingsTab() {
-  const [subTab, setSubTab] = useState<'prompts' | 'assistant' | 'vars'>('prompts');
+  const [subTab, setSubTab] = useState<'prompts' | 'assistant' | 'media' | 'vars'>('prompts');
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl w-fit">
         {[
           { id: 'prompts', label: 'Prompts Fixos' },
           { id: 'assistant', label: 'AI Assistente' },
+          { id: 'media', label: 'IA de Mídia' },
           { id: 'vars', label: 'Variáveis de Sistema' },
         ].map(t => (
           <button key={t.id} onClick={() => setSubTab(t.id as any)}
@@ -1117,6 +1119,7 @@ function SystemSettingsTab() {
       </div>
       {subTab === 'prompts' ? <PromptTemplatesManager />
         : subTab === 'assistant' ? <AIAssistantConfigSection />
+        : subTab === 'media' ? <MediaAIPanel />
         : <SystemVariablesSection />}
     </div>
   );

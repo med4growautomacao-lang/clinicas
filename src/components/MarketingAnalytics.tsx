@@ -51,7 +51,7 @@ import {
 import { cn } from "@/src/lib/utils";
 import { TrendBarChart, fmtByType } from "./TrendBarChart";
 import { motion, AnimatePresence } from "framer-motion";
-import { useMarketing, MarketingData, useFunnelStages, useUtmFunnelCohort, useMarketingKpis, MarketingKpiRow } from "../hooks/useSupabase";
+import { useMarketing, MarketingData, useFunnelStages, useUtmFunnelCohort, useFunnelCohort, useMarketingKpis, MarketingKpiRow } from "../hooks/useSupabase";
 import {
   format,
   startOfDay,
@@ -102,7 +102,7 @@ const METRICS_CONFIG = [
   { id: 'appointments', label: 'Agendamentos', color: '#8b5cf6', type: 'number', icon: Calendar, bgColor: 'bg-violet-50 text-violet-600' },
   { id: 'convs', label: 'Conversões', color: '#10b981', type: 'number', icon: CheckCircle2, bgColor: 'bg-emerald-50 text-emerald-600' },
   { id: 'cpapt', label: 'Custo p/ Agend.', color: '#ec4899', type: 'currency', icon: Target, bgColor: 'bg-pink-50 text-pink-600' },
-  { id: 'cpa', label: 'CPA (Conv.)', color: '#f43f5e', type: 'currency', icon: Activity, bgColor: 'bg-rose-50 text-rose-600' },
+  { id: 'cpa', label: 'CAC', color: '#f43f5e', type: 'currency', icon: Activity, bgColor: 'bg-rose-50 text-rose-600' },
   { id: 'conv_value', label: 'Valor Conv.', color: '#059669', type: 'currency', icon: DollarSign, bgColor: 'bg-green-50 text-green-600' },
   { id: 'roas', label: 'ROAS', color: '#ea580c', type: 'ratio', icon: TrendingUp, bgColor: 'bg-orange-50 text-orange-600' },
   { id: 'lead_to_apt_rate', label: 'Lead p/ Agend.', color: '#0ea5e9', type: 'percent', icon: Activity, bgColor: 'bg-sky-50 text-sky-600' },
@@ -275,10 +275,16 @@ export function MarketingAnalytics() {
     format(dateRange.start, 'yyyy-MM-dd'),
     format(dateRange.end, 'yyyy-MM-dd')
   );
+  // Funil de Vendas VISUAL: usa o coorte LEVE (marketing_funnel_cohort, sem as dimensões
+  // de UTM) — o cohort UTM explode em linhas (etapa×plataforma×canal×motivo×campanha×…)
+  // e ESTOURA o max_rows do PostgREST em clínica grande, cortando etapas inteiras (Ganho
+  // sumia do funil da Intubação, 5367>5000). O leve fica em ~centenas de linhas.
+  const funnelCohort = useFunnelCohort(
+    format(dateRange.start, 'yyyy-MM-dd'),
+    format(dateRange.end, 'yyyy-MM-dd')
+  );
   // Conversões e Agendamentos dos CARDS vêm da RPC marketing_kpis (wins/scheduled,
-  // fonte única = tickets.outcome / união agendamento∪etapa). A contagem por ETAPA
-  // (is_conversion / 'agendado') era usada só pelo bucketStages, removido — o funil
-  // VISUAL continua lendo utmCohort direto.
+  // fonte única = tickets.outcome / união agendamento∪etapa).
   const [isEditing, setIsEditing] = useState(false);
   const [isComparing, setIsComparing] = useState(false);
   const [compareDateRange, setCompareDateRange] = useState<{ start: Date, end: Date }>({
@@ -286,8 +292,13 @@ export function MarketingAnalytics() {
     end: subDays(new Date(), 8)
   });
 
-  // Cohort do funil para o período de comparação (mesma fonte do funil principal).
+  // Cohort UTM (seção UTM × Etapa / pizzas) do período de comparação.
   const utmCohortCompare = useUtmFunnelCohort(
+    isComparing ? format(compareDateRange.start, 'yyyy-MM-dd') : null,
+    isComparing ? format(compareDateRange.end, 'yyyy-MM-dd') : null
+  );
+  // Cohort LEVE do funil visual (comparação) — mesma razão do principal (evita clamp).
+  const funnelCohortCompare = useFunnelCohort(
     isComparing ? format(compareDateRange.start, 'yyyy-MM-dd') : null,
     isComparing ? format(compareDateRange.end, 'yyyy-MM-dd') : null
   );
@@ -876,8 +887,10 @@ export function MarketingAnalytics() {
                 metricsOrder={dashboardMetricsOrder}
                 moveMetric={(id: string, dir) => moveMetric(id, dir as any, 'dashboard')}
                 funnelStages={stages}
-                funnelCohort={utmCohort}
-                funnelCohortCompare={utmCohortCompare}
+                funnelCohort={funnelCohort}
+                funnelCohortCompare={funnelCohortCompare}
+                utmCohort={utmCohort}
+                utmCohortCompare={utmCohortCompare}
                 funnelOrder={funnelStagesOrder}
                 funnelHidden={effectiveFunnelHidden}
                 toggleFunnelStage={toggleFunnelStage}
@@ -1122,7 +1135,7 @@ function FunnelConfigButton({ stages, order, hidden, toggleStage, moveStage, fix
   );
 }
 
-function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, isComparing, visibleMetrics, metricsOrder, toggleMetric, moveMetric, funnelStages, funnelCohort, funnelCohortCompare, funnelOrder, funnelHidden, toggleFunnelStage, moveFunnelStage, selectedPlatform, selectedChannel }: any) {
+function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, isComparing, visibleMetrics, metricsOrder, toggleMetric, moveMetric, funnelStages, funnelCohort, funnelCohortCompare, utmCohort, utmCohortCompare, funnelOrder, funnelHidden, toggleFunnelStage, moveFunnelStage, selectedPlatform, selectedChannel }: any) {
 
   const [selectedMetric, setSelectedMetric] = useState('leads');
   const latestPeriod = periods[periods.length - 1]?.label || '';
@@ -1526,8 +1539,8 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
       </div>
 
       <UtmFunnelSection
-        cohort={funnelCohort}
-        cohortCompare={funnelCohortCompare}
+        cohort={utmCohort}
+        cohortCompare={utmCohortCompare}
         isComparing={isComparing}
         stages={funnelStages}
         funnelOrder={funnelOrder}

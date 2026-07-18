@@ -1036,11 +1036,50 @@ export interface UtmFunnelRow {
   leads: number;
 }
 
+// PAGINADO: diferente dos outros coortes, o UTM × Etapa cruza etapa × plataforma ×
+// canal × 5 dimensões de UTM × dia, então em clínica grande passa de max_rows (5000)
+// e o PostgREST clampa a resposta em silêncio — cortava justo as linhas de "Ganho"
+// (a seção mostrava SEM DADOS ao filtrar por Ganho). Buscamos em páginas via .range()
+// até vir uma página incompleta. O RPC tem ORDER BY determinístico p/ a paginação ser
+// estável (migration marketing_utm_funnel_cohort_ordered).
 export function useUtmFunnelCohort(start: string | null, end: string | null) {
-  return useRpcRows<UtmFunnelRow>(
-    'marketing_utm_funnel_cohort',
-    start && end ? { p_start: start, p_end: end } : null
-  );
+  const { activeClinicId } = useAuth();
+  const [data, setData] = useState<UtmFunnelRow[]>([]);
+
+  useEffect(() => {
+    if (!activeClinicId || !start || !end) { setData([]); return; }
+    let cancelled = false;
+    const PAGE = 5000;      // = max_rows do projeto (teto da resposta REST por página)
+    const MAX_PAGES = 20;   // trava de segurança: >100k linhas é anômalo
+
+    (async () => {
+      const all: UtmFunnelRow[] = [];
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const from = page * PAGE;
+        const { data: rows, error }: any = await supabase
+          .rpc('marketing_utm_funnel_cohort', { p_clinic_id: activeClinicId, p_start: start, p_end: end })
+          .range(from, from + PAGE - 1);
+        if (cancelled) return;
+        if (error) {
+          console.error('[marketing_utm_funnel_cohort] RPC falhou:', error);
+          logSystemError('RPC_FETCH_FAIL', 'marketing_utm_funnel_cohort: falha ao buscar dados — UTM × Etapa pode exibir zero', activeClinicId, { fn: 'marketing_utm_funnel_cohort', from, error: error?.message ?? String(error) }, 'error');
+          setData([]);
+          return;
+        }
+        const list: UtmFunnelRow[] = Array.isArray(rows) ? rows : [];
+        all.push(...list);
+        if (list.length < PAGE) { setData(all); return; }  // última página
+        if (page === MAX_PAGES - 1) {
+          logSystemError('UTM_COHORT_PAGE_CAP', 'marketing_utm_funnel_cohort: paginação atingiu o teto de páginas — dados truncados', activeClinicId, { fn: 'marketing_utm_funnel_cohort', pages: MAX_PAGES }, 'warn');
+        }
+      }
+      if (!cancelled) setData(all);
+    })();
+
+    return () => { cancelled = true; };
+  }, [activeClinicId, start, end]);
+
+  return data;
 }
 
 // KPIs do Marketing agregados no BANCO: leads criados (por created_at) e valor de

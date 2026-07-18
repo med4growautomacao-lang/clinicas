@@ -299,16 +299,48 @@ function ConfirmationsView() {
               </div>
 
               <div className={cn("space-y-2 transition-opacity", !localConfig.confirm_post_enabled && "opacity-50 pointer-events-none")}>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Template da Mensagem</label>
+                <label className="text-xs font-bold text-emerald-600 uppercase tracking-wider pl-1 flex items-center gap-1.5">
+                  <CheckSquare className="w-3 h-3" /> Resposta ao tocar "Confirmar"
+                </label>
                 <textarea
-                  rows={6}
+                  rows={4}
                   value={localConfig.confirm_post_message || ""}
                   onChange={(e) => setConfig({ confirm_post_message: e.target.value })}
                   className="w-full p-4 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all resize-none text-sm leading-relaxed"
                   placeholder="Ex: Perfeito, {paciente}! Sua consulta no dia {data} às {hora} está confirmada. Te aguardamos!"
                 />
+              </div>
+
+              <div className="pt-2 border-t border-slate-100 space-y-6">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1">
+                  Respostas aos outros botões
+                </p>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-amber-600 uppercase tracking-wider pl-1 flex items-center gap-1.5">
+                    <Clock className="w-3 h-3" /> Resposta ao tocar "Remarcar"
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={(localConfig as any).confirm_reply_remarcado || ""}
+                    onChange={(e) => setConfig({ confirm_reply_remarcado: e.target.value } as any)}
+                    className="w-full p-4 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-amber-100 focus:border-amber-500 outline-none transition-all resize-none text-sm leading-relaxed"
+                    placeholder="Ex: Sem problemas, {paciente}! Vou verificar novas opções de horário para você."
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-rose-600 uppercase tracking-wider pl-1 flex items-center gap-1.5">
+                    <X className="w-3 h-3" /> Resposta ao tocar "Cancelar"
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={(localConfig as any).confirm_reply_cancelado || ""}
+                    onChange={(e) => setConfig({ confirm_reply_cancelado: e.target.value } as any)}
+                    className="w-full p-4 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-rose-100 focus:border-rose-400 outline-none transition-all resize-none text-sm leading-relaxed"
+                    placeholder="Ex: Consulta cancelada, {paciente}. Se quiser remarcar, é só chamar por aqui!"
+                  />
+                </div>
                 <p className="text-[10px] text-slate-400 font-medium italic pl-1">
-                  Variáveis disponíveis: {"{paciente}"}, {"{data}"}, {"{hora}"}.
+                  Variáveis: {"{paciente}"}, {"{data}"}, {"{hora}"}. Todas as respostas notificam a equipe e atualizam o status da consulta.
                 </p>
               </div>
             </div>

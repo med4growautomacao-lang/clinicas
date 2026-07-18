@@ -131,6 +131,7 @@ function ConfirmationsView() {
   const [showValidation, setShowValidation] = useState(false);
   const [missingTags, setMissingTags] = useState<string[]>([]);
   const [tab, setTab] = useState<'before' | 'after'>('before');
+  const beforeMsgRef = useRef<HTMLTextAreaElement>(null);
 
   const setConfig = (updates: any) => { setLocalConfig((p: any) => ({ ...p, ...updates })); setIsDirty(true); };
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Bot, User, Loader2, MessageSquare, FileText, Download } from "lucide-react";
+import { Bot, User, Loader2, MessageSquare, FileText, Download, RefreshCw } from "lucide-react";
 import { format, isToday, isYesterday } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/src/lib/utils";
@@ -98,81 +98,209 @@ export function detectMedia(message: any): { kind: MediaKind; url?: string; stor
   return { kind, url, storagePath, mime, caption: message.caption, filename: message.filename, duration: message.duration };
 }
 
-// Signed URLs do bucket privado, com cache de módulo p/ não re-assinar a cada render.
-const signedUrlCache = new Map<string, { url: string; exp: number }>();
-function useSignedUrl(path: string | undefined): string | null {
-  const [url, setUrl] = useState<string | null>(() => {
-    if (!path) return null;
-    const c = signedUrlCache.get(path);
-    return c && c.exp > Date.now() ? c.url : null;
+// ─── Signed URLs do bucket privado chat-media ────────────────────────────────
+// Rápido + robusto (itens 1–3 da arquitetura de mídia):
+//  • assinatura via edge `chat-media-sign` (service role + predicado testável),
+//    NÃO createSignedUrl direto — que dependia da RLS de storage.objects (frágil,
+//    já custou 2 bugs) e do plumbing JWT do cliente;
+//  • LOTE: N mídias visíveis viram 1 request (fila com flush em ~60ms);
+//  • LAZY: o card só entra na fila quando encosta na viewport (não assina o que
+//    ninguém rola até ver);
+//  • THUMBNAIL: imagem no thread pede uma versão reduzida (transform do Storage);
+//    o full-res só ao clicar/onError. Corta banda em conversa com muita foto.
+// A fila é indexada por `id` (não por path): a MESMA imagem tem 2 ids (full e
+// thumb) com URLs distintas, então o cache não pode colidir por path.
+type SignItem = { id: string; path: string; width?: number; height?: number; quality?: number };
+type SignEntry = { url: string; exp: number };
+const signCache = new Map<string, SignEntry>();                              // por id
+const signWaiters = new Map<string, Array<(u: string | null) => void>>();    // por id
+let signQueue = new Map<string, SignItem>();                                 // por id (dedup)
+let signTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function flushSignQueue() {
+  signTimer = null;
+  const items = [...signQueue.values()];
+  signQueue = new Map();
+  if (items.length === 0) return;
+  const ids = items.map((i) => i.id);
+  const resolveAll = (map: Record<string, string | null>) => {
+    for (const id of ids) {
+      const w = signWaiters.get(id); signWaiters.delete(id);
+      w?.forEach((fn) => fn(map[id] ?? null));
+    }
+  };
+  try {
+    const { data, error } = await supabase.functions.invoke("chat-media-sign", { body: { items } });
+    if (error || !data?.urls) { resolveAll({}); return; }
+    const ttlMs = Math.max(60, (Number(data.ttl) || 3600) - 300) * 1000; // margem de 5min antes do vencimento
+    const urls: Record<string, string> = data.urls;
+    for (const [id, u] of Object.entries(urls)) {
+      if (u) signCache.set(id, { url: u, exp: Date.now() + ttlMs });
+    }
+    resolveAll(urls);
+  } catch {
+    resolveAll({});
+  }
+}
+
+function requestSigned(item: SignItem): Promise<string | null> {
+  const c = signCache.get(item.id);
+  if (c && c.exp > Date.now()) return Promise.resolve(c.url);
+  return new Promise((resolve) => {
+    const arr = signWaiters.get(item.id) ?? [];
+    arr.push(resolve);
+    signWaiters.set(item.id, arr);
+    signQueue.set(item.id, item); // mesmos params → mesmo id; último descriptor vence
+    if (!signTimer) signTimer = setTimeout(flushSignQueue, 60);
   });
+}
+
+// Vira true quando o elemento encosta na viewport (pré-carga de 200px). Uma vez.
+function useInViewport<T extends HTMLElement>(): [React.RefObject<T>, boolean] {
+  const ref = useRef<T>(null);
+  const [inView, setInView] = useState(false);
   useEffect(() => {
-    if (!path) { setUrl(null); return; }
-    const cached = signedUrlCache.get(path);
-    if (cached && cached.exp > Date.now()) { setUrl(cached.url); return; }
+    if (inView) return;
+    const el = ref.current;
+    if (!el) return;
+    if (typeof IntersectionObserver === "undefined") { setInView(true); return; }
+    const obs = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) { setInView(true); obs.disconnect(); }
+    }, { rootMargin: "200px" });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [inView]);
+  return [ref, inView];
+}
+
+// Assina um conjunto de itens (full e/ou thumb) num único lote. `settled` vira true
+// quando a rodada resolveu — o placeholder distingue "carregando" de "falhou".
+function useSigned(items: SignItem[], enabled: boolean) {
+  const key = items.map((i) => i.id).join("|");
+  const [urls, setUrls] = useState<Record<string, string | null>>(() => {
+    const o: Record<string, string | null> = {};
+    for (const it of items) { const c = signCache.get(it.id); o[it.id] = c && c.exp > Date.now() ? c.url : null; }
+    return o;
+  });
+  const [settled, setSettled] = useState(() => items.length > 0 && items.every((it) => {
+    const c = signCache.get(it.id); return !!(c && c.exp > Date.now());
+  }));
+  const [nonce, setNonce] = useState(0);
+  useEffect(() => {
+    if (!enabled || items.length === 0) return;
     let cancelled = false;
-    supabase.storage.from('chat-media').createSignedUrl(path, 3600).then(({ data }) => {
-      if (cancelled || !data?.signedUrl) return;
-      signedUrlCache.set(path, { url: data.signedUrl, exp: Date.now() + 55 * 60 * 1000 });
-      setUrl(data.signedUrl);
+    setSettled(false);
+    Promise.all(items.map((it) => {
+      const c = signCache.get(it.id);
+      if (c && c.exp > Date.now()) return Promise.resolve([it.id, c.url] as const);
+      return requestSigned(it).then((u) => [it.id, u] as const);
+    })).then((pairs) => {
+      if (cancelled) return;
+      setUrls((prev) => { const n = { ...prev }; for (const [id, u] of pairs) n[id] = u; return n; });
+      setSettled(true);
     });
     return () => { cancelled = true; };
-  }, [path]);
-  return url;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, enabled, nonce]);
+  return { urls, settled, retry: () => setNonce((n) => n + 1) };
 }
 
 export function MediaBubble({ media, dark }: { media: NonNullable<ReturnType<typeof detectMedia>>; dark: boolean }) {
   const { kind, mime, caption, filename } = media;
-  const signed = useSignedUrl(media.url ? undefined : media.storagePath);
-  const url = media.url ?? signed;
-  if (!url) {
-    const rotulo = kind === 'image' ? 'imagem' : kind === 'audio' ? 'áudio' : kind === 'video' ? 'vídeo' : 'arquivo';
+  const [ref, inView] = useInViewport<HTMLDivElement>();
+  // mídia com URL http (ex.: enviada pela IA) não precisa assinar; path do bucket sim.
+  const path = !media.url ? media.storagePath : undefined;
+
+  // Imagem: pede thumb (exibição) + full (clique/onError); demais: só full.
+  const items: SignItem[] = [];
+  if (path) {
+    items.push({ id: path, path });
+    if (kind === 'image') items.push({ id: `${path}@thumb`, path, width: 520, quality: 60 });
+  }
+  const { urls, settled, retry } = useSigned(items, inView);
+
+  const fullUrl = media.url ?? (path ? urls[path] ?? null : null);
+  const thumbUrl = media.url ?? (path ? urls[`${path}@thumb`] ?? null : null) ?? fullUrl;
+  const displayUrl = kind === 'image' ? thumbUrl : fullUrl;
+  const failed = !!path && settled && !displayUrl;
+  const rotulo = kind === 'image' ? 'imagem' : kind === 'audio' ? 'áudio' : kind === 'video' ? 'vídeo' : 'arquivo';
+
+  // O ref fica SEMPRE no container externo (inclusive no placeholder), senão o
+  // observer não anexa enquanto carrega e a assinatura nunca dispara (deadlock).
+  const inner = (() => {
+    if (!displayUrl) {
+      if (failed) {
+        return (
+          <button
+            type="button"
+            onClick={retry}
+            className={cn("flex items-center gap-2 px-3 py-2.5 rounded-lg text-xs transition-colors",
+              dark ? "bg-white/10 hover:bg-white/20" : "bg-slate-50 border border-slate-200 hover:bg-slate-100")}
+          >
+            <RefreshCw className="w-3.5 h-3.5 opacity-60" />
+            <span className="opacity-70">Erro ao carregar {rotulo} — tocar p/ tentar de novo</span>
+          </button>
+        );
+      }
+      return (
+        <div className={cn("flex items-center gap-2 px-3 py-2.5 rounded-lg text-xs", dark ? "bg-white/10" : "bg-slate-50 border border-slate-200")}>
+          <Loader2 className="w-3.5 h-3.5 animate-spin opacity-60" />
+          <span className="opacity-70">Carregando {rotulo}…</span>
+        </div>
+      );
+    }
+    if (kind === 'image') {
+      return (
+        <div className="space-y-2">
+          <a href={fullUrl ?? displayUrl} target="_blank" rel="noopener noreferrer">
+            {/* thumbnail p/ exibir; se o transform falhar (plano sem render), cai no full-res */}
+            <img
+              src={displayUrl}
+              alt={caption || 'imagem'}
+              className="rounded-lg max-w-[260px] max-h-[320px] object-cover"
+              loading="lazy"
+              onError={(e) => {
+                const img = e.currentTarget;
+                if (fullUrl && img.src !== fullUrl) img.src = fullUrl;
+              }}
+            />
+          </a>
+          {caption && <p className="text-sm font-medium leading-relaxed whitespace-pre-wrap">{caption}</p>}
+        </div>
+      );
+    }
+    if (kind === 'audio') {
+      return <audio src={displayUrl} controls className="max-w-[260px] h-10" preload="metadata" />;
+    }
+    if (kind === 'video') {
+      return (
+        <div className="space-y-2">
+          <video src={displayUrl} controls className="rounded-lg max-w-[260px] max-h-[320px]" preload="metadata" />
+          {caption && <p className="text-sm font-medium leading-relaxed whitespace-pre-wrap">{caption}</p>}
+        </div>
+      );
+    }
     return (
-      <div className={cn("flex items-center gap-2 px-3 py-2.5 rounded-lg text-xs", dark ? "bg-white/10" : "bg-slate-50 border border-slate-200")}>
-        <Loader2 className="w-3.5 h-3.5 animate-spin opacity-60" />
-        <span className="opacity-70">Carregando {rotulo}…</span>
-      </div>
+      <a
+        href={displayUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={cn(
+          "flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors",
+          dark ? "bg-white/10 border-white/20 hover:bg-white/20" : "bg-slate-50 border-slate-200 hover:bg-slate-100"
+        )}
+      >
+        <FileText className="w-5 h-5 shrink-0 opacity-80" />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold truncate">{filename || 'Arquivo'}</p>
+          {mime && <p className="text-[10px] opacity-60 uppercase">{mime}</p>}
+        </div>
+        <Download className="w-4 h-4 shrink-0 opacity-60" />
+      </a>
     );
-  }
-  if (kind === 'image') {
-    return (
-      <div className="space-y-2">
-        <a href={url} target="_blank" rel="noopener noreferrer">
-          <img src={url} alt={caption || 'imagem'} className="rounded-lg max-w-[260px] max-h-[320px] object-cover" loading="lazy" />
-        </a>
-        {caption && <p className="text-sm font-medium leading-relaxed whitespace-pre-wrap">{caption}</p>}
-      </div>
-    );
-  }
-  if (kind === 'audio') {
-    return <audio src={url} controls className="max-w-[260px] h-10" preload="metadata" />;
-  }
-  if (kind === 'video') {
-    return (
-      <div className="space-y-2">
-        <video src={url} controls className="rounded-lg max-w-[260px] max-h-[320px]" preload="metadata" />
-        {caption && <p className="text-sm font-medium leading-relaxed whitespace-pre-wrap">{caption}</p>}
-      </div>
-    );
-  }
-  return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={cn(
-        "flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors",
-        dark ? "bg-white/10 border-white/20 hover:bg-white/20" : "bg-slate-50 border-slate-200 hover:bg-slate-100"
-      )}
-    >
-      <FileText className="w-5 h-5 shrink-0 opacity-80" />
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold truncate">{filename || 'Arquivo'}</p>
-        {mime && <p className="text-[10px] opacity-60 uppercase">{mime}</p>}
-      </div>
-      <Download className="w-4 h-4 shrink-0 opacity-60" />
-    </a>
-  );
+  })();
+
+  return <div ref={ref}>{inner}</div>;
 }
 
 // ─── ChatThread: lista de mensagens compartilhada entre kanban e Conversas ───

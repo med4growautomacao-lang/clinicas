@@ -14,10 +14,11 @@
 //
 // C5-b: mídia (áudio/imagem/vídeo/doc) é baixada da uazapi (POST /message/download
 // -> {fileURL,mimetype}; GET fileURL -> bytes), subida no bucket PRIVADO chat-media
-// e anexada à mensagem (attach_chat_media) nos campos que o MediaBubble renderiza.
-// A transcrição para a IA (Gemini) fica para a próxima camada — hoje a IA recebe
-// o placeholder textual. Persistência primeiro, mídia depois: falha de mídia NUNCA
-// perde a mensagem (fica como placeholder + log na Central).
+// e anexada à mensagem nos campos que o MediaBubble renderiza. Além disso, mídia
+// INBOUND é transcrita para a IA: áudio→Gemini, imagem→Claude vision (a transcrição
+// entra no `content`, que vira a memória e o `mensagem` do forward). Sem GEMINI_API_KEY
+// o áudio cai no placeholder (sem regressão). Falha de mídia/transcrição NUNCA perde
+// a mensagem (fica como placeholder + log na Central).
 //
 // Auth: ?k=<WA_INBOUND_SECRET> na URL configurada na uazapi (que não envia
 // headers). Retorna 500 em falha de persistência (uazapi reenvia; o dedup torna
@@ -30,6 +31,9 @@ const UAZAPI_BASE = "https://med4growautomacao.uazapi.com";
 const HUB_AI_WEBHOOK_URL = Deno.env.get("HUB_AI_WEBHOOK_URL") ?? "";
 const HUB_AI_SECRET = Deno.env.get("HUB_AI_SECRET") ?? "";
 const WA_INBOUND_SECRET = Deno.env.get("WA_INBOUND_SECRET") ?? "";
+// Transcrição (C5-b): áudio→Gemini (Claude não processa áudio), imagem→Claude vision.
+const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
+const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
 
 function kindFromMime(mime: string): "image" | "audio" | "video" | "document" {
   if (mime.startsWith("image/")) return "image";
@@ -45,6 +49,66 @@ function extFromMime(mime: string): string {
     "application/pdf": "pdf",
   };
   return map[mime.split(";")[0].trim()] || "bin";
+}
+
+// base64 em blocos (evita estourar a pilha no fromCharCode com arquivos grandes)
+function toBase64(bytes: Uint8Array): string {
+  let bin = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  return btoa(bin);
+}
+
+// Áudio → transcrição (Gemini flash: aceita áudio nativo, barato). null se sem chave.
+async function transcribeAudio(bytes: Uint8Array, mime: string): Promise<string | null> {
+  if (!GEMINI_API_KEY) return null;
+  const model = "gemini-2.0-flash";
+  const resp = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+    {
+      method: "POST",
+      signal: AbortSignal.timeout(25000), // não segurar o caminho de entrada se a IA travar
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [
+          { text: "Transcreva este áudio em português do Brasil. Responda APENAS com a transcrição literal, sem comentários nem aspas." },
+          { inlineData: { mimeType: mime.split(";")[0].trim(), data: toBase64(bytes) } },
+        ] }],
+        generationConfig: { temperature: 0 },
+      }),
+    },
+  );
+  if (!resp.ok) throw new Error(`gemini ${resp.status}: ${(await resp.text().catch(() => "")).slice(0, 300)}`);
+  const j = await resp.json().catch(() => ({}));
+  const text = (j?.candidates?.[0]?.content?.parts ?? [])
+    .map((p: any) => p?.text).filter(Boolean).join(" ").trim();
+  return text || null;
+}
+
+// Imagem → descrição/OCR (Claude Haiku vision; chave já existe no ambiente). null se sem chave.
+async function describeImage(bytes: Uint8Array, mime: string): Promise<string | null> {
+  if (!ANTHROPIC_API_KEY) return null;
+  const media_type = mime.split(";")[0].trim(); // jpeg/png/webp/gif
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    signal: AbortSignal.timeout(25000), // idem: não travar o inbound se a IA demorar
+    headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5",
+      max_tokens: 400,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: "Descreva de forma objetiva o que há nesta imagem enviada por um paciente/cliente no WhatsApp (foto, documento, exame, print, etc.). Se houver texto legível, transcreva-o. Responda em português, em 1 a 3 frases, sem preâmbulo." },
+          { type: "image", source: { type: "base64", media_type, data: toBase64(bytes) } },
+        ],
+      }],
+    }),
+  });
+  if (!resp.ok) throw new Error(`anthropic ${resp.status}: ${(await resp.text().catch(() => "")).slice(0, 300)}`);
+  const j = await resp.json().catch(() => ({}));
+  const text = (j?.content ?? []).map((b: any) => b?.text).filter(Boolean).join(" ").trim();
+  return text || null;
 }
 
 serve(async (req) => {
@@ -74,7 +138,8 @@ serve(async (req) => {
   if (!leadPhone) return json({ ok: true, ignored: true, reason: "no_phone" });
 
   const isText = (msg.type === "text" || msg.messageType === "Conversation" || msg.messageType === "ExtendedTextMessage");
-  const content = isText
+  // `content` pode ser enriquecido com a transcrição da mídia (C5-b) antes do insert.
+  let content = isText
     ? String(msg.text ?? msg.content ?? "")
     : (String(msg.caption ?? "").trim() || `[${msg.messageType || msg.mediaType || "mídia"} recebida]`);
 
@@ -129,6 +194,25 @@ serve(async (req) => {
             } else {
               mediaKind = kindFromMime(mime); mediaMime = mime; mediaPath = path;
               mediaFilename = msg.filename ?? null;
+
+              // Transcrição p/ a IA (C5-b): só INBOUND; enriquece o `content` (memória +
+              // forward da IA). Falha NUNCA quebra o fluxo (cai no placeholder + log).
+              if (direction === "inbound") {
+                try {
+                  let t: string | null = null;
+                  if (mediaKind === "audio") t = await transcribeAudio(bytes, mime);
+                  else if (mediaKind === "image") t = await describeImage(bytes, mime);
+                  if (t) {
+                    const cap = String(msg.caption ?? "").trim();
+                    content = mediaKind === "image"
+                      ? (cap ? `${cap}\n[Imagem] ${t}` : `[Imagem] ${t}`)
+                      : t; // áudio: transcrição limpa (a IA lê como fala do paciente)
+                  }
+                } catch (e) {
+                  await registrarErro("transcribe_failed", "Falha ao transcrever mídia recebida",
+                    { detail: String(e), kind: mediaKind, mime, wa_message_id: waMessageId }, clinicId);
+                }
+              }
             }
           } else {
             await registrarErro("media_download_failed", "Falha ao baixar bytes da mídia",
@@ -195,7 +279,7 @@ serve(async (req) => {
           confirm_enabled: r.ai?.confirm_enabled ?? false,
           transition_rules: r.ai?.transition_rules ?? [],
           midia_kind: isText ? "" : String(msg.mediaType || msg.messageType || ""),
-          midia_mime: "",
+          midia_mime: mediaMime ?? "",
           response_wait_seconds: r.ai?.response_wait_seconds ?? 30,
         }),
       });

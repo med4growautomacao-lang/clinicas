@@ -80,6 +80,7 @@ import { GranularityToggle } from "./filters/GranularityToggle";
 import { DateRangePopover } from "./filters/DateRangePopover";
 import { type Period, RANGE_PRESETS } from "../lib/dateRange";
 import { useAuth } from "../contexts/AuthContext";
+import { supabase } from "../lib/supabase";
 
 type Platform = 'meta_ads' | 'google_ads' | 'no_track';
 
@@ -783,6 +784,11 @@ export function MarketingAnalytics() {
                   Comparar
                 </Button>
 
+                <SyncInvestmentButton
+                  clinicId={activeClinicId}
+                  onDone={() => fetchMkt(format(dateRange.start, 'yyyy-MM-dd'), format(dateRange.end, 'yyyy-MM-dd'))}
+                />
+
                 {viewMode === 'table' && (
                   <Button
                     onClick={handleEditData}
@@ -968,6 +974,105 @@ export function MarketingAnalytics() {
           </motion.div>
         </AnimatePresence>
       </div>
+    </div>
+  );
+}
+
+// Botão + popover para sincronizar o INVESTIMENTO do Meta Ads (edge meta-spend-sync) de X a Y.
+// A edge lê o token/conta da clínica (segredo, server-side), busca o gasto diário na Graph API
+// e faz upsert em marketing_data (platform='meta_ads'). Ao concluir, atualiza a tela via onDone.
+function SyncInvestmentButton({ clinicId, onDone }: { clinicId: string | null; onDone: () => void }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [from, setFrom] = useState(() => format(startOfMonth(new Date()), 'yyyy-MM-dd'));
+  const [to, setTo] = useState(() => format(new Date(), 'yyyy-MM-dd'));
+  const [syncing, setSyncing] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  const runSync = async () => {
+    if (!clinicId || syncing) return;
+    setSyncing(true);
+    setResult(null);
+    try {
+      const { data, error } = await supabase.functions.invoke('meta-spend-sync', {
+        body: { clinic_id: clinicId, since: from, until: to },
+      });
+      if (error) {
+        // status não-2xx: o corpo detalhado vem em error.context (Response), não em error.message.
+        let detail = error.message;
+        try { const b = await (error as any).context?.json?.(); if (b?.detail || b?.error) detail = b.detail || b.error; } catch { /* usa message */ }
+        throw new Error(detail);
+      }
+      if (!data?.ok) {
+        const detail = data?.detail || data?.error || 'Falha na sincronização.';
+        setResult({ ok: false, msg: detail });
+      } else {
+        setResult({ ok: true, msg: `${data.days} dia(s) sincronizado(s) · ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(data.total_spend || 0)} de investimento.` });
+        onDone();
+      }
+    } catch (e: any) {
+      setResult({ ok: false, msg: e?.message || 'Erro ao sincronizar.' });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  return (
+    <div className="relative">
+      <Button
+        onClick={() => setIsOpen(!isOpen)}
+        variant="outline"
+        className={cn(
+          "rounded-xl h-9 gap-2 text-[10px] font-bold uppercase transition-all shadow-sm",
+          isOpen ? "bg-teal-50 border-teal-200 text-teal-600 shadow-teal-100" : "border-slate-200 bg-white hover:bg-slate-50 text-slate-600"
+        )}
+      >
+        <Download className={cn("w-3.5 h-3.5", isOpen ? "text-teal-600" : "text-slate-400")} />
+        Sincronizar Investimento
+      </Button>
+
+      <AnimatePresence>
+        {isOpen && (
+          <>
+            <div className="fixed inset-0 z-[105]" onClick={() => setIsOpen(false)} />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="absolute top-full right-0 mt-2 w-80 bg-white rounded-2xl border border-slate-200 shadow-2xl z-[110] p-4 overflow-hidden"
+            >
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Sincronizar Investimento · Meta Ads</p>
+              <p className="text-[11px] text-slate-500 mb-3">Puxa o gasto diário direto da conta de anúncios do Meta e grava no período escolhido.</p>
+
+              <DateRangePicker
+                inline
+                numberOfMonths={1}
+                from={from}
+                to={to}
+                onFromChange={(v) => { if (v) setFrom(v); }}
+                onToChange={(v) => { if (v) setTo(v); }}
+              />
+
+              {result && (
+                <div className={cn(
+                  "mt-3 text-[11px] font-medium rounded-xl px-3 py-2",
+                  result.ok ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
+                )}>
+                  {result.msg}
+                </div>
+              )}
+
+              <Button
+                onClick={runSync}
+                disabled={syncing || !clinicId}
+                className="mt-3 w-full rounded-xl bg-teal-600 hover:bg-teal-700 text-white h-9 text-[10px] font-black uppercase shadow-lg shadow-teal-100 transition-all active:scale-[0.98] disabled:opacity-60"
+              >
+                {syncing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                {syncing ? 'Sincronizando…' : 'Sincronizar'}
+              </Button>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

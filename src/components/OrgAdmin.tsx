@@ -4,6 +4,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { Building2, Users, ArrowRight, LogIn, Loader2, X, Eye, EyeOff, Search, MoreVertical, UserPlus, Wifi, WifiOff, Settings, UserCheck, TrendingUp, UserCog, ChevronDown, Check, Trash2, MessageCircle, Globe, FileText, BarChart3, Search as SearchIcon, LayoutGrid, List as ListIcon, Stethoscope, Briefcase, AlertCircle, Plus, Building, Activity, ListTodo } from "lucide-react";
 import { OrgTasks } from "./OrgTasks";
 import { OrgMetrics } from "./OrgMetrics";
+import { OrgWhatsapp } from "./OrgWhatsapp";
 import { ClinicInfoModal } from "./ClinicInfoModal";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -1194,6 +1195,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
       {/* Settings Tab */}
       {activeSubTab === "settings" && (
         <div className="flex-1 max-w-xl space-y-6">
+          {profile?.organization_id && <OrgWhatsapp organizationId={profile.organization_id} />}
           <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-3">
               <div className="w-8 h-8 bg-amber-50 rounded-lg flex items-center justify-center">

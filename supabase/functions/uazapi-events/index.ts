@@ -70,9 +70,10 @@ function extractInstanceData(payload: UazapiConnectionEvent): UazapiInstance & {
   return {};
 }
 
-type InstanceRow = { id: string; clinic_id: string; attempt_id: string | null; status: string; api_token: string | null; phone_number: string | null };
+// clinic_id é null para a instância de ORGANIZAÇÃO (remetente de relatórios; send-only).
+type InstanceRow = { id: string; clinic_id: string | null; org_id: string | null; attempt_id: string | null; status: string; api_token: string | null; phone_number: string | null };
 
-const ROW_COLS = 'id, clinic_id, attempt_id, status, api_token, phone_number';
+const ROW_COLS = 'id, clinic_id, org_id, attempt_id, status, api_token, phone_number';
 
 async function findInstanceRow(supa: SupabaseClient, data: UazapiInstance): Promise<InstanceRow | null> {
   if (data.id) {
@@ -92,13 +93,22 @@ async function findInstanceRow(supa: SupabaseClient, data: UazapiInstance): Prom
     if (byToken) return byToken as any;
   }
   if (data.name) {
-    // name na uazapi = clinic_id
-    const { data: byClinic } = await supa
-      .from('whatsapp_instances')
-      .select(ROW_COLS)
-      .eq('clinic_id', data.name)
-      .maybeSingle();
-    if (byClinic) return byClinic as any;
+    // name na uazapi = clinic_id (clínicas) ou 'org-<org_id>' (instância da organização)
+    if (data.name.startsWith('org-')) {
+      const { data: byOrg } = await supa
+        .from('whatsapp_instances')
+        .select(ROW_COLS)
+        .eq('org_id', data.name.slice(4))
+        .maybeSingle();
+      if (byOrg) return byOrg as any;
+    } else {
+      const { data: byClinic } = await supa
+        .from('whatsapp_instances')
+        .select(ROW_COLS)
+        .eq('clinic_id', data.name)
+        .maybeSingle();
+      if (byClinic) return byClinic as any;
+    }
   }
   return null;
 }
@@ -190,6 +200,7 @@ serve(async (req) => {
     console.error('[uazapi-events] update error', error);
     await supa.from('whatsapp_events').insert({
       clinic_id: row.clinic_id,
+      org_id: row.org_id,
       instance_id: row.id,
       attempt_id: row.attempt_id,
       event_type: 'error',
@@ -201,6 +212,7 @@ serve(async (req) => {
 
   await supa.from('whatsapp_events').insert({
     clinic_id: row.clinic_id,
+    org_id: row.org_id,
     instance_id: row.id,
     attempt_id: row.attempt_id,
     event_type: nextStatus

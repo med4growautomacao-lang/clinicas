@@ -43,9 +43,13 @@ const HTTP_TIMEOUT_MS = 5000;
 
 type Action = 'start' | 'cancel' | 'disconnect' | 'reset' | 'status';
 
+// Instância pode pertencer a uma CLÍNICA (fluxo completo: IA, chat, tracking) ou a uma
+// ORGANIZAÇÃO (send-only: remetente de relatórios; só webhook de 'connection').
+// Exatamente um de clinic_id/org_id é não-nulo (CHECK no banco).
 interface InstanceRow {
   id: string;
-  clinic_id: string;
+  clinic_id: string | null;
+  org_id: string | null;
   api_id: string | null;
   api_token: string;
   status: 'disconnected' | 'connecting' | 'connected';
@@ -54,6 +58,13 @@ interface InstanceRow {
   attempt_id: string | null;
   attempt_started_at: string | null;
   last_event_at: string | null;
+}
+
+const ROW_COLS = 'id, clinic_id, org_id, api_id, api_token, status, qr_code, phone_number, attempt_id, attempt_started_at, last_event_at';
+
+// Nome único da instância na uazapi: clinic_id (legado) ou org-<org_id>.
+function instanceName(row: { clinic_id: string | null; org_id: string | null }): string {
+  return row.clinic_id ?? `org-${row.org_id}`;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -121,11 +132,12 @@ async function uazapi(
 
 async function logEvent(
   supa: SupabaseClient,
-  row: { clinic_id: string; instance_id?: string | null; attempt_id?: string | null; event_type: string; source: string; payload?: unknown },
+  row: { clinic_id: string | null; org_id?: string | null; instance_id?: string | null; attempt_id?: string | null; event_type: string; source: string; payload?: unknown },
 ): Promise<void> {
   try {
     await supa.from('whatsapp_events').insert({
       clinic_id: row.clinic_id,
+      org_id: row.org_id ?? null,
       instance_id: row.instance_id ?? null,
       attempt_id: row.attempt_id ?? null,
       event_type: row.event_type,
@@ -139,20 +151,28 @@ async function logEvent(
 
 async function resolveInstance(
   supa: SupabaseClient,
-  body: { clinic_id?: string; connect_token?: string },
+  body: { clinic_id?: string; org_id?: string; connect_token?: string },
 ): Promise<{ row: InstanceRow | null; clinic_id?: string }> {
   if (body.connect_token) {
     const { data } = await supa
       .from('whatsapp_instances')
-      .select('id, clinic_id, api_id, api_token, status, qr_code, phone_number, attempt_id, attempt_started_at, last_event_at')
+      .select(ROW_COLS)
       .eq('connect_token', body.connect_token)
       .maybeSingle();
-    return { row: (data as InstanceRow | null) ?? null, clinic_id: data?.clinic_id };
+    return { row: (data as InstanceRow | null) ?? null, clinic_id: data?.clinic_id ?? undefined };
+  }
+  if (body.org_id) {
+    const { data } = await supa
+      .from('whatsapp_instances')
+      .select(ROW_COLS)
+      .eq('org_id', body.org_id)
+      .maybeSingle();
+    return { row: (data as InstanceRow | null) ?? null };
   }
   if (body.clinic_id) {
     const { data } = await supa
       .from('whatsapp_instances')
-      .select('id, clinic_id, api_id, api_token, status, qr_code, phone_number, attempt_id, attempt_started_at, last_event_at')
+      .select(ROW_COLS)
       .eq('clinic_id', body.clinic_id)
       .maybeSingle();
     return { row: (data as InstanceRow | null) ?? null, clinic_id: body.clinic_id };
@@ -161,41 +181,45 @@ async function resolveInstance(
 }
 
 // Garante registro local em whatsapp_instances. Cria com defaults se nao existir.
-async function ensureLocalRow(supa: SupabaseClient, clinic_id: string): Promise<InstanceRow> {
+// owner: exatamente um de clinic_id/org_id.
+async function ensureLocalRow(supa: SupabaseClient, owner: { clinic_id?: string; org_id?: string }): Promise<InstanceRow> {
+  const key = owner.clinic_id ? 'clinic_id' : 'org_id';
+  const val = owner.clinic_id ?? owner.org_id!;
   const { data: existing } = await supa
     .from('whatsapp_instances')
-    .select('id, clinic_id, api_id, api_token, status, qr_code, phone_number, attempt_id, attempt_started_at, last_event_at')
-    .eq('clinic_id', clinic_id)
+    .select(ROW_COLS)
+    .eq(key, val)
     .maybeSingle();
   if (existing) return existing as InstanceRow;
 
   const { data: inserted, error } = await supa
     .from('whatsapp_instances')
-    .insert({ clinic_id, api_token: '', status: 'disconnected' })
-    .select('id, clinic_id, api_id, api_token, status, qr_code, phone_number, attempt_id, attempt_started_at, last_event_at')
+    .insert({ [key]: val, api_token: '', status: 'disconnected' })
+    .select(ROW_COLS)
     .single();
   if (error || !inserted) throw new Error(`failed_to_create_instance_row: ${error?.message ?? 'unknown'}`);
   return inserted as InstanceRow;
 }
 
 // Garante instancia correspondente na uazapi e devolve {api_id, api_token} validos.
-// Estrategia: lista todas com admintoken, filtra por name === clinic_id. Se nao
-// existir, cria via /instance/create.
+// Estrategia: lista todas com admintoken, filtra por name === instanceName(row)
+// (clinic_id ou org-<org_id>). Se nao existir, cria via /instance/create.
 async function ensureUazapiInstance(
   supa: SupabaseClient,
   row: InstanceRow,
 ): Promise<{ api_id: string; api_token: string; row: InstanceRow }> {
+  const name = instanceName(row);
   // 1) Tenta achar na lista (idempotente)
   const list = await uazapi('/instance/all', { method: 'GET', admin: true });
   if (list.ok && Array.isArray(list.data)) {
-    const found = list.data.find((it: any) => it?.name === row.clinic_id);
+    const found = list.data.find((it: any) => it?.name === name);
     if (found?.id && found?.token) {
       if (row.api_id !== found.id || row.api_token !== found.token) {
         const { data: updated } = await supa
           .from('whatsapp_instances')
           .update({ api_id: found.id, api_token: found.token })
           .eq('id', row.id)
-          .select('id, clinic_id, api_id, api_token, status, qr_code, phone_number, attempt_id, attempt_started_at, last_event_at')
+          .select(ROW_COLS)
           .single();
         return { api_id: found.id, api_token: found.token, row: (updated as InstanceRow) ?? row };
       }
@@ -207,7 +231,7 @@ async function ensureUazapiInstance(
   const created = await uazapi('/instance/create', {
     method: 'POST',
     admin: true,
-    body: { name: row.clinic_id, adminField01: 'paralello' },
+    body: { name, adminField01: 'paralello' },
   });
   if (!created.ok || !created.data?.token) {
     throw new Error(`uazapi_create_failed: ${created.error ?? 'no_token'}`);
@@ -218,7 +242,7 @@ async function ensureUazapiInstance(
     .from('whatsapp_instances')
     .update({ api_id, api_token })
     .eq('id', row.id)
-    .select('id, clinic_id, api_id, api_token, status, qr_code, phone_number, attempt_id, attempt_started_at, last_event_at')
+    .select(ROW_COLS)
     .single();
   return { api_id, api_token, row: (updated as InstanceRow) ?? { ...row, api_id, api_token } };
 }
@@ -230,7 +254,7 @@ async function ensureUazapiInstance(
 // URLs nao reconhecidos (configs custom do cliente) ficam intactos.
 async function ensureUazapiWebhooks(
   api_token: string,
-  route: 'n8n' | 'hub' = 'n8n',
+  route: 'n8n' | 'hub' | 'org' = 'n8n',
 ): Promise<{ created: string[]; removed_duplicates: { url: string; ids: string[] }[]; removed_stale: string[] }> {
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
   const eventsUrl = `${SUPABASE_URL}/functions/v1/uazapi-events`;
@@ -244,14 +268,16 @@ async function ensureUazapiWebhooks(
   }
 
   // Destino do evento 'messages': hub nativo (wa-inbound) ou n8n, por clínica.
-  const messagesUrl = route === 'hub' ? WA_INBOUND_URL : N8N_INBOUND_URL;
+  // Instância de ORG é send-only (remetente de relatórios): nenhum webhook de
+  // 'messages'/tracking — só o de 'connection' (status/QR).
+  const messagesUrl = route === 'org' ? '' : route === 'hub' ? WA_INBOUND_URL : N8N_INBOUND_URL;
   // URL que NÃO deve mais existir para esta rota (evita dupla entrega na reconexão).
-  const staleUrl = route === 'hub' ? N8N_INBOUND_URL : WA_INBOUND_URL;
+  const staleUrl = route === 'org' ? '' : route === 'hub' ? N8N_INBOUND_URL : WA_INBOUND_URL;
 
   const desired = [
     { url: eventsUrl, events: ['connection'], excludeMessages: [] as string[] },
-    ...(messagesUrl        ? [{ url: messagesUrl,        events: ['messages'], excludeMessages: ['wasSentByApi'] }] : []),
-    ...(CTWA_TRACKING_URL  ? [{ url: CTWA_TRACKING_URL,  events: ['messages'], excludeMessages: ['wasSentByApi'] }] : []),
+    ...(messagesUrl                            ? [{ url: messagesUrl,        events: ['messages'], excludeMessages: ['wasSentByApi'] }] : []),
+    ...(route !== 'org' && CTWA_TRACKING_URL   ? [{ url: CTWA_TRACKING_URL,  events: ['messages'], excludeMessages: ['wasSentByApi'] }] : []),
   ];
 
   const created: string[] = [];
@@ -327,7 +353,7 @@ async function handleStart(supa: SupabaseClient, row: InstanceRow, source: strin
     ensured = await ensureUazapiInstance(supa, row);
   } catch (e: any) {
     await logEvent(supa, {
-      clinic_id: row.clinic_id, instance_id: row.id, event_type: 'error', source,
+      clinic_id: row.clinic_id, org_id: row.org_id, instance_id: row.id, event_type: 'error', source,
       payload: { stage: 'ensure_uazapi_instance', error: e.message },
     });
     return json({ success: false, error: e.message }, 502);
@@ -336,21 +362,25 @@ async function handleStart(supa: SupabaseClient, row: InstanceRow, source: strin
 
   // Configura webhooks (idempotente: cria os que faltam, dedup os duplicados).
   // A rota de ingestão ('messages') é por-clínica: hub nativo (wa-inbound) ou n8n.
+  // Instância de ORG usa rota 'org' (send-only: só o webhook de 'connection').
   try {
-    const { data: routeRow } = await supa
-      .from('whatsapp_instances').select('inbound_route').eq('id', row.id).maybeSingle();
-    const route: 'n8n' | 'hub' = routeRow?.inbound_route === 'hub' ? 'hub' : 'n8n';
+    let route: 'n8n' | 'hub' | 'org' = 'org';
+    if (row.clinic_id) {
+      const { data: routeRow } = await supa
+        .from('whatsapp_instances').select('inbound_route').eq('id', row.id).maybeSingle();
+      route = routeRow?.inbound_route === 'hub' ? 'hub' : 'n8n';
+    }
     const whResult = await ensureUazapiWebhooks(ensured.api_token, route);
     if (whResult.created.length > 0 || whResult.removed_duplicates.length > 0 || whResult.removed_stale.length > 0) {
       await logEvent(supa, {
-        clinic_id: row.clinic_id, instance_id: row.id, event_type: 'webhook_ensured', source,
+        clinic_id: row.clinic_id, org_id: row.org_id, instance_id: row.id, event_type: 'webhook_ensured', source,
         payload: whResult,
       });
     }
   } catch (e) {
     // Falha de webhook nao bloqueia conexao; loga e segue
     await logEvent(supa, {
-      clinic_id: row.clinic_id, instance_id: row.id, event_type: 'warning', source,
+      clinic_id: row.clinic_id, org_id: row.org_id, instance_id: row.id, event_type: 'warning', source,
       payload: { stage: 'ensure_webhooks', error: String(e) },
     });
   }
@@ -361,7 +391,7 @@ async function handleStart(supa: SupabaseClient, row: InstanceRow, source: strin
       .from('whatsapp_instances')
       .update({ status: 'connecting' })
       .eq('id', row.id)
-      .select('id, clinic_id, api_id, api_token, status, qr_code, phone_number, attempt_id, attempt_started_at, last_event_at')
+      .select(ROW_COLS)
       .single();
     if (error) {
       return json({ success: false, error: `state_transition_failed: ${error.message}` }, 409);
@@ -370,7 +400,7 @@ async function handleStart(supa: SupabaseClient, row: InstanceRow, source: strin
   }
 
   await logEvent(supa, {
-    clinic_id: row.clinic_id, instance_id: row.id, attempt_id: row.attempt_id, source,
+    clinic_id: row.clinic_id, org_id: row.org_id, instance_id: row.id, attempt_id: row.attempt_id, source,
     event_type: 'connect_requested', payload: { api_id: ensured.api_id },
   });
 
@@ -388,7 +418,7 @@ async function handleStart(supa: SupabaseClient, row: InstanceRow, source: strin
       last_error: `connect_failed: ${connectRes.error}`,
     }).eq('id', row.id);
     await logEvent(supa, {
-      clinic_id: row.clinic_id, instance_id: row.id, attempt_id: row.attempt_id, source,
+      clinic_id: row.clinic_id, org_id: row.org_id, instance_id: row.id, attempt_id: row.attempt_id, source,
       event_type: 'error', payload: { stage: 'instance_connect', status: connectRes.status, error: connectRes.error },
     });
     return json({ success: false, status: 'disconnected', error: connectRes.error, http_status: connectRes.status }, 502);
@@ -404,7 +434,7 @@ async function handleStart(supa: SupabaseClient, row: InstanceRow, source: strin
       last_event_at: new Date().toISOString(),
     }).eq('id', row.id);
     await logEvent(supa, {
-      clinic_id: row.clinic_id, instance_id: row.id, attempt_id: row.attempt_id, source,
+      clinic_id: row.clinic_id, org_id: row.org_id, instance_id: row.id, attempt_id: row.attempt_id, source,
       event_type: 'qr_received', payload: { has_qr: true },
     });
   }
@@ -427,7 +457,7 @@ async function handleCancel(supa: SupabaseClient, row: InstanceRow, source: stri
   if (error) return json({ success: false, error: error.message }, 409);
 
   await logEvent(supa, {
-    clinic_id: row.clinic_id, instance_id: row.id, attempt_id: row.attempt_id, source,
+    clinic_id: row.clinic_id, org_id: row.org_id, instance_id: row.id, attempt_id: row.attempt_id, source,
     event_type: 'cancel', payload: null,
   });
   return json({ success: true, status: 'disconnected' });
@@ -448,7 +478,7 @@ async function handleDisconnect(supa: SupabaseClient, row: InstanceRow, source: 
   if (error) return json({ success: false, error: error.message }, 409);
 
   await logEvent(supa, {
-    clinic_id: row.clinic_id, instance_id: row.id, source,
+    clinic_id: row.clinic_id, org_id: row.org_id, instance_id: row.id, source,
     event_type: 'disconnect_requested', payload: null,
   });
   return json({ success: true, status: 'disconnected' });
@@ -458,7 +488,7 @@ async function handleReset(supa: SupabaseClient, row: InstanceRow, source: strin
   if (!row.api_token) return json({ success: false, error: 'sem_api_token' }, 400);
   const res = await uazapi('/instance/reset', { method: 'POST', token: row.api_token, body: {} });
   await logEvent(supa, {
-    clinic_id: row.clinic_id, instance_id: row.id, source, event_type: 'reset_requested',
+    clinic_id: row.clinic_id, org_id: row.org_id, instance_id: row.id, source, event_type: 'reset_requested',
     payload: { http_status: res.status, data: res.data },
   });
   return json({ success: res.ok, status: row.status, http_status: res.status });
@@ -490,15 +520,16 @@ serve(async (req) => {
   const action = (body.action as Action) ?? 'start';
   const source = body.connect_token ? 'public' : 'admin';
 
-  // Resolve / cria instancia local
+  // Resolve / cria instancia local (dono = clínica OU organização)
   let row: InstanceRow | null = null;
   let clinic_id = body.clinic_id as string | undefined;
+  const org_id = body.org_id as string | undefined;
   try {
     const resolved = await resolveInstance(supa, body);
     row = resolved.row;
     if (resolved.clinic_id) clinic_id = resolved.clinic_id;
-    if (!row && action === 'start' && clinic_id) {
-      row = await ensureLocalRow(supa, clinic_id);
+    if (!row && action === 'start' && (clinic_id || org_id)) {
+      row = await ensureLocalRow(supa, clinic_id ? { clinic_id } : { org_id: org_id! });
     }
   } catch (e: any) {
     return json({ success: false, error: e.message }, 500);
@@ -517,7 +548,7 @@ serve(async (req) => {
   } catch (e: any) {
     console.error('[orchestrator] unhandled error', e);
     await logEvent(supa, {
-      clinic_id: row.clinic_id, instance_id: row.id, source,
+      clinic_id: row.clinic_id, org_id: row.org_id, instance_id: row.id, source,
       event_type: 'error', payload: { stage: 'unhandled', error: e.message },
     });
     return json({ success: false, error: e.message ?? 'unhandled' }, 500);

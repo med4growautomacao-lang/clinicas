@@ -71,7 +71,7 @@ export function Settings() {
     const { userRole } = useAuth();
     const showToast = useToast();
     const { clinic, aiConfig, whatsapp, loading, updateClinic, updateAI, updateWhatsapp, generateConnectToken } = useSettings();
-    const [activeTab, setActiveTab] = useState<"clinic" | "integrations" | "protocols" | "products">(() => (localStorage.getItem('settingsTab') as any) || "clinic");
+    const [activeTab, setActiveTab] = useState<"clinic" | "notifications" | "integrations" | "protocols" | "products">(() => (localStorage.getItem('settingsTab') as any) || "clinic");
     const [activeIntTab, setActiveIntTab] = useState<'whatsapp' | 'meta' | 'google' | 'external'>(() => (localStorage.getItem('settingsIntTab') as any) || 'whatsapp');
     
     // Local states for editing
@@ -331,6 +331,7 @@ export function Settings() {
 
     const tabs = [
         { id: "clinic", label: "Dados da Clínica", icon: Building2, color: "text-emerald-600" },
+        { id: "notifications", label: "Notificações", icon: Bell, color: "text-amber-600" },
         { id: "integrations", label: "Integrações", icon: Plug, color: "text-violet-600" },
     ];
 
@@ -668,6 +669,9 @@ export function Settings() {
                                 activeIntTab={activeIntTab}
                             />
                         )}
+
+                        {/* Aba própria de Notificações (grupo do WhatsApp + preferências por evento/cargo) */}
+                        {activeTab === "notifications" && <NotificationsSettingsTab />}
 
                         {activeTab === "clinic" && !isSecretaria && (
                             <Card className="border border-slate-200 shadow-sm max-w-4xl mx-auto">
@@ -2031,10 +2035,6 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
     activeIntTab: 'whatsapp' | 'meta' | 'google' | 'external'
 }) {
     const { clinic, refetch, systemSettings } = useSettings();
-    const [groupName, setGroupName] = useState('Informativos do Agente IA');
-    const [participants, setParticipants] = useState<{ name: string; phone: string }[]>([{ name: '', phone: '' }]);
-    const [creatingGroup, setCreatingGroup] = useState(false);
-    const [groupResult, setGroupResult] = useState<'success' | 'error' | null>(null);
     const [showScripts, setShowScripts] = useState(false);
     const [googleIdSaving, setGoogleIdSaving] = useState(false);
     const [googleIdSaved, setGoogleIdSaved] = useState(false);
@@ -2066,40 +2066,6 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
         return () => { cancelled = true; };
     }, [activeIntTab, clinic?.id]);
     const formsWebhookUrl = captureToken ? `${EXTERNAL_FORMS_INGEST_URL}?k=${captureToken}` : '';
-
-    const addParticipant = () => setParticipants(p => [...p, { name: '', phone: '' }]);
-    const removeParticipant = (i: number) => setParticipants(p => p.filter((_, idx) => idx !== i));
-    const updateParticipant = (i: number, field: 'name' | 'phone', value: string) =>
-        setParticipants(p => p.map((item, idx) => idx === i ? { ...item, [field]: value } : item));
-
-    const invokeGroup = async (action: 'create_group' | 'add_participants') => {
-        if (!clinic?.id) return;
-        setCreatingGroup(true);
-        setGroupResult(null);
-        try {
-            const { data, error } = await supabase.functions.invoke('whatsapp-group', {
-                body: {
-                    action,
-                    clinic_id: clinic.id,
-                    group_name: groupName,
-                    group_id: clinic.notification_group_id,
-                    participants: participants.filter(p => p.phone.trim()),
-                },
-            });
-            // A edge devolve {success:false,...} com HTTP 4xx/5xx (que vira `error`) OU 200; cobre ambos.
-            const ok = !error && (data as any)?.success !== false;
-            setGroupResult(ok ? 'success' : 'error');
-            if (ok) {
-                await refetch();
-                if (action === 'add_participants') setParticipants([{ name: '', phone: '' }]);
-            }
-        } catch {
-            setGroupResult('error');
-        } finally {
-            setCreatingGroup(false);
-        }
-    };
-    const handleCreateGroup = () => invokeGroup('create_group');
 
     return (
         <div className="max-w-4xl mx-auto space-y-6">
@@ -2730,20 +2696,67 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
             )}
 
 
-            {/* Grupo de Notificação */}
-            {activeIntTab === 'whatsapp' && (
-                <div className="space-y-6">
-                    <Card className="border border-emerald-200 shadow-sm bg-white overflow-hidden">
-                        <CardHeader className="bg-emerald-100 border-b border-emerald-200 pb-6 px-8">
-                            <div className="flex items-center gap-4">
-                                <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm border border-emerald-200">
-                                    <Bell className="w-6 h-6 text-emerald-600" />
-                                </div>
-                                <div>
-                                    <CardTitle className="text-xl font-bold text-slate-800">Grupo de Notificações</CardTitle>
-                                </div>
-                            </div>
-                        </CardHeader>
+        </div>
+    );
+}
+
+// ==========================================
+// Aba "Notificações" (ao lado de Dados da Clínica)
+// ==========================================
+// Grupo do WhatsApp + preferências granulares (sino/grupo por evento e cargo).
+// Movido da aba Integrações (sub-aba WhatsApp) para uma aba própria — lá ficava
+// confuso no meio da conexão do WhatsApp.
+function NotificationsSettingsTab() {
+    const { clinic, refetch } = useSettings();
+    const [groupName, setGroupName] = useState('Informativos do Agente IA');
+    const [participants, setParticipants] = useState<{ name: string; phone: string }[]>([{ name: '', phone: '' }]);
+    const [creatingGroup, setCreatingGroup] = useState(false);
+    const [groupResult, setGroupResult] = useState<'success' | 'error' | null>(null);
+
+    const addParticipant = () => setParticipants(p => [...p, { name: '', phone: '' }]);
+    const removeParticipant = (i: number) => setParticipants(p => p.filter((_, idx) => idx !== i));
+    const updateParticipant = (i: number, field: 'name' | 'phone', value: string) =>
+        setParticipants(p => p.map((item, idx) => idx === i ? { ...item, [field]: value } : item));
+
+    const handleCreateGroup = async () => {
+        if (!clinic?.id) return;
+        setCreatingGroup(true);
+        setGroupResult(null);
+        try {
+            const { data, error } = await supabase.functions.invoke('whatsapp-group', {
+                body: {
+                    action: 'create_group',
+                    clinic_id: clinic.id,
+                    group_name: groupName,
+                    group_id: clinic.notification_group_id,
+                    participants: participants.filter(p => p.phone.trim()),
+                },
+            });
+            // A edge devolve {success:false,...} com HTTP 4xx/5xx (que vira `error`) OU 200; cobre ambos.
+            const ok = !error && (data as any)?.success !== false;
+            setGroupResult(ok ? 'success' : 'error');
+            if (ok) await refetch();
+        } catch {
+            setGroupResult('error');
+        } finally {
+            setCreatingGroup(false);
+        }
+    };
+
+    return (
+        <div className="max-w-4xl mx-auto space-y-6">
+            <Card className="border border-emerald-200 shadow-sm bg-white overflow-hidden">
+                <CardHeader className="bg-emerald-100 border-b border-emerald-200 pb-6 px-8">
+                    <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm border border-emerald-200">
+                            <Bell className="w-6 h-6 text-emerald-600" />
+                        </div>
+                        <div>
+                            <CardTitle className="text-xl font-bold text-slate-800">Grupo de Notificações</CardTitle>
+                            <p className="text-sm text-slate-500 mt-0.5">Grupo do WhatsApp da clínica que recebe os avisos do sistema</p>
+                        </div>
+                    </div>
+                </CardHeader>
                 <CardContent className="p-8 space-y-6">
                     {clinic?.notification_group_id ? (
                         <div className="flex items-center gap-3 px-4 py-3 bg-white border border-slate-200 rounded-lg">
@@ -2806,18 +2819,15 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                 </CardContent>
             </Card>
 
-                    {/* Preferências granulares (sino + grupo + por cargo + SLA).
-                        Guard: clinic é null no 1º render (dados carregando) — sem ele a
-                        tela inteira caía em branco (TypeError no clinic!.id). */}
-                    {clinic && (
-                        <NotificationPrefs
-                            clinicId={clinic.id}
-                            hasGroup={!!clinic.notification_group_id}
-                            initialPrefs={clinic.notification_prefs}
-                            onSaved={refetch}
-                        />
-                    )}
-                </div>
+            {/* Preferências granulares (sino + grupo + por cargo + SLA).
+                Guard: clinic é null no 1º render (dados carregando). */}
+            {clinic && (
+                <NotificationPrefs
+                    clinicId={clinic.id}
+                    hasGroup={!!clinic.notification_group_id}
+                    initialPrefs={clinic.notification_prefs}
+                    onSaved={refetch}
+                />
             )}
         </div>
     );

@@ -2393,37 +2393,20 @@ export function useTransitionRules() {
     );
   };
 
-  // Aciona o webhook de teste no n8n para a regra/numero informados.
-  // O app so dispara; quem cria o lead, envia a mensagem e move a etapa e o n8n.
-  const testRule = async (rule: TransitionRule, leadPhone: string) => {
+  // Testa a regra em DRY-RUN pelo motor NATIVO (RPC test_stage_rule): diz qual regra
+  // uma mensagem casaria — sem criar lead nem mover card. Substitui o antigo teste
+  // ponta-a-ponta via n8n (o motor de etapas agora é o trigger trg_zz_apply_stage_rules;
+  // os nós Call Gatilhos do Receptor foram desligados no corte A2).
+  const testRule = async (message: string) => {
     if (!activeClinicId) return { ok: false as const, error: 'no_clinic' as const };
-    const phone = (leadPhone || '').replace(/\D/g, '');
-    if (!phone) return { ok: false as const, error: 'invalid_phone' as const };
-
-    const [{ data: instance }, { data: settingsRows }] = await Promise.all([
-      supabase.from('whatsapp_instances').select('api_token, phone_number').eq('clinic_id', activeClinicId).maybeSingle(),
-      supabase.from('system_settings').select('id, value').eq('id', 'test_gatilho_webhook_url'),
-    ]);
-    const targetUrl = settingsRows?.[0]?.value || TEST_GATILHO_WEBHOOK_FALLBACK;
-
-    const { error } = await supabase.functions.invoke('webhook-proxy', {
-      body: {
-        target_url: targetUrl,
-        payload: {
-          event: 'test_transition_rule',
-          clinic_id: activeClinicId,
-          clinic_phone: instance?.phone_number || null,
-          lead_phone: phone,
-          keywords: rule.keywords,
-          message_to_send: rule.message_to_send,
-          target_stage_id: rule.target_stage_id,
-          seed_message: TEST_GATILHO_SEED_MESSAGE,
-          token: instance?.api_token || null,
-        },
-      },
-    });
-    if (error) return { ok: false as const, error: 'webhook_failed' as const };
-    return { ok: true as const };
+    const msg = (message || '').trim();
+    if (!msg) return { ok: false as const, error: 'empty_message' as const };
+    const { data, error } = await supabase.rpc('test_stage_rule', { p_clinic_id: activeClinicId, p_message: msg });
+    if (error) return { ok: false as const, error: 'rpc_failed' as const };
+    return {
+      ok: true as const,
+      result: (data ?? { matched: false }) as { matched: boolean; rule_id?: string; keywords?: string; target_stage_id?: string; target_stage_name?: string; reason?: string },
+    };
   };
 
   // Busca a etapa atual do lead pelo telefone, com match tolerante por sufixo

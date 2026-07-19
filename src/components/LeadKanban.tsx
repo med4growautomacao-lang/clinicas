@@ -2778,68 +2778,37 @@ export function LeadKanban() {
 
   // --- Teste de gatilho (regra de funil) ---
   const [testingRuleId, setTestingRuleId] = useState<string | null>(null);
-  const [testPhone, setTestPhone] = useState('');
-  const [testStatus, setTestStatus] = useState<'idle' | 'sending' | 'waiting' | 'moved' | 'timeout' | 'error'>('idle');
-  const [testResultLeadId, setTestResultLeadId] = useState<string | null>(null);
+  const [testMessage, setTestMessage] = useState('');
+  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'match' | 'shadowed' | 'nomatch' | 'error'>('idle');
+  const [testResult, setTestResult] = useState<{ matched: boolean; rule_id?: string; keywords?: string; target_stage_id?: string; target_stage_name?: string } | null>(null);
   const [highlightLeadId, setHighlightLeadId] = useState<string | null>(null);
-  const testPollRef = useRef<{ cancelled: boolean } | null>(null);
 
   const openTestPanel = (ruleId: string) => {
-    if (testPollRef.current) testPollRef.current.cancelled = true;
     setTestingRuleId(ruleId);
-    setTestPhone('');
+    setTestMessage('');
     setTestStatus('idle');
-    setTestResultLeadId(null);
+    setTestResult(null);
   };
   const closeTestPanel = () => {
-    if (testPollRef.current) testPollRef.current.cancelled = true;
     setTestingRuleId(null);
     setTestStatus('idle');
-    setTestResultLeadId(null);
+    setTestResult(null);
   };
+  // Dry-run pelo motor nativo (RPC test_stage_rule): diz se a mensagem casaria com
+  // ESTA regra, com outra antes dela (sombreamento), ou com nenhuma. Sem efeito colateral.
   const runRuleTest = async (rule: TransitionRule) => {
-    const phone = testPhone.replace(/\D/g, '');
-    if (phone.length < 8) return;
-    if (testPollRef.current) testPollRef.current.cancelled = true;
-    setTestResultLeadId(null);
-    setTestStatus('sending');
-    const res = await testRule(rule, phone);
+    const msg = testMessage.trim();
+    if (!msg) return;
+    setTestStatus('testing');
+    setTestResult(null);
+    const res = await testRule(msg);
     if (!res.ok) { setTestStatus('error'); return; }
-    setTestStatus('waiting');
-    // Polling: aguarda o n8n detectar o gatilho e mover o card (ate ~60s).
-    const token = { cancelled: false };
-    testPollRef.current = token;
-    const startedAt = Date.now();
-    const TIMEOUT_MS = 60000;
-    const INTERVAL_MS = 3000;
-    const poll = async () => {
-      if (token.cancelled) return;
-      const found = await lookupActiveStageByPhone(phone);
-      if (token.cancelled) return;
-      if (found && found.stageId === rule.target_stage_id) {
-        setTestResultLeadId(found.leadId);
-        setTestStatus('moved');
-        return;
-      }
-      if (Date.now() - startedAt >= TIMEOUT_MS) {
-        if (found?.leadId) setTestResultLeadId(found.leadId);
-        setTestStatus('timeout');
-        return;
-      }
-      setTimeout(poll, INTERVAL_MS);
-    };
-    setTimeout(poll, INTERVAL_MS);
+    const r = res.result;
+    setTestResult(r);
+    if (!r.matched) setTestStatus('nomatch');
+    else if (r.rule_id === rule.id) setTestStatus('match');
+    else setTestStatus('shadowed');
   };
-  const viewCardInFunnel = (leadId: string) => {
-    closeTestPanel();
-    setShowAutomationModal(false);
-    setEditingRuleId(null);
-    setIsAddingRule(false);
-    setHighlightLeadId(leadId);
-  };
-
-  // Cancela qualquer polling de teste em andamento ao desmontar.
-  useEffect(() => () => { if (testPollRef.current) testPollRef.current.cancelled = true; }, []);
 
   // Ao destacar um card, rola ate ele no quadro e tira o realce depois de uns segundos.
   useEffect(() => {
@@ -3463,7 +3432,7 @@ export function LeadKanban() {
                       </div>
                     </div>
 
-                    {/* Painel de teste do gatilho */}
+                    {/* Painel de teste do gatilho (dry-run pelo motor nativo) */}
                     {testingRuleId === rule.id && (
                       <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/60">
                         <div className="flex items-center justify-between mb-2.5">
@@ -3476,64 +3445,53 @@ export function LeadKanban() {
                           </button>
                         </div>
                         <p className="text-[11px] text-slate-400 mb-3 leading-relaxed">
-                          Informe o número que vai receber a <span className="font-semibold text-slate-500">Mensagem a Enviar</span>. Se ainda não for um lead, enviamos antes uma mensagem padrão para criá-lo. O card só muda de etapa quando o n8n detecta o gatilho.
+                          Digite uma mensagem de exemplo do cliente. Mostramos qual regra o motor casaria — sem criar lead nem mover card.
                         </p>
                         <div className="flex items-center gap-2">
                           <input
-                            type="tel"
-                            value={testPhone}
-                            onChange={e => setTestPhone(e.target.value)}
-                            disabled={testStatus === 'sending' || testStatus === 'waiting'}
-                            placeholder="Ex: 11 99999-9999"
+                            type="text"
+                            value={testMessage}
+                            onChange={e => setTestMessage(e.target.value)}
+                            disabled={testStatus === 'testing'}
+                            placeholder="Ex: segue o comprovante do pagamento"
                             className="flex-1 px-3 py-2.5 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 font-medium transition-all disabled:opacity-60"
                           />
                           <Button
                             onClick={() => runRuleTest(rule)}
-                            disabled={testPhone.replace(/\D/g, '').length < 8 || testStatus === 'sending' || testStatus === 'waiting'}
+                            disabled={!testMessage.trim() || testStatus === 'testing'}
                             className="bg-teal-600 hover:bg-teal-700 px-5 whitespace-nowrap"
                           >
-                            {(testStatus === 'sending' || testStatus === 'waiting') ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <Send className="w-4 h-4 mr-1.5" />}
-                            Disparar teste
+                            {testStatus === 'testing' ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <Send className="w-4 h-4 mr-1.5" />}
+                            Testar
                           </Button>
                         </div>
 
-                        {testStatus === 'sending' && (
-                          <p className="mt-3 text-xs font-medium text-slate-500 flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Enviando mensagem…</p>
-                        )}
-                        {testStatus === 'waiting' && (
-                          <p className="mt-3 text-xs font-medium text-amber-600 flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Mensagem enviada. Aguardando o n8n mover o card…</p>
-                        )}
-                        {testStatus === 'moved' && (
-                          <div className="mt-3 flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl bg-emerald-50 border border-emerald-200">
-                            <p className="text-xs font-bold text-emerald-700 flex items-center gap-1.5">
-                              <Check className="w-4 h-4" />
-                              Card movido para «{stages.find(s => s.id === rule.target_stage_id)?.name || '—'}»
+                        {testStatus === 'match' && (
+                          <div className="mt-3 flex items-center gap-2 px-3 py-2.5 rounded-xl bg-emerald-50 border border-emerald-200">
+                            <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <p className="text-xs font-bold text-emerald-700">
+                              Casa com esta regra e move para «{testResult?.target_stage_name || stages.find(s => s.id === rule.target_stage_id)?.name || '—'}».
                             </p>
-                            {testResultLeadId && (
-                              <button onClick={() => viewCardInFunnel(testResultLeadId)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 transition-all whitespace-nowrap">
-                                <Eye className="w-3.5 h-3.5" />
-                                Ver card no funil
-                              </button>
-                            )}
                           </div>
                         )}
-                        {testStatus === 'timeout' && (
+                        {testStatus === 'shadowed' && (
                           <div className="mt-3 px-3 py-2.5 rounded-xl bg-amber-50 border border-amber-200">
                             <p className="text-xs font-semibold text-amber-700 flex items-center gap-1.5">
-                              <AlertCircle className="w-4 h-4" />
-                              Mensagem enviada, mas o card ainda não mudou de etapa.
+                              <AlertCircle className="w-4 h-4 shrink-0" />
+                              Outra regra casa antes desta.
                             </p>
-                            <p className="text-[11px] text-amber-600 mt-1">Verifique a configuração do gatilho no n8n.</p>
-                            <div className="flex items-center gap-3 mt-2">
-                              <button onClick={() => runRuleTest(rule)} className="text-xs font-bold text-amber-700 hover:underline">Tentar de novo</button>
-                              {testResultLeadId && (
-                                <button onClick={() => viewCardInFunnel(testResultLeadId)} className="flex items-center gap-1 text-xs font-bold text-amber-700 hover:underline"><Eye className="w-3.5 h-3.5" /> Ver card no funil</button>
-                              )}
-                            </div>
+                            <p className="text-[11px] text-amber-600 mt-1">
+                              A mensagem casa com «{testResult?.keywords}» → «{testResult?.target_stage_name || '—'}». Reordene as regras se quiser que esta valha primeiro.
+                            </p>
                           </div>
                         )}
+                        {testStatus === 'nomatch' && (
+                          <p className="mt-3 text-xs font-medium text-slate-500 flex items-center gap-1.5">
+                            <AlertCircle className="w-3.5 h-3.5" /> Nenhuma regra casou com essa mensagem.
+                          </p>
+                        )}
                         {testStatus === 'error' && (
-                          <p className="mt-3 text-xs font-bold text-rose-600 flex items-center gap-1.5"><AlertCircle className="w-4 h-4" /> Não foi possível disparar o teste. Tente novamente.</p>
+                          <p className="mt-3 text-xs font-bold text-rose-600 flex items-center gap-1.5"><AlertCircle className="w-4 h-4" /> Não foi possível testar. Tente novamente.</p>
                         )}
                       </div>
                     )}

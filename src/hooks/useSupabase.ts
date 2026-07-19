@@ -1408,7 +1408,7 @@ export interface DashboardStats {
   totalLeads: number;
   newPatients: number;
   totalSales: number;
-  totalInvestment: number;
+  totalInvestment: number | null;   // null = não atribuível (filtro de canal/agente ativo) → UI mostra "—"
   totalSlaBreaches: number;
   avgResponseTime: number; // minutes
   avgSalesCycle: number; // days
@@ -1481,7 +1481,7 @@ export function useDashboardStats(dateRange?: { start: string; end: string }, or
         totalLeads: r?.totalLeads || 0,
         newPatients: r?.newPatients || 0,
         totalSales: r?.totalSales || 0,
-        totalInvestment: Number(r?.totalInvestment || 0),
+        totalInvestment: r?.totalInvestment == null ? null : Number(r.totalInvestment),
         totalSlaBreaches: r?.totalSlaBreaches || 0,
         avgResponseTime: Number(r?.avgResponseTime || 0),
         avgSalesCycle: Number(r?.avgSalesCycle || 0),

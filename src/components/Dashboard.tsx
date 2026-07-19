@@ -160,7 +160,9 @@ export function Dashboard() {
   // Faturamento canônico = VENDAS LANÇADAS (salesValue). Fallback p/ totalConversionsValue
   // durante a transição do deploy (a RPC v2 já devolve salesValue).
   const salesValue = Number(stats.salesValue ?? stats.totalConversionsValue ?? 0);
-  const roas = stats.totalInvestment > 0 && salesValue > 0 ? (salesValue / stats.totalInvestment) : 0;
+  // Investimento é null quando há filtro de canal/agente (gasto não é atribuível a esse recorte) → "—".
+  const investimento = stats.totalInvestment;
+  const roas = investimento != null && investimento > 0 && salesValue > 0 ? (salesValue / investimento) : 0;
   const conversionRate = stats.totalLeads > 0 && stats.totalSales > 0
     ? ((stats.totalSales / stats.totalLeads) * 100)
     : 0;
@@ -169,7 +171,7 @@ export function Dashboard() {
   const cards = [
     // Dinheiro
     { title: "Vendas lançadas", value: `R$ ${salesValue.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: "Valor lançado no fechamento", icon: DollarSign, color: "bg-emerald-50 text-emerald-600" },
-    { title: "Investimento", value: `R$ ${stats.totalInvestment.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: "Em mídia paga", icon: TrendingUp, color: "bg-amber-50 text-amber-600" },
+    { title: "Investimento", value: investimento == null ? "—" : `R$ ${investimento.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: investimento == null ? "Não atribuível por canal/agente" : "Em mídia paga", icon: TrendingUp, color: "bg-amber-50 text-amber-600" },
     { title: "ROAS", value: roas > 0 ? `${roas.toFixed(2).replace('.', ',')}x` : "—", trend: "Vendas ÷ Investimento", icon: Activity, color: "bg-teal-50 text-teal-600" },
     { title: "Ticket Médio", value: configuredTicket > 0 ? `R$ ${configuredTicket.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}` : "—", trend: "Definido em Dados da Clínica", icon: Target, color: "bg-violet-50 text-violet-600" },
     // Funil

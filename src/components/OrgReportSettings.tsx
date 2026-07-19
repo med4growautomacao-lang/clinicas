@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { logSystemError } from "../hooks/useSupabase";
 import { Check, ChevronDown, FileText, Loader2 } from "lucide-react";
 
 // Configuração dos RELATÓRIOS AUTOMÁTICOS por clínica (aba Configurações da org).
@@ -41,14 +42,20 @@ export function OrgReportSettings({ clinics, canManage }: {
   const [savedId, setSavedId] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
 
+  // OrgAdmin passa `clinics={clinics.map(...)}` (nova identidade a cada render). Depender
+  // do array recriaria load em todo render → refetch + setRows apagando o que o admin está
+  // digitando. Chaveamos por uma STRING estável de ids (mesmo valor = mesma referência).
+  const clinicIdsKey = useMemo(() => clinics.map((c) => c.id).sort().join(","), [clinics]);
+
   const load = useCallback(async () => {
-    if (clinics.length === 0) { setLoading(false); return; }
+    const ids = clinicIdsKey ? clinicIdsKey.split(",") : [];
+    if (ids.length === 0) { setLoading(false); return; }
     const { data } = await supabase
       .from("report_settings")
       .select("*")
-      .in("clinic_id", clinics.map((c) => c.id));
+      .in("clinic_id", ids);
     const map: Record<string, RowSettings> = {};
-    clinics.forEach((c) => { map[c.id] = DEFAULT_ROW(c.id); });
+    ids.forEach((id) => { map[id] = DEFAULT_ROW(id); });
     (data || []).forEach((r: any) => {
       map[r.clinic_id] = {
         clinic_id: r.clinic_id,
@@ -60,7 +67,7 @@ export function OrgReportSettings({ clinics, canManage }: {
     });
     setRows(map);
     setLoading(false);
-  }, [clinics]);
+  }, [clinicIdsKey]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -84,8 +91,9 @@ export function OrgReportSettings({ clinics, canManage }: {
       if (error) throw error;
       setSavedId(clinicId);
       setTimeout(() => setSavedId((id) => (id === clinicId ? null : id)), 2000);
-    } catch (e) {
+    } catch (e: any) {
       console.error("report_settings save error:", e);
+      logSystemError("REPORT_SETTINGS_SAVE_FAIL", "OrgReportSettings: falha ao salvar config de relatório da clínica", clinicId, { error: e?.message ?? String(e) }, "error");
       alert("Não foi possível salvar. Verifique sua permissão e tente novamente.");
     } finally {
       setSavingId(null);

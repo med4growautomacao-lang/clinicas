@@ -8,7 +8,11 @@ import { jsPDF } from "jspdf";
 const EMOJI_RE = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}\u{2B00}-\u{2BFF}]/gu;
 
 function clean(line: string): string {
-  return line.replace(EMOJI_RE, "").replace(/\*/g, "").replace(/\s+/g, " ").trim();
+  return line
+    // As setas de tendência ▲/▼ não têm glifo na Helvetica (WinAnsi) do jsPDF —
+    // renderizariam como '²'/'¼'/vazio. Trocamos por ASCII antes de imprimir.
+    .replace(/▲\s*/g, "+").replace(/▼\s*/g, "-")
+    .replace(EMOJI_RE, "").replace(/\*/g, "").replace(/\s+/g, " ").trim();
 }
 
 export function downloadReportPdf(reportText: string, filename: string) {

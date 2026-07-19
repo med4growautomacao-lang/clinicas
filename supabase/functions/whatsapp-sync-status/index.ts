@@ -149,11 +149,16 @@ serve(async (req) => {
 
   const { data: locals, error: localErr } = await supa
     .from('whatsapp_instances')
-    .select('id, clinic_id, api_id, api_token, status, attempt_id, phone_number')
+    .select('id, clinic_id, org_id, api_id, api_token, status, attempt_id, phone_number')
     .not('api_id', 'is', null);
   if (localErr) return json({ success: false, error: localErr.message }, 500);
 
-  type Reconcile = { instance_id: string; clinic_id: string; from: string; to: string; reason: string };
+  // Nome da instância na uazapi: clinic_id (clínica) ou 'org-<org_id>' (instância da organização).
+  // Sem isto, o fallback por-nome usaria clinic_id=NULL na linha da org e ela seria falsamente
+  // marcada 'disconnected', parando os relatórios automáticos.
+  const uazName = (l: any): string => l.clinic_id ?? `org-${l.org_id}`;
+
+  type Reconcile = { instance_id: string; clinic_id: string | null; from: string; to: string; reason: string };
   const reconciled: Reconcile[] = [];
   const notFoundOnUazapi: string[] = [];
 
@@ -163,12 +168,12 @@ serve(async (req) => {
     // Fallback: nao achou por api_id, tenta por name (=clinic_id). Pode ter
     // sido recriada na uazapi com novo id mas mesmo nome.
     if (!remote) {
-      const byName = uazByName.get(local.clinic_id);
+      const byName = uazByName.get(uazName(local));
       if (byName?.id && byName?.token) {
         // Remapeia api_id e api_token localmente
         await supa.from('whatsapp_instances').update({ api_id: byName.id, api_token: byName.token }).eq('id', local.id);
         await supa.from('whatsapp_events').insert({
-          clinic_id: local.clinic_id, instance_id: local.id, event_type: 'api_id_remapped', source: 'sync_cron',
+          clinic_id: local.clinic_id, org_id: local.org_id ?? null, instance_id: local.id, event_type: 'api_id_remapped', source: 'sync_cron',
           payload: { old_api_id: local.api_id, new_api_id: byName.id, reason: 'matched_by_name' },
         });
         // Atualiza variavel local em memoria para o resto do loop usar
@@ -183,7 +188,7 @@ serve(async (req) => {
         const { error } = await supa.from('whatsapp_instances').update({ status: 'disconnected', last_error: 'sync_cron: instancia nao encontrada na uazapi' }).eq('id', local.id);
         if (!error) {
           reconciled.push({ instance_id: local.id, clinic_id: local.clinic_id, from: local.status, to: 'disconnected', reason: 'missing_on_uazapi' });
-          await supa.from('whatsapp_events').insert({ clinic_id: local.clinic_id, instance_id: local.id, attempt_id: local.attempt_id, event_type: 'sync_correction', source: 'sync_cron', payload: { from: local.status, to: 'disconnected', reason: 'missing_on_uazapi' } });
+          await supa.from('whatsapp_events').insert({ clinic_id: local.clinic_id, org_id: local.org_id ?? null, instance_id: local.id, attempt_id: local.attempt_id, event_type: 'sync_correction', source: 'sync_cron', payload: { from: local.status, to: 'disconnected', reason: 'missing_on_uazapi' } });
         }
       }
       continue;
@@ -198,7 +203,7 @@ serve(async (req) => {
       const { error } = await supa.from('whatsapp_instances').update(updates).eq('id', local.id);
       if (!error) {
         reconciled.push({ instance_id: local.id, clinic_id: local.clinic_id, from: local.status, to: 'connected', reason: 'uazapi_says_connected' });
-        await supa.from('whatsapp_events').insert({ clinic_id: local.clinic_id, instance_id: local.id, event_type: 'sync_correction', source: 'sync_cron', payload: { from: local.status, to: 'connected', reason: 'uazapi_says_connected', phone_updated: !!updates.phone_number } });
+        await supa.from('whatsapp_events').insert({ clinic_id: local.clinic_id, org_id: local.org_id ?? null, instance_id: local.id, event_type: 'sync_correction', source: 'sync_cron', payload: { from: local.status, to: 'connected', reason: 'uazapi_says_connected', phone_updated: !!updates.phone_number } });
       }
       continue;
     }
@@ -208,14 +213,14 @@ serve(async (req) => {
       const { error } = await supa.from('whatsapp_instances').update({ phone_number: remotePhone }).eq('id', local.id);
       if (!error) {
         reconciled.push({ instance_id: local.id, clinic_id: local.clinic_id, from: 'connected', to: 'connected', reason: 'phone_filled' });
-        await supa.from('whatsapp_events').insert({ clinic_id: local.clinic_id, instance_id: local.id, event_type: 'sync_correction', source: 'sync_cron', payload: { reason: 'phone_filled', phone_number: remotePhone } });
+        await supa.from('whatsapp_events').insert({ clinic_id: local.clinic_id, org_id: local.org_id ?? null, instance_id: local.id, event_type: 'sync_correction', source: 'sync_cron', payload: { reason: 'phone_filled', phone_number: remotePhone } });
       }
     }
     if ((remoteStatus === 'disconnected' || remoteStatus === 'loggedout') && local.status !== 'disconnected') {
       const { error } = await supa.from('whatsapp_instances').update({ status: 'disconnected', last_error: 'sync_cron: uazapi reportou desconectado' }).eq('id', local.id);
       if (!error) {
         reconciled.push({ instance_id: local.id, clinic_id: local.clinic_id, from: local.status, to: 'disconnected', reason: 'uazapi_says_disconnected' });
-        await supa.from('whatsapp_events').insert({ clinic_id: local.clinic_id, instance_id: local.id, attempt_id: local.attempt_id, event_type: 'sync_correction', source: 'sync_cron', payload: { from: local.status, to: 'disconnected', reason: 'uazapi_says_disconnected', remote_reason: remote.lastDisconnectReason ?? null } });
+        await supa.from('whatsapp_events').insert({ clinic_id: local.clinic_id, org_id: local.org_id ?? null, instance_id: local.id, attempt_id: local.attempt_id, event_type: 'sync_correction', source: 'sync_cron', payload: { from: local.status, to: 'disconnected', reason: 'uazapi_says_disconnected', remote_reason: remote.lastDisconnectReason ?? null } });
       }
       continue;
     }
@@ -236,7 +241,7 @@ serve(async (req) => {
       if (res.removed > 0) {
         webhookCleanups.push({ instance_id: local.id, clinic_id: local.clinic_id, removed: res.removed, total_before: res.total_before });
         await supa.from('whatsapp_events').insert({
-          clinic_id: local.clinic_id, instance_id: local.id, event_type: 'webhook_dedupe', source: 'sync_cron',
+          clinic_id: local.clinic_id, org_id: local.org_id ?? null, instance_id: local.id, event_type: 'webhook_dedupe', source: 'sync_cron',
           payload: { removed: res.removed, total_before: res.total_before, duplicates: res.duplicates },
         });
       }

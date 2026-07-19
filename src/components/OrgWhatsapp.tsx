@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { logSystemError } from "../hooks/useSupabase";
 import { Loader2, MessageCircle, QrCode, RefreshCw, Unplug } from "lucide-react";
 import WhatsappLogo from "../assets/logos/Logo Whatsapp.png";
 
@@ -41,21 +42,27 @@ export function OrgWhatsapp({ organizationId }: { organizationId: string }) {
       if (data?.success) {
         setWa({ status: data.status ?? "disconnected", qr_code: data.qr_code ?? null, phone_number: data.phone_number ?? null });
         setError(null);
-      } else if (data?.error === "instance_not_found") {
-        // Org ainda não conectou nenhuma vez — estado inicial legítimo.
+      } else {
+        // Sem instância ainda (org nunca conectou) = estado inicial legítimo → Desconectado.
         setWa({ status: "disconnected", qr_code: null, phone_number: null });
         setError(null);
       }
     } catch {
-      // 404 do orchestrator (sem instância) também cai aqui dependendo do client.
+      // O orchestrator responde 404 quando não há instância; supabase.functions.invoke
+      // lança nesse caso (data=null) → tratamos como "ainda não conectou" no 1º load.
       setWa((prev) => (prev.status === "unknown" ? { status: "disconnected", qr_code: null, phone_number: null } : prev));
     }
   }, [invoke]);
 
   // Poll: 3s conectando (QR/confirm), 30s em repouso (pega desconexões externas).
+  // Pausa quando a aba está oculta — evita bater no orchestrator (admin token) sem ninguém olhando.
   useEffect(() => {
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
     refresh();
-    const interval = setInterval(refresh, wa.status === "connecting" ? 3000 : 30000);
+    const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      refresh();
+    }, wa.status === "connecting" ? 3000 : 30000);
     return () => clearInterval(interval);
   }, [refresh, wa.status]);
 
@@ -85,6 +92,8 @@ export function OrgWhatsapp({ organizationId }: { organizationId: string }) {
       await refresh();
     } catch (e: any) {
       setError(e?.message ?? String(e));
+      // Conectar o número da org é o que viabiliza os relatórios automáticos — falha vai à Central.
+      logSystemError("ORG_WA_CONNECT_FAIL", "OrgWhatsapp: falha ao conectar o WhatsApp da organização", null, { org_id: organizationId, error: e?.message ?? String(e) }, "error");
     } finally {
       setBusy(false);
     }
@@ -92,13 +101,17 @@ export function OrgWhatsapp({ organizationId }: { organizationId: string }) {
 
   const handleCancel = async () => {
     setBusy(true);
-    try { await invoke("cancel"); await refresh(); } finally { setBusy(false); }
+    try { await invoke("cancel"); await refresh(); }
+    catch (e: any) { logSystemError("ORG_WA_CANCEL_FAIL", "OrgWhatsapp: falha ao cancelar conexão", null, { org_id: organizationId, error: e?.message ?? String(e) }, "warn"); }
+    finally { setBusy(false); }
   };
 
   const handleDisconnect = async () => {
     if (!window.confirm("Desconectar o WhatsApp da organização? Os relatórios automáticos deixarão de ser enviados até reconectar.")) return;
     setBusy(true);
-    try { await invoke("disconnect"); await refresh(); } finally { setBusy(false); }
+    try { await invoke("disconnect"); await refresh(); }
+    catch (e: any) { logSystemError("ORG_WA_DISCONNECT_FAIL", "OrgWhatsapp: falha ao desconectar", null, { org_id: organizationId, error: e?.message ?? String(e) }, "warn"); }
+    finally { setBusy(false); }
   };
 
   const statusDot =

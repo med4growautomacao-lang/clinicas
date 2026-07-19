@@ -38,8 +38,10 @@ const EVENTS: { key: NotificationEventKey; label: string; desc: string; Icon: ty
   { key: 'nao_atendido',     label: 'Lead não atendido (SLA)', desc: 'Ninguém respondeu no prazo',  Icon: AlertTriangle },
 ];
 
-// Largura ÚNICA das colunas de toggle — cabeçalho e células usam a mesma, senão desalinha.
-const COL = 'w-16 flex justify-center';
+// Largura/alinhamento ÚNICOS das colunas de toggle — a MESMA constante no cabeçalho e nas
+// células, senão desalinha. Prefixada com md: porque no mobile as células são inline (label +
+// toggle) e o cabeçalho é hidden; a largura fixa só vale no desktop (md+).
+const COL = 'md:w-16 md:flex md:justify-center md:items-center';
 
 function Toggle({ on, onClick, disabled, title }: { on: boolean; onClick: () => void; disabled?: boolean; title?: string }) {
   return (
@@ -240,7 +242,7 @@ export function NotificationPrefs({ clinicId, hasGroup, initialPrefs, onSaved }:
                     </div>
 
                     {/* Sino */}
-                    <div className={cn('flex items-center gap-2', 'md:w-16 md:justify-center')}>
+                    <div className={cn('flex items-center gap-2', COL)}>
                       <span className="md:hidden text-[11px] font-semibold text-slate-500 w-12">Sino</span>
                       <Toggle
                         on={sinoOn}
@@ -251,7 +253,7 @@ export function NotificationPrefs({ clinicId, hasGroup, initialPrefs, onSaved }:
                     </div>
 
                     {/* Grupo */}
-                    <div className={cn('flex items-center gap-2', 'md:w-16 md:justify-center')}>
+                    <div className={cn('flex items-center gap-2', COL)}>
                       <span className="md:hidden text-[11px] font-semibold text-slate-500 w-12">Grupo</span>
                       {hasGroup ? (
                         <Toggle

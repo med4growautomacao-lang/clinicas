@@ -41,7 +41,9 @@ const CTWA_TRACKING_URL = Deno.env.get('CTWA_TRACKING_WEBHOOK_URL')
 const COOLDOWN_SECONDS = 15;
 const HTTP_TIMEOUT_MS = 5000;
 
-type Action = 'start' | 'cancel' | 'disconnect' | 'reset' | 'status';
+const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+
+type Action = 'start' | 'cancel' | 'disconnect' | 'reset' | 'status' | 'migrate';
 
 // Instância pode pertencer a uma CLÍNICA (fluxo completo: IA, chat, tracking) ou a uma
 // ORGANIZAÇÃO (send-only: remetente de relatórios; só webhook de 'connection').
@@ -505,6 +507,50 @@ async function handleStatus(_supa: SupabaseClient, row: InstanceRow): Promise<Re
   });
 }
 
+// Migra a ROTA de ingestão ('messages') de uma clínica entre n8n <-> hub (wa-inbound).
+// Muda o flag whatsapp_instances.inbound_route E aplica o webhook na uazapi AO VIVO
+// (reusa ensureUazapiWebhooks, que já apaga o webhook da rota antiga = sem dupla entrega).
+// Sem api_token (instância nunca provisionada): só o flag; aplica na 1ª conexão.
+// Authz: SUPER-ADMIN apenas (muda roteamento de produção) — checado pelo JWT do chamador,
+// independente do verify_jwt da função.
+async function handleMigrate(supa: SupabaseClient, row: InstanceRow, req: Request, body: any): Promise<Response> {
+  const authHeader = req.headers.get('Authorization') ?? '';
+  const jwt = authHeader.replace(/^Bearer\s+/i, '').trim();
+  if (!jwt || !ANON_KEY) return json({ success: false, error: 'unauthorized' }, 401);
+  const userClient = createClient(Deno.env.get('SUPABASE_URL') ?? '', ANON_KEY, {
+    global: { headers: { Authorization: `Bearer ${jwt}` } },
+  });
+  const { data: isSuper, error: authErr } = await userClient.rpc('is_super_admin');
+  if (authErr || isSuper !== true) return json({ success: false, error: 'forbidden' }, 403);
+
+  if (!row.clinic_id) return json({ success: false, error: 'not_a_clinic_instance' }, 400);
+  const route: 'n8n' | 'hub' = body.route === 'n8n' ? 'n8n' : 'hub';
+
+  const { error: upErr } = await supa
+    .from('whatsapp_instances').update({ inbound_route: route }).eq('id', row.id);
+  if (upErr) return json({ success: false, error: upErr.message }, 500);
+
+  let webhook: any = null;
+  let applied_live = false;
+  if (row.api_token) {
+    try {
+      webhook = await ensureUazapiWebhooks(row.api_token, route);
+      applied_live = true;
+    } catch (e) {
+      // Flag já mudou; o webhook aplica na próxima (re)conexão pelo handleStart. Loga.
+      await logEvent(supa, {
+        clinic_id: row.clinic_id, instance_id: row.id, source: 'admin',
+        event_type: 'warning', payload: { stage: 'migrate_webhook', route, error: String(e) },
+      });
+    }
+  }
+  await logEvent(supa, {
+    clinic_id: row.clinic_id, instance_id: row.id, source: 'admin',
+    event_type: 'route_migrated', payload: { route, applied_live, webhook },
+  });
+  return json({ success: true, route, applied_live, webhook });
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS_HEADERS });
   if (req.method !== 'POST') return json({ success: false, error: 'method_not_allowed' }, 405);
@@ -543,6 +589,7 @@ serve(async (req) => {
       case 'disconnect':  return await handleDisconnect(supa, row, source);
       case 'reset':       return await handleReset(supa, row, source);
       case 'status':      return await handleStatus(supa, row);
+      case 'migrate':     return await handleMigrate(supa, row, req, body);
       default:            return json({ success: false, error: `unknown_action_${action}` }, 400);
     }
   } catch (e: any) {

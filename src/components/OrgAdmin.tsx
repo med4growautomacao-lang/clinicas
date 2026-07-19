@@ -1244,7 +1244,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
               </div>
               <div>
                 <p className="text-sm font-bold text-slate-800">Google Ads — MCC</p>
-                <p className="text-xs text-slate-400">Credenciais da conta gerenciadora</p>
+                <p className="text-xs text-slate-400">Conta gerenciadora + developer-token da agência — usados por <b>todas</b> as clínicas na sincronização de investimento</p>
               </div>
             </div>
             <div className="p-6 space-y-5">

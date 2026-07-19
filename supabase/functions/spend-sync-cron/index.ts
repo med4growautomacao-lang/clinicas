@@ -28,6 +28,7 @@ const CONCURRENCY = 8; // contas processadas em paralelo por lote
 
 interface ClinicRow {
   id: string;
+  organization_id: string | null;
   meta_token: string | null;
   meta_ad_account_id: string | null;
   google_ad_account_id: string | null;
@@ -120,12 +121,32 @@ serve(async (req) => {
     else googleToken = token ?? null;
   }
 
+  // MCC + developer-token do Google são da AGÊNCIA (org): configurados UMA vez na org e
+  // herdados por todas as clínicas dela. Carregamos o mapa por org (fallback = valor da
+  // própria clínica, p/ clínica sem org ou org sem MCC). Só o customer_id é por-clínica.
+  const orgMcc = new Map<string, { id: string | null; token: string | null }>();
+  {
+    const { data: orgs } = await service
+      .from("organizations")
+      .select("id, google_ad_mcc_id, google_ad_mcc_token")
+      .not("google_ad_mcc_token", "is", null);
+    for (const o of orgs ?? []) orgMcc.set(o.id, { id: o.google_ad_mcc_id, token: o.google_ad_mcc_token });
+  }
+  const resolveGoogle = (c: ClinicRow) => {
+    const o = c.organization_id ? orgMcc.get(c.organization_id) : undefined;
+    return {
+      mcc: (o?.id && String(o.id).trim() ? o.id : null) ?? c.google_ad_mcc_id,
+      token: (o?.token && String(o.token).trim() ? o.token : null) ?? c.google_ad_mcc_token,
+    };
+  };
+
   // Próximo lote de clínicas ativas com Meta OU Google configurado.
+  // O gate do Google exige apenas o customer_id por-clínica; o MCC/token pode vir da org.
   const { data: clinics, error: clinicsErr } = await service
     .from("clinics")
-    .select("id, meta_token, meta_ad_account_id, google_ad_account_id, google_ad_mcc_id, google_ad_mcc_token, meta_status, google_status")
+    .select("id, organization_id, meta_token, meta_ad_account_id, google_ad_account_id, google_ad_mcc_id, google_ad_mcc_token, meta_status, google_status")
     .eq("is_active", true)
-    .or("and(meta_token.not.is.null,meta_ad_account_id.not.is.null),and(google_ad_account_id.not.is.null,google_ad_mcc_token.not.is.null,google_ad_mcc_id.not.is.null)")
+    .or("and(meta_token.not.is.null,meta_ad_account_id.not.is.null),google_ad_account_id.not.is.null")
     .order("id", { ascending: true })
     .range(cursor, cursor + batchSize - 1);
 
@@ -149,8 +170,9 @@ serve(async (req) => {
         else metaOk++;
       }
     }
-    if (wantGoogle && googleToken && c.google_ad_account_id && c.google_ad_mcc_id && c.google_ad_mcc_token) {
-      const { rows, error } = await fetchGoogleDaily(googleToken, c.google_ad_mcc_token, c.google_ad_mcc_id, c.google_ad_account_id, since, until);
+    const g = resolveGoogle(c);
+    if (wantGoogle && googleToken && c.google_ad_account_id && g.mcc && g.token) {
+      const { rows, error } = await fetchGoogleDaily(googleToken, g.token, g.mcc, c.google_ad_account_id, since, until);
       await applyAdStatus(service, c.id, "google", c.google_status, !error);
       if (error) { errors++; await registrar("google_falhou", "Sincronização de investimento (Google) falhou nesta clínica", "error", c.id, { error, since, until }); }
       else {

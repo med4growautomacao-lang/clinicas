@@ -77,21 +77,34 @@ serve(async (req) => {
   ]);
   if (isAdmin !== true && isSuper !== true) return json({ ok: false, error: "forbidden" }, 403);
 
-  // (3) Credenciais da clínica (service role). developer-token + mcc + customer.
+  // (3) Credenciais. O customer_id é da CLÍNICA; o MCC + developer-token são da AGÊNCIA
+  // (org): configurados uma vez na org e herdados. Fallback = valor da própria clínica
+  // (clínica sem org, ou org sem MCC setado). Só o service_role lê.
   const { data: clinic, error: clinicErr } = await service
     .from("clinics")
-    .select("google_ad_account_id, google_ad_mcc_id, google_ad_mcc_token, google_status")
+    .select("google_ad_account_id, google_ad_mcc_id, google_ad_mcc_token, google_status, organization_id")
     .eq("id", clinicId)
     .single();
   if (clinicErr) {
     await registrarErro("clinica_nao_encontrada", "Falha ao ler credenciais Google Ads da clínica", "error", { detail: clinicErr.message });
     return json({ ok: false, error: "clinic_read_failed", detail: clinicErr.message }, 500);
   }
-  if (!clinic?.google_ad_account_id || !clinic?.google_ad_mcc_id || !clinic?.google_ad_mcc_token) {
-    return json({ ok: false, error: "google_not_configured", detail: "Esta clínica não tem conta/MCC/developer-token do Google Ads configurados." }, 200);
+  let mccId = clinic?.google_ad_mcc_id ?? null;
+  let devToken = clinic?.google_ad_mcc_token ?? null;
+  if (clinic?.organization_id) {
+    const { data: org } = await service
+      .from("organizations")
+      .select("google_ad_mcc_id, google_ad_mcc_token")
+      .eq("id", clinic.organization_id)
+      .maybeSingle();
+    if (org?.google_ad_mcc_id && String(org.google_ad_mcc_id).trim()) mccId = org.google_ad_mcc_id;
+    if (org?.google_ad_mcc_token && String(org.google_ad_mcc_token).trim()) devToken = org.google_ad_mcc_token;
+  }
+  if (!clinic?.google_ad_account_id || !mccId || !devToken) {
+    return json({ ok: false, error: "google_not_configured", detail: "Falta a conta do Google Ads da clínica ou o MCC/developer-token (na organização ou na clínica)." }, 200);
   }
   const customerId = String(clinic.google_ad_account_id).replace(/\D/g, ""); // sem hífens
-  const loginCustomerId = String(clinic.google_ad_mcc_id).replace(/\D/g, "");
+  const loginCustomerId = String(mccId).replace(/\D/g, "");
 
   // (4) OAuth2: refresh_token (segredo do MCC) → access_token de curta duração.
   // Os 3 valores moram no Vault (gravados pelo painel Super Admin via set_google_ads_secret);
@@ -151,7 +164,7 @@ serve(async (req) => {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${accessToken}`,
-          "developer-token": String(clinic.google_ad_mcc_token),
+          "developer-token": String(devToken),
           "login-customer-id": loginCustomerId,
           "Content-Type": "application/json",
         },

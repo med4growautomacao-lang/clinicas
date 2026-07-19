@@ -19,7 +19,10 @@ const CORS = {
 
 function normPhone(p: unknown): string {
   let n = String(p ?? "").replace(/\D/g, "");
-  if (n && !n.startsWith("55")) n = "55" + n;
+  // ≤11 dígitos = DDD + número (sem código do país) → prefixa 55.
+  // NÃO usar "começa com 55" como critério: DDD 55 existe (Santa Maria/RS) e
+  // um local 55 9XXXX-XXXX seria confundido com código do país.
+  if (n && n.length <= 11) n = "55" + n;
   return n;
 }
 

@@ -2709,6 +2709,13 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
 function NotificationsSettingsTab() {
     const { clinic, refetch } = useSettings();
     const [groupName, setGroupName] = useState('Informativos do Agente IA');
+    // Pré-preenche "Informativos do Agente IA - {nome da clínica}" quando a clínica
+    // carrega (async) — sem sobrescrever se o usuário já editou o campo.
+    useEffect(() => {
+        if (clinic?.name) {
+            setGroupName(prev => prev === 'Informativos do Agente IA' ? `Informativos do Agente IA - ${clinic.name}` : prev);
+        }
+    }, [clinic?.name]);
     const [participants, setParticipants] = useState<{ name: string; phone: string }[]>([{ name: '', phone: '' }]);
     const [creatingGroup, setCreatingGroup] = useState(false);
     const [groupResult, setGroupResult] = useState<'success' | 'error' | null>(null);
@@ -2773,7 +2780,7 @@ function NotificationsSettingsTab() {
                                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
                                     <Bell className="w-3.5 h-3.5 text-teal-500" /> Nome do Grupo
                                 </label>
-                                <input type="text" value={groupName} onChange={e => setGroupName(e.target.value)} placeholder="Informativos do Agente IA"
+                                <input type="text" value={groupName} onChange={e => setGroupName(e.target.value)} placeholder={`Informativos do Agente IA - ${clinic?.name ?? 'Clínica'}`}
                                     className="w-full px-4 py-3 border border-slate-200 rounded-xl font-medium text-slate-700 text-sm placeholder:text-slate-300 focus:ring-4 focus:ring-teal-100 focus:border-teal-400 outline-none transition-all shadow-sm hover:border-teal-200" />
                             </div>
 
@@ -2794,7 +2801,7 @@ function NotificationsSettingsTab() {
                                                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 placeholder:text-slate-300 focus:ring-2 focus:ring-teal-100 focus:border-teal-300 outline-none shadow-sm transition-all" />
                                             </div>
                                             <div className="flex-1">
-                                                <input type="text" value={p.phone} onChange={e => updateParticipant(i, 'phone', e.target.value)} placeholder="Telefone (5511999999999)"
+                                                <input type="text" value={p.phone} onChange={e => updateParticipant(i, 'phone', e.target.value)} placeholder="DDD + número (ex: 47 99999-8888)"
                                                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 placeholder:text-slate-300 focus:ring-2 focus:ring-teal-100 focus:border-teal-300 outline-none shadow-sm transition-all" />
                                             </div>
                                             {participants.length > 1 && (

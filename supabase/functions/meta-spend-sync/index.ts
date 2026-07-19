@@ -18,6 +18,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { applyAdStatus } from "../_shared/spend.ts";
 
 const GRAPH_VERSION = "v24.0";
 const CHUNK_DAYS = 90;              // a insights diária tem teto de janela; fatiar em blocos ≤90d
@@ -96,7 +97,7 @@ serve(async (req) => {
   // (3) Token + conta de anúncios da clínica (service role — segredo nunca vai ao browser).
   const { data: clinic, error: clinicErr } = await service
     .from("clinics")
-    .select("meta_token, meta_ad_account_id")
+    .select("meta_token, meta_ad_account_id, meta_status")
     .eq("id", clinicId)
     .single();
   if (clinicErr) {
@@ -129,11 +130,13 @@ serve(async (req) => {
             "critical",
             { erro: j.error?.message, codigo: j.error?.code, chunk, account },
           );
+          await applyAdStatus(service, clinicId, "meta", clinic.meta_status, false);
           return json({ ok: false, error: "graph_error", detail: j.error?.message ?? "erro da Graph API" }, 502);
         }
         for (const d of (j.data ?? [])) {
           if (d?.date_start && d?.spend != null) {
-            rows.push({ date: String(d.date_start), spend: Number(d.spend) || 0 });
+            // arredonda a 2 casas (centavos) — o Meta já manda em moeda, mas com casas extras às vezes.
+            rows.push({ date: String(d.date_start), spend: Math.round((Number(d.spend) || 0) * 100) / 100 });
           }
         }
         url = j.paging?.next ?? null;
@@ -142,8 +145,12 @@ serve(async (req) => {
   } catch (e) {
     await registrarErro("ciclo_falhou", "A sincronização de investimento do Meta quebrou", "critical",
       { erro: e instanceof Error ? e.message : String(e) });
+    await applyAdStatus(service, clinicId, "meta", clinic.meta_status, false);
     return json({ ok: false, error: "fetch_failed", detail: e instanceof Error ? e.message : String(e) }, 500);
   }
+
+  // Busca funcionou → reativa o status se estava inativo (não mexe em 'none').
+  await applyAdStatus(service, clinicId, "meta", clinic.meta_status, true);
 
   // (5) Upsert por dia. onConflict (clinic_id,date,platform) atualiza SÓ investment — os campos
   // manuais da linha (manual_leads_count, conversions_value…) não entram no payload e ficam intactos.

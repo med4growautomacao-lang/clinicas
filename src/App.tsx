@@ -21,6 +21,7 @@ import { ToastProvider } from './components/ui/toast';
 import { Login } from './components/Login';
 import { ConnectPage } from './components/ConnectPage';
 import { WhatsAppStatusBanner } from './components/WhatsAppStatusBanner';
+import { AdAccountStatusBanner } from './components/AdAccountStatusBanner';
 import { RedirectPage } from './components/RedirectPage';
 import { LandingPage } from './components/LandingPage';
 import { PrivacyPolicy } from './components/PrivacyPolicy';
@@ -130,6 +131,18 @@ function AppContent() {
             handleSetActiveTab('settings');
             window.dispatchEvent(new CustomEvent('settings-deeplink', {
               detail: { tab: 'integrations', intTab: 'whatsapp' },
+            }));
+          }}
+        />
+
+        <AdAccountStatusBanner
+          userRole={userRole}
+          onFix={(platform) => {
+            localStorage.setItem('settingsTab', 'integrations');
+            localStorage.setItem('settingsIntTab', platform);
+            handleSetActiveTab('settings');
+            window.dispatchEvent(new CustomEvent('settings-deeplink', {
+              detail: { tab: 'integrations', intTab: platform },
             }));
           }}
         />

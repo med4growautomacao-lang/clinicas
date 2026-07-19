@@ -14,6 +14,8 @@ import { useToast } from './ui/toast';
 import { matchesSearch } from '../lib/search';
 import { ErrorCenter } from './ErrorCenter';
 import { MediaAIPanel } from './MediaAIPanel';
+import { GoogleAdsSecretsPanel } from './GoogleAdsSecretsPanel';
+import { SpendSyncConfigPanel } from './SpendSyncConfigPanel';
 
 // ─── tipos de modal ───────────────────────────────────────────────────────────
 type ModalState =
@@ -1100,7 +1102,7 @@ function PromptTemplatesManager() {
 
 // ─── SystemSettingsTab (wrapper com sub-abas) ─────────────────────────────────
 function SystemSettingsTab() {
-  const [subTab, setSubTab] = useState<'prompts' | 'assistant' | 'media' | 'vars'>('prompts');
+  const [subTab, setSubTab] = useState<'prompts' | 'assistant' | 'media' | 'google_ads' | 'vars'>('prompts');
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl w-fit">
@@ -1108,6 +1110,7 @@ function SystemSettingsTab() {
           { id: 'prompts', label: 'Prompts Fixos' },
           { id: 'assistant', label: 'AI Assistente' },
           { id: 'media', label: 'IA de Mídia' },
+          { id: 'google_ads', label: 'Investimento (Ads)' },
           { id: 'vars', label: 'Variáveis de Sistema' },
         ].map(t => (
           <button key={t.id} onClick={() => setSubTab(t.id as any)}
@@ -1120,6 +1123,7 @@ function SystemSettingsTab() {
       {subTab === 'prompts' ? <PromptTemplatesManager />
         : subTab === 'assistant' ? <AIAssistantConfigSection />
         : subTab === 'media' ? <MediaAIPanel />
+        : subTab === 'google_ads' ? <div className="space-y-6"><GoogleAdsSecretsPanel /><SpendSyncConfigPanel /></div>
         : <SystemVariablesSection />}
     </div>
   );

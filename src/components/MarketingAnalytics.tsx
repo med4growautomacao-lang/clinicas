@@ -978,9 +978,16 @@ export function MarketingAnalytics() {
   );
 }
 
-// Botão + popover para sincronizar o INVESTIMENTO do Meta Ads (edge meta-spend-sync) de X a Y.
-// A edge lê o token/conta da clínica (segredo, server-side), busca o gasto diário na Graph API
-// e faz upsert em marketing_data (platform='meta_ads'). Ao concluir, atualiza a tela via onDone.
+// Botão + popover para sincronizar o INVESTIMENTO de X a Y — Meta e Google Ads.
+// Cada edge (meta-spend-sync / google-spend-sync) lê as credenciais da clínica no servidor
+// (segredo nunca vai ao browser), busca o gasto diário na API respectiva e faz upsert em
+// marketing_data. "Não configurado" numa plataforma é ignorado em silêncio (a clínica pode ter
+// só uma das duas); só erro real aparece. Ao concluir, atualiza a tela via onDone.
+const SYNC_PLATFORMS: { fn: string; label: string; notConfigured: string }[] = [
+  { fn: 'meta-spend-sync', label: 'Meta', notConfigured: 'meta_not_configured' },
+  { fn: 'google-spend-sync', label: 'Google', notConfigured: 'google_not_configured' },
+];
+
 function SyncInvestmentButton({ clinicId, onDone }: { clinicId: string | null; onDone: () => void }) {
   const [isOpen, setIsOpen] = useState(false);
   const [from, setFrom] = useState(() => format(startOfMonth(new Date()), 'yyyy-MM-dd'));
@@ -988,32 +995,48 @@ function SyncInvestmentButton({ clinicId, onDone }: { clinicId: string | null; o
   const [syncing, setSyncing] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
+  const fmtBRL = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
+
   const runSync = async () => {
     if (!clinicId || syncing) return;
     setSyncing(true);
     setResult(null);
-    try {
-      const { data, error } = await supabase.functions.invoke('meta-spend-sync', {
-        body: { clinic_id: clinicId, since: from, until: to },
-      });
-      if (error) {
-        // status não-2xx: o corpo detalhado vem em error.context (Response), não em error.message.
-        let detail = error.message;
-        try { const b = await (error as any).context?.json?.(); if (b?.detail || b?.error) detail = b.detail || b.error; } catch { /* usa message */ }
-        throw new Error(detail);
+
+    const okLines: string[] = [];
+    const errLines: string[] = [];
+    let touched = false;
+
+    for (const p of SYNC_PLATFORMS) {
+      try {
+        const { data, error } = await supabase.functions.invoke(p.fn, {
+          body: { clinic_id: clinicId, since: from, until: to },
+        });
+        if (error) {
+          // status não-2xx: o corpo detalhado vem em error.context (Response), não em error.message.
+          let detail = error.message;
+          try { const b = await (error as any).context?.json?.(); if (b?.detail || b?.error) detail = b.detail || b.error; } catch { /* usa message */ }
+          errLines.push(`${p.label}: ${detail}`);
+          continue;
+        }
+        if (!data?.ok) {
+          // Plataforma sem credencial nesta clínica → pula em silêncio; outro erro → mostra.
+          if (data?.error !== p.notConfigured) errLines.push(`${p.label}: ${data?.detail || data?.error || 'falha'}`);
+          continue;
+        }
+        touched = true;
+        okLines.push(`${p.label}: ${data.days} dia(s) · ${fmtBRL(data.total_spend)}`);
+      } catch (e: any) {
+        errLines.push(`${p.label}: ${e?.message || 'erro'}`);
       }
-      if (!data?.ok) {
-        const detail = data?.detail || data?.error || 'Falha na sincronização.';
-        setResult({ ok: false, msg: detail });
-      } else {
-        setResult({ ok: true, msg: `${data.days} dia(s) sincronizado(s) · ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(data.total_spend || 0)} de investimento.` });
-        onDone();
-      }
-    } catch (e: any) {
-      setResult({ ok: false, msg: e?.message || 'Erro ao sincronizar.' });
-    } finally {
-      setSyncing(false);
     }
+
+    if (touched) onDone();
+    if (okLines.length === 0 && errLines.length === 0) {
+      setResult({ ok: false, msg: 'Nenhuma plataforma de anúncios configurada nesta clínica.' });
+    } else {
+      setResult({ ok: errLines.length === 0, msg: [...okLines, ...errLines].join('\n') });
+    }
+    setSyncing(false);
   };
 
   return (
@@ -1040,8 +1063,8 @@ function SyncInvestmentButton({ clinicId, onDone }: { clinicId: string | null; o
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
               className="absolute top-full right-0 mt-2 w-80 bg-white rounded-2xl border border-slate-200 shadow-2xl z-[110] p-4 overflow-hidden"
             >
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Sincronizar Investimento · Meta Ads</p>
-              <p className="text-[11px] text-slate-500 mb-3">Puxa o gasto diário direto da conta de anúncios do Meta e grava no período escolhido.</p>
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Sincronizar Investimento · Meta + Google</p>
+              <p className="text-[11px] text-slate-500 mb-3">Puxa o gasto diário direto das contas de anúncios e grava no período escolhido.</p>
 
               <DateRangePicker
                 inline
@@ -1054,7 +1077,7 @@ function SyncInvestmentButton({ clinicId, onDone }: { clinicId: string | null; o
 
               {result && (
                 <div className={cn(
-                  "mt-3 text-[11px] font-medium rounded-xl px-3 py-2",
+                  "mt-3 text-[11px] font-medium rounded-xl px-3 py-2 whitespace-pre-line",
                   result.ok ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
                 )}>
                   {result.msg}
@@ -1364,33 +1387,36 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
       const stats = adjChannel(rawStats);
       const compStats = adjChannel(rawCompStats);
 
+      // Com filtro de CANAL ativo, investimento não é atribuível → métricas derivadas viram
+      // NaN (o gráfico as trata como 0/vazio), coerente com os cards que mostram "—".
+      const invNA = selectedChannel.length > 0;
       return {
         name: p.label,
         leads: stats.leads,
-        investment: stats.investment,
+        investment: invNA ? NaN : stats.investment,
         appointments: stats.appointments,
         convs: stats.convs,
         conv_value: stats.conv_value,
-        cpl: stats.leads > 0 ? stats.investment / stats.leads : 0,
-        cpapt: stats.appointments > 0 ? stats.investment / stats.appointments : 0,
-        cpa: stats.convs > 0 ? stats.investment / stats.convs : 0,
+        cpl: invNA ? NaN : (stats.leads > 0 ? stats.investment / stats.leads : 0),
+        cpapt: invNA ? NaN : (stats.appointments > 0 ? stats.investment / stats.appointments : 0),
+        cpa: invNA ? NaN : (stats.convs > 0 ? stats.investment / stats.convs : 0),
         lead_to_apt_rate: stats.leads > 0 ? (stats.appointments / stats.leads) * 100 : 0,
         lead_to_conv_rate: stats.leads > 0 ? (stats.convs / stats.leads) * 100 : 0,
         apt_to_conv_rate: stats.appointments > 0 ? (stats.convs / stats.appointments) * 100 : 0,
-        roas: stats.investment > 0 ? stats.conv_value / stats.investment : 0,
+        roas: invNA ? NaN : (stats.investment > 0 ? stats.conv_value / stats.investment : 0),
 
         leads_prev: compStats.leads,
-        investment_prev: compStats.investment,
+        investment_prev: invNA ? NaN : compStats.investment,
         appointments_prev: compStats.appointments,
         convs_prev: compStats.convs,
         conv_value_prev: compStats.conv_value,
-        cpl_prev: compStats.leads > 0 ? compStats.investment / compStats.leads : 0,
-        cpapt_prev: compStats.appointments > 0 ? compStats.investment / compStats.appointments : 0,
-        cpa_prev: compStats.convs > 0 ? compStats.investment / compStats.convs : 0,
+        cpl_prev: invNA ? NaN : (compStats.leads > 0 ? compStats.investment / compStats.leads : 0),
+        cpapt_prev: invNA ? NaN : (compStats.appointments > 0 ? compStats.investment / compStats.appointments : 0),
+        cpa_prev: invNA ? NaN : (compStats.convs > 0 ? compStats.investment / compStats.convs : 0),
         lead_to_apt_rate_prev: compStats.leads > 0 ? (compStats.appointments / compStats.leads) * 100 : 0,
         lead_to_conv_rate_prev: compStats.leads > 0 ? (compStats.convs / compStats.leads) * 100 : 0,
         apt_to_conv_rate_prev: compStats.appointments > 0 ? (compStats.convs / compStats.appointments) * 100 : 0,
-        roas_prev: compStats.investment > 0 ? compStats.conv_value / compStats.investment : 0,
+        roas_prev: invNA ? NaN : (compStats.investment > 0 ? compStats.conv_value / compStats.investment : 0),
       };
     });
   }, [periods, metricsByPeriod, comparisonMetricsByPeriod, getTotals, selectedPlatform, selectedChannel, adjChannel]);
@@ -1491,6 +1517,13 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
           else if (id === 'apt_to_conv_rate') {
             value = currentTotals.appointments > 0 ? (currentTotals.convs / currentTotals.appointments) * 100 : 0;
             prevValue = isComparing ? (prevTotals.appointments > 0 ? (prevTotals.convs / prevTotals.appointments) * 100 : 0) : null;
+          }
+
+          // Investimento não é atribuível por CANAL (o gasto é por plataforma). Com filtro de
+          // canal ativo, o investimento e tudo que deriva dele viram "—" (NaN = sentinel do StatCard).
+          if (selectedChannel.length > 0 && ['investment', 'roas', 'cpl', 'cpapt', 'cpa'].includes(id)) {
+            value = NaN;
+            prevValue = null;
           }
 
           return (
@@ -2188,7 +2221,9 @@ function UtmValuePicker({ label, allLabel, options, selected, onChange }: {
 }
 
 function StatCard({ title, value, prevValue, type, icon: Icon, color }: any) {
-  const delta = (prevValue !== null && prevValue > 0) ? ((value - prevValue) / prevValue) * 100 : null;
+  // Valor não-finito (NaN/null) = "não atribuível" (ex.: investimento sob filtro de canal) → "—".
+  const isNA = value == null || !Number.isFinite(value);
+  const delta = (!isNA && prevValue !== null && prevValue > 0) ? ((value - prevValue) / prevValue) * 100 : null;
   return (
     <Card className="bg-white border-slate-200 shadow-lg rounded-3xl p-5 overflow-hidden group hover:shadow-xl transition-all">
       <div className="flex items-start justify-between">
@@ -2203,7 +2238,8 @@ function StatCard({ title, value, prevValue, type, icon: Icon, color }: any) {
       <div className="mt-4">
         <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{title}</h3>
         <p className="text-lg font-black text-slate-900 mt-1 whitespace-nowrap">
-          {type === 'currency' ? `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` :
+          {isNA ? "—" :
+            type === 'currency' ? `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` :
             type === 'percent' ? `${value.toFixed(1)}%` :
             type === 'ratio' ? `${value.toFixed(2)}x` : value.toLocaleString('pt-BR')}
         </p>

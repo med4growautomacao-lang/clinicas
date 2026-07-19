@@ -2076,7 +2076,7 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
         setCreatingGroup(true);
         setGroupResult(null);
         try {
-            const { error } = await supabase.functions.invoke('whatsapp-bridge', {
+            const { data, error } = await supabase.functions.invoke('whatsapp-group', {
                 body: {
                     action,
                     clinic_id: clinic.id,
@@ -2085,8 +2085,10 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                     participants: participants.filter(p => p.phone.trim()),
                 },
             });
-            setGroupResult(error ? 'error' : 'success');
-            if (!error) {
+            // A edge devolve {success:false,...} com HTTP 4xx/5xx (que vira `error`) OU 200; cobre ambos.
+            const ok = !error && (data as any)?.success !== false;
+            setGroupResult(ok ? 'success' : 'error');
+            if (ok) {
                 await refetch();
                 if (action === 'add_participants') setParticipants([{ name: '', phone: '' }]);
             }

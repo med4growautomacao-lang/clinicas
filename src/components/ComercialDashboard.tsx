@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import {
   Bot,
@@ -399,6 +399,8 @@ export function ComercialDashboard() {
   const orcamentosProcessados = isOutro ? orcamentosWD.filter(o => o.status === 'aprovado' || o.status === 'recusado').length : 0;
   const taxaAprovacaoWD = orcamentosProcessados > 0 ? Math.round((orcamentosAprovados.length / orcamentosProcessados) * 100) : null;
   const [data, setData] = useState<CommercialData | null>(null);
+  // Guarda de geração: resposta de um recorte antigo não sobrescreve o atual.
+  const fetchGenRef = useRef(0);
   const [clinicFeatures, setClinicFeatures] = useState<{ feature_followup?: boolean; feature_ia?: boolean } | null>(null);
   const [clinicName, setClinicName] = useState("");
   const [loading, setLoading] = useState(true);
@@ -508,6 +510,7 @@ export function ComercialDashboard() {
   const fetchData = useCallback(async (silent = false) => {
     const clinicId = activeClinicId || profile?.clinic_id;
     if (!clinicId) return;
+    const gen = ++fetchGenRef.current;
     const params = {
       p_clinic_id: clinicId,
       p_entry_from: entryRange ? format(entryRange.start, "yyyy-MM-dd") : null,
@@ -534,12 +537,13 @@ export function ComercialDashboard() {
     try {
       const { data: res, error } = await supabase.rpc("get_commercial_dashboard", params);
       if (error) throw error;
+      setCached(cacheKey, res);   // cache pode gravar mesmo se superada (chave é correta)
+      if (gen !== fetchGenRef.current) return;   // superada por chamada mais nova → não pinta
       setData(res as CommercialData);
-      setCached(cacheKey, res);
     } catch (err) {
       console.error("ComercialDashboard fetch error:", err);
     } finally {
-      if (showSpinner) setLoading(false);
+      if (gen === fetchGenRef.current && showSpinner) setLoading(false);
     }
   }, [activeClinicId, profile?.clinic_id, convRange, entryRange, apptRange, agent, origin, channel]);
 

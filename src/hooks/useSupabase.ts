@@ -12,7 +12,19 @@ export function getCached<T>(key: string): T | null {
   if (Date.now() - entry.ts > CACHE_TTL) { _cache.delete(key); return null; }
   return entry.data as T;
 }
-export function setCached(key: string, data: any) { _cache.set(key, { data, ts: Date.now() }); }
+// Cap de entradas: o _cache virou SWR dos painéis (chaves de alta cardinalidade —
+// cada (clínica, período, filtros) — com payloads grandes, ex.: coorte UTM ~1MB).
+// Sem limite cresceria sem parar numa sessão longa. LRU-por-escrita: reinsere no
+// fim e descarta a mais antiga quando passa do teto.
+const CACHE_MAX_ENTRIES = 50;
+export function setCached(key: string, data: any) {
+  _cache.delete(key);
+  _cache.set(key, { data, ts: Date.now() });
+  if (_cache.size > CACHE_MAX_ENTRIES) {
+    const oldest = _cache.keys().next().value;
+    if (oldest !== undefined) _cache.delete(oldest);
+  }
+}
 function invalidateCache(key: string) { _cache.delete(key); }
 
 // ── Central de Erros a partir do front ───────────────────────────────────────
@@ -91,6 +103,8 @@ export interface ConsultationType {
   buffer_before_minutes: number;
   buffer_after_minutes: number;
   min_notice_minutes: number;
+  requires_prepayment?: boolean;
+  prepayment_amount?: number | null;
   working_hours_override: Record<string, { start: string; end: string }[]> | null;
   created_at: string;
 }
@@ -1073,22 +1087,30 @@ export function useUtmFunnelCohort(start: string | null, end: string | null) {
       .rpc('marketing_utm_funnel_cohort', { p_clinic_id: activeClinicId, p_start: start, p_end: end })
       .range(page * PAGE, page * PAGE + PAGE - 1);
 
+    const takeError = (error: any) => {
+      console.error('[marketing_utm_funnel_cohort] RPC falhou:', error);
+      logSystemError('RPC_FETCH_FAIL', 'marketing_utm_funnel_cohort: falha ao buscar dados — UTM × Etapa pode exibir zero', activeClinicId, { fn: 'marketing_utm_funnel_cohort', error: error?.message ?? String(error) }, 'error');
+      if (!cached) setData([]);   // erro não apaga o que já estava na tela
+    };
+
     (async () => {
       const all: UtmFunnelRow[] = [];
-      let page = 0;
-      let more = true;
+      // 1ª página sozinha: cobre o caso comum (clínica < max_rows) em UMA requisição —
+      // só clínica grande paga a página extra, e aí ela vem EM PARALELO (abaixo).
+      const first: any = await fetchPage(0);
+      if (cancelled) return;
+      if (first.error) { takeError(first.error); return; }
+      if (Array.isArray(first.data)) all.push(...first.data);
+      let more = Array.isArray(first.data) && first.data.length === PAGE;
+      let page = 1;
+
       while (more && page < MAX_PAGES) {
         const batch: any[] = [];
         for (let i = 0; i < BATCH && page + i < MAX_PAGES; i++) batch.push(fetchPage(page + i));
         const results = await Promise.all(batch);
         if (cancelled) return;
         for (const { data: rows, error } of results as any[]) {
-          if (error) {
-            console.error('[marketing_utm_funnel_cohort] RPC falhou:', error);
-            logSystemError('RPC_FETCH_FAIL', 'marketing_utm_funnel_cohort: falha ao buscar dados — UTM × Etapa pode exibir zero', activeClinicId, { fn: 'marketing_utm_funnel_cohort', error: error?.message ?? String(error) }, 'error');
-            if (!cached) setData([]);   // erro não apaga o que já estava na tela
-            return;
-          }
+          if (error) { takeError(error); return; }
           if (Array.isArray(rows)) all.push(...rows);
         }
         // há mais páginas só se a ÚLTIMA página da rodada veio cheia (== PAGE)
@@ -1097,11 +1119,14 @@ export function useUtmFunnelCohort(start: string | null, end: string | null) {
         page += batch.length;
       }
       if (cancelled) return;
-      if (more) {
-        logSystemError('UTM_COHORT_PAGE_CAP', 'marketing_utm_funnel_cohort: paginação atingiu o teto de páginas — dados truncados', activeClinicId, { fn: 'marketing_utm_funnel_cohort', pages: MAX_PAGES }, 'warn');
-      }
       setData(all);
-      setCached(cacheKey, all);
+      if (more) {
+        // estourou o teto de páginas: exibe o parcial mas NÃO cacheia truncado
+        // (senão serviria dado incompleto por todo o TTL).
+        logSystemError('UTM_COHORT_PAGE_CAP', 'marketing_utm_funnel_cohort: paginação atingiu o teto de páginas — dados truncados', activeClinicId, { fn: 'marketing_utm_funnel_cohort', pages: MAX_PAGES }, 'warn');
+      } else {
+        setCached(cacheKey, all);
+      }
     })();
 
     return () => { cancelled = true; };
@@ -1417,9 +1442,13 @@ export function useDashboardStats(dateRange?: { start: string; end: string }, or
     chartData: []
   });
   const [loading, setLoading] = useState(true);
+  // Guarda de geração: a resposta que chega tarde de um período/filtro ANTIGO não pode
+  // sobrescrever o atual (sem isso, troca rápida de filtro exibia número errado).
+  const genRef = useRef(0);
 
   const load = useCallback(async (silent = false) => {
     if (!activeClinicId) return;
+    const gen = ++genRef.current;
     const now = new Date();
     const startOfMonth = dateRange?.start || new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
     const endOfMonth = dateRange?.end || new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
@@ -1459,12 +1488,13 @@ export function useDashboardStats(dateRange?: { start: string; end: string }, or
         defaultTicket: Number(r?.defaultTicket || 0),
         chartData: (r?.chartData || []) as any,
       };
+      setCached(cacheKey, mapped);   // cache pode gravar mesmo se superada (chave é correta)
+      if (gen !== genRef.current) return;   // superada por uma chamada mais nova → não pinta
       setData(mapped);
-      setCached(cacheKey, mapped);
     } catch (error) {
       console.error('Erro ao carregar estatísticas do dashboard:', error);
     } finally {
-      if (showSpinner) setLoading(false);
+      if (gen === genRef.current && showSpinner) setLoading(false);
     }
   }, [activeClinicId, dateRange?.start, dateRange?.end, origin, channel, agent]);
 
@@ -2162,9 +2192,12 @@ export function useMarketing() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const currentRange = useRef<{ start: string; end: string } | null>(null);
+  // Guarda de geração: resposta de um período antigo não sobrescreve o atual.
+  const genRef = useRef(0);
 
   const fetch = useCallback(async (startDate: string, endDate: string) => {
     if (!activeClinicId) return;
+    const gen = ++genRef.current;
     currentRange.current = { start: startDate, end: endDate };
 
     // SWR: cache por (clínica, período); troca de aba pinta na hora e revalida.
@@ -2181,14 +2214,15 @@ export function useMarketing() {
       .lte('date', endDate)
       .order('date', { ascending: true });
 
+    if (gen !== genRef.current) return;   // superada por uma chamada mais nova
     if (error) {
-      setError(error.message);
-      if (!cached) setLoading(false);
+      // com cache válido na tela, não vira estado de erro (revalidação falha em silêncio)
+      if (!cached) { setError(error.message); setLoading(false); }
       return;
     }
 
-    setData(data || []);
     setCached(cacheKey, data || []);
+    setData(data || []);
     setError(null);
     setLoading(false);
   }, [activeClinicId]);

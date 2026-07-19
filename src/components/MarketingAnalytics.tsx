@@ -52,6 +52,7 @@ import { cn } from "@/src/lib/utils";
 import { TrendBarChart, fmtByType } from "./TrendBarChart";
 import { motion, AnimatePresence } from "framer-motion";
 import { useMarketing, MarketingData, useFunnelStages, useUtmFunnelCohort, useFunnelCohort, useMarketingKpis, MarketingKpiRow } from "../hooks/useSupabase";
+import { ReportQuick } from "./ReportQuick";
 import {
   format,
   startOfDay,
@@ -788,6 +789,9 @@ export function MarketingAnalytics() {
                   clinicId={activeClinicId}
                   onDone={() => fetchMkt(format(dateRange.start, 'yyyy-MM-dd'), format(dateRange.end, 'yyyy-MM-dd'))}
                 />
+
+                {/* Relatório completo do período (mesma fonte do Comercial/agendado) */}
+                <ReportQuick start={dateRange.start} end={dateRange.end} className="rounded-xl h-9" />
 
                 {viewMode === 'table' && (
                   <Button

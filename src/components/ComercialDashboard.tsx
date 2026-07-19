@@ -47,6 +47,7 @@ import { cn } from "../lib/utils";
 import { LeadChat } from "./LeadChat";
 import type { Lead } from "../hooks/useSupabase";
 import { useOrcamentos, getCached, setCached, logSystemError } from "../hooks/useSupabase";
+import { downloadReportPdf } from "../lib/reportPdf";
 import { TrendBarChart, fmtByType } from "./TrendBarChart";
 import { Button } from "./ui/button";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
@@ -1293,7 +1294,11 @@ export function ComercialDashboard() {
                 <div className="flex items-center gap-2">
                   <Button onClick={downloadReport} variant="outline" className="gap-2 border-slate-200 bg-white hover:bg-slate-50 text-slate-600">
                     <Download className="w-4 h-4" />
-                    <span className="text-[11px] font-bold uppercase tracking-tight">Baixar .txt</span>
+                    <span className="text-[11px] font-bold uppercase tracking-tight">.txt</span>
+                  </Button>
+                  <Button onClick={() => downloadReportPdf(reportText, `relatorio-comercial-${reportKind}-${format(new Date(), "yyyy-MM-dd")}.pdf`)} variant="outline" className="gap-2 border-slate-200 bg-white hover:bg-slate-50 text-slate-600">
+                    <Download className="w-4 h-4" />
+                    <span className="text-[11px] font-bold uppercase tracking-tight">PDF</span>
                   </Button>
                   <Button onClick={copyReport} variant="outline" className="gap-2 border-slate-200 bg-white hover:bg-slate-50 text-slate-600">
                     {reportCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}

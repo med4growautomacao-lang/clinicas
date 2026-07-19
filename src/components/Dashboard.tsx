@@ -25,6 +25,7 @@ import MetaLogo from "../assets/logos/Logo Metaads.png";
 import SemOrigemLogo from "../assets/logos/Logo Sem origem.png";
 import WhatsAppLogo from "../assets/logos/Logo Whatsapp.png";
 import { FilterChips } from "./filters/FilterChips";
+import { ReportQuick } from "./ReportQuick";
 import { GranularityToggle } from "./filters/GranularityToggle";
 import { DateRangePopover } from "./filters/DateRangePopover";
 import { type Period, RANGE_PRESETS } from "../lib/dateRange";
@@ -273,6 +274,9 @@ export function Dashboard() {
               { id: 'balcao', label: 'Balcão', icon: Store },
             ]}
           />
+
+          {/* Relatório completo do período (mesma fonte do Comercial/agendado) */}
+          <ReportQuick start={dateRange.start} end={dateRange.end} />
         </div>
       </div>
 

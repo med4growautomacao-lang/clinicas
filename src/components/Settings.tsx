@@ -2806,13 +2806,17 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                 </CardContent>
             </Card>
 
-                    {/* Preferências granulares (sino + grupo + por cargo + SLA) */}
-                    <NotificationPrefs
-                        clinicId={clinic!.id}
-                        hasGroup={!!clinic?.notification_group_id}
-                        initialPrefs={clinic?.notification_prefs}
-                        onSaved={refetch}
-                    />
+                    {/* Preferências granulares (sino + grupo + por cargo + SLA).
+                        Guard: clinic é null no 1º render (dados carregando) — sem ele a
+                        tela inteira caía em branco (TypeError no clinic!.id). */}
+                    {clinic && (
+                        <NotificationPrefs
+                            clinicId={clinic.id}
+                            hasGroup={!!clinic.notification_group_id}
+                            initialPrefs={clinic.notification_prefs}
+                            onSaved={refetch}
+                        />
+                    )}
                 </div>
             )}
         </div>

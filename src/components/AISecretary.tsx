@@ -986,6 +986,194 @@ function PosFollowupView() {
   );
 }
 
+function PayField({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
+  return (
+    <div className="space-y-1.5">
+      <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider pl-1">{label}</label>
+      <input
+        value={value || ""}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full px-4 py-2.5 border border-slate-200 rounded-lg font-medium text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all"
+      />
+    </div>
+  );
+}
+
+function PaymentConfigView() {
+  const { aiConfig, updateAI, loading } = useSettings();
+  const { activeClinicId } = useAuth();
+  const [saving, setSaving] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const [cfg, setCfg] = useState<any>(null);
+  const [qrUploading, setQrUploading] = useState(false);
+  const [qrError, setQrError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (aiConfig) { setCfg({ ...aiConfig }); setIsDirty(false); }
+    else if (!loading) { setCfg({ payment_enabled: false }); }
+  }, [aiConfig, loading]);
+
+  if (loading || !cfg) {
+    return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 text-teal-600 animate-spin" /></div>;
+  }
+
+  const set = (u: any) => { setCfg((p: any) => ({ ...p, ...u })); setIsDirty(true); };
+  const save = async () => { setSaving(true); await updateAI(cfg); setSaving(false); setIsDirty(false); };
+  const on = cfg.payment_enabled === true;
+
+  const handleQrUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !activeClinicId) return;
+    if (!file.type.startsWith('image/')) { setQrError('Envie um arquivo de imagem.'); return; }
+    if (file.size > 5 * 1024 * 1024) { setQrError('Imagem muito grande (máx. 5 MB).'); return; }
+    setQrError(null);
+    setQrUploading(true);
+    try {
+      const ext = (file.name.split('.').pop() || 'png').toLowerCase();
+      const path = `${activeClinicId}/qr-${Date.now()}.${ext}`;
+      const { error } = await supabase.storage.from('payment-qr').upload(path, file, { upsert: true, contentType: file.type });
+      if (error) throw error;
+      const { data } = supabase.storage.from('payment-qr').getPublicUrl(path);
+      set({ payment_qr_url: data.publicUrl });
+    } catch (err: any) {
+      setQrError(err?.message || 'Falha ao enviar a imagem.');
+    } finally {
+      setQrUploading(false);
+    }
+  };
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+      <Card className="border border-slate-200 shadow-sm relative overflow-hidden">
+        <div className="h-1.5 bg-teal-600 absolute top-0 left-0 right-0" />
+        <CardHeader className="pb-4">
+          <CardTitle className="text-xl font-bold text-slate-900 flex items-center gap-3">
+            <DollarSign className="w-6 h-6 text-teal-600" />
+            Pagamento Antecipado
+          </CardTitle>
+          <CardDescription className="text-slate-500 font-medium">
+            A IA envia os dados de pagamento e a equipe confere o comprovante antes de confirmar a consulta.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-100">
+            <div>
+              <p className="text-sm font-bold text-slate-900">Ativar pagamento antecipado</p>
+              <p className="text-[10px] font-semibold text-slate-500 uppercase pt-0.5">Habilita o envio dos dados pela IA</p>
+            </div>
+            <button
+              onClick={() => set({ payment_enabled: !on })}
+              className={cn("w-12 h-6 rounded-full relative transition-all shrink-0", on ? "bg-teal-600" : "bg-slate-300")}
+            >
+              <div className={cn("w-4 h-4 bg-white rounded-full absolute top-1 transition-all shadow-sm", on ? "right-1" : "left-1")} />
+            </button>
+          </div>
+
+          <div className={cn("space-y-6 transition-opacity", !on && "opacity-50 pointer-events-none")}>
+            <div className="space-y-4">
+              <p className="text-[10px] font-bold text-teal-600 uppercase tracking-wider pl-1">PIX</p>
+              <PayField label="Chave PIX" value={cfg.payment_pix_key} onChange={(v) => set({ payment_pix_key: v })} placeholder="CNPJ, e-mail, telefone ou chave aleatória" />
+              <div className="grid grid-cols-2 gap-4">
+                <PayField label="Titular" value={cfg.payment_pix_name} onChange={(v) => set({ payment_pix_name: v })} placeholder="Nome do recebedor" />
+                <PayField label="Banco" value={cfg.payment_pix_bank} onChange={(v) => set({ payment_pix_bank: v })} placeholder="Ex: Nubank" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider pl-1">QR Code do PIX</label>
+                {cfg.payment_qr_url ? (
+                  <div className="flex items-center gap-4 p-3 rounded-lg border border-slate-200 bg-white">
+                    <img src={cfg.payment_qr_url} alt="QR Code" className="w-20 h-20 rounded-md border border-slate-100 object-contain bg-white shrink-0" />
+                    <div className="flex flex-col gap-1.5 min-w-0">
+                      <label className="text-[11px] font-bold text-teal-600 cursor-pointer hover:underline flex items-center gap-1">
+                        {qrUploading ? <Loader2 className="w-3 h-3 animate-spin" /> : null} Trocar imagem
+                        <input type="file" accept="image/*" className="hidden" disabled={qrUploading} onChange={handleQrUpload} />
+                      </label>
+                      <button type="button" onClick={() => set({ payment_qr_url: null })} className="text-[11px] font-bold text-rose-500 hover:underline text-left">
+                        Remover
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <label className={cn(
+                    "flex items-center justify-center gap-2 w-full py-6 border-2 border-dashed rounded-lg cursor-pointer transition-colors text-sm font-medium",
+                    qrUploading ? "border-teal-300 bg-teal-50/30 text-teal-600" : "border-slate-200 text-slate-400 hover:border-teal-300 hover:bg-teal-50/30"
+                  )}>
+                    {qrUploading ? <><Loader2 className="w-5 h-5 animate-spin" /> Enviando…</> : <><Plus className="w-4 h-4" /> Enviar imagem do QR Code (do computador)</>}
+                    <input type="file" accept="image/*" className="hidden" disabled={qrUploading} onChange={handleQrUpload} />
+                  </label>
+                )}
+                {qrError && <p className="text-[10px] text-rose-500 font-medium pl-1">{qrError}</p>}
+              </div>
+            </div>
+
+            <div className="space-y-4 pt-2 border-t border-slate-100">
+              <p className="text-[10px] font-bold text-blue-600 uppercase tracking-wider pl-1">Cartão</p>
+              <PayField label="Link de pagamento por cartão" value={cfg.payment_card_link} onChange={(v) => set({ payment_card_link: v })} placeholder="https://... (opcional)" />
+            </div>
+
+            <div className="space-y-2 pt-2 border-t border-slate-100">
+              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider pl-1">Mensagem ao enviar os dados</label>
+              <textarea
+                rows={4}
+                value={cfg.payment_instructions || ""}
+                onChange={(e) => set({ payment_instructions: e.target.value })}
+                className="w-full p-4 border border-slate-200 rounded-lg font-medium text-sm leading-relaxed focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all resize-none"
+                placeholder="Ex: {paciente}, para garantir seu horário, faça o PIX de {valor} na chave abaixo e envie o comprovante por aqui. 🙏"
+              />
+              <p className="text-[10px] text-slate-400 font-medium italic pl-1">Variáveis: {"{paciente}"}, {"{valor}"}.</p>
+            </div>
+
+            <div className="space-y-2 pt-2 border-t border-slate-100">
+              <label className="text-[11px] font-bold text-teal-600 uppercase tracking-wider pl-1 flex items-center gap-1.5">
+                <ShieldCheck className="w-3 h-3" /> Regra para a IA (vai no prompt)
+              </label>
+              <textarea
+                rows={4}
+                value={cfg.payment_ai_instructions || ""}
+                onChange={(e) => set({ payment_ai_instructions: e.target.value })}
+                className="w-full p-4 border border-slate-200 rounded-lg font-medium text-sm leading-relaxed focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all resize-none"
+                placeholder="Ex: Só agende consultas com pré-pagamento após receber o comprovante e conferir que o valor e os dados bancários batem. Se não bater, acione o atendimento humano."
+              />
+              <p className="text-[10px] text-slate-400 font-medium italic pl-1">
+                Injetada automaticamente no prompt do agente quando o pagamento está ativo. Em branco = usa uma regra padrão.
+              </p>
+            </div>
+          </div>
+
+          <Button
+            onClick={save}
+            disabled={saving || !isDirty}
+            className={cn("w-full py-6 transition-all", isDirty ? "bg-teal-600 hover:bg-teal-700 text-white" : "bg-slate-100 text-slate-400 cursor-default")}
+          >
+            {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : isDirty ? "Salvar" : "Configuração Salva ✓"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      <div className="space-y-8">
+        <Card className="border border-slate-200 shadow-sm bg-teal-50/30">
+          <CardContent className="p-6 space-y-4">
+            <div className="flex items-center gap-3 text-teal-700">
+              <Info className="w-6 h-6" />
+              <h4 className="font-bold text-sm">Como funciona (Fase 1)</h4>
+            </div>
+            <ol className="space-y-2.5 text-xs text-slate-600 leading-relaxed font-medium list-decimal pl-4">
+              <li>Você marca quais <b>tipos de consulta</b> exigem pré-pagamento (na tela de Tipos de Consulta).</li>
+              <li>Quando o paciente vai agendar um desses tipos, a IA envia <b>PIX + dados + link de cartão</b>.</li>
+              <li>O paciente envia o <b>comprovante</b>; a IA lê e sinaliza (valor confere / não confere / ilegível).</li>
+              <li>A equipe é <b>notificada no grupo e no sino</b> para dar o OK final.</li>
+            </ol>
+            <p className="text-[10px] text-slate-400 italic">
+              A verificação por imagem reduz fraude, mas não elimina. A confirmação automática de verdade (via banco/PSP) fica para a Fase 2.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
 function AllFollowupsView() {
   const [subTab, setSubTab] = useState<"welcome" | "reengagement" | "confirmation" | "finish_service" | "pos">("welcome");
 
@@ -2177,7 +2365,7 @@ function ConfigView() {
   const { templates: promptTemplates } = usePromptTemplates();
   const activeTemplates = useMemo(() => promptTemplates.filter(t => t.is_active), [promptTemplates]);
   const showToast = useToast();
-  const [subTab, setSubTab] = useState<"config" | "handoff">("config");
+  const [subTab, setSubTab] = useState<"config" | "handoff" | "payment">("config");
   const [saving, setSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [localConfig, setLocalConfig] = useState<any>(null);
@@ -2311,6 +2499,7 @@ function ConfigView() {
         {[
           { id: "config", label: "Configurações IA" },
           { id: "handoff", label: "Transbordo" },
+          { id: "payment", label: "Pagamento" },
         ].map((t) => (
           <button
             key={t.id}
@@ -2327,6 +2516,7 @@ function ConfigView() {
         ))}
       </div>
       {subTab === "handoff" && <div className="flex-1 min-h-0"><HandoffView /></div>}
+      {subTab === "payment" && <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-1"><PaymentConfigView /></div>}
       <div className={cn("grid grid-cols-1 md:grid-cols-2 gap-8 flex-1", subTab !== "config" && "hidden")}>
       <div className="space-y-8">
       <PromptLayersExplainer />

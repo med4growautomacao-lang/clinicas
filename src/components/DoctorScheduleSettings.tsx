@@ -557,6 +557,8 @@ function ConsultationTypeEditor({ doctorId, clinicId, existing, doctorWorkingHou
     return 'minutos';
   });
   const [isActive, setIsActive] = useState<boolean>(existing?.is_active ?? true);
+  const [requiresPrepayment, setRequiresPrepayment] = useState<boolean>((existing as any)?.requires_prepayment ?? false);
+  const [prepaymentAmount, setPrepaymentAmount] = useState<number | null>((existing as any)?.prepayment_amount ?? null);
   const [useCustomHours, setUseCustomHours] = useState<boolean>(!!existing?.working_hours_override);
   const [customHours, setCustomHours] = useState<Record<string, { start: string; end: string }[]>>(() => {
     if (existing?.working_hours_override) return existing.working_hours_override;
@@ -631,6 +633,8 @@ function ConsultationTypeEditor({ doctorId, clinicId, existing, doctorWorkingHou
         buffer_before_minutes: bufferBefore,
         buffer_after_minutes: bufferAfter,
         min_notice_minutes: minNoticeMinutes,
+        requires_prepayment: requiresPrepayment,
+        prepayment_amount: requiresPrepayment ? prepaymentAmount : null,
         working_hours_override: useCustomHours ? customHours : null,
       });
     } catch (e: any) {
@@ -844,6 +848,35 @@ function ConsultationTypeEditor({ doctorId, clinicId, existing, doctorWorkingHou
                 </select>
               </div>
             </div>
+          </div>
+
+          <div className="p-4 bg-white rounded-xl border border-slate-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-bold text-slate-700">Exigir pagamento antecipado</p>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">A IA envia os dados de pagamento e só confirma após o comprovante.</p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" className="sr-only peer" checked={requiresPrepayment} onChange={e => setRequiresPrepayment(e.target.checked)} />
+                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-500"></div>
+              </label>
+            </div>
+            {requiresPrepayment && (
+              <div className="mt-4 border-t border-slate-100 pt-4">
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Valor do pré-pagamento</label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-bold text-slate-500">R$</span>
+                  <input
+                    type="number" min={0} step="0.01"
+                    value={prepaymentAmount ?? ''}
+                    onChange={e => setPrepaymentAmount(e.target.value === '' ? null : parseFloat(e.target.value))}
+                    placeholder="150,00"
+                    className="w-32 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-teal-200 focus:outline-none"
+                  />
+                  <span className="text-[11px] text-slate-400 font-medium">Em branco = informar manualmente.</span>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="p-4 bg-white rounded-xl border border-slate-200">

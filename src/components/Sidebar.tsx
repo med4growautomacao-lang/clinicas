@@ -239,7 +239,7 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
               </div>
             </button>
             <div className="flex items-center gap-0.5 shrink-0">
-              <NotificationCenter onNavigate={(tab) => setActiveTab(tab)} />
+              <NotificationCenter />
               <button
                 onClick={() => signOut()}
                 className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"

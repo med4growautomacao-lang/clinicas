@@ -36,7 +36,7 @@ function tabForEvent(event: string): string {
   return 'ai-secretary';
 }
 
-export function NotificationCenter({ onNavigate }: { onNavigate: (tab: string, n: OpsNotification) => void }) {
+export function NotificationCenter() {
   const { data, unreadCount, markAllRead, markRead } = useNotifications();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -53,7 +53,10 @@ export function NotificationCenter({ onNavigate }: { onNavigate: (tab: string, n
   const handleClick = (n: OpsNotification) => {
     if (!n.read_at) markRead(n.id);
     setOpen(false);
-    onNavigate(tabForEvent(n.event), n);
+    const tab = tabForEvent(n.event);
+    // Deep-link: abre a conversa do lead específico (ChatsView consome open_lead_id).
+    if (n.lead_id && tab === 'ai-secretary') sessionStorage.setItem('open_lead_id', n.lead_id);
+    window.dispatchEvent(new CustomEvent('app-navigate', { detail: { tab } }));
   };
 
   return (

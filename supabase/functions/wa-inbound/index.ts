@@ -38,7 +38,8 @@ const WA_INBOUND_SECRET = Deno.env.get("WA_INBOUND_SECRET") ?? "";
 // (get_llm_secret, service role) com fallback pro Deno.env. Áudio: gemini|openai
 // (Claude não faz áudio). Imagem: anthropic|gemini|openai.
 const AUDIO_PROMPT = "Transcreva este áudio em português do Brasil. Responda APENAS com a transcrição literal, sem comentários nem aspas.";
-const IMAGE_PROMPT = "Descreva de forma objetiva o que há nesta imagem enviada por um paciente/cliente no WhatsApp (foto, documento, exame, print, etc.). Se houver texto legível, transcreva-o. Responda em português, em 1 a 3 frases, sem preâmbulo.";
+const IMAGE_PROMPT = "Descreva de forma objetiva o que há nesta imagem enviada por um paciente/cliente no WhatsApp (foto, documento, exame, print, etc.). Se houver texto legível, transcreva-o. IMPORTANTE: se for um comprovante de pagamento (PIX, transferência, recibo), comece a resposta EXATAMENTE com 'COMPROVANTE DE PAGAMENTO:' e inclua pagador, valor, data e destinatário/chave. Responda em português, em 1 a 3 frases, sem preâmbulo.";
+const DOC_PROMPT = "Este é um documento (PDF) enviado por um paciente/cliente no WhatsApp. Extraia e resuma as informações principais em português. IMPORTANTE: se for um comprovante de pagamento (PIX, transferência, recibo), comece a resposta EXATAMENTE com 'COMPROVANTE DE PAGAMENTO:' e inclua pagador, valor, data e destinatário/chave. Responda em 1 a 4 frases, sem preâmbulo.";
 // Modelos verificados 18/07/26 (Google matou o 2.0-flash em 01/06/26; whisper-1
 // saiu do catálogo OpenAI; sonnet-5 substitui sonnet-4-6).
 const DEFAULT_MEDIA_AI = {
@@ -233,6 +234,12 @@ async function transcribeMedia(kind: string, bytes: Uint8Array, mime: string, pr
     if (provider === "openai") return openaiImage(model, key, bytes, mime);
     return null;
   }
+  if (kind === "document") {
+    // Gemini lê PDF nativamente (inlineData mimeType application/pdf). Outros providers
+    // não fazem PDF de forma confiável aqui → null (o fallback da escada tenta o Gemini).
+    if (provider === "gemini") return geminiGenerate(model, key, DOC_PROMPT, bytes, mime);
+    return null;
+  }
   return null;
 }
 
@@ -325,12 +332,14 @@ serve(async (req) => {
               // FALLBACK em escada de custo: tenta o configurado; se falhar (erro,
               // modelo aposentado, sem chave), cai pro próximo MAIS BARATO da
               // COST_LADDER. Falha total NUNCA quebra o fluxo (placeholder + log).
-              if (direction === "inbound" && (mediaKind === "audio" || mediaKind === "image")) {
+              if (direction === "inbound" && (mediaKind === "audio" || mediaKind === "image" || mediaKind === "document")) {
                 try {
                   if (await clinicUsesAi(supabase, clinicId)) {
                     const cfg = await getMediaAiConfig(supabase);
-                    const spec = mediaKind === "audio" ? cfg.audio : cfg.image;
-                    const ladder = COST_LADDER[mediaKind];
+                    // Documento (PDF) usa a config/escada de IMAGEM — o Gemini lê PDF nativamente.
+                    const specKind = mediaKind === "audio" ? "audio" : "image";
+                    const spec = cfg[specKind];
+                    const ladder = COST_LADDER[specKind];
                     const candidates = [spec, ...ladder.filter((c) =>
                       !(c.provider === spec?.provider && c.model === spec?.model))]
                       .filter((c) => c?.provider && c?.model);
@@ -353,8 +362,11 @@ serve(async (req) => {
                       // modelo responder "não consigo ver fotos" mesmo COM a descrição
                       // (nenhum prompt explica o prefixo; não dependemos de prompt).
                       const imgContent = `(O paciente enviou uma imagem. Você consegue vê-la por descrição automática. Conteúdo da imagem: ${t})`;
+                      const docContent = `(O paciente enviou um documento. Você consegue lê-lo por extração automática. Conteúdo do documento: ${t})`;
                       content = mediaKind === "image"
                         ? (cap ? `${cap}\n${imgContent}` : imgContent)
+                        : mediaKind === "document"
+                        ? (cap ? `${cap}\n${docContent}` : docContent)
                         : t; // áudio: transcrição limpa (a IA lê como fala do paciente)
                       if (fails.length) {
                         // sucesso via fallback: registra warning p/ o operador corrigir a config

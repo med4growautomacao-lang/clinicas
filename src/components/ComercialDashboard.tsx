@@ -46,7 +46,7 @@ import { supabase } from "../lib/supabase";
 import { cn } from "../lib/utils";
 import { LeadChat } from "./LeadChat";
 import type { Lead } from "../hooks/useSupabase";
-import { useOrcamentos, getCached, setCached } from "../hooks/useSupabase";
+import { useOrcamentos, getCached, setCached, logSystemError } from "../hooks/useSupabase";
 import { TrendBarChart, fmtByType } from "./TrendBarChart";
 import { Button } from "./ui/button";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
@@ -284,105 +284,12 @@ function chartValue(d: DailyBucket, metric: ChartMetric, ticket: number): number
 }
 
 // ==========================================
-// Geração de relatório em texto para WhatsApp
+// Relatório em texto para WhatsApp
 // ==========================================
+// A MONTAGEM mora no banco: RPC build_commercial_report (fonte única — o botão
+// da tela e o envio agendado geram o MESMO texto). Inclui blocos de Marketing,
+// Perdas/no-show e variações ▲▼ vs. período anterior. Aqui só disparamos a RPC.
 type ReportKind = "completo" | "geral" | "ia" | "humano";
-
-// Dinheiro em reais cheios (sem centavos) — mais limpo p/ o cliente
-function fmtMoney0(v: number): string {
-  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
-}
-
-// Retorno amigável (ROAS) — "R$ X p/ cada R$ 1"
-function fmtRetorno(v: number | null): string {
-  return v != null ? `R$ ${v.toFixed(v < 10 ? 1 : 0)} p/ cada R$ 1` : "—";
-}
-
-// Bloco "Visão Geral" (escopo "todos") — linguagem simples, com parcial (realizado) e previsto (agendado)
-function buildGeneralBlock(d: CommercialData): string {
-  const s = d.appointments.byStatus || {};
-  const realizadas = (s.realizado || 0) + (s.compareceu || 0);
-  const noShow = s.faltou || 0;
-  const canceled = s.cancelado || 0;
-  const fin = d.finance;
-  const interessados = d.newLeads;
-  const previstas = d.appointments.total; // consultas marcadas (base do "previsto")
-  const pctMarcou = interessados > 0 ? Math.round((previstas / interessados) * 100) : 0;
-  const ticket = fin.defaultTicket > 0 ? fin.defaultTicket : null;
-  const validAppts = Math.max(previstas - (noShow + canceled), 0);
-  const fatPrevisto = ticket != null ? validAppts * ticket : null;
-  const realRevenue = fin.revenueScoped ?? fin.revenue;
-  const semFatLancado = realRevenue <= 0 && realizadas > 0;
-  const retornoReal = fin.investment > 0 && realRevenue > 0 ? realRevenue / fin.investment : null;
-  const retornoPrev = fin.investment > 0 && fatPrevisto != null && fatPrevisto > 0 ? fatPrevisto / fin.investment : null;
-
-  const atendimento = [
-    "*👥 ATENDIMENTO*",
-    `• Interessados: *${interessados}*`,
-    `• Consultas marcadas: *${previstas}*${interessados > 0 ? ` (${pctMarcou}%)` : ""}`,
-    `• Consultas realizadas: *${realizadas}*`,
-    `• Viraram clientes: *${d.outcomes.won}*`,
-  ].join("\n");
-
-  const finLines = [
-    "*💰 FINANCEIRO*",
-    `• Faturamento realizado: *${semFatLancado || realRevenue <= 0 ? "—" : fmtMoney0(realRevenue)}*`,
-    `• Faturamento previsto: *${fatPrevisto != null && fatPrevisto > 0 ? fmtMoney0(fatPrevisto) : "—"}*`,
-  ];
-  if (fin.investment > 0) {
-    finLines.push(`• Investido em anúncios: *${fmtMoney0(fin.investment)}*`);
-    finLines.push(`• Retorno realizado: *${fmtRetorno(retornoReal)}*`);
-    finLines.push(`• Retorno previsto: *${fmtRetorno(retornoPrev)}*`);
-  }
-  return `${atendimento}\n\n${finLines.join("\n")}`;
-}
-
-// Bloco atribuído a um agente (IA ou Humano) — usa d.agent para escopo
-function buildAgentBlock(d: CommercialData): string {
-  const isIa = d.agent === "ia";
-  const s = d.appointments.byStatus || {};
-  const realizadas = (s.realizado || 0) + (s.compareceu || 0);
-  const fin = d.finance;
-  const interessados = isIa ? d.agents.ia.leadsTouched : d.agents.humano.leadsTouched;
-  const previstas = d.appointments.total;
-  const pctMarcou = interessados > 0 ? Math.round((previstas / interessados) * 100) : 0;
-  const ticket = fin.defaultTicket > 0 ? fin.defaultTicket : null;
-  const noShow = s.faltou || 0;
-  const canceled = s.cancelado || 0;
-  const validAppts = Math.max(previstas - (noShow + canceled), 0);
-  const fatPrevisto = ticket != null ? validAppts * ticket : null;
-  const lines = [
-    isIa ? "*🤖 INTELIGÊNCIA ARTIFICIAL*" : "*🧑‍💼 EQUIPE (ATENDIMENTO HUMANO)*",
-    `• Atendeu: *${interessados}* interessados`,
-    `• Consultas marcadas: *${previstas}*${interessados > 0 ? ` (${pctMarcou}%)` : ""}`,
-    `• Consultas realizadas: *${realizadas}*`,
-  ];
-  if (isIa) {
-    lines.push(`• Resolveu sozinha (sem humano): *${d.agents.ia.autonomous}*`);
-    lines.push(`• Passou p/ humano: *${d.agents.ia.handoffs}*`);
-  } else {
-    lines.push(`• Assumiu da IA: *${d.agents.humano.handoffsReceived}* conversas`);
-  }
-  if (fatPrevisto != null && fatPrevisto > 0) lines.push(`• Faturamento previsto: *${fmtMoney0(fatPrevisto)}*`);
-  return lines.join("\n");
-}
-
-// Monta o texto completo: cabeçalho (clínica + datas de entrada e conversão) + blocos + legenda
-function buildReportText(
-  meta: { clinicName: string; entryPeriod: string; convPeriod: string; scopeLine: string | null },
-  blocks: string[],
-): string {
-  const header = [
-    "📊 *RELATÓRIO COMERCIAL*",
-    meta.clinicName ? `🏥 ${meta.clinicName}` : null,
-    `📥 Entrada do lead: ${meta.entryPeriod}`,
-    `🎯 Conversão: ${meta.convPeriod}`,
-    meta.scopeLine ? `🔎 ${meta.scopeLine}` : null,
-  ].filter(Boolean).join("\n");
-  const body = [header, ...blocks].join("\n\n");
-  const legenda = "_Realizado = já aconteceu · Previsto = projeção do que já está agendado_";
-  return `${body}\n\n${legenda}\n_Gerado em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}_`;
-}
 
 // ==========================================
 // Componente principal
@@ -654,71 +561,40 @@ export function ComercialDashboard() {
   const [showReport, setShowReport] = useState(false);
   const [reportCopied, setReportCopied] = useState(false);
 
-  // Busca os dados de um escopo de agente respeitando os filtros de data/origem atuais
-  const fetchScoped = useCallback(async (agentScope: AgentFilter): Promise<CommercialData | null> => {
-    const clinicId = activeClinicId || profile?.clinic_id;
-    if (!clinicId) return null;
-    const { data: res, error } = await supabase.rpc("get_commercial_dashboard", {
-      p_clinic_id: clinicId,
-      p_entry_from: entryRange ? format(entryRange.start, "yyyy-MM-dd") : null,
-      p_entry_to: entryRange ? format(entryRange.end, "yyyy-MM-dd") : null,
-      // Agenda (apptRange)->p_conv (created_at); Conversão (convRange)->p_appt (a.date)
-      p_conv_from: apptRange ? format(apptRange.start, "yyyy-MM-dd") : null,
-      p_conv_to: apptRange ? format(apptRange.end, "yyyy-MM-dd") : null,
-      p_agent: agentScope,
-      // O relatório respeita SOMENTE o filtro de data + o tipo escolhido (Geral/IA/Humano).
-      // Ignora os filtros de origem/canal/agente da tela para não distorcer o que foi pedido.
-      p_origin: "todos",
-      p_channel: "todos",
-      p_appt_from: convRange ? format(convRange.start, "yyyy-MM-dd") : null,
-      p_appt_to: convRange ? format(convRange.end, "yyyy-MM-dd") : null,
-    });
-    if (error) throw error;
-    return res as CommercialData;
-  }, [activeClinicId, profile?.clinic_id, convRange, entryRange, apptRange]);
-
   const generateReport = useCallback(async (kind: ReportKind) => {
+    const clinicId = activeClinicId || profile?.clinic_id;
+    if (!clinicId) return;
     setReportLoading(kind);
     setReportKind(kind);
     try {
-      const fmtRange = (r: { start: Date; end: Date }) =>
-        `${format(r.start, "dd/MM/yyyy")} a ${format(r.end, "dd/MM/yyyy")}`;
-      const meta = {
-        clinicName,
-        entryPeriod: entryRange ? fmtRange(entryRange) : "Todos os leads",
-        convPeriod: convRange ? fmtRange(convRange) : "Todas as datas",
-        scopeLine: null,
-      };
-      let text = "";
-      if (kind === "geral") {
-        const d = await fetchScoped("todos");
-        if (d) text = buildReportText(meta, [buildGeneralBlock(d)]);
-      } else if (kind === "ia") {
-        const d = await fetchScoped("ia");
-        if (d) text = buildReportText(meta, [buildAgentBlock(d)]);
-      } else if (kind === "humano") {
-        const d = await fetchScoped("humano");
-        if (d) text = buildReportText(meta, [buildAgentBlock(d)]);
-      } else {
-        const [todos, ia, humano] = await Promise.all([fetchScoped("todos"), fetchScoped("ia"), fetchScoped("humano")]);
-        const blocks: string[] = [];
-        if (todos) blocks.push(buildGeneralBlock(todos));
-        // Inclui IA só se a clínica tem IA e ela atuou no período ("humano ou IA se tiver")
-        const iaActed = !!ia && (ia.agents.ia.messagesOut > 0 || ia.agents.ia.leadsTouched > 0 || ia.agents.ia.appointments > 0);
-        if (iaActed && ia) blocks.push(buildAgentBlock(ia));
-        if (humano) blocks.push(buildAgentBlock(humano));
-        text = buildReportText(meta, blocks);
-      }
-      setReportText(text);
+      // O relatório respeita SOMENTE o filtro de data + o tipo escolhido (Geral/IA/Humano).
+      // Origem/canal/agente da tela são ignorados de propósito. A montagem (blocos,
+      // marketing, perdas, ▲▼) mora na RPC — fonte única com o envio agendado.
+      const { data, error } = await supabase.rpc("build_commercial_report", {
+        p_clinic_id: clinicId,
+        p_kind: kind,
+        p_entry_from: entryRange ? format(entryRange.start, "yyyy-MM-dd") : null,
+        p_entry_to: entryRange ? format(entryRange.end, "yyyy-MM-dd") : null,
+        // Agenda (apptRange)->p_conv (created_at); Conversão (convRange)->p_appt (a.date)
+        p_conv_from: apptRange ? format(apptRange.start, "yyyy-MM-dd") : null,
+        p_conv_to: apptRange ? format(apptRange.end, "yyyy-MM-dd") : null,
+        p_appt_from: convRange ? format(convRange.start, "yyyy-MM-dd") : null,
+        p_appt_to: convRange ? format(convRange.end, "yyyy-MM-dd") : null,
+        p_compare: true,
+      });
+      if (error) throw error;
+      if (typeof data !== "string" || !data) throw new Error("relatório vazio");
+      setReportText(data);
       setReportCopied(false);
       setShowReport(true);
-    } catch (err) {
+    } catch (err: any) {
       console.error("ComercialDashboard report error:", err);
+      logSystemError("REPORT_BUILD_FAIL", "build_commercial_report: falha ao gerar relatório comercial", clinicId, { kind, error: err?.message ?? String(err) }, "error");
       alert("Não foi possível gerar o relatório. Tente novamente.");
     } finally {
       setReportLoading(null);
     }
-  }, [clinicName, convRange, entryRange, fetchScoped]);
+  }, [activeClinicId, profile?.clinic_id, clinicName, convRange, entryRange, apptRange]);
 
   const copyReport = async () => {
     try {

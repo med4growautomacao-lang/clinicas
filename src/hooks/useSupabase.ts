@@ -31,7 +31,7 @@ function invalidateCache(key: string) { _cache.delete(key); }
 // Wrapper fino do RPC log_system_error (fire-and-forget). A falha do próprio logger
 // é engolida de propósito — o logger nunca pode derrubar o fluxo que está reportando.
 // (.then de dois args em vez de .catch: o builder do supabase-js é PromiseLike.)
-function logSystemError(code: string, title: string, clinicId?: string | null, context?: Record<string, any>, level: string = 'warn') {
+export function logSystemError(code: string, title: string, clinicId?: string | null, context?: Record<string, any>, level: string = 'warn') {
   supabase.rpc('log_system_error', {
     p_scope: 'frontend',
     p_code: code,

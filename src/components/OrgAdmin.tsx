@@ -100,6 +100,8 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
   const [orgUsers, setOrgUsers] = useState<OrgUser[]>([]);
   const [loadingClinics, setLoadingClinics] = useState(true);
   const [activeSubTab, setActiveSubTab] = useState<"clinics" | "metrics" | "users" | "settings" | "tasks">(() => (localStorage.getItem('orgAdminTab') as any) || "clinics");
+  // Sub-abas de Configurações: cada função em uma aba (WhatsApp / Relatórios / Google Ads)
+  const [settingsTab, setSettingsTab] = useState<"whatsapp" | "relatorios" | "googleads">(() => (localStorage.getItem('orgSettingsTab') as any) || "whatsapp");
   const [orgSettings, setOrgSettings] = useState<{ google_ad_mcc_id: string; google_ad_mcc_token: string }>({ google_ad_mcc_id: '', google_ad_mcc_token: '' });
   const [orgSettingsSaving, setOrgSettingsSaving] = useState(false);
   const [orgSettingsSaved, setOrgSettingsSaved] = useState(false);
@@ -1195,13 +1197,47 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
 
       {/* Settings Tab */}
       {activeSubTab === "settings" && (
-        <div className="flex-1 max-w-xl space-y-6">
-          {profile?.organization_id && <OrgWhatsapp organizationId={profile.organization_id} />}
-          <OrgReportSettings
-            clinics={clinics.map((c) => ({ id: c.id, name: c.name }))}
-            canManage={canManageSettings}
-          />
-          <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+        <div className="flex-1 space-y-5">
+          {/* Sub-abas de Configurações — cada função em uma aba */}
+          <div className="flex bg-white p-1 rounded-xl border border-slate-200 gap-1 w-fit">
+            {([
+              { id: "whatsapp", label: "WhatsApp da Org", Icon: MessageCircle },
+              { id: "relatorios", label: "Relatórios", Icon: FileText },
+              { id: "googleads", label: "Google Ads", Icon: TrendingUp },
+            ] as const).map((t) => (
+              <button
+                key={t.id}
+                onClick={() => { setSettingsTab(t.id); localStorage.setItem('orgSettingsTab', t.id); }}
+                className={cn(
+                  "flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg transition-all",
+                  settingsTab === t.id
+                    ? "bg-teal-600 text-white shadow-sm"
+                    : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+                )}
+              >
+                <t.Icon className="w-3.5 h-3.5" />
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {settingsTab === "whatsapp" && (
+            <div className="max-w-xl">
+              {profile?.organization_id && <OrgWhatsapp organizationId={profile.organization_id} />}
+            </div>
+          )}
+
+          {settingsTab === "relatorios" && (
+            <div className="max-w-2xl">
+              <OrgReportSettings
+                clinics={clinics.map((c) => ({ id: c.id, name: c.name }))}
+                canManage={canManageSettings}
+              />
+            </div>
+          )}
+
+          {settingsTab === "googleads" && (
+          <div className="max-w-xl bg-white rounded-2xl border border-slate-200 overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-3">
               <div className="w-8 h-8 bg-amber-50 rounded-lg flex items-center justify-center">
                 <Settings className="w-4 h-4 text-amber-600" />
@@ -1254,6 +1290,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
               </button>
             </div>
           </div>
+          )}
         </div>
       )}
 

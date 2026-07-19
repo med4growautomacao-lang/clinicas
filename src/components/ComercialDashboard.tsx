@@ -46,7 +46,7 @@ import { supabase } from "../lib/supabase";
 import { cn } from "../lib/utils";
 import { LeadChat } from "./LeadChat";
 import type { Lead } from "../hooks/useSupabase";
-import { useOrcamentos } from "../hooks/useSupabase";
+import { useOrcamentos, getCached, setCached } from "../hooks/useSupabase";
 import { TrendBarChart, fmtByType } from "./TrendBarChart";
 import { Button } from "./ui/button";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
@@ -508,29 +508,38 @@ export function ComercialDashboard() {
   const fetchData = useCallback(async (silent = false) => {
     const clinicId = activeClinicId || profile?.clinic_id;
     if (!clinicId) return;
-    if (!silent) setLoading(true);
+    const params = {
+      p_clinic_id: clinicId,
+      p_entry_from: entryRange ? format(entryRange.start, "yyyy-MM-dd") : null,
+      p_entry_to: entryRange ? format(entryRange.end, "yyyy-MM-dd") : null,
+      // Mapeamento calendário -> coluna no backend:
+      //   Agenda (apptRange)    -> p_conv -> appointments.created_at (geração: Geradas/CAC)
+      //   Conversão (convRange) -> p_appt -> appointments.date       (realização: realizadas/faturamento)
+      p_conv_from: apptRange ? format(apptRange.start, "yyyy-MM-dd") : null,
+      p_conv_to: apptRange ? format(apptRange.end, "yyyy-MM-dd") : null,
+      p_agent: agent,
+      p_origin: origin.length ? origin.join(",") : "todos",
+      p_channel: channel.length ? channel.join(",") : "todos",
+      p_appt_from: convRange ? format(convRange.start, "yyyy-MM-dd") : null,
+      p_appt_to: convRange ? format(convRange.end, "yyyy-MM-dd") : null,
+    };
+    // SWR: pinta o cache na hora (troca de aba = instantâneo) e revalida em 2º plano;
+    // o spinner só aparece na 1ª carga (sem cache). Projeto em us-east-1 => cada
+    // refetch do zero custa ~150ms de RTT.
+    const cacheKey = `comm_dash|${JSON.stringify(params)}`;
+    const cached = getCached<CommercialData>(cacheKey);
+    if (cached) { setData(cached); setLoading(false); }
+    const showSpinner = !silent && !cached;
+    if (showSpinner) setLoading(true);
     try {
-      const { data: res, error } = await supabase.rpc("get_commercial_dashboard", {
-        p_clinic_id: clinicId,
-        p_entry_from: entryRange ? format(entryRange.start, "yyyy-MM-dd") : null,
-        p_entry_to: entryRange ? format(entryRange.end, "yyyy-MM-dd") : null,
-        // Mapeamento calendário -> coluna no backend:
-        //   Agenda (apptRange)    -> p_conv -> appointments.created_at (geração: Geradas/CAC)
-        //   Conversão (convRange) -> p_appt -> appointments.date       (realização: realizadas/faturamento)
-        p_conv_from: apptRange ? format(apptRange.start, "yyyy-MM-dd") : null,
-        p_conv_to: apptRange ? format(apptRange.end, "yyyy-MM-dd") : null,
-        p_agent: agent,
-        p_origin: origin.length ? origin.join(",") : "todos",
-        p_channel: channel.length ? channel.join(",") : "todos",
-        p_appt_from: convRange ? format(convRange.start, "yyyy-MM-dd") : null,
-        p_appt_to: convRange ? format(convRange.end, "yyyy-MM-dd") : null,
-      });
+      const { data: res, error } = await supabase.rpc("get_commercial_dashboard", params);
       if (error) throw error;
       setData(res as CommercialData);
+      setCached(cacheKey, res);
     } catch (err) {
       console.error("ComercialDashboard fetch error:", err);
     } finally {
-      if (!silent) setLoading(false);
+      if (showSpinner) setLoading(false);
     }
   }, [activeClinicId, profile?.clinic_id, convRange, entryRange, apptRange, agent, origin, channel]);
 

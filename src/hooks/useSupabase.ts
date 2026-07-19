@@ -6,13 +6,13 @@ import { useAuth } from '../contexts/AuthContext';
 const _cache = new Map<string, { data: any; ts: number }>();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutos
 
-function getCached<T>(key: string): T | null {
+export function getCached<T>(key: string): T | null {
   const entry = _cache.get(key);
   if (!entry) return null;
   if (Date.now() - entry.ts > CACHE_TTL) { _cache.delete(key); return null; }
   return entry.data as T;
 }
-function setCached(key: string, data: any) { _cache.set(key, { data, ts: Date.now() }); }
+export function setCached(key: string, data: any) { _cache.set(key, { data, ts: Date.now() }); }
 function invalidateCache(key: string) { _cache.delete(key); }
 
 // ── Central de Erros a partir do front ───────────────────────────────────────
@@ -986,6 +986,13 @@ function useRpcRows<T>(fn: string, params: Record<string, any> | null, mapRow?: 
 
   useEffect(() => {
     if (!activeClinicId || !paramsKey) { setData([]); return; }
+    // SWR: se há resultado em cache p/ este (rpc, clínica, params), pinta na hora
+    // (troca de aba = render instantâneo) e revalida em segundo plano. O projeto
+    // está em us-east-1: cada ida ao banco custa ~150ms de RTT do Brasil, então
+    // evitar o refetch do zero a cada remonte é o maior ganho de percepção.
+    const cacheKey = `rpcrows|${fn}|${activeClinicId}|${paramsKey}`;
+    const cached = getCached<T[]>(cacheKey);
+    if (cached) setData(cached);
     let cancelled = false;
     supabase
       .rpc(fn, { p_clinic_id: activeClinicId, ...JSON.parse(paramsKey) })
@@ -994,12 +1001,14 @@ function useRpcRows<T>(fn: string, params: Record<string, any> | null, mapRow?: 
         if (error) {
           console.error(`[${fn}] RPC falhou:`, error);
           logSystemError('RPC_FETCH_FAIL', `${fn}: falha ao buscar dados — painel pode exibir zero`, activeClinicId, { fn, error: error?.message ?? String(error) }, 'error');
-          setData([]);
+          if (!cached) setData([]);   // erro não apaga o que já estava na tela
           return;
         }
         const list = Array.isArray(rows) ? rows : [];
         warnPostgrestClamp(fn, list.length, activeClinicId);
-        setData(mapRow ? list.map(mapRow) : list);
+        const mapped = mapRow ? list.map(mapRow) : list;
+        setData(mapped);
+        setCached(cacheKey, mapped);
       });
     return () => { cancelled = true; };
     // mapRow fora das deps de propósito: é mapper puro passado inline; incluí-lo
@@ -1048,32 +1057,51 @@ export function useUtmFunnelCohort(start: string | null, end: string | null) {
 
   useEffect(() => {
     if (!activeClinicId || !start || !end) { setData([]); return; }
+    // SWR: pinta o cache na hora e revalida em 2º plano — troca de aba deixa de
+    // re-baixar ~1MB. (Medido 18/07: agregar essa seção no servidor NÃO ajuda — a
+    // tendência precisa do grão diário, e top-N server-side forçaria ida ao banco a
+    // cada clique de filtro. O que dói é o transfer × RTT us-east-1, resolvido aqui.)
+    const cacheKey = `utm_cohort|${activeClinicId}|${start}|${end}`;
+    const cached = getCached<UtmFunnelRow[]>(cacheKey);
+    if (cached) setData(cached);
     let cancelled = false;
     const PAGE = 5000;      // = max_rows do projeto (teto da resposta REST por página)
+    const BATCH = 2;        // páginas buscadas EM PARALELO por rodada (corta o RTT sequencial)
     const MAX_PAGES = 20;   // trava de segurança: >100k linhas é anômalo
+
+    const fetchPage = (page: number) => supabase
+      .rpc('marketing_utm_funnel_cohort', { p_clinic_id: activeClinicId, p_start: start, p_end: end })
+      .range(page * PAGE, page * PAGE + PAGE - 1);
 
     (async () => {
       const all: UtmFunnelRow[] = [];
-      for (let page = 0; page < MAX_PAGES; page++) {
-        const from = page * PAGE;
-        const { data: rows, error }: any = await supabase
-          .rpc('marketing_utm_funnel_cohort', { p_clinic_id: activeClinicId, p_start: start, p_end: end })
-          .range(from, from + PAGE - 1);
+      let page = 0;
+      let more = true;
+      while (more && page < MAX_PAGES) {
+        const batch: any[] = [];
+        for (let i = 0; i < BATCH && page + i < MAX_PAGES; i++) batch.push(fetchPage(page + i));
+        const results = await Promise.all(batch);
         if (cancelled) return;
-        if (error) {
-          console.error('[marketing_utm_funnel_cohort] RPC falhou:', error);
-          logSystemError('RPC_FETCH_FAIL', 'marketing_utm_funnel_cohort: falha ao buscar dados — UTM × Etapa pode exibir zero', activeClinicId, { fn: 'marketing_utm_funnel_cohort', from, error: error?.message ?? String(error) }, 'error');
-          setData([]);
-          return;
+        for (const { data: rows, error } of results as any[]) {
+          if (error) {
+            console.error('[marketing_utm_funnel_cohort] RPC falhou:', error);
+            logSystemError('RPC_FETCH_FAIL', 'marketing_utm_funnel_cohort: falha ao buscar dados — UTM × Etapa pode exibir zero', activeClinicId, { fn: 'marketing_utm_funnel_cohort', error: error?.message ?? String(error) }, 'error');
+            if (!cached) setData([]);   // erro não apaga o que já estava na tela
+            return;
+          }
+          if (Array.isArray(rows)) all.push(...rows);
         }
-        const list: UtmFunnelRow[] = Array.isArray(rows) ? rows : [];
-        all.push(...list);
-        if (list.length < PAGE) { setData(all); return; }  // última página
-        if (page === MAX_PAGES - 1) {
-          logSystemError('UTM_COHORT_PAGE_CAP', 'marketing_utm_funnel_cohort: paginação atingiu o teto de páginas — dados truncados', activeClinicId, { fn: 'marketing_utm_funnel_cohort', pages: MAX_PAGES }, 'warn');
-        }
+        // há mais páginas só se a ÚLTIMA página da rodada veio cheia (== PAGE)
+        const last = (results[results.length - 1] as any)?.data;
+        more = Array.isArray(last) && last.length === PAGE;
+        page += batch.length;
       }
-      if (!cancelled) setData(all);
+      if (cancelled) return;
+      if (more) {
+        logSystemError('UTM_COHORT_PAGE_CAP', 'marketing_utm_funnel_cohort: paginação atingiu o teto de páginas — dados truncados', activeClinicId, { fn: 'marketing_utm_funnel_cohort', pages: MAX_PAGES }, 'warn');
+      }
+      setData(all);
+      setCached(cacheKey, all);
     })();
 
     return () => { cancelled = true; };
@@ -1392,10 +1420,17 @@ export function useDashboardStats(dateRange?: { start: string; end: string }, or
 
   const load = useCallback(async (silent = false) => {
     if (!activeClinicId) return;
-    if (!silent) setLoading(true);
     const now = new Date();
     const startOfMonth = dateRange?.start || new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
     const endOfMonth = dateRange?.end || new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+
+    // SWR: pinta o cache na hora e revalida em 2º plano; o spinner só aparece quando
+    // não há nada em cache pra mostrar (1ª carga). Troca de aba deixa de recarregar do zero.
+    const cacheKey = `dash_stats|${activeClinicId}|${startOfMonth}|${endOfMonth}|${origin}|${channel}|${agent}`;
+    const cached = getCached<DashboardStats>(cacheKey);
+    if (cached) { setData(cached); setLoading(false); }
+    const showSpinner = !silent && !cached;
+    if (showSpinner) setLoading(true);
 
     try {
       const { data, error } = await supabase.rpc('get_dashboard_stats', {
@@ -1408,7 +1443,7 @@ export function useDashboardStats(dateRange?: { start: string; end: string }, or
       });
       if (error) throw error;
       const r = data as any;
-      setData({
+      const mapped: DashboardStats = {
         totalAppointments: r?.totalAppointments || 0,
         totalRevenue: Number(r?.totalRevenue || 0),
         salesValue: Number(r?.salesValue ?? r?.totalConversionsValue ?? 0),
@@ -1423,11 +1458,13 @@ export function useDashboardStats(dateRange?: { start: string; end: string }, or
         avgSalesCycle: Number(r?.avgSalesCycle || 0),
         defaultTicket: Number(r?.defaultTicket || 0),
         chartData: (r?.chartData || []) as any,
-      });
+      };
+      setData(mapped);
+      setCached(cacheKey, mapped);
     } catch (error) {
       console.error('Erro ao carregar estatísticas do dashboard:', error);
     } finally {
-      if (!silent) setLoading(false);
+      if (showSpinner) setLoading(false);
     }
   }, [activeClinicId, dateRange?.start, dateRange?.end, origin, channel, agent]);
 
@@ -2129,7 +2166,12 @@ export function useMarketing() {
   const fetch = useCallback(async (startDate: string, endDate: string) => {
     if (!activeClinicId) return;
     currentRange.current = { start: startDate, end: endDate };
-    setLoading(true);
+
+    // SWR: cache por (clínica, período); troca de aba pinta na hora e revalida.
+    const cacheKey = `marketing_data|${activeClinicId}|${startDate}|${endDate}`;
+    const cached = getCached<MarketingData[]>(cacheKey);
+    if (cached) { setData(cached); setLoading(false); }
+    else setLoading(true);
 
     const { data, error } = await supabase
       .from('marketing_data')
@@ -2141,11 +2183,12 @@ export function useMarketing() {
 
     if (error) {
       setError(error.message);
-      setLoading(false);
+      if (!cached) setLoading(false);
       return;
     }
 
     setData(data || []);
+    setCached(cacheKey, data || []);
     setError(null);
     setLoading(false);
   }, [activeClinicId]);

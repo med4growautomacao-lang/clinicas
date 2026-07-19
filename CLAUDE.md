@@ -79,13 +79,24 @@ Por isso **a invariante não pode morar na aplicação** — ela é garantida po
 
 Ciclo de vida: `move_lead_stage`, `finalize_ticket`, `reopen_ticket`, `move_ticket_keep_outcome`.
 
-## Dashboards — divergem POR CONSTRUÇÃO
+## Dashboards — fonte ÚNICA por conceito; divergência só de RECORTE
 
-Três painéis, três RPCs: **Visão Geral** (`Dashboard.tsx` → `get_dashboard_stats`), **Comercial** (`ComercialDashboard.tsx` → `get_commercial_dashboard`) e **Marketing** (`MarketingAnalytics.tsx` → `marketing_*_funnel_cohort`).
+Três painéis, três RPCs: **Visão Geral** (`Dashboard.tsx` → `get_dashboard_stats`), **Comercial** (`ComercialDashboard.tsx` → `get_commercial_dashboard`) e **Marketing** (`MarketingAnalytics.tsx` → `marketing_kpis`/`marketing_*_funnel_cohort`).
 
-⚠️ **Eles não são três versões do mesmo número.** Dentro de um mesmo painel convivem **três eixos de data diferentes** — criação do lead (`created_at`), conversão (`outcome_at`) e realização da consulta (`appointments.date`). Duas telas podem mostrar números diferentes **e ambas estarem certas**.
+Desde 18/07 os três **partem da MESMA definição por conceito** — as **views canônicas `v_kpi_*`** (`security_invoker=on`) são a fonte única:
 
-**Antes de "corrigir" uma divergência, confirme qual eixo cada lado usa.** A atribuição IA × Humano também diverge entre Visão Geral e Comercial **por desenho**.
+| conceito | fonte única | eixo de data |
+|---|---|---|
+| leads | `v_kpi_leads` (exclui `is_not_lead`) | `leads.created_at` |
+| vendas (nº) | `v_kpi_wins` (`tickets.outcome='ganho'`) | `COALESCE(outcome_at,closed_at)` |
+| faturamento | `v_kpi_sales_value` = **vendas lançadas** (`conversions` s/ 'Orçamento Enviado') | `converted_at` |
+| agendado | `v_kpi_scheduled` (união consulta ∪ etapa, 1×/ticket) | `LEAST` das duas |
+
+⚠️ **O módulo Financeiro está DESABILITADO nos painéis** (decisão do dono, 18/07) — **não puxar de `financial_transactions`** em RPC de painel nenhuma. Faturamento = valor lançado (`conversions`), em todo lugar.
+
+⚠️ **Divergência legítima agora é SÓ de recorte, nunca de definição.** Um painel pode fatiar por **criação do lead** (`created_at`), **conversão** (`outcome_at`) ou **realização da consulta** (`appointments.date`) — mesmo conceito, janela diferente → números diferentes e ambos certos. **Antes de "corrigir" uma divergência, confirme qual eixo cada lado usa.** Se as definições divergirem (não o recorte), aí é bug — as três devem bater na mesma janela.
+
+**Atribuição IA × Humano:** régua canônica única precomputada em `lead_kpi_attribution` (cron 10min) → view `vw_lead_agent_class`. A VG já lê dela. **RESSALVA (pendente):** `get_commercial_dashboard` ainda tem cálculo inline p/ `agents.leadsTouched` e `appointments.generated` por `created_at` — até unificar, esses dois podem divergir da VG. O resto do Comercial já usa as views/precompute.
 
 ## O produto não é só clínicas
 

@@ -123,6 +123,15 @@ function getMediaAiConfig(supabase: any): Promise<{ audio: { provider: string; m
   });
 }
 
+// Comprovante: a clínica usa pagamento antecipado e tem grupo de notificações?
+function clinicPaymentGroup(supabase: any, clinicId: string): Promise<{ enabled: boolean; group: string | null }> {
+  return cached(`pay_grp:${clinicId}`, 60000, async () => {
+    const { data: ac } = await supabase.from("ai_config").select("payment_enabled").eq("clinic_id", clinicId).maybeSingle();
+    const { data: cl } = await supabase.from("clinics").select("notification_group_id").eq("id", clinicId).maybeSingle();
+    return { enabled: (ac as any)?.payment_enabled === true, group: (cl as any)?.notification_group_id ?? null };
+  });
+}
+
 async function llmKey(supabase: any, provider: string): Promise<string | null> {
   const name = provider === "gemini" ? "GEMINI_API_KEY"
     : provider === "anthropic" ? "ANTHROPIC_API_KEY"
@@ -368,6 +377,25 @@ serve(async (req) => {
                         : mediaKind === "document"
                         ? (cap ? `${cap}\n${docContent}` : docContent)
                         : t; // áudio: transcrição limpa (a IA lê como fala do paciente)
+
+                      // Comprovante: encaminha a MÍDIA (imagem/PDF) ao grupo de notificações,
+                      // com legenda. O sino in-app vem do trigger trg_notify_comprovante.
+                      if ((mediaKind === "image" || mediaKind === "document") && /comprovante/i.test(t)) {
+                        try {
+                          const pg = await clinicPaymentGroup(supabase, clinicId);
+                          if (pg.enabled && pg.group) {
+                            const caption = `*PAGAMENTO REALIZADO*\n\nPaciente: ${leadName || leadPhone}\nTelefone: ${leadPhone}\n\n_Verifique se o pagamento foi realizado._`;
+                            await fetch(`${UAZAPI_BASE}/send/media`, {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json", "token": String(body.token || "") },
+                              body: JSON.stringify({ number: pg.group, type: mediaKind, file: toBase64(bytes), text: caption }),
+                            });
+                          }
+                        } catch (e) {
+                          await registrarErro("comprovante_forward_failed", "Falha ao encaminhar comprovante ao grupo",
+                            { detail: String(e), wa_message_id: waMessageId }, clinicId);
+                        }
+                      }
                       if (fails.length) {
                         // sucesso via fallback: registra warning p/ o operador corrigir a config
                         await registrarErro("transcribe_fallback", "Transcrição caiu para modelo alternativo",

@@ -193,6 +193,15 @@ serve(async (req) => {
   if (!claimed || claimed.length === 0) return json({ ok: true, skipped: "already_claimed" });
   const priorAttempts = Number(claimed[0]?.welcome_attempts ?? 0);
 
+  // (1.1) BLINDAGEM: se o lead já tem QUALQUER mensagem (recebeu ou enviou), NÃO manda welcome.
+  // O selector já checa isso, mas há uma janelinha de corrida entre selecionar e chegar aqui.
+  // welcome_sent fica true (terminal: já há conversa, não precisa de boas-vindas).
+  const { count: msgCount } = await supabase
+    .from("chat_messages").select("id", { count: "exact", head: true }).eq("lead_id", lead_id);
+  if ((msgCount ?? 0) > 0) {
+    return json({ ok: true, skipped: "has_messages", lead_id });
+  }
+
   const logFail = async (reason: string, metadata: Record<string, unknown> = {}) => {
     await supabase.from("automation_logs").insert({
       clinic_id, lead_id, type: "forms_welcome", status: "failed",

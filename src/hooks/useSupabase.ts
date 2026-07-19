@@ -1679,6 +1679,25 @@ export function useMedicalRecords(patientId: string | null) {
 // ==========================================
 // SETTINGS: CLINIC, AI & WHATSAPP
 // ==========================================
+// Preferências de notificação por clínica (coluna clinics.notification_prefs jsonb).
+// Vazio = tudo ligado (default seguro do notify_ops). roles vazio/ausente = todos os cargos.
+export type NotificationEventKey =
+  | 'handoff' | 'agendamento_novo' | 'confirmacao' | 'remarcacao'
+  | 'cancelamento' | 'comprovante' | 'venda' | 'nao_atendido';
+
+export interface NotificationEventPref {
+  sino?: boolean;   // notificação in-app (sino)
+  grupo?: boolean;  // envio ao grupo do WhatsApp
+  roles?: string[]; // cargos que veem no sino (vazio/ausente = todos)
+}
+
+export interface NotificationPrefs {
+  group_all?: boolean;  // liga/desliga TODAS as notificações no grupo
+  sino_all?: boolean;   // liga/desliga TODAS as notificações no sino
+  events?: Partial<Record<NotificationEventKey, NotificationEventPref>>;
+  sla?: { enabled?: boolean; minutes?: number };
+}
+
 export interface Clinic {
   id: string;
   name: string;
@@ -1693,6 +1712,7 @@ export interface Clinic {
   plan: 'free' | 'pro' | 'enterprise';
   is_active: boolean;
   notification_group_id: string | null;
+  notification_prefs?: NotificationPrefs | null;
   meta_token?: string | null;
   meta_ad_account_id?: string | null;
   meta_pixel_id?: string | null;
@@ -4133,17 +4153,36 @@ export type OpsNotification = {
   appointment_id: string | null;
   link: string | null;
   payload: any;
+  target_roles: string[] | null;
   read_at: string | null;
   created_at: string;
 };
 
 export function useNotifications() {
-  const { activeClinicId } = useAuth();
-  const [data, setData] = useState<OpsNotification[]>([]);
+  const { activeClinicId, userRole } = useAuth();
+  const [rawData, setRawData] = useState<OpsNotification[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // Cargos efetivos do usuário p/ o filtro "por função" (target_roles).
+  const myRoles = useMemo(() => {
+    const r = String(userRole || '');
+    const set = new Set<string>([r]);
+    if (r === 'medico_gestor') { set.add('gestor'); set.add('medico'); }
+    if (['org_owner', 'org_admin', 'org_team'].includes(r)) set.add('gestor');
+    return set;
+  }, [userRole]);
+  const seeAll = userRole === 'super-admin';
+
+  // Só as notificações cujo target_roles inclui um cargo do usuário (ou sem alvo = todos).
+  const data = useMemo(
+    () => rawData.filter(n =>
+      seeAll || !n.target_roles || n.target_roles.length === 0 || n.target_roles.some(role => myRoles.has(role))
+    ),
+    [rawData, myRoles, seeAll],
+  );
+
   const fetch = useCallback(async () => {
-    if (!activeClinicId) { setData([]); return; }
+    if (!activeClinicId) { setRawData([]); return; }
     setLoading(true);
     const { data: rows } = await supabase
       .from('notifications')
@@ -4151,7 +4190,7 @@ export function useNotifications() {
       .eq('clinic_id', activeClinicId)
       .order('created_at', { ascending: false })
       .limit(50);
-    setData((rows as OpsNotification[]) || []);
+    setRawData((rows as OpsNotification[]) || []);
     setLoading(false);
   }, [activeClinicId]);
 
@@ -4170,13 +4209,13 @@ export function useNotifications() {
 
   const markAllRead = useCallback(async () => {
     if (!activeClinicId) return;
-    setData(prev => prev.map(x => (x.read_at ? x : { ...x, read_at: new Date().toISOString() }))); // otimista
+    setRawData(prev => prev.map(x => (x.read_at ? x : { ...x, read_at: new Date().toISOString() }))); // otimista
     await supabase.rpc('mark_notifications_read', { p_clinic_id: activeClinicId, p_ids: null });
   }, [activeClinicId]);
 
   const markRead = useCallback(async (id: string) => {
     if (!activeClinicId) return;
-    setData(prev => prev.map(x => (x.id === id && !x.read_at ? { ...x, read_at: new Date().toISOString() } : x)));
+    setRawData(prev => prev.map(x => (x.id === id && !x.read_at ? { ...x, read_at: new Date().toISOString() } : x)));
     await supabase.rpc('mark_notifications_read', { p_clinic_id: activeClinicId, p_ids: [id] });
   }, [activeClinicId]);
 

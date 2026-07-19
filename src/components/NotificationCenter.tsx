@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bell, CheckCheck, CalendarDays, Receipt, AlertTriangle, MessageSquareWarning, Dot } from 'lucide-react';
+import { Bell, CheckCheck, CalendarDays, CalendarCheck, CalendarClock, CalendarX, Receipt, AlertTriangle, MessageSquareWarning, PartyPopper, Dot } from 'lucide-react';
 import { useNotifications, OpsNotification } from '../hooks/useSupabase';
 
 // Sino de notificações no rodapé da Sidebar. Espelho in-app do grupo do WhatsApp
@@ -17,7 +17,11 @@ function timeAgo(iso: string): string {
 }
 
 function eventIcon(event: string) {
-  if (event === 'agendamento') return CalendarDays;
+  if (event === 'agendamento_novo' || event === 'agendamento') return CalendarDays;
+  if (event === 'confirmacao') return CalendarCheck;
+  if (event === 'remarcacao') return CalendarClock;
+  if (event === 'cancelamento') return CalendarX;
+  if (event === 'venda') return PartyPopper;
   if (event === 'comprovante') return Receipt;
   if (event === 'nao_atendido') return AlertTriangle;
   if (event === 'handoff') return MessageSquareWarning;
@@ -32,7 +36,7 @@ const LEVEL_DOT: Record<string, string> = {
 
 // Mapa evento -> aba de destino (deep-link v1). Conversas vivem em "Comercial".
 function tabForEvent(event: string): string {
-  if (event === 'agendamento') return 'appointments';
+  if (event === 'agendamento_novo' || event === 'cancelamento' || event === 'agendamento') return 'appointments';
   return 'ai-secretary';
 }
 
@@ -76,7 +80,7 @@ export function NotificationCenter() {
       </button>
 
       {open && (
-        <div className="fixed bottom-20 left-4 w-80 max-w-[calc(100vw-2rem)] max-h-[26rem] bg-white border border-slate-200 rounded-xl shadow-2xl z-[60] flex flex-col overflow-hidden">
+        <div className="fixed bottom-20 left-4 w-96 max-w-[calc(100vw-2rem)] max-h-[34rem] bg-white border border-slate-200 rounded-xl shadow-2xl z-[100] flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100 bg-slate-50/60">
             <span className="text-xs font-bold text-slate-800">Notificações</span>
             {unreadCount > 0 && (

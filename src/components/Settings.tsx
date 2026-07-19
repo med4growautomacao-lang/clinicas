@@ -45,6 +45,7 @@ import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSettings, useProtocols, Protocol, useProducts, Product, ProductAttribute, useQuoteImages, useRedirectLinks, RedirectLink, Clinic, AIConfig, WhatsappInstance } from "../hooks/useSupabase";
 import { RedirectLinksCard } from "./RedirectLinksCard";
+import { NotificationPrefs } from "./NotificationPrefs";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "./ui/toast";
@@ -2804,6 +2805,14 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                     )}
                 </CardContent>
             </Card>
+
+                    {/* Preferências granulares (sino + grupo + por cargo + SLA) */}
+                    <NotificationPrefs
+                        clinicId={clinic!.id}
+                        hasGroup={!!clinic?.notification_group_id}
+                        initialPrefs={clinic?.notification_prefs}
+                        onSaved={refetch}
+                    />
                 </div>
             )}
         </div>

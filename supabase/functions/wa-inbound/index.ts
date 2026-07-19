@@ -80,6 +80,28 @@ function extFromMime(mime: string): string {
   return map[mime.split(";")[0].trim()] || "bin";
 }
 
+// Nome do lead: o push-name do WhatsApp chega em campos DIFERENTES conforme o tipo de
+// evento/versão da uazapi (chat.name, chat.wa_contactName, message.senderName…). Usar UM
+// campo só deixava lead "SemNome" (o antigo Receptor). Tentamos vários, limpando lixo.
+// Em fromMe NÃO usamos senderName (ali seria o nome da CLÍNICA, não do lead).
+// Retorna null quando nada é usável → a RPC mantém/deriva o placeholder e faz backfill depois.
+function cleanName(raw: unknown): string | null {
+  if (!raw) return null;
+  const s = String(raw).normalize("NFKC").replace(/[^\p{L}\p{M}\s'.\-]/gu, "").replace(/\s+/g, " ").trim();
+  if (!s) return null;
+  const low = s.toLowerCase();
+  if (low === "semnome" || low === "sem nome" || low === "contato") return null;
+  if (/^\+?[0-9][0-9\s\-]*$/.test(s)) return null; // só telefone/dígitos
+  return s.slice(0, 120);
+}
+function resolveLeadName(body: any, msg: any, isFromMe: boolean): string | null {
+  const chat = body?.chat ?? {};
+  const cands: unknown[] = [chat.wa_contactName, chat.name, chat.wa_name, chat.pushName, chat.verifiedName];
+  if (!isFromMe) cands.push(msg?.senderName, msg?.pushName, msg?.notifyName, msg?.verifiedBizName);
+  for (const c of cands) { const n = cleanName(c); if (n) return n; }
+  return null;
+}
+
 // base64 em blocos (evita estourar a pilha no fromCharCode com arquivos grandes)
 function toBase64(bytes: Uint8Array): string {
   let bin = "";
@@ -286,7 +308,9 @@ serve(async (req) => {
 
   const direction = msg.fromMe ? "outbound" : "inbound";
   const waMessageId = String(msg.messageid || msg.id || "");
-  const leadName = String(body.chat?.wa_contactName || body.chat?.name || msg.senderName || "").trim();
+  const leadName = resolveLeadName(body, msg, !!msg.fromMe);
+  // Avatar do lead (foto do WhatsApp) — paridade com o nó "Atualiza Foto Lead" do Receptor.
+  const leadAvatar = String(body.chat?.imagePreview || "").trim() || null;
 
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL") ?? "",
@@ -438,12 +462,13 @@ serve(async (req) => {
     p_lead_phone: leadPhone,
     p_content: content,
     p_wa_message_id: waMessageId || null,
-    p_lead_name: leadName || null,
+    p_lead_name: leadName,
     p_sender: "human",
     p_media_kind: mediaKind,
     p_media_mime: mediaMime,
     p_media_path: mediaPath,
     p_media_filename: mediaFilename,
+    p_avatar_url: leadAvatar,
   });
   const r = res as any;
   if (rpcErr || !r?.success) {

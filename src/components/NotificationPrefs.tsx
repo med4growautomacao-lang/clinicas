@@ -7,12 +7,20 @@ import type { NotificationPrefs as Prefs, NotificationEventKey } from '../hooks/
 import {
   BellRing, MessageSquareWarning, CalendarDays, CalendarCheck, CalendarClock,
   CalendarX, Receipt, PartyPopper, AlertTriangle, Clock, Users, Save,
-  Loader2, CheckCircle2, Smartphone,
+  Loader2, CheckCircle2, Smartphone, Info,
 } from 'lucide-react';
 
-// UI de Configuração de Notificações (Configurações › Integrações › WhatsApp, abaixo do Grupo).
+// UI de Configuração de Notificações (Configurações › Notificações, abaixo do Grupo).
 // Escreve clinics.notification_prefs. Vazio = tudo ligado (default seguro do notify_ops).
 // Espelha 1:1 as chaves lidas por notify_ops / process_sla_unanswered — não inventar chave nova.
+//
+// Decisões de UX (reescrita 19/07 — a 1ª versão era contraintuitiva):
+// - Colunas Sino/Grupo com cabeçalho COLADO e alinhado às células (largura fixa única).
+// - Sem grupo criado: a coluna Grupo vira "—" com um aviso único (antes eram 8 toggles
+//   mortos sem explicação). Master desligado: a coluna respectiva esmaece.
+// - Cargos: chip "Todos" explícito + seleção direta (clicar um cargo no modo Todos
+//   seleciona SÓ ele). Desmarcar o último volta para "Todos" — visível, sem o efeito
+//   surpresa de "nenhum marcado = todos veem". Cargos só aparecem com o sino ligado.
 
 const ALL_ROLES = ['gestor', 'secretaria', 'vendedor', 'medico'] as const;
 const ROLE_LABEL: Record<string, string> = {
@@ -30,6 +38,9 @@ const EVENTS: { key: NotificationEventKey; label: string; desc: string; Icon: ty
   { key: 'nao_atendido',     label: 'Lead não atendido (SLA)', desc: 'Ninguém respondeu no prazo',  Icon: AlertTriangle },
 ];
 
+// Largura ÚNICA das colunas de toggle — cabeçalho e células usam a mesma, senão desalinha.
+const COL = 'w-16 flex justify-center';
+
 function Toggle({ on, onClick, disabled, title }: { on: boolean; onClick: () => void; disabled?: boolean; title?: string }) {
   return (
     <button
@@ -41,7 +52,7 @@ function Toggle({ on, onClick, disabled, title }: { on: boolean; onClick: () => 
       onClick={onClick}
       className={cn(
         'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors outline-none focus:ring-4 focus:ring-teal-100',
-        disabled ? 'bg-slate-100 cursor-not-allowed' : on ? 'bg-teal-500' : 'bg-slate-200 hover:bg-slate-300',
+        disabled ? 'bg-slate-100 cursor-not-allowed opacity-60' : on ? 'bg-teal-500' : 'bg-slate-200 hover:bg-slate-300',
       )}
     >
       <span className={cn('inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform', on ? 'translate-x-5' : 'translate-x-0.5')} />
@@ -74,20 +85,32 @@ export function NotificationPrefs({ clinicId, hasGroup, initialPrefs, onSaved }:
   const evGrupo = (ev: NotificationEventKey) => prefs.events?.[ev]?.grupo ?? true;
   const evRoles = (ev: NotificationEventKey) => prefs.events?.[ev]?.roles ?? [];
 
+  const groupUsable = hasGroup && groupAll;
+
   // Escrita imutável.
   const setEventField = (ev: NotificationEventKey, field: 'sino' | 'grupo', value: boolean) =>
     setPrefs(p => ({ ...p, events: { ...p.events, [ev]: { ...p.events?.[ev], [field]: value } } }));
 
+  // Chips de cargo: no modo "Todos" (roles=[]), clicar um cargo seleciona SÓ ele.
+  // Desmarcar o último (ou marcar todos) volta ao "Todos" canônico (roles=[]).
   const toggleRole = (ev: NotificationEventKey, role: string) => setPrefs(p => {
     const current = p.events?.[ev]?.roles;
     const isAll = !current || current.length === 0;
-    const set = new Set<string>(isAll ? ALL_ROLES : current);
-    if (set.has(role)) set.delete(role); else set.add(role);
-    let arr = ALL_ROLES.filter(r => set.has(r)) as unknown as string[];
-    // Extremos (nenhum ou todos) = "todos" canônico (roles vazio → visível a todos os cargos).
-    if (arr.length === 0 || arr.length === ALL_ROLES.length) arr = [];
+    let arr: string[];
+    if (isAll) {
+      arr = [role];
+    } else {
+      const set = new Set<string>(current);
+      if (set.has(role)) set.delete(role); else set.add(role);
+      arr = ALL_ROLES.filter(r => set.has(r)) as unknown as string[];
+      if (arr.length === 0 || arr.length === ALL_ROLES.length) arr = [];
+    }
     return { ...p, events: { ...p.events, [ev]: { ...p.events?.[ev], roles: arr } } };
   });
+
+  const setAllRoles = (ev: NotificationEventKey) => setPrefs(p => (
+    { ...p, events: { ...p.events, [ev]: { ...p.events?.[ev], roles: [] } } }
+  ));
 
   const save = async () => {
     setSaving(true); setSaved(false); setError(false);
@@ -117,14 +140,14 @@ export function NotificationPrefs({ clinicId, hasGroup, initialPrefs, onSaved }:
         </CardHeader>
 
         <CardContent className="p-8 space-y-8">
-          {/* Interruptores gerais */}
+          {/* Canais (interruptores gerais) */}
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="flex items-center justify-between gap-4 px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl">
               <div className="flex items-center gap-3 min-w-0">
                 <Smartphone className="w-4 h-4 text-teal-500 shrink-0" />
                 <div className="min-w-0">
                   <p className="text-xs font-bold text-slate-700">Sino do app</p>
-                  <p className="text-[11px] text-slate-400">Todas as notificações in-app</p>
+                  <p className="text-[11px] text-slate-400">{sinoAll ? 'Notificações in-app ligadas' : 'Desligado — nada aparece no sino'}</p>
                 </div>
               </div>
               <Toggle on={sinoAll} onClick={() => setPrefs(p => ({ ...p, sino_all: !sinoAll }))} />
@@ -134,7 +157,7 @@ export function NotificationPrefs({ clinicId, hasGroup, initialPrefs, onSaved }:
                 <Users className="w-4 h-4 text-teal-500 shrink-0" />
                 <div className="min-w-0">
                   <p className="text-xs font-bold text-slate-700">Grupo do WhatsApp</p>
-                  <p className="text-[11px] text-slate-400">{hasGroup ? 'Todas as notificações no grupo' : 'Crie o grupo acima primeiro'}</p>
+                  <p className="text-[11px] text-slate-400">{hasGroup ? (groupAll ? 'Avisos no grupo ligados' : 'Desligado — nada vai ao grupo') : 'Sem grupo — crie no quadro acima'}</p>
                 </div>
               </div>
               <Toggle on={groupAll} disabled={!hasGroup} onClick={() => setPrefs(p => ({ ...p, group_all: !groupAll }))} />
@@ -172,65 +195,119 @@ export function NotificationPrefs({ clinicId, hasGroup, initialPrefs, onSaved }:
 
           {/* Matriz por evento */}
           <div>
-            <div className="flex items-center gap-2 mb-3">
+            <div className="flex items-center gap-2 mb-1.5">
               <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Por tipo de notificação</span>
             </div>
-            {/* Cabeçalho (desktop) */}
-            <div className="hidden md:grid grid-cols-[1fr_auto_auto_auto] gap-x-6 px-4 pb-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-              <span>Evento</span>
-              <span className="text-center w-10">Sino</span>
-              <span className="text-center w-10">Grupo</span>
-              <span className="text-right">Cargos que veem no sino</span>
+            <p className="text-[11px] text-slate-400 mb-3">
+              Cada linha é um aviso: ligue/desligue por canal e escolha quais cargos o veem no sino.
+            </p>
+
+            {!hasGroup && (
+              <div className="flex items-center gap-2 px-4 py-2.5 mb-3 bg-slate-50 border border-slate-200 rounded-xl">
+                <Info className="w-4 h-4 text-slate-400 shrink-0" />
+                <p className="text-[11px] text-slate-500">
+                  A coluna <b>Grupo</b> fica disponível depois de criar o Grupo de Notificações (quadro acima).
+                </p>
+              </div>
+            )}
+
+            {/* Cabeçalho (desktop) — larguras IGUAIS às células, senão desalinha */}
+            <div className="hidden md:flex items-center gap-x-4 px-4 pb-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+              <span className="flex-1">Evento</span>
+              <span className={cn(COL, 'items-center gap-1', !sinoAll && 'opacity-40')}>
+                <Smartphone className="w-3 h-3" /> Sino
+              </span>
+              <span className={cn(COL, 'items-center gap-1', !groupUsable && 'opacity-40')}>
+                <Users className="w-3 h-3" /> Grupo
+              </span>
+              <span className="w-[340px] text-left">Quem vê no sino</span>
             </div>
+
             <div className="space-y-2">
               {EVENTS.map(({ key, label, desc, Icon }) => {
                 const roles = evRoles(key);
                 const isAll = roles.length === 0;
+                const sinoOn = evSino(key);
                 return (
-                  <div key={key} className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto_auto] gap-x-6 gap-y-3 items-center px-4 py-3 bg-white border border-slate-100 rounded-xl">
-                    <div className="flex items-center gap-3 min-w-0">
+                  <div key={key} className="flex flex-col md:flex-row md:items-center gap-x-4 gap-y-3 px-4 py-3 bg-white border border-slate-100 rounded-xl">
+                    {/* Evento */}
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
                       <Icon className="w-4 h-4 text-slate-400 shrink-0" />
                       <div className="min-w-0">
                         <p className="text-xs font-bold text-slate-700 truncate">{label}</p>
                         <p className="text-[11px] text-slate-400 truncate">{desc}</p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 md:block md:w-10 md:text-center">
+
+                    {/* Sino */}
+                    <div className={cn('flex items-center gap-2', 'md:w-16 md:justify-center')}>
                       <span className="md:hidden text-[11px] font-semibold text-slate-500 w-12">Sino</span>
-                      <Toggle on={evSino(key)} onClick={() => setEventField(key, 'sino', !evSino(key))} title="Notificar no sino do app" />
+                      <Toggle
+                        on={sinoOn}
+                        disabled={!sinoAll}
+                        onClick={() => setEventField(key, 'sino', !sinoOn)}
+                        title={sinoAll ? 'Notificar no sino do app' : 'O sino geral está desligado (acima)'}
+                      />
                     </div>
-                    <div className="flex items-center gap-2 md:block md:w-10 md:text-center">
+
+                    {/* Grupo */}
+                    <div className={cn('flex items-center gap-2', 'md:w-16 md:justify-center')}>
                       <span className="md:hidden text-[11px] font-semibold text-slate-500 w-12">Grupo</span>
-                      <Toggle on={evGrupo(key)} disabled={!hasGroup} onClick={() => setEventField(key, 'grupo', !evGrupo(key))} title="Enviar ao grupo do WhatsApp" />
+                      {hasGroup ? (
+                        <Toggle
+                          on={evGrupo(key)}
+                          disabled={!groupAll}
+                          onClick={() => setEventField(key, 'grupo', !evGrupo(key))}
+                          title={groupAll ? 'Enviar ao grupo do WhatsApp' : 'O grupo geral está desligado (acima)'}
+                        />
+                      ) : (
+                        <span className="text-slate-300 font-bold" title="Crie o Grupo de Notificações no quadro acima">—</span>
+                      )}
                     </div>
-                    <div className="flex flex-wrap gap-1.5 md:justify-end">
-                      {ALL_ROLES.map(role => {
-                        const active = isAll || roles.includes(role);
-                        return (
+
+                    {/* Cargos (só fazem sentido com o sino do evento ligado) */}
+                    <div className="md:w-[340px]">
+                      {sinoOn && sinoAll ? (
+                        <div className="flex flex-wrap gap-1.5">
                           <button
-                            key={role}
                             type="button"
-                            onClick={() => toggleRole(key, role)}
+                            onClick={() => setAllRoles(key)}
                             className={cn(
                               'px-2.5 py-1 rounded-full text-[11px] font-bold border transition-all',
-                              active
-                                ? 'bg-teal-50 border-teal-200 text-teal-700'
+                              isAll
+                                ? 'bg-teal-600 border-teal-600 text-white shadow-sm'
                                 : 'bg-white border-slate-200 text-slate-400 hover:border-slate-300',
                             )}
                           >
-                            {ROLE_LABEL[role]}
+                            Todos
                           </button>
-                        );
-                      })}
-                      {isAll && <span className="self-center text-[10px] text-slate-400 ml-1">todos</span>}
+                          {ALL_ROLES.map(role => {
+                            const active = !isAll && roles.includes(role);
+                            return (
+                              <button
+                                key={role}
+                                type="button"
+                                onClick={() => toggleRole(key, role)}
+                                className={cn(
+                                  'px-2.5 py-1 rounded-full text-[11px] font-bold border transition-all',
+                                  active
+                                    ? 'bg-teal-600 border-teal-600 text-white shadow-sm'
+                                    : 'bg-white border-slate-200 text-slate-400 hover:border-slate-300',
+                                )}
+                              >
+                                {ROLE_LABEL[role]}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <span className="text-[11px] text-slate-300">— sino desligado</span>
+                      )}
                     </div>
                   </div>
                 );
               })}
             </div>
-            <p className="text-[11px] text-slate-400 mt-3">
-              Selecione cargos para restringir quem vê no sino. Todos marcados (ou nenhum) = visível para todos.
-            </p>
           </div>
 
           {/* Salvar */}
@@ -243,6 +320,7 @@ export function NotificationPrefs({ clinicId, hasGroup, initialPrefs, onSaved }:
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
               {saving ? 'Salvando...' : 'Salvar preferências'}
             </Button>
+            {dirty && !saving && <span className="text-[11px] text-slate-400">Alterações não salvas</span>}
             {saved && <span className="text-sm font-bold text-emerald-600 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" /> Salvo!</span>}
             {error && <span className="text-sm font-bold text-rose-600">Erro ao salvar</span>}
           </div>

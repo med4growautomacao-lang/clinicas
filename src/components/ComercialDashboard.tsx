@@ -606,6 +606,49 @@ export function ComercialDashboard() {
     }
   };
 
+  // Envia pelo WhatsApp da ORGANIZAÇÃO (RPC send_clinic_report) aos destinatários
+  // configurados em report_settings. O texto é re-gerado pela MESMA RPC de montagem
+  // (fonte única) com as mesmas janelas do preview.
+  const [reportSending, setReportSending] = useState(false);
+  const [reportSendMsg, setReportSendMsg] = useState<string | null>(null);
+  const sendReport = async () => {
+    const clinicId = activeClinicId || profile?.clinic_id;
+    if (!clinicId) return;
+    setReportSending(true);
+    setReportSendMsg(null);
+    try {
+      const { data, error } = await supabase.rpc("send_clinic_report", {
+        p_clinic_id: clinicId,
+        p_kind: reportKind,
+        p_entry_from: entryRange ? format(entryRange.start, "yyyy-MM-dd") : null,
+        p_entry_to: entryRange ? format(entryRange.end, "yyyy-MM-dd") : null,
+        p_conv_from: apptRange ? format(apptRange.start, "yyyy-MM-dd") : null,
+        p_conv_to: apptRange ? format(apptRange.end, "yyyy-MM-dd") : null,
+        p_appt_from: convRange ? format(convRange.start, "yyyy-MM-dd") : null,
+        p_appt_to: convRange ? format(convRange.end, "yyyy-MM-dd") : null,
+        p_trigger: "manual",
+      });
+      if (error) throw error;
+      if (data?.success) {
+        setReportSendMsg(`Enviado a ${data.sent} destinatário${data.sent > 1 ? "s" : ""} ✓`);
+      } else {
+        const msgs: Record<string, string> = {
+          org_whatsapp_desconectado: "WhatsApp da organização não está conectado (Gestão Organizacional → Configurações).",
+          sem_destinatarios: "Nenhum destinatário configurado para esta clínica (Gestão Organizacional → Configurações).",
+          nenhum_destinatario_valido: "Nenhum número de destinatário é válido.",
+          clinica_sem_organizacao: "Esta clínica não pertence a uma organização.",
+        };
+        setReportSendMsg(msgs[data?.error] ?? `Falha ao enviar: ${data?.error ?? "erro desconhecido"}`);
+      }
+    } catch (err: any) {
+      console.error("send_clinic_report error:", err);
+      logSystemError("REPORT_SEND_FAIL", "send_clinic_report: falha ao enviar relatório pelo WhatsApp da org", clinicId, { error: err?.message ?? String(err) }, "error");
+      setReportSendMsg("Erro ao enviar. Tente novamente.");
+    } finally {
+      setReportSending(false);
+    }
+  };
+
   const downloadReport = () => {
     const blob = new Blob([reportText], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -1243,15 +1286,24 @@ export function ComercialDashboard() {
               <div className="p-4 overflow-y-auto custom-scrollbar">
                 <pre className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-slate-700 font-sans bg-slate-50 rounded-xl border border-slate-100 p-4">{reportText}</pre>
               </div>
-              <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-slate-100 bg-slate-50">
-                <Button onClick={downloadReport} variant="outline" className="gap-2 border-slate-200 bg-white hover:bg-slate-50 text-slate-600">
-                  <Download className="w-4 h-4" />
-                  <span className="text-[11px] font-bold uppercase tracking-tight">Baixar .txt</span>
-                </Button>
-                <Button onClick={copyReport} className="gap-2 bg-teal-600 hover:bg-teal-700 text-white">
-                  {reportCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                  <span className="text-[11px] font-bold uppercase tracking-tight">{reportCopied ? "Copiado!" : "Copiar"}</span>
-                </Button>
+              <div className="flex items-center justify-between gap-2 px-5 py-3.5 border-t border-slate-100 bg-slate-50">
+                <span className={cn("text-[11px] font-semibold", reportSendMsg?.endsWith("✓") ? "text-emerald-600" : "text-amber-600")}>
+                  {reportSendMsg ?? ""}
+                </span>
+                <div className="flex items-center gap-2">
+                  <Button onClick={downloadReport} variant="outline" className="gap-2 border-slate-200 bg-white hover:bg-slate-50 text-slate-600">
+                    <Download className="w-4 h-4" />
+                    <span className="text-[11px] font-bold uppercase tracking-tight">Baixar .txt</span>
+                  </Button>
+                  <Button onClick={copyReport} variant="outline" className="gap-2 border-slate-200 bg-white hover:bg-slate-50 text-slate-600">
+                    {reportCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                    <span className="text-[11px] font-bold uppercase tracking-tight">{reportCopied ? "Copiado!" : "Copiar"}</span>
+                  </Button>
+                  <Button onClick={sendReport} disabled={reportSending} className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white">
+                    {reportSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <MessageSquare className="w-4 h-4" />}
+                    <span className="text-[11px] font-bold uppercase tracking-tight">{reportSending ? "Enviando..." : "Enviar no WhatsApp"}</span>
+                  </Button>
+                </div>
               </div>
             </motion.div>
           </motion.div>

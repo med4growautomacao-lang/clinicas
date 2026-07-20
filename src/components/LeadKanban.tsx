@@ -939,17 +939,19 @@ function GanhoModal({ lead, ticketId, onClose, onCancel, onCreate, createPatient
 
           {/* Atribuição Meta Ads — só quando o lead veio de anúncio (tem ctwa_clid). O valor acima já
               entra no evento; aqui só reforçamos os dados de match, pedindo o e-mail se faltar. */}
-          {fromAd && (
+          {(fromAd || !lead.email) && (
             <div className="space-y-2 rounded-xl border border-blue-100 bg-blue-50/40 p-3">
               <div className="flex items-center gap-1.5">
                 <ThumbsUp className="w-3.5 h-3.5 text-blue-500" />
-                <span className="text-xs font-black text-blue-700 uppercase tracking-wider">Atribuição Meta Ads</span>
+                <span className="text-xs font-black text-blue-700 uppercase tracking-wider">Atribuição Meta</span>
               </div>
               <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
-                Este lead veio de anúncio Click-to-WhatsApp. A venda será enviada ao Meta para otimizar suas campanhas.
+                {fromAd
+                  ? 'Este lead veio de anúncio Click-to-WhatsApp. A venda será enviada ao Meta para otimizar suas campanhas.'
+                  : 'A venda será enviada ao Meta como conversão offline, casando por telefone/e-mail. Informe o e-mail para melhorar a atribuição.'}
               </p>
               <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] font-semibold">
-                <span className="inline-flex items-center gap-1 text-emerald-600"><Check className="w-3 h-3" /> Clique do anúncio</span>
+                {fromAd && <span className="inline-flex items-center gap-1 text-emerald-600"><Check className="w-3 h-3" /> Clique do anúncio</span>}
                 <span className={cn("inline-flex items-center gap-1", lead.phone ? "text-emerald-600" : "text-slate-400")}>
                   {lead.phone ? <Check className="w-3 h-3" /> : <X className="w-3 h-3" />} Telefone
                 </span>

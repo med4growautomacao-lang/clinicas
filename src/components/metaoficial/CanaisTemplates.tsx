@@ -103,7 +103,7 @@ export function CanaisTemplates({ clinicId, clinicName, channels, templates, sen
           <ConnectionStation clinicId={clinicId} channels={channels} reload={reload} showToast={showToast} />
           <TemplateEngineer clinicId={clinicId} reload={reload} showToast={showToast} />
           <div className="flex items-center justify-between">
-            <h4 className="text-sm font-bold text-slate-700">Seus templates</h4>
+            <h4 className="text-sm font-bold text-slate-700">Templates da conta (Meta)</h4>
             <SyncButton clinicId={clinicId} reload={reload} showToast={showToast} />
           </div>
           <TemplateGallery templates={templates} />
@@ -313,8 +313,8 @@ function SyncButton({
     setBusy(true);
     try {
       const { data, error } = await invokeMetaCloud({ action: "sync_templates", clinic_id: clinicId });
-      if (error || !data?.ok) showToast(data?.detail || "Falha ao sincronizar status.", "error");
-      else { showToast(`Status sincronizado (${data.updated} atualizados).`, "success"); reload(); }
+      if (error || !data?.ok) showToast(data?.detail || "Falha ao sincronizar com a Meta.", "error");
+      else { showToast(`${data.updated} template(s) sincronizado(s) da Meta.`, "success"); reload(); }
     } finally { setBusy(false); }
   };
   return (
@@ -323,7 +323,7 @@ function SyncButton({
       disabled={busy}
       className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40 transition-all"
     >
-      {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Sincronizar status
+      {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Sincronizar com a Meta
     </button>
   );
 }

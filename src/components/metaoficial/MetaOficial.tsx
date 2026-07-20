@@ -12,6 +12,7 @@ import { cn } from "@/src/lib/utils";
 import { Send, LayoutGrid, Loader2 } from "lucide-react";
 import { PainelEnvio } from "./PainelEnvio";
 import { CanaisTemplates } from "./CanaisTemplates";
+import { invokeMetaCloud } from "./invoke";
 import type { MetaChannel, MetaTemplate, MetaSend } from "./types";
 
 export function MetaOficial() {
@@ -43,6 +44,17 @@ export function MetaOficial() {
   }, [clinicId]);
 
   useEffect(() => { reload(); }, [reload]);
+
+  // Ao abrir (por clínica), puxa TODOS os templates da WABA da Meta e recarrega — assim os
+  // aprovados já aparecem na tela sem precisar clicar em "Sincronizar".
+  useEffect(() => {
+    if (!clinicId) return;
+    let cancelled = false;
+    invokeMetaCloud({ action: "sync_templates", clinic_id: clinicId })
+      .then(() => { if (!cancelled) reload(); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [clinicId, reload]);
 
   if (!clinicId) {
     return (

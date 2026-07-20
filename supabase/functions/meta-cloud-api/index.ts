@@ -157,17 +157,11 @@ serve(async (req) => {
     }
 
     // ───────────────────────────── sync_templates ──────────────────────────────
-    // Atualiza o STATUS na Meta apenas dos templates que ESTE cliente já criou
-    // (isola clientes que compartilham a mesma WABA de plataforma).
+    // IMPORTA TODOS os templates da WABA para a visão desta clínica (não só os criados
+    // aqui) — assim os aprovados pré-existentes aparecem na tela e no dropdown de envio.
     if (action === "sync_templates") {
       const waba = (typeof body?.waba_id === "string" && body.waba_id) || envWaba;
       if (!waba) return json({ ok: false, error: "not_configured", detail: "WABA não configurada." }, 200);
-
-      const { data: mine } = await service
-        .from("meta_cloud_templates")
-        .select("name, language")
-        .eq("clinic_id", clinicId);
-      const mineKeys = new Set((mine ?? []).map((t: any) => `${t.name}|${t.language}`));
 
       const url = `${GRAPH}/${GRAPH_VERSION}/${waba}/message_templates?fields=id,name,status,category,language,components,quality_score&limit=200`;
       const resp = await fetch(url, { headers: authGraph });
@@ -177,23 +171,32 @@ serve(async (req) => {
         return json({ ok: false, error: "graph_error", detail: j.error?.message ?? "erro da Graph API" }, 200);
       }
 
+      const now = new Date().toISOString();
+      const rows = (j?.data ?? [])
+        .filter((t: any) => t?.name)
+        .map((t: any) => ({
+          clinic_id: clinicId,
+          meta_template_id: t?.id ?? null,
+          name: t.name,
+          language: t?.language ?? "pt_BR",
+          category: ["MARKETING", "UTILITY", "AUTHENTICATION"].includes(t?.category) ? t.category : "MARKETING",
+          body_text: bodyTextFromComponents(t?.components),
+          components: t?.components ?? null,
+          status: t?.status ?? "PENDING",
+          rejected_reason: t?.status === "REJECTED" ? (t?.quality_score?.reasons?.join?.("; ") ?? null) : null,
+          synced_at: now,
+        }));
+
       let updated = 0;
-      for (const t of (j?.data ?? [])) {
-        const key = `${t?.name}|${t?.language}`;
-        if (!mineKeys.has(key)) continue; // só o que este cliente criou
-        const { error: uErr } = await service
+      if (rows.length > 0) {
+        const { error: upErr } = await service
           .from("meta_cloud_templates")
-          .update({
-            meta_template_id: t?.id ?? null,
-            status: t?.status ?? "PENDING",
-            category: ["MARKETING", "UTILITY", "AUTHENTICATION"].includes(t?.category) ? t.category : undefined,
-            body_text: bodyTextFromComponents(t?.components) ?? undefined,
-            components: t?.components ?? undefined,
-            rejected_reason: t?.status === "REJECTED" ? (t?.quality_score?.reasons?.join?.("; ") ?? null) : null,
-            synced_at: new Date().toISOString(),
-          })
-          .eq("clinic_id", clinicId).eq("name", t.name).eq("language", t.language);
-        if (!uErr) updated++;
+          .upsert(rows, { onConflict: "clinic_id,name,language" });
+        if (upErr) {
+          await registrarErro("sync_gravacao_falhou", "Templates vieram da Meta mas NÃO foram gravados", "error", { detail: upErr.message, qtd: rows.length });
+          return json({ ok: false, error: "upsert_failed", detail: upErr.message }, 500);
+        }
+        updated = rows.length;
       }
       return json({ ok: true, updated, fetched: (j?.data ?? []).length });
     }

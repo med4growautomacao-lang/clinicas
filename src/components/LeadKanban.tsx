@@ -977,6 +977,72 @@ function GanhoModal({ lead, onClose, onCancel, onCreate, createPatient, updateLe
   );
 }
 
+// Modal leve de atribuição para etapa de conversão que NÃO é 'ganho' (ex.: "Compareceu"). O evento
+// CAPI já foi enfileirado pelo backend ao entrar na etapa; aqui só pedimos o e-mail que falta para
+// subir a nota da atribuição. Só aparece para lead de anúncio (tem ctwa_clid) sem e-mail.
+function AtribMetaModal({ lead, onClose, onSaveEmail }: {
+  lead: { id: string; name: string; phone: string | null; ctwaClid: string | null };
+  onClose: () => void;
+  onSaveEmail: (email: string) => Promise<void>;
+}) {
+  const [email, setEmail] = useState('');
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    setSaving(true);
+    if (email.trim()) await onSaveEmail(email.trim());
+    setSaving(false);
+    onClose();
+  };
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="h-1.5 bg-blue-500" />
+        <div className="p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ThumbsUp className="w-4 h-4 text-blue-500" />
+              <h3 className="text-base font-black text-slate-900">Atribuição Meta Ads</h3>
+            </div>
+            <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4 text-slate-400" /></button>
+          </div>
+          <p className="text-xs text-slate-500 font-medium leading-relaxed">
+            <b>{lead.name}</b> veio de anúncio Click-to-WhatsApp e entrou na etapa de conversão. A conversão
+            já será enviada ao Meta — informe o e-mail para aumentar a atribuição (opcional).
+          </p>
+          <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] font-semibold">
+            <span className="inline-flex items-center gap-1 text-emerald-600"><Check className="w-3 h-3" /> Clique do anúncio</span>
+            <span className={cn("inline-flex items-center gap-1", lead.phone ? "text-emerald-600" : "text-slate-400")}>
+              {lead.phone ? <Check className="w-3 h-3" /> : <X className="w-3 h-3" />} Telefone
+            </span>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">E-mail do lead (opcional)</label>
+            <input
+              type="email" autoFocus value={email} onChange={e => setEmail(e.target.value)}
+              placeholder="email@exemplo.com"
+              className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
+            />
+          </div>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">Pular</button>
+            <button
+              onClick={save} disabled={saving}
+              className="flex-1 py-2.5 rounded-xl text-sm font-black bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white flex items-center justify-center gap-2 transition-colors"
+            >
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Salvar
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 // Quantidade "bonita": sem casas decimais forçadas (30, 1,5, 12,25...).
 const formatQty = (n: number) => Number(n).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
 
@@ -2722,6 +2788,9 @@ export function LeadKanban() {
   const { aiConfig, updateAI } = useSettings();
   const { data: orcamentos, save: saveOrcamento } = useOrcamentos();
   const [ganhoLead, setGanhoLead] = useState<{ id: string; name: string; phone: string | null; patientId: string | null; prevStageId: string | null; ticketId: string; ctwaClid?: string | null; email?: string | null } | null>(null);
+  // Captura de atribuição para etapa de conversão que NÃO é 'ganho' (ex.: "Compareceu") — só p/ lead
+  // de anúncio (tem ctwa_clid) com e-mail faltando, para enriquecer a conversão enviada ao Meta.
+  const [attribLead, setAttribLead] = useState<{ id: string; name: string; phone: string | null; ctwaClid: string | null } | null>(null);
   const [lossLead, setLossLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
   const [orcamentoLead, setOrcamentoLead] = useState<{ id: string; name: string; phone: string | null; prevStageId: string | null; ticketId: string; initialQuote?: any; orcamentoId?: string | null } | null>(null);
   const [poLead, setPoLead] = useState<{ id: string; name: string; phone: string | null; quoteData: any; ticketId?: string | null } | null>(null);
@@ -2922,6 +2991,13 @@ export function LeadKanban() {
     if (targetStage?.slug === 'orcamento') {
       // Registra valor + produto/serviço (NÃO gera conversão; só metadados no lead/ticket).
       setOrcamentoLead({ id: ticket.lead_id, name: ticket.lead?.name ?? '', phone: ticket.lead?.phone ?? null, prevStageId: ticket.stage_id, ticketId: ticket.id });
+    }
+
+    // Etapa de conversão que não é 'ganho' (o backend já enfileira o evento CAPI): se o lead veio de
+    // anúncio e falta e-mail, pede para enriquecer a atribuição. Orgânico não pede (sem clid, nada vai
+    // ao Meta); 'ganho' já é tratado pelo GanhoModal acima.
+    if (targetStage?.is_conversion && targetStage.slug !== 'ganho' && ticket.lead?.ctwa_clid && !ticket.lead?.email) {
+      setAttribLead({ id: ticket.lead_id, name: ticket.lead?.name ?? '', phone: ticket.lead?.phone ?? null, ctwaClid: ticket.lead?.ctwa_clid ?? null });
     }
   };
 
@@ -4701,6 +4777,14 @@ export function LeadKanban() {
         />
       )}
 
+      {attribLead && (
+        <AtribMetaModal
+          lead={attribLead}
+          onClose={() => setAttribLead(null)}
+          onSaveEmail={async (email) => { await update(attribLead.id, { email }); }}
+        />
+      )}
+
       {/* Loss Modal */}
       {lossLead && (
         <LossModal
@@ -4811,6 +4895,10 @@ export function LeadKanban() {
                   setGanhoLead({ id: chatLead.lead.id, name: chatLead.lead.name, phone: chatLead.lead.phone ?? null, patientId: chatLead.lead.converted_patient_id ?? null, prevStageId: ticket.stage_id, ticketId: ticket.id, ctwaClid: chatLead.lead.ctwa_clid ?? null, email: chatLead.lead.email ?? null });
                 } else {
                   await moveTicket(ticket.id, stageId);
+                  // Etapa de conversão não-'ganho' + lead de anúncio sem e-mail → enriquece atribuição.
+                  if (targetStage?.is_conversion && chatLead.lead.ctwa_clid && !chatLead.lead.email) {
+                    setAttribLead({ id: chatLead.lead.id, name: chatLead.lead.name, phone: chatLead.lead.phone ?? null, ctwaClid: chatLead.lead.ctwa_clid ?? null });
+                  }
                 }
               }
             }}

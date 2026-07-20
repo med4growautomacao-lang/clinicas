@@ -151,7 +151,7 @@ serve(async (req) => {
         const parts = String(lead?.name ?? "").trim().split(/\s+/).filter(Boolean);
         if (parts.length) { ud.fn = await sha256(parts[0]); if (parts.length > 1) ud.ln = await sha256(parts[parts.length - 1]); }
         if (lead?.rast_id) ud.external_id = await sha256(String(lead.rast_id));
-        payload = { event_name: eventName || "Lead", event_time: eventTime(62), action_source: offlineActionSource, event_id: debugTicketId, user_data: ud };
+        payload = { event_name: eventName || "Lead", event_time: eventTime(offlineActionSource === "physical_store" ? 62 : 7), action_source: offlineActionSource, event_id: debugTicketId, user_data: ud };
         if (value != null) payload.custom_data = { currency: "BRL", value, order_id: debugTicketId };
         endpoint = pixel;
       }
@@ -388,7 +388,9 @@ serve(async (req) => {
     if (lead?.rast_id) userData.external_id = await sha256(String(lead.rast_id));
     const payload: Record<string, unknown> = {
       event_name: ev.event_name || "Lead",
-      event_time: eventTime(62),
+      // Janela por action_source: physical_store aceita 62 dias (backfill de vendas passadas);
+      // system_generated/other só ~7 dias (senão a Meta recusa o event_time — subcode 2804003).
+      event_time: eventTime(offlineActionSource === "physical_store" ? 62 : 7),
       action_source: offlineActionSource,
       event_id: ev.ticket_id,
       user_data: userData,

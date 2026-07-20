@@ -1,0 +1,6 @@
+-- Rollback de 20260719000058.
+-- Restaura process_pos_followup e fn_ticket_finish_message às versões de 20260719000057
+-- (reaplicar os blocos CREATE OR REPLACE daquele arquivo).
+-- ATENÇÃO: reverter reintroduz (a) a sobre-supressão do pós pelo PRÓPRIO ticket
+-- resolvido-mas-open (52 casos medidos) e (b) o drop silencioso do encerramento por infra.
+-- Sem mudanças de schema nesta migration — só funções.

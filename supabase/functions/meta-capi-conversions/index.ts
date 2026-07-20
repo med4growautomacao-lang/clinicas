@@ -64,7 +64,7 @@ serve(async (req) => {
 
   // Gate: liga/desliga + tamanho do lote + modo Tech Provider.
   const { data: cfgRow } = await service.from("system_settings").select("value").eq("id", "meta_capi_config").maybeSingle();
-  let enabled = false, batch = 25, providerMode = false;
+  let enabled = false, batch = 25, providerMode = false, sendOffline = false, offlineActionSource = "system_generated";
   try {
     const cfg = cfgRow?.value ? JSON.parse(cfgRow.value) : {};
     enabled = cfg.enabled === true;
@@ -72,6 +72,9 @@ serve(async (req) => {
     // provider_mode: a plataforma é Tech Provider → o token de plataforma acessa as WABAs de todos
     // os clientes; ele passa à frente do token da clínica. Default false = clínica-primeiro (interim).
     providerMode = cfg.provider_mode === true;
+    // send_offline: leads SEM ctwa_clid (orgânicos) viram conversão OFFLINE no pixel (casa por PII).
+    sendOffline = cfg.send_offline === true;
+    if (typeof cfg.offline_action_source === "string" && cfg.offline_action_source) offlineActionSource = cfg.offline_action_source;
   } catch { /* config malformada → tratado como desligado */ }
   if (!enabled) return json({ ok: true, skipped: "disabled" });
 
@@ -94,8 +97,8 @@ serve(async (req) => {
   const ticketIds = [...new Set(pend.map((p) => p.ticket_id))];
 
   const [{ data: clinics }, { data: leads }, { data: convs }, { data: tickets }, { data: platTokenRaw }] = await Promise.all([
-    service.from("clinics").select("id, meta_waba_id, meta_capi_dataset_id, meta_token").in("id", clinicIds),
-    leadIds.length ? service.from("leads").select("id, phone, email, ctwa_clid, rast_id").in("id", leadIds) : Promise.resolve({ data: [] as any[] }),
+    service.from("clinics").select("id, meta_waba_id, meta_capi_dataset_id, meta_token, meta_pixel_id, organization_id").in("id", clinicIds),
+    leadIds.length ? service.from("leads").select("id, name, phone, email, ctwa_clid, rast_id").in("id", leadIds) : Promise.resolve({ data: [] as any[] }),
     service.from("conversions").select("ticket_id, value, converted_at").in("ticket_id", ticketIds).order("converted_at", { ascending: false }),
     service.from("tickets").select("id, outcome_at").in("id", ticketIds),
     service.rpc("get_meta_cloud_secret", { p_name: "META_CLOUD_TOKEN" }),
@@ -111,6 +114,18 @@ serve(async (req) => {
   // Conversão mais recente por ticket (já veio ordenado desc).
   const convByTicket = new Map<string, any>();
   for (const c of convs ?? []) if (!convByTicket.has(c.ticket_id)) convByTicket.set(c.ticket_id, c);
+
+  // Token do caminho OFFLINE (pixel = coisa de anúncio/métricas): clínica → org → plataforma.
+  // Diferente do CTWA (que usa o token do Tech Provider via pickToken) — o pixel pertence à conta de
+  // anúncios, então o token de métricas (clínica/org) é quem costuma ter acesso a ele.
+  const orgIds = [...new Set((clinics ?? []).map((c: any) => c.organization_id).filter(Boolean))] as string[];
+  const orgTokenById = new Map<string, string>();
+  if (sendOffline && orgIds.length) {
+    const { data: orgs } = await service.from("organizations").select("id, meta_ad_token").in("id", orgIds);
+    for (const o of orgs ?? []) if (o.meta_ad_token) orgTokenById.set(o.id, String(o.meta_ad_token).trim());
+  }
+  const offlineToken = (c: any): string =>
+    (c?.meta_token ?? "").trim() || (c?.organization_id ? (orgTokenById.get(c.organization_id) ?? "") : "") || platformToken;
 
   // Auto-provisiona o dataset a partir da WABA quando faltar (1×/clínica; cacheia em clinics). POST
   // /{waba}/dataset é IDEMPOTENTE: cria se não existe, senão devolve o id atual (precisa do escopo
@@ -140,118 +155,144 @@ serve(async (req) => {
   }
 
   const nowSec = Math.floor(Date.now() / 1000);
-  const loggedMissingConfig = new Set<string>();   // 1 log por clínica por execução
+  const loggedMissingConfig = new Set<string>();   // 1 log por clínica/caminho por execução
   let sent = 0, skipped = 0, errored = 0;
+
+  // Envia 1 evento (para um dataset da WABA OU um pixel) e trata a resposta: sucesso, ou retry/erro
+  // na Central. Reusado pelos dois caminhos (CTWA e offline), com o MESMO contrato de status/tentativas.
+  const deliverAndRecord = async (
+    evId: string, clinicId: string, ticketId: string, targetId: string, token: string, payload: unknown, kind: string,
+  ): Promise<"sent" | "error"> => {
+    const bumpFail = async (errMsg: string, jResp: unknown, status: number | null) => {
+      const { data: cur } = await service.from("meta_capi_events").select("attempts").eq("id", evId).maybeSingle();
+      const attemptsNow = ((cur?.attempts as number) ?? 0) + 1;
+      const giveUp = attemptsNow >= MAX_ATTEMPTS;
+      await service.from("meta_capi_events").update({
+        status: giveUp ? "error" : "pending", attempts: attemptsNow, last_error: errMsg, meta_response: jResp ?? null,
+      }).eq("id", evId);
+      await registrar("envio_recusado",
+        `A Meta recusou o evento de conversão (${kind}${status ? ", " + status : ""})` + (giveUp ? " — desistindo após várias tentativas" : ""),
+        giveUp ? "error" : "warn", clinicId, { ticket_id: ticketId, kind, tentativa: attemptsNow, erro: errMsg });
+    };
+    try {
+      const resp = await fetch(`${GRAPH}/${GRAPH_VERSION}/${targetId}/events`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ data: [payload] }),
+      });
+      const j = await resp.json().catch(() => ({}));
+      if (!resp.ok || j?.error) {
+        await bumpFail(j?.error?.error_user_msg || j?.error?.message || `HTTP ${resp.status}`, j, resp.status);
+        return "error";
+      }
+      await service.from("meta_capi_events").update({
+        status: "sent", sent_at: new Date().toISOString(), meta_response: j ?? null, last_error: null,
+      }).eq("id", evId);
+      return "sent";
+    } catch (e) {
+      await bumpFail(String(e), null, null);
+      return "error";
+    }
+  };
 
   for (const ev of pend) {
     const clinic: any = clinicById.get(ev.clinic_id);
     const lead: any = ev.lead_id ? leadById.get(ev.lead_id) : null;
 
-    const dataset = (clinic?.meta_capi_dataset_id ?? "").trim();
-    const waba = (clinic?.meta_waba_id ?? "").trim();
-    const token = pickToken((clinic?.meta_token ?? "").trim());
-
-    // Gate de config: clínica sem WABA/dataset/token ainda não pode enviar. Marca skipped e loga
-    // (1×/clínica) — o go-live é: resolver WABA (edge meta-waba-discover) → só então enabled=true.
-    if (!dataset || !waba || !token) {
-      await service.from("meta_capi_events").update({
-        status: "skipped", last_error: "clínica sem WABA/dataset/token de CAPI configurados",
-      }).eq("id", ev.id);
-      if (!loggedMissingConfig.has(ev.clinic_id)) {
-        loggedMissingConfig.add(ev.clinic_id);
-        await registrar("clinica_sem_config", "Conversão pronta mas a clínica não tem WABA/dataset CAPI configurados",
-          "warn", ev.clinic_id, { tem_dataset: !!dataset, tem_waba: !!waba, tem_token: !!token });
-      }
-      skipped++;
-      continue;
-    }
-
-    // ctwa_clid é a chave determinística do CTWA. Sem ele (lead orgânico / não-anúncio) o evento de
-    // mensageria não atribui — pulamos sem poluir a Central (é esperado e de alto volume).
-    const clid = (lead?.ctwa_clid ?? "").trim();
-    if (!clid) {
-      await service.from("meta_capi_events").update({
-        status: "skipped", last_error: "lead sem ctwa_clid (não veio de anúncio Click-to-WhatsApp)",
-      }).eq("id", ev.id);
-      skipped++;
-      continue;
-    }
-
-    // event_time: hora real da conversão, mas nunca no futuro e nunca fora da janela de 7 dias
-    // (a Meta rejeita eventos antigos) — nesse caso reportamos "agora".
     const conv = convByTicket.get(ev.ticket_id);
     const ticket: any = ticketById.get(ev.ticket_id);
     const rawTime = conv?.converted_at ?? ticket?.outcome_at ?? null;
-    let et = rawTime ? Math.floor(new Date(rawTime).getTime() / 1000) : nowSec;
-    if (!Number.isFinite(et) || et > nowSec || et < nowSec - 7 * 24 * 3600) et = nowSec;
-
-    // user_data — em ordem de importância. clid e waba em claro; PII com SHA-256.
-    const userData: Record<string, unknown> = {
-      whatsapp_business_account_id: waba,
-      ctwa_clid: clid,
+    const value = (conv?.value != null && Number.isFinite(Number(conv.value)) && Number(conv.value) > 0) ? Number(conv.value) : null;
+    // event_time real, nunca no futuro nem fora da janela (mensageria 7d; offline 62d) → senão "agora".
+    const eventTime = (windowDays: number) => {
+      let t = rawTime ? Math.floor(new Date(rawTime).getTime() / 1000) : nowSec;
+      if (!Number.isFinite(t) || t > nowSec || t < nowSec - windowDays * 24 * 3600) t = nowSec;
+      return t;
     };
-    const ph = phoneDigits(lead?.phone);
-    if (ph) userData.ph = await sha256(ph);
-    if (lead?.email) userData.em = await sha256(String(lead.email));
-    if (lead?.rast_id) userData.external_id = await sha256(String(lead.rast_id));
 
-    const event: Record<string, unknown> = {
-      event_name: ev.event_name || "Purchase",
-      event_time: et,
-      action_source: "business_messaging",
-      messaging_channel: "whatsapp",
-      event_id: ev.ticket_id,                 // dedup do lado Meta
-      user_data: userData,
-    };
-    // value + currency: habilita otimização por ROAS. Só quando há valor de venda registrado.
-    const value = conv?.value != null ? Number(conv.value) : null;
-    if (value != null && Number.isFinite(value) && value > 0) {
-      event.custom_data = { currency: "BRL", value, order_id: ev.ticket_id };
-    }
+    const clid = (lead?.ctwa_clid ?? "").trim();
 
-    try {
-      const resp = await fetch(`${GRAPH}/${GRAPH_VERSION}/${dataset}/events`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ data: [event] }),
-      });
-      const j = await resp.json().catch(() => ({}));
-
-      if (!resp.ok || j?.error) {
-        const errMsg = j?.error?.error_user_msg || j?.error?.message || `HTTP ${resp.status}`;
-        // Busca attempts atual para decidir se ainda tenta de novo ou desiste.
-        const { data: cur } = await service.from("meta_capi_events").select("attempts").eq("id", ev.id).maybeSingle();
-        const attemptsNow = (cur?.attempts ?? 0) + 1;
-        const giveUp = attemptsNow >= MAX_ATTEMPTS;
+    // ── Caminho 1: CTWA (lead veio de anúncio) → dataset da WABA, action_source business_messaging ──
+    if (clid) {
+      const dataset = (clinic?.meta_capi_dataset_id ?? "").trim();
+      const waba = (clinic?.meta_waba_id ?? "").trim();
+      const token = pickToken((clinic?.meta_token ?? "").trim());
+      if (!dataset || !waba || !token) {
         await service.from("meta_capi_events").update({
-          status: giveUp ? "error" : "pending",
-          attempts: attemptsNow,
-          last_error: errMsg,
-          meta_response: j ?? null,
+          status: "skipped", last_error: "clínica sem WABA/dataset/token de CAPI configurados",
         }).eq("id", ev.id);
-        await registrar("envio_recusado",
-          `A Meta recusou o evento de conversão (${resp.status})` + (giveUp ? " — desistindo após várias tentativas" : ""),
-          giveUp ? "error" : "warn", ev.clinic_id,
-          { ticket_id: ev.ticket_id, tentativa: attemptsNow, erro: errMsg, codigo: j?.error?.code });
-        errored++;
+        if (!loggedMissingConfig.has(ev.clinic_id + ":ctwa")) {
+          loggedMissingConfig.add(ev.clinic_id + ":ctwa");
+          await registrar("clinica_sem_config", "Conversão pronta mas a clínica não tem WABA/dataset CAPI configurados",
+            "warn", ev.clinic_id, { tem_dataset: !!dataset, tem_waba: !!waba, tem_token: !!token });
+        }
+        skipped++;
         continue;
       }
-
-      await service.from("meta_capi_events").update({
-        status: "sent", sent_at: new Date().toISOString(), meta_response: j ?? null, last_error: null,
-      }).eq("id", ev.id);
-      sent++;
-    } catch (e) {
-      const { data: cur } = await service.from("meta_capi_events").select("attempts").eq("id", ev.id).maybeSingle();
-      const attemptsNow = (cur?.attempts ?? 0) + 1;
-      const giveUp = attemptsNow >= MAX_ATTEMPTS;
-      await service.from("meta_capi_events").update({
-        status: giveUp ? "error" : "pending", attempts: attemptsNow, last_error: String(e),
-      }).eq("id", ev.id);
-      await registrar("envio_indisponivel", "Não foi possível falar com a Graph API para enviar a conversão",
-        giveUp ? "error" : "warn", ev.clinic_id, { ticket_id: ev.ticket_id, tentativa: attemptsNow, erro: String(e) });
-      errored++;
+      const userData: Record<string, unknown> = { whatsapp_business_account_id: waba, ctwa_clid: clid };
+      const ph = phoneDigits(lead?.phone);
+      if (ph) userData.ph = await sha256(ph);
+      if (lead?.email) userData.em = await sha256(String(lead.email));
+      if (lead?.rast_id) userData.external_id = await sha256(String(lead.rast_id));
+      const payload: Record<string, unknown> = {
+        event_name: ev.event_name || "Purchase",
+        event_time: eventTime(7),
+        action_source: "business_messaging",
+        messaging_channel: "whatsapp",
+        event_id: ev.ticket_id,                 // dedup do lado Meta
+        user_data: userData,
+      };
+      if (value != null) payload.custom_data = { currency: "BRL", value, order_id: ev.ticket_id };
+      const r = await deliverAndRecord(ev.id, ev.clinic_id, ev.ticket_id, dataset, token, payload, "ctwa");
+      if (r === "sent") sent++; else errored++;
+      continue;
     }
+
+    // ── Caminho 2: OFFLINE (lead orgânico / sem clique) → pixel, casa por PII (telefone/e-mail/nome) ──
+    // A Meta dobrou a Offline Conversions API na Conversions API unificada (mai/2025): action_source
+    // system_generated/physical_store, sem ctwa_clid, no pixel (dataset unificado). Só se ligado.
+    if (!sendOffline) {
+      await service.from("meta_capi_events").update({
+        status: "skipped", last_error: "lead sem ctwa_clid e envio offline desligado",
+      }).eq("id", ev.id);
+      skipped++;
+      continue;
+    }
+    const pixel = (clinic?.meta_pixel_id ?? "").trim();
+    const offTok = offlineToken(clinic);
+    const ph = phoneDigits(lead?.phone);
+    const hasMatch = !!ph || !!lead?.email;
+    if (!pixel || !offTok || !hasMatch) {
+      await service.from("meta_capi_events").update({
+        status: "skipped", last_error: "offline sem pixel/token/chave de match (telefone ou e-mail)",
+      }).eq("id", ev.id);
+      if (!loggedMissingConfig.has(ev.clinic_id + ":off")) {
+        loggedMissingConfig.add(ev.clinic_id + ":off");
+        await registrar("offline_sem_config", "Conversão offline pronta mas falta pixel/token/chave de match",
+          "warn", ev.clinic_id, { tem_pixel: !!pixel, tem_token: !!offTok, tem_match: hasMatch });
+      }
+      skipped++;
+      continue;
+    }
+    const userData: Record<string, unknown> = {};
+    if (ph) userData.ph = await sha256(ph);
+    if (lead?.email) userData.em = await sha256(String(lead.email));
+    const nameParts = String(lead?.name ?? "").trim().split(/\s+/).filter(Boolean);
+    if (nameParts.length) {
+      userData.fn = await sha256(nameParts[0]);
+      if (nameParts.length > 1) userData.ln = await sha256(nameParts[nameParts.length - 1]);
+    }
+    if (lead?.rast_id) userData.external_id = await sha256(String(lead.rast_id));
+    const payload: Record<string, unknown> = {
+      event_name: ev.event_name || "Lead",
+      event_time: eventTime(62),
+      action_source: offlineActionSource,
+      event_id: ev.ticket_id,
+      user_data: userData,
+    };
+    if (value != null) payload.custom_data = { currency: "BRL", value, order_id: ev.ticket_id };
+    const r = await deliverAndRecord(ev.id, ev.clinic_id, ev.ticket_id, pixel, offTok, payload, "offline");
+    if (r === "sent") sent++; else errored++;
   }
 
   return json({ ok: true, processed: pend.length, sent, skipped, errored });

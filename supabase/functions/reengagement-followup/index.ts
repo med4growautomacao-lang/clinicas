@@ -112,6 +112,21 @@ serve(async (req) => {
   if (claimErr) return json({ ok: false, error: claimErr.message }, 500);
   if (!claimed || claimed.length === 0) return json({ ok: true, skipped: "not_claimed" });
 
+  // (1.1) Re-check da direção da última mensagem. O selector já exige last_dir='outbound', mas há
+  // uma janela entre selecionar e chegar aqui: se o lead RESPONDEU nesse meio-tempo, NÃO reengaja
+  // por cima da resposta fresca (parece que o bot ignorou o cliente). Devolve o passo à régua
+  // (followup_count volta ao valor anterior) — quando ele voltar a ficar em silêncio, reentra.
+  const { data: lastMsg } = await supabase
+    .from("chat_messages")
+    .select("direction")
+    .eq("lead_id", lead_id)
+    .order("seq", { ascending: false })
+    .limit(1);
+  if (lastMsg && lastMsg.length > 0 && lastMsg[0].direction === "inbound") {
+    await supabase.from("leads").update({ followup_count: v_expected }).eq("id", lead_id);
+    return json({ ok: true, skipped: "lead_replied" });
+  }
+
   const logFail = async (reason: string) => {
     await supabase.from("automation_logs").insert({
       clinic_id, lead_id, type: "followup", status: "failed",

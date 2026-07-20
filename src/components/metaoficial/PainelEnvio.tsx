@@ -64,7 +64,7 @@ export function PainelEnvio({ clinicId, clinicName, channels, templates, onSent 
   const channelOptions = connected.map((c) => ({ value: c.id, label: c.label || c.phone_display || c.phone_number_id }));
 
   return (
-    <div className="max-w-2xl mx-auto bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+    <div className="max-w-2xl mx-auto bg-white rounded-2xl border border-slate-200 shadow-sm">
       <div className="px-6 py-5 border-b border-slate-100 text-center">
         <h3 className="text-xl font-bold text-slate-900">Painel de Disparo</h3>
         <p className="text-xs font-bold uppercase tracking-widest text-teal-600 mt-0.5">{clinicName || "—"}</p>

@@ -117,7 +117,7 @@ export function CanaisTemplates({ clinicId, clinicName, channels, templates, sen
 /* ───────────────────────────── Card genérico ───────────────────────────── */
 function Card({ icon: Icon, title, subtitle, children, action }: { icon: any; title: string; subtitle?: string; children: React.ReactNode; action?: React.ReactNode }) {
   return (
-    <section className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+    <section className="bg-white rounded-2xl border border-slate-200 shadow-sm">
       <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-teal-50 flex items-center justify-center">
@@ -143,6 +143,9 @@ function ConnectionStation({
   const [phoneDisplay, setPhoneDisplay] = useState("");
   const [phoneNumberId, setPhoneNumberId] = useState("");
   const [busy, setBusy] = useState(false);
+  const [adding, setAdding] = useState(false);
+
+  const resetForm = () => { setLabel(""); setPhoneDisplay(""); setPhoneNumberId(""); };
 
   const connect = async () => {
     if (!phoneNumberId.trim()) { showToast("Informe o Phone Number ID.", "error"); return; }
@@ -159,7 +162,8 @@ function ConnectionStation({
         showToast(error.code === "23505" ? "Este Phone Number ID já está conectado." : "Falha ao conectar o canal.", "error");
       } else {
         showToast("Canal conectado!", "success");
-        setLabel(""); setPhoneDisplay(""); setPhoneNumberId("");
+        resetForm();
+        setAdding(false);
         reload();
       }
     } finally { setBusy(false); }
@@ -197,18 +201,42 @@ function ConnectionStation({
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Input label="Identificação (opcional)" value={label} onChange={setLabel} placeholder="Ex.: Meta Tester" />
-        <Input label="Número (DDD + número)" value={phoneDisplay} onChange={setPhoneDisplay} placeholder="Ex.: 15551940324" />
-        <Input label="Phone Number ID" value={phoneNumberId} onChange={setPhoneNumberId} placeholder="Do Gerenciador do WhatsApp" mono />
-      </div>
-      <button
-        onClick={connect}
-        disabled={busy}
-        className="mt-4 flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-teal-600 hover:bg-teal-700 disabled:opacity-40 transition-all shadow-sm"
-      >
-        {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Conectar canal
-      </button>
+      {channels.length === 0 || adding ? (
+        <div className={cn("rounded-xl border border-slate-100 bg-slate-50/50 p-4", channels.length > 0 && "mt-1")}>
+          <p className="text-xs font-bold text-slate-600 mb-3">
+            {channels.length === 0 ? "Conectar canal (remetente)" : "Adicionar outro número"}
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Input label="Identificação (opcional)" value={label} onChange={setLabel} placeholder="Ex.: Meta Tester" />
+            <Input label="Número (DDD + número)" value={phoneDisplay} onChange={setPhoneDisplay} placeholder="Ex.: 15551940324" />
+            <Input label="Phone Number ID" value={phoneNumberId} onChange={setPhoneNumberId} placeholder="Do Gerenciador do WhatsApp" mono />
+          </div>
+          <div className="flex items-center gap-2 mt-4">
+            <button
+              onClick={connect}
+              disabled={busy}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-teal-600 hover:bg-teal-700 disabled:opacity-40 transition-all shadow-sm"
+            >
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Conectar canal
+            </button>
+            {channels.length > 0 && (
+              <button
+                onClick={() => { setAdding(false); resetForm(); }}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm font-bold transition-all"
+              >
+                Cancelar
+              </button>
+            )}
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => setAdding(true)}
+          className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl border border-dashed border-slate-300 text-slate-500 hover:border-teal-300 hover:text-teal-600 hover:bg-teal-50/40 text-sm font-bold transition-all"
+        >
+          <Plus className="w-4 h-4" /> Adicionar outro número
+        </button>
+      )}
     </Card>
   );
 }

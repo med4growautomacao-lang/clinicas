@@ -86,27 +86,23 @@ serve(async (req) => {
   ]);
   if (isAdmin !== true && isSuper !== true) return json({ ok: false, error: "forbidden" }, 403);
 
-  // (3) Credenciais: preferir as da ORGANIZAÇÃO da clínica (configuradas na UI: Gestão Org ›
-  // Configurações › API Meta), com fallback para secret de env. Lidas só pelo service role.
+  // (3) Credenciais globais de plataforma, guardadas no Vault (Super Admin › API Meta) e lidas
+  // só pelo service role. Fallback para secret de env. Nunca vão ao browser.
   let token = "";
-  let orgWaba = "";
+  let vaultWaba = "";
   {
-    const { data: clinicRow } = await service.from("clinics").select("organization_id").eq("id", clinicId).single();
-    if (clinicRow?.organization_id) {
-      const { data: org } = await service
-        .from("organizations")
-        .select("meta_cloud_token, meta_cloud_waba_id")
-        .eq("id", clinicRow.organization_id)
-        .single();
-      token = (org?.meta_cloud_token || "").trim();
-      orgWaba = (org?.meta_cloud_waba_id || "").trim();
-    }
+    const [{ data: tk }, { data: wb }] = await Promise.all([
+      service.rpc("get_meta_cloud_secret", { p_name: "META_CLOUD_TOKEN" }),
+      service.rpc("get_meta_cloud_secret", { p_name: "META_CLOUD_WABA_ID" }),
+    ]);
+    token = (typeof tk === "string" ? tk : "").trim();
+    vaultWaba = (typeof wb === "string" ? wb : "").trim();
   }
   if (!token) token = Deno.env.get("META_CLOUD_TOKEN") ?? "";
-  const envWaba = orgWaba || (Deno.env.get("META_CLOUD_WABA_ID") ?? "");
+  const envWaba = vaultWaba || (Deno.env.get("META_CLOUD_WABA_ID") ?? "");
   if (!token) {
-    await registrarErro("sem_token", "Token da API Meta não configurado (org nem env)", "error", {});
-    return json({ ok: false, error: "not_configured", detail: "Token da API Meta não configurado. Preencha em Gestão Org › Configurações › API Meta." }, 200);
+    await registrarErro("sem_token", "Token da API Meta não configurado (Vault nem env)", "error", {});
+    return json({ ok: false, error: "not_configured", detail: "Token da API Meta não configurado. Preencha em Super Admin › Configurações › API Meta." }, 200);
   }
   const authGraph = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 

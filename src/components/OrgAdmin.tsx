@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
-import { Building2, Users, ArrowRight, LogIn, Loader2, X, Eye, EyeOff, Search, MoreVertical, UserPlus, Wifi, WifiOff, Settings, UserCheck, TrendingUp, UserCog, ChevronDown, Check, Trash2, MessageCircle, Globe, FileText, BarChart3, Search as SearchIcon, LayoutGrid, List as ListIcon, Stethoscope, Briefcase, AlertCircle, Plus, Building, Activity, ListTodo, BadgeCheck } from "lucide-react";
+import { Building2, Users, ArrowRight, LogIn, Loader2, X, Eye, EyeOff, Search, MoreVertical, UserPlus, Wifi, WifiOff, Settings, UserCheck, TrendingUp, UserCog, ChevronDown, Check, Trash2, MessageCircle, Globe, FileText, BarChart3, Search as SearchIcon, LayoutGrid, List as ListIcon, Stethoscope, Briefcase, AlertCircle, Plus, Building, Activity, ListTodo } from "lucide-react";
 import { OrgTasks } from "./OrgTasks";
 import { OrgMetrics } from "./OrgMetrics";
 import { OrgWhatsapp } from "./OrgWhatsapp";
@@ -100,13 +100,12 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
   const [orgUsers, setOrgUsers] = useState<OrgUser[]>([]);
   const [loadingClinics, setLoadingClinics] = useState(true);
   const [activeSubTab, setActiveSubTab] = useState<"clinics" | "metrics" | "users" | "settings" | "tasks">(() => (localStorage.getItem('orgAdminTab') as any) || "clinics");
-  // Sub-abas de Configurações: cada função em uma aba (WhatsApp / Relatórios / Google Ads / API Meta)
-  const [settingsTab, setSettingsTab] = useState<"whatsapp" | "relatorios" | "googleads" | "apimeta">(() => (localStorage.getItem('orgSettingsTab') as any) || "whatsapp");
-  const [orgSettings, setOrgSettings] = useState<{ google_ad_mcc_id: string; google_ad_mcc_token: string; meta_cloud_waba_id: string; meta_cloud_token: string }>({ google_ad_mcc_id: '', google_ad_mcc_token: '', meta_cloud_waba_id: '', meta_cloud_token: '' });
+  // Sub-abas de Configurações: cada função em uma aba (WhatsApp / Relatórios / Google Ads)
+  const [settingsTab, setSettingsTab] = useState<"whatsapp" | "relatorios" | "googleads">(() => (localStorage.getItem('orgSettingsTab') as any) || "whatsapp");
+  const [orgSettings, setOrgSettings] = useState<{ google_ad_mcc_id: string; google_ad_mcc_token: string }>({ google_ad_mcc_id: '', google_ad_mcc_token: '' });
   const [orgSettingsSaving, setOrgSettingsSaving] = useState(false);
   const [orgSettingsSaved, setOrgSettingsSaved] = useState(false);
   const [tokenFocused, setTokenFocused] = useState(false);
-  const [metaTokenFocused, setMetaTokenFocused] = useState(false);
   const [clinicSearch, setClinicSearch] = useState('');
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [menuDropUp, setMenuDropUp] = useState(false);
@@ -252,14 +251,9 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
     fetchClinics();
     fetchOrgUsers();
     if (profile?.organization_id) {
-      supabase.from('organizations').select('google_ad_mcc_id, google_ad_mcc_token, meta_cloud_waba_id, meta_cloud_token').eq('id', profile.organization_id).single()
+      supabase.from('organizations').select('google_ad_mcc_id, google_ad_mcc_token').eq('id', profile.organization_id).single()
         .then(({ data }) => {
-          if (data) setOrgSettings({
-            google_ad_mcc_id: data.google_ad_mcc_id || '',
-            google_ad_mcc_token: data.google_ad_mcc_token || '',
-            meta_cloud_waba_id: data.meta_cloud_waba_id || '',
-            meta_cloud_token: data.meta_cloud_token || '',
-          });
+          if (data) setOrgSettings({ google_ad_mcc_id: data.google_ad_mcc_id || '', google_ad_mcc_token: data.google_ad_mcc_token || '' });
         });
     }
   }, [fetchClinics, fetchOrgUsers, profile?.organization_id]);
@@ -302,8 +296,6 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
     await supabase.from('organizations').update({
       google_ad_mcc_id: orgSettings.google_ad_mcc_id || null,
       google_ad_mcc_token: orgSettings.google_ad_mcc_token || null,
-      meta_cloud_waba_id: orgSettings.meta_cloud_waba_id || null,
-      meta_cloud_token: orgSettings.meta_cloud_token || null,
     }).eq('id', profile.organization_id);
     setOrgSettingsSaving(false);
     setOrgSettingsSaved(true);
@@ -1212,7 +1204,6 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
               { id: "whatsapp", label: "WhatsApp da Org", Icon: MessageCircle },
               { id: "relatorios", label: "Relatórios", Icon: FileText },
               { id: "googleads", label: "Google Ads", Icon: TrendingUp },
-              { id: "apimeta", label: "API Meta", Icon: BadgeCheck },
             ] as const).map((t) => (
               <button
                 key={t.id}
@@ -1293,63 +1284,6 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                 onClick={handleSaveOrgSettings}
                 disabled={orgSettingsSaving}
                 className="flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-sm font-bold rounded-xl transition-all shadow-sm"
-              >
-                {orgSettingsSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                {orgSettingsSaved ? 'Salvo!' : 'Salvar'}
-              </button>
-            </div>
-          </div>
-          )}
-
-          {settingsTab === "apimeta" && (
-          <div className="max-w-xl bg-white rounded-2xl border border-slate-200 overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-3">
-              <div className="w-8 h-8 bg-teal-50 rounded-lg flex items-center justify-center">
-                <BadgeCheck className="w-4 h-4 text-teal-600" />
-              </div>
-              <div>
-                <p className="text-sm font-bold text-slate-800">API Oficial Meta — WhatsApp Cloud</p>
-                <p className="text-xs text-slate-400">Token e WABA da organização — usados por <b>todas</b> as clínicas no plano Meta Tester para criar e enviar templates</p>
-              </div>
-            </div>
-            <div className="p-6 space-y-5">
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">WABA ID</label>
-                <input
-                  type="text"
-                  value={orgSettings.meta_cloud_waba_id}
-                  onChange={e => setOrgSettings(s => ({ ...s, meta_cloud_waba_id: e.target.value }))}
-                  placeholder="Ex.: 882390987724948"
-                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-700 placeholder:text-slate-400 focus:ring-2 focus:ring-teal-100 focus:border-teal-400 outline-none transition-all"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Token de Acesso (Meta)</label>
-                {!metaTokenFocused && orgSettings.meta_cloud_token ? (
-                  <div
-                    onClick={() => setMetaTokenFocused(true)}
-                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-700 bg-white cursor-text tracking-widest"
-                  >
-                    {orgSettings.meta_cloud_token.slice(0, 3)}{'•'.repeat(Math.max(0, Math.min(orgSettings.meta_cloud_token.length - 3, 24)))}
-                  </div>
-                ) : (
-                  <input
-                    type="password"
-                    autoFocus={metaTokenFocused}
-                    value={orgSettings.meta_cloud_token}
-                    onChange={e => setOrgSettings(s => ({ ...s, meta_cloud_token: e.target.value }))}
-                    onBlur={() => setMetaTokenFocused(false)}
-                    placeholder="System User token da WhatsApp Cloud API"
-                    autoComplete="new-password"
-                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-700 placeholder:text-slate-400 focus:ring-2 focus:ring-teal-100 focus:border-teal-400 outline-none transition-all"
-                  />
-                )}
-                <p className="text-[11px] text-slate-400">Precisa das permissões whatsapp_business_messaging + whatsapp_business_management.</p>
-              </div>
-              <button
-                onClick={handleSaveOrgSettings}
-                disabled={orgSettingsSaving}
-                className="flex items-center gap-2 px-5 py-2.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl transition-all shadow-sm"
               >
                 {orgSettingsSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                 {orgSettingsSaved ? 'Salvo!' : 'Salvar'}

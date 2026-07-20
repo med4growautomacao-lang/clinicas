@@ -15,6 +15,7 @@ import { matchesSearch } from '../lib/search';
 import { ErrorCenter } from './ErrorCenter';
 import { MediaAIPanel } from './MediaAIPanel';
 import { GoogleAdsSecretsPanel } from './GoogleAdsSecretsPanel';
+import { MetaCloudSecretsPanel } from './MetaCloudSecretsPanel';
 import { SpendSyncConfigPanel } from './SpendSyncConfigPanel';
 import { HubMigrationPanel } from './HubMigrationPanel';
 
@@ -1103,7 +1104,7 @@ function PromptTemplatesManager() {
 
 // ─── SystemSettingsTab (wrapper com sub-abas) ─────────────────────────────────
 function SystemSettingsTab() {
-  const [subTab, setSubTab] = useState<'prompts' | 'assistant' | 'media' | 'google_ads' | 'hub' | 'vars'>('prompts');
+  const [subTab, setSubTab] = useState<'prompts' | 'assistant' | 'media' | 'google_ads' | 'meta_api' | 'hub' | 'vars'>('prompts');
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl w-fit">
@@ -1112,6 +1113,7 @@ function SystemSettingsTab() {
           { id: 'assistant', label: 'AI Assistente' },
           { id: 'media', label: 'IA de Mídia' },
           { id: 'google_ads', label: 'Investimento (Ads)' },
+          { id: 'meta_api', label: 'API Meta' },
           { id: 'hub', label: 'Migração Hub' },
           { id: 'vars', label: 'Variáveis de Sistema' },
         ].map(t => (
@@ -1126,6 +1128,7 @@ function SystemSettingsTab() {
         : subTab === 'assistant' ? <AIAssistantConfigSection />
         : subTab === 'media' ? <MediaAIPanel />
         : subTab === 'google_ads' ? <div className="space-y-6"><GoogleAdsSecretsPanel /><SpendSyncConfigPanel /></div>
+        : subTab === 'meta_api' ? <MetaCloudSecretsPanel />
         : subTab === 'hub' ? <HubMigrationPanel />
         : <SystemVariablesSection />}
     </div>

@@ -27,3 +27,15 @@ enabled = true
 # Disparada por pg_net a partir de process_reengagement_followup() (sem JWT).
 verify_jwt = false
 entrypoint = "./functions/reengagement-followup/index.ts"
+
+[functions.meta-cloud-api]
+enabled = true
+# Chamada pelo frontend (functions.invoke manda o JWT do usuário).
+verify_jwt = true
+entrypoint = "./functions/meta-cloud-api/index.ts"
+
+[functions.meta-cloud-webhook]
+enabled = true
+# Callback da WhatsApp Cloud API oficial — a Meta chama sem Authorization.
+verify_jwt = false
+entrypoint = "./functions/meta-cloud-webhook/index.ts"

@@ -14,6 +14,7 @@ import { UserProfile } from './components/UserProfile';
 import { TeamManagement } from './components/TeamManagement';
 import { Production } from './components/production/Production';
 import { OrcamentosCentral } from './components/orcamentos/OrcamentosCentral';
+import { MetaOficial } from './components/metaoficial/MetaOficial';
 import { AIAssistant } from './components/AIAssistant';
 
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -78,7 +79,7 @@ function AppContent() {
     if (loading) return;
     const ROLE_ALLOWED_TABS: Record<string, string[]> = {
       medico: ['appointments', 'medical-records', 'profile'],
-      vendedor: ['dashboard', 'marketing', 'ai-secretary', 'finance', 'settings', 'profile', 'orcamentos'],
+      vendedor: ['dashboard', 'marketing', 'ai-secretary', 'finance', 'settings', 'profile', 'orcamentos', 'meta-oficial'],
     };
     const allowed = ROLE_ALLOWED_TABS[userRole];
     if (allowed && !allowed.includes(activeTab)) {
@@ -114,6 +115,7 @@ function AppContent() {
     { id: 'team',            el: <TeamManagement /> },
     { id: 'production',      el: <Production /> },
     { id: 'orcamentos',      el: <OrcamentosCentral /> },
+    { id: 'meta-oficial',    el: <MetaOficial /> },
   ];
 
   return (

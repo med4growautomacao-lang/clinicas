@@ -17,6 +17,7 @@ import {
   ChevronsUpDown,
   Factory,
   FileText,
+  BadgeCheck,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -82,8 +83,18 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
   const effectiveRole = isOrgUser && activeClinicId ? 'gestor' : userRole;
 
   const isOutro = activeClinicCategory === 'outro';
+  // Plano "Meta Tester": barra reduzida a 3 módulos (API Oficial Meta + Comercial + Marketing).
+  const isMetaTester = activeClinicCategory === 'meta_tester';
+  const META_TESTER_TABS = ['meta-oficial', 'ai-secretary', 'marketing'];
+
+  const brand = isMetaTester
+    ? { name: 'Meta Tester', tag: 'API OFICIAL', Icon: BadgeCheck, box: 'bg-blue-600 shadow-blue-100' }
+    : isOutro
+    ? { name: 'WakeDesk', tag: 'WAKEMARKETING', Icon: Building2, box: 'bg-slate-700 shadow-slate-200' }
+    : { name: 'MedDesk', tag: 'MED4GROW', Icon: Stethoscope, box: 'bg-teal-600 shadow-teal-100' };
 
   const allNavItems = [
+    { id: "meta-oficial", label: "API Oficial Meta", icon: BadgeCheck, color: "text-blue-600", roles: ['gestor', 'medico_gestor', 'secretaria', 'vendedor'], metaTesterOnly: true },
     { id: "dashboard", label: "Visão Geral", icon: LayoutDashboard, color: "text-emerald-600", roles: ['gestor', 'medico_gestor', 'secretaria', 'vendedor'] },
     { id: "marketing", label: "Marketing", icon: BarChart3, color: "text-cyan-600", roles: ['gestor', 'medico_gestor', 'vendedor'] },
     { id: "ai-secretary", label: "Comercial", icon: Bot, color: "text-teal-600", roles: ['gestor', 'medico_gestor', 'secretaria', 'vendedor'] },
@@ -103,18 +114,22 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
   const navItems = allNavItems
     .filter(item => item.roles.includes(effectiveRole) || (item.id === 'org-admin' && isOrgUser))
     .filter(item => !(isOutro && (item as any).clinicOnly))
-    .filter(item => !((item as any).outroOnly && !isOutro));
+    .filter(item => !((item as any).outroOnly && !isOutro))
+    // "API Oficial Meta" só existe no plano Meta Tester...
+    .filter(item => !((item as any).metaTesterOnly && !isMetaTester))
+    // ...e, no plano Meta Tester, a barra fica reduzida a esses 3 módulos.
+    .filter(item => !isMetaTester || META_TESTER_TABS.includes(item.id));
 
   return (
     <div className="w-72 bg-white flex flex-col h-full border-r border-slate-200 shadow-sm z-10 transition-all duration-200">
       <div className="p-8 pb-4">
         <div className="flex items-center gap-3">
-          <div className={cn("w-12 h-12 rounded-xl flex items-center justify-center text-white shadow-lg", isOutro ? "bg-slate-700 shadow-slate-200" : "bg-teal-600 shadow-teal-100")}>
-            {isOutro ? <Building2 className="w-7 h-7" /> : <Stethoscope className="w-7 h-7" />}
+          <div className={cn("w-12 h-12 rounded-xl flex items-center justify-center text-white shadow-lg", brand.box)}>
+            <brand.Icon className="w-7 h-7" />
           </div>
           <div className="flex flex-col">
-            <span className="text-xl font-black text-slate-900 tracking-tight">{isOutro ? 'WakeDesk' : 'MedDesk'}</span>
-            <span className="text-[10px] font-bold text-teal-600 uppercase tracking-widest -mt-1">{isOutro ? 'WAKEMARKETING' : 'MED4GROW'}</span>
+            <span className="text-xl font-black text-slate-900 tracking-tight">{brand.name}</span>
+            <span className={cn("text-[10px] font-bold uppercase tracking-widest -mt-1", isMetaTester ? "text-blue-600" : "text-teal-600")}>{brand.tag}</span>
           </div>
         </div>
       </div>

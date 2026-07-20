@@ -7,6 +7,7 @@ import { supabase } from "../../lib/supabase";
 import { useToast } from "../ui/toast";
 import { logSystemError } from "../../hooks/useSupabase";
 import { CustomDropdown } from "../CustomDropdown";
+import { invokeMetaCloud } from "./invoke";
 import {
   CheckCircle2, Clock, XCircle, Unplug, Loader2, PlugZap, Code2, RefreshCw,
   Settings2, History, Plus, Smartphone, FileText,
@@ -255,9 +256,7 @@ function TemplateEngineer({
     if (!name.trim() || !content.trim()) { showToast("Preencha identificação e payload do template.", "error"); return; }
     setBusy(true);
     try {
-      const { data, error } = await supabase.functions.invoke("meta-cloud-api", {
-        body: { action: "create_template", clinic_id: clinicId, name, language, category, content },
-      });
+      const { data, error } = await invokeMetaCloud({ action: "create_template", clinic_id: clinicId, name, language, category, content });
       if (error) {
         showToast("Falha ao solicitar aprovação (erro de função).", "error");
         logSystemError("META_CLOUD_CREATE_INVOKE_FAIL", "Falha ao invocar create_template", clinicId, { error: error.message }, "warn");
@@ -313,7 +312,7 @@ function SyncButton({
   const sync = async () => {
     setBusy(true);
     try {
-      const { data, error } = await supabase.functions.invoke("meta-cloud-api", { body: { action: "sync_templates", clinic_id: clinicId } });
+      const { data, error } = await invokeMetaCloud({ action: "sync_templates", clinic_id: clinicId });
       if (error || !data?.ok) showToast(data?.detail || "Falha ao sincronizar status.", "error");
       else { showToast(`Status sincronizado (${data.updated} atualizados).`, "success"); reload(); }
     } finally { setBusy(false); }

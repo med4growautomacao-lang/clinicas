@@ -2,11 +2,11 @@
 // Identidade visual do app (card branco, CustomDropdown, botão teal).
 
 import React, { useEffect, useMemo, useState } from "react";
-import { supabase } from "../../lib/supabase";
 import { useToast } from "../ui/toast";
 import { logSystemError } from "../../hooks/useSupabase";
 import { CustomDropdown } from "../CustomDropdown";
 import { CheckCircle2, Send, Loader2, Smartphone } from "lucide-react";
+import { invokeMetaCloud } from "./invoke";
 import type { MetaChannel, MetaTemplate } from "./types";
 
 interface Props {
@@ -39,8 +39,8 @@ export function PainelEnvio({ clinicId, clinicName, channels, templates, onSent 
     if (!template || !channelId) return;
     setSending(true);
     try {
-      const { data, error } = await supabase.functions.invoke("meta-cloud-api", {
-        body: { action: "send_template", clinic_id: clinicId, channel_id: channelId, template_name: template.name, language: template.language, to_phone: phone },
+      const { data, error } = await invokeMetaCloud({
+        action: "send_template", clinic_id: clinicId, channel_id: channelId, template_name: template.name, language: template.language, to_phone: phone,
       });
       if (error) {
         showToast("Falha ao enviar (erro de rede/função).", "error");

@@ -1,12 +1,14 @@
 // Módulo "API Oficial Meta" — WhatsApp Cloud API oficial (Graph API), plano Meta Tester.
-// Duas abas (como nas imagens): Painel de Envio + Canais & Templates.
-// Fonte de dados: tabelas meta_cloud_* escopadas por clinic_id (RLS). Ações que falam com a
-// Meta passam pela edge meta-cloud-api. Tema escuro, self-contained (o resto do app é claro).
+// Duas abas: Painel de Envio + Canais & Templates. Identidade visual do app (tema claro).
+// Dados: tabelas meta_cloud_* escopadas por clinic_id (RLS). Ações que falam com a Meta
+// passam pela edge meta-cloud-api.
 
 import React, { useCallback, useEffect, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../../contexts/AuthContext";
 import { logSystemError } from "../../hooks/useSupabase";
+import { cn } from "@/src/lib/utils";
 import { Send, LayoutGrid, Loader2 } from "lucide-react";
 import { PainelEnvio } from "./PainelEnvio";
 import { CanaisTemplates } from "./CanaisTemplates";
@@ -44,64 +46,85 @@ export function MetaOficial() {
 
   if (!clinicId) {
     return (
-      <div className="min-h-full rounded-3xl bg-[#0a0f1e] flex items-center justify-center text-slate-400 text-sm">
+      <div className="flex items-center justify-center py-24 text-slate-400 text-sm">
         Selecione uma clínica para usar a API Oficial Meta.
       </div>
     );
   }
 
-  return (
-    <div className="min-h-full rounded-3xl bg-[#0a0f1e] text-slate-100 p-6 md:p-10 relative overflow-hidden">
-      {/* brilho de fundo */}
-      <div className="pointer-events-none absolute -top-32 left-1/2 -translate-x-1/2 w-[640px] h-[320px] bg-gradient-to-br from-blue-600/20 to-cyan-400/10 blur-3xl rounded-full" />
+  const tabs = [
+    { id: "envio" as const, label: "Painel de Envio", icon: Send },
+    { id: "canais" as const, label: "Canais & Templates", icon: LayoutGrid },
+  ];
 
-      {/* Toggle das abas */}
-      <div className="relative flex justify-center mb-8">
-        <div className="inline-flex items-center gap-1 p-1 rounded-full bg-white/[0.04] border border-white/10 backdrop-blur">
-          <TabButton active={tab === "envio"} onClick={() => setTab("envio")} icon={Send} label="Painel de Envio" />
-          <TabButton active={tab === "canais"} onClick={() => setTab("canais")} icon={LayoutGrid} label="Canais & Templates" />
+  return (
+    <div className="space-y-6">
+      {/* Cabeçalho */}
+      <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+        <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}>
+          <h2 className="text-3xl font-bold tracking-tight text-slate-900">
+            API Oficial <span className="text-teal-600">Meta</span>
+          </h2>
+          <p className="text-slate-500 font-medium text-base">
+            WhatsApp Cloud API — {activeClinicName || "clínica"}.
+          </p>
+        </motion.div>
+
+        <div className="flex bg-white p-1 rounded-lg w-fit shadow-sm border border-slate-200">
+          {tabs.map((t) => {
+            const Icon = t.icon;
+            const isActive = tab === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={cn(
+                  "flex items-center gap-2 px-5 py-2 text-sm font-semibold rounded-md transition-all",
+                  isActive ? "bg-teal-600 text-white shadow-sm" : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
+                )}
+              >
+                <Icon className={cn("w-4 h-4", isActive ? "text-white" : "text-teal-500")} />
+                {t.label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
       {loading ? (
         <div className="flex items-center justify-center gap-3 py-24 text-slate-400">
-          <Loader2 className="w-5 h-5 animate-spin" /> Carregando…
+          <Loader2 className="w-5 h-5 animate-spin text-teal-500" /> Carregando…
         </div>
-      ) : tab === "envio" ? (
-        <PainelEnvio
-          clinicId={clinicId}
-          clinicName={activeClinicName || ""}
-          channels={channels}
-          templates={templates}
-          onSent={reload}
-        />
       ) : (
-        <CanaisTemplates
-          clinicId={clinicId}
-          clinicName={activeClinicName || ""}
-          channels={channels}
-          templates={templates}
-          sends={sends}
-          reload={reload}
-        />
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={tab}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.18 }}
+          >
+            {tab === "envio" ? (
+              <PainelEnvio
+                clinicId={clinicId}
+                clinicName={activeClinicName || ""}
+                channels={channels}
+                templates={templates}
+                onSent={reload}
+              />
+            ) : (
+              <CanaisTemplates
+                clinicId={clinicId}
+                clinicName={activeClinicName || ""}
+                channels={channels}
+                templates={templates}
+                sends={sends}
+                reload={reload}
+              />
+            )}
+          </motion.div>
+        </AnimatePresence>
       )}
     </div>
-  );
-}
-
-function TabButton({ active, onClick, icon: Icon, label }: { active: boolean; onClick: () => void; icon: any; label: string }) {
-  return (
-    <button
-      onClick={onClick}
-      className={
-        "flex items-center gap-2 px-5 py-2 rounded-full text-xs font-bold uppercase tracking-wider transition-all " +
-        (active
-          ? "bg-gradient-to-r from-blue-600 to-cyan-500 text-white shadow-lg shadow-blue-500/20"
-          : "text-slate-400 hover:text-slate-200")
-      }
-    >
-      <Icon className="w-3.5 h-3.5" />
-      {label}
-    </button>
   );
 }

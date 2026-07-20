@@ -744,8 +744,9 @@ function CurrencyInput({ value, onChange, className, placeholder, autoFocus }: {
   );
 }
 
-function GanhoModal({ lead, onClose, onCancel, onCreate, createPatient, updateLead }: {
+function GanhoModal({ lead, ticketId, onClose, onCancel, onCreate, createPatient, updateLead }: {
   lead: { id: string; name: string; phone?: string | null; patientId?: string | null; ctwaClid?: string | null; email?: string | null };
+  ticketId: string;
   onClose: () => void;
   onCancel: () => void;
   onCreate: (data: Omit<Conversion, 'id' | 'clinic_id' | 'created_at'>) => Promise<boolean>;
@@ -767,6 +768,10 @@ function GanhoModal({ lead, onClose, onCancel, onCreate, createPatient, updateLe
   // lead). Só pedimos quando o lead veio de anúncio (tem ctwa_clid) e ainda não tem e-mail.
   const fromAd = !!lead.ctwaClid;
   const [emailInput, setEmailInput] = useState(lead.email ?? '');
+  // DEBUG (TEMPORÁRIO, p/ aprovação Meta): resultado do envio de teste (payload + resposta crua).
+  // Remover este estado + o painel abaixo depois da aprovação e restaurar o auto-close no handleSave.
+  const [capiResult, setCapiResult] = useState<any>(null);
+  const [capiOpen, setCapiOpen] = useState(true);
 
   const toggleProtocol = (id: string) =>
     setProtocolIds(prev => prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]);
@@ -818,7 +823,15 @@ function GanhoModal({ lead, onClose, onCancel, onCreate, createPatient, updateLe
     });
     if (ok) {
       setDone(true);
-      setTimeout(onClose, 1000);
+      // DEBUG (TEMPORÁRIO, p/ aprovação Meta): dispara a conversão na hora e mostra payload+resposta,
+      // em vez de fechar. Depois da aprovação, apagar este bloco e voltar ao setTimeout(onClose, 1000).
+      setCapiResult('loading');
+      try {
+        const { data, error } = await supabase.functions.invoke('meta-capi-conversions', { body: { debug_ticket_id: ticketId } });
+        setCapiResult(error ? { ok: false, error: error.message } : data);
+      } catch (e) {
+        setCapiResult({ ok: false, error: e instanceof Error ? e.message : String(e) });
+      }
     }
     setSaving(false);
   };
@@ -971,6 +984,48 @@ function GanhoModal({ lead, onClose, onCancel, onCreate, createPatient, updateLe
               saving ? <Loader2 className="w-4 h-4 animate-spin" /> :
                 <><ThumbsUp className="w-4 h-4" /> Registrar Ganho</>}
           </button>
+
+          {/* DEBUG (TEMPORÁRIO, p/ aprovação Meta): payload + resposta do envio da conversão, para print.
+              Remover este bloco + o estado capiResult depois da aprovação. */}
+          {capiResult && (
+            <div className="rounded-xl border border-slate-200 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setCapiOpen(o => !o)}
+                className="w-full flex items-center justify-between px-3 py-2.5 bg-slate-50 hover:bg-slate-100 transition-colors"
+              >
+                <span className="flex items-center gap-2 text-xs font-black text-slate-700">
+                  Detalhes do envio
+                  {capiResult === 'loading'
+                    ? <span className="text-[10px] font-bold text-slate-400">enviando…</span>
+                    : <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded",
+                        capiResult?.ok ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700")}>
+                        {capiResult?.ok ? `OK · ${capiResult?.kind}` : `ERRO${capiResult?.status ? ' ' + capiResult.status : ''}`}
+                      </span>}
+                </span>
+                {capiOpen ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+              </button>
+              {capiOpen && capiResult !== 'loading' && (
+                <div className="p-3 space-y-3 bg-white">
+                  {capiResult?.url && (
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Endpoint</p>
+                      <p className="text-[11px] font-mono text-slate-600 break-all">{capiResult.url}</p>
+                    </div>
+                  )}
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Payload enviado</p>
+                    <pre className="text-[10px] leading-relaxed font-mono text-slate-700 bg-slate-50 border border-slate-100 rounded-lg p-2 overflow-auto max-h-56">{JSON.stringify(capiResult.request ?? capiResult, null, 2)}</pre>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Resposta da Meta</p>
+                    <pre className="text-[10px] leading-relaxed font-mono text-slate-700 bg-slate-50 border border-slate-100 rounded-lg p-2 overflow-auto max-h-56">{JSON.stringify(capiResult.response ?? capiResult, null, 2)}</pre>
+                  </div>
+                  <button type="button" onClick={onClose} className="w-full py-2 rounded-lg text-xs font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">Fechar</button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </motion.div>
     </div>
@@ -4760,6 +4815,7 @@ export function LeadKanban() {
       {ganhoLead && (
         <GanhoModal
           lead={ganhoLead}
+          ticketId={ganhoLead.ticketId}
           createPatient={createPatient}
           updateLead={update}
           onClose={() => setGanhoLead(null)}

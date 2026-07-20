@@ -76,6 +76,109 @@ serve(async (req) => {
     sendOffline = cfg.send_offline === true;
     if (typeof cfg.offline_action_source === "string" && cfg.offline_action_source) offlineActionSource = cfg.offline_action_source;
   } catch { /* config malformada → tratado como desligado */ }
+
+  // ── Modo DEBUG (TEMPORÁRIO, p/ aprovação na Meta) ─────────────────────────────────────────────
+  // POST { debug_ticket_id } → envia ESSE ticket na hora e devolve payload + resposta crua, para o
+  // modal exibir e o dono printar. Ignora os gates (enabled/send_offline): é envio EXPLÍCITO de teste.
+  // Autocontido de propósito: não toca no fluxo em lote. Remover este bloco + o painel do modal
+  // depois da aprovação volta ao comportamento normal (envio só pelo cron).
+  let body: any = {};
+  try { body = await req.json(); } catch { /* cron chama sem corpo */ }
+  const debugTicketId = typeof body?.debug_ticket_id === "string" ? body.debug_ticket_id : "";
+  if (debugTicketId) {
+    const authHeader = req.headers.get("Authorization") ?? "";
+    const { data: userData } = await service.auth.getUser(authHeader.replace("Bearer ", ""));
+    if (!userData?.user?.id) return json({ ok: false, error: "unauthorized" }, 401);
+    const { data: t } = await service.from("tickets").select("id, clinic_id, lead_id, outcome_at").eq("id", debugTicketId).maybeSingle();
+    if (!t) return json({ ok: false, error: "ticket_not_found" }, 404);
+    const userClient = createClient(Deno.env.get("SUPABASE_URL") ?? "", Deno.env.get("SUPABASE_ANON_KEY") ?? "", { global: { headers: { Authorization: authHeader } } });
+    const [{ data: isAdmin }, { data: isSuper }] = await Promise.all([
+      userClient.rpc("is_clinic_admin", { p_clinic_id: t.clinic_id }),
+      userClient.rpc("is_super_admin"),
+    ]);
+    if (isAdmin !== true && isSuper !== true) return json({ ok: false, error: "forbidden" }, 403);
+
+    const { data: clinic } = await service.from("clinics")
+      .select("id, meta_waba_id, meta_capi_dataset_id, meta_token, meta_pixel_id, organization_id").eq("id", t.clinic_id).maybeSingle();
+    const { data: lead } = t.lead_id
+      ? await service.from("leads").select("id, name, phone, email, ctwa_clid, rast_id").eq("id", t.lead_id).maybeSingle()
+      : { data: null };
+    const { data: convRow } = await service.from("conversions").select("value, converted_at").eq("ticket_id", debugTicketId).order("converted_at", { ascending: false }).limit(1).maybeSingle();
+    const { data: outbox } = await service.from("meta_capi_events").select("id, event_name").eq("ticket_id", debugTicketId).maybeSingle();
+    const eventName = outbox?.event_name ?? null;
+
+    const { data: platRaw } = await service.rpc("get_meta_cloud_secret", { p_name: "META_CLOUD_TOKEN" });
+    const platformToken = (typeof platRaw === "string" ? platRaw : "").trim();
+    let orgToken = "";
+    if (clinic?.organization_id) {
+      const { data: org } = await service.from("organizations").select("meta_ad_token").eq("id", clinic.organization_id).maybeSingle();
+      orgToken = (org?.meta_ad_token ?? "").trim();
+    }
+
+    const nowSecD = Math.floor(Date.now() / 1000);
+    const rawTime = convRow?.converted_at ?? t.outcome_at ?? null;
+    const value = (convRow?.value != null && Number.isFinite(Number(convRow.value)) && Number(convRow.value) > 0) ? Number(convRow.value) : null;
+    const eventTime = (w: number) => { let x = rawTime ? Math.floor(new Date(rawTime).getTime() / 1000) : nowSecD; if (!Number.isFinite(x) || x > nowSecD || x < nowSecD - w * 86400) x = nowSecD; return x; };
+    const clid = (lead?.ctwa_clid ?? "").trim();
+
+    let endpoint = "", token = "", kind = "", skip = "";
+    let payload: Record<string, unknown> | null = null;
+    if (clid) {
+      const dataset = (clinic?.meta_capi_dataset_id ?? "").trim();
+      const waba = (clinic?.meta_waba_id ?? "").trim();
+      token = providerMode ? (platformToken || (clinic?.meta_token ?? "").trim()) : ((clinic?.meta_token ?? "").trim() || platformToken);
+      kind = "ctwa";
+      if (!dataset || !waba || !token) { skip = "CTWA sem WABA/dataset/token"; }
+      else {
+        const ud: Record<string, unknown> = { whatsapp_business_account_id: waba, ctwa_clid: clid };
+        const ph = phoneDigits(lead?.phone); if (ph) ud.ph = await sha256(ph);
+        if (lead?.email) ud.em = await sha256(String(lead.email));
+        if (lead?.rast_id) ud.external_id = await sha256(String(lead.rast_id));
+        payload = { event_name: eventName || "Purchase", event_time: eventTime(7), action_source: "business_messaging", messaging_channel: "whatsapp", event_id: debugTicketId, user_data: ud };
+        if (value != null) payload.custom_data = { currency: "BRL", value, order_id: debugTicketId };
+        endpoint = dataset;
+      }
+    } else {
+      const pixel = (clinic?.meta_pixel_id ?? "").trim();
+      token = (clinic?.meta_token ?? "").trim() || orgToken || platformToken;
+      const ph = phoneDigits(lead?.phone);
+      kind = "offline";
+      if (!pixel || !token || !(ph || lead?.email)) { skip = "offline sem pixel/token/telefone-ou-email"; }
+      else {
+        const ud: Record<string, unknown> = {};
+        if (ph) ud.ph = await sha256(ph);
+        if (lead?.email) ud.em = await sha256(String(lead.email));
+        const parts = String(lead?.name ?? "").trim().split(/\s+/).filter(Boolean);
+        if (parts.length) { ud.fn = await sha256(parts[0]); if (parts.length > 1) ud.ln = await sha256(parts[parts.length - 1]); }
+        if (lead?.rast_id) ud.external_id = await sha256(String(lead.rast_id));
+        payload = { event_name: eventName || "Lead", event_time: eventTime(62), action_source: offlineActionSource, event_id: debugTicketId, user_data: ud };
+        if (value != null) payload.custom_data = { currency: "BRL", value, order_id: debugTicketId };
+        endpoint = pixel;
+      }
+    }
+    if (skip || !payload) return json({ ok: false, kind, skip: skip || "sem payload" });
+
+    // O token vai no header (nunca no corpo/URL) → seguro devolver url + request para print.
+    const url = `${GRAPH}/${GRAPH_VERSION}/${endpoint}/events`;
+    const request = { data: [payload] };
+    let response: any = { error: "sem resposta" }, status = 0, ok = false;
+    try {
+      const resp = await fetch(url, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(request) });
+      status = resp.status;
+      response = await resp.json().catch(() => ({}));
+      ok = resp.ok && !response?.error;
+    } catch (e) { response = { error: String(e) }; }
+
+    if (outbox?.id) {
+      await service.from("meta_capi_events").update({
+        status: ok ? "sent" : "error", sent_at: ok ? new Date().toISOString() : null,
+        meta_response: response, last_error: ok ? null : (response?.error?.message ?? `HTTP ${status}`),
+      }).eq("id", outbox.id);
+    }
+    return json({ ok, kind, endpoint, url, status, request, response });
+  }
+  // ── fim do modo DEBUG ─────────────────────────────────────────────────────────────────────────
+
   if (!enabled) return json({ ok: true, skipped: "disabled" });
 
   // Lote de pendentes (mais antigos primeiro).

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
-import { Building2, Users, ArrowRight, LogIn, Loader2, X, Eye, EyeOff, Search, MoreVertical, UserPlus, Wifi, WifiOff, Settings, UserCheck, TrendingUp, UserCog, ChevronDown, Check, Trash2, MessageCircle, Globe, FileText, BarChart3, Search as SearchIcon, LayoutGrid, List as ListIcon, Stethoscope, Briefcase, AlertCircle, Plus, Building, Activity, ListTodo } from "lucide-react";
+import { Building2, Users, ArrowRight, LogIn, Loader2, X, Eye, EyeOff, Search, MoreVertical, UserPlus, Wifi, WifiOff, Settings, UserCheck, TrendingUp, UserCog, ChevronDown, Check, Trash2, MessageCircle, Globe, FileText, BarChart3, Search as SearchIcon, LayoutGrid, List as ListIcon, Stethoscope, Briefcase, AlertCircle, Plus, Building, Activity, ListTodo, Megaphone } from "lucide-react";
 import { OrgTasks } from "./OrgTasks";
 import { OrgMetrics } from "./OrgMetrics";
 import { OrgWhatsapp } from "./OrgWhatsapp";
@@ -101,11 +101,12 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
   const [loadingClinics, setLoadingClinics] = useState(true);
   const [activeSubTab, setActiveSubTab] = useState<"clinics" | "metrics" | "users" | "settings" | "tasks">(() => (localStorage.getItem('orgAdminTab') as any) || "clinics");
   // Sub-abas de Configurações: cada função em uma aba (WhatsApp / Relatórios / Google Ads)
-  const [settingsTab, setSettingsTab] = useState<"whatsapp" | "relatorios" | "googleads">(() => (localStorage.getItem('orgSettingsTab') as any) || "whatsapp");
-  const [orgSettings, setOrgSettings] = useState<{ google_ad_mcc_id: string; google_ad_mcc_token: string }>({ google_ad_mcc_id: '', google_ad_mcc_token: '' });
+  const [settingsTab, setSettingsTab] = useState<"whatsapp" | "relatorios" | "googleads" | "metaads">(() => (localStorage.getItem('orgSettingsTab') as any) || "whatsapp");
+  const [orgSettings, setOrgSettings] = useState<{ google_ad_mcc_id: string; google_ad_mcc_token: string; meta_ad_token: string }>({ google_ad_mcc_id: '', google_ad_mcc_token: '', meta_ad_token: '' });
   const [orgSettingsSaving, setOrgSettingsSaving] = useState(false);
   const [orgSettingsSaved, setOrgSettingsSaved] = useState(false);
   const [tokenFocused, setTokenFocused] = useState(false);
+  const [metaTokenFocused, setMetaTokenFocused] = useState(false);
   const [clinicSearch, setClinicSearch] = useState('');
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [menuDropUp, setMenuDropUp] = useState(false);
@@ -251,9 +252,9 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
     fetchClinics();
     fetchOrgUsers();
     if (profile?.organization_id) {
-      supabase.from('organizations').select('google_ad_mcc_id, google_ad_mcc_token').eq('id', profile.organization_id).single()
+      supabase.from('organizations').select('google_ad_mcc_id, google_ad_mcc_token, meta_ad_token').eq('id', profile.organization_id).single()
         .then(({ data }) => {
-          if (data) setOrgSettings({ google_ad_mcc_id: data.google_ad_mcc_id || '', google_ad_mcc_token: data.google_ad_mcc_token || '' });
+          if (data) setOrgSettings({ google_ad_mcc_id: data.google_ad_mcc_id || '', google_ad_mcc_token: data.google_ad_mcc_token || '', meta_ad_token: data.meta_ad_token || '' });
         });
     }
   }, [fetchClinics, fetchOrgUsers, profile?.organization_id]);
@@ -296,6 +297,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
     await supabase.from('organizations').update({
       google_ad_mcc_id: orgSettings.google_ad_mcc_id || null,
       google_ad_mcc_token: orgSettings.google_ad_mcc_token || null,
+      meta_ad_token: orgSettings.meta_ad_token || null,
     }).eq('id', profile.organization_id);
     setOrgSettingsSaving(false);
     setOrgSettingsSaved(true);
@@ -1204,6 +1206,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
               { id: "whatsapp", label: "WhatsApp da Org", Icon: MessageCircle },
               { id: "relatorios", label: "Relatórios", Icon: FileText },
               { id: "googleads", label: "Google Ads", Icon: TrendingUp },
+              { id: "metaads", label: "Meta Ads", Icon: Megaphone },
             ] as const).map((t) => (
               <button
                 key={t.id}
@@ -1284,6 +1287,55 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                 onClick={handleSaveOrgSettings}
                 disabled={orgSettingsSaving}
                 className="flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-sm font-bold rounded-xl transition-all shadow-sm"
+              >
+                {orgSettingsSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {orgSettingsSaved ? 'Salvo!' : 'Salvar'}
+              </button>
+            </div>
+          </div>
+          )}
+
+          {settingsTab === "metaads" && (
+          <div className="max-w-xl bg-white rounded-2xl border border-slate-200 overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-3">
+              <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center">
+                <Megaphone className="w-4 h-4 text-blue-600" />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-slate-800">Meta Ads — Token da Agência</p>
+                <p className="text-xs text-slate-400">Token do app Meta da agência — usado por <b>todas</b> as clínicas na sincronização de investimento. As clínicas puxam deste token em vez de cada uma cadastrar o seu.</p>
+              </div>
+            </div>
+            <div className="p-6 space-y-5">
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Token de Acesso Meta</label>
+                {!metaTokenFocused && orgSettings.meta_ad_token ? (
+                  <div
+                    onClick={() => setMetaTokenFocused(true)}
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-700 bg-white cursor-text tracking-widest"
+                  >
+                    {orgSettings.meta_ad_token.slice(0, 3)}{'•'.repeat(Math.max(0, Math.min(orgSettings.meta_ad_token.length - 3, 24)))}
+                  </div>
+                ) : (
+                  <input
+                    type="password"
+                    autoFocus={metaTokenFocused}
+                    value={orgSettings.meta_ad_token}
+                    onChange={e => setOrgSettings(s => ({ ...s, meta_ad_token: e.target.value }))}
+                    onBlur={() => setMetaTokenFocused(false)}
+                    placeholder="EAA... token de acesso do app da agência"
+                    autoComplete="new-password"
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-700 placeholder:text-slate-400 focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all"
+                  />
+                )}
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  O ID da conta de anúncios continua por clínica (em Configurações da clínica); aqui fica só o token compartilhado.
+                </p>
+              </div>
+              <button
+                onClick={handleSaveOrgSettings}
+                disabled={orgSettingsSaving}
+                className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl transition-all shadow-sm"
               >
                 {orgSettingsSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                 {orgSettingsSaved ? 'Salvo!' : 'Salvar'}

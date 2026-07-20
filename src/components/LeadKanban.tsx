@@ -745,12 +745,12 @@ function CurrencyInput({ value, onChange, className, placeholder, autoFocus }: {
 }
 
 function GanhoModal({ lead, onClose, onCancel, onCreate, createPatient, updateLead }: {
-  lead: { id: string; name: string; phone?: string | null; patientId?: string | null };
+  lead: { id: string; name: string; phone?: string | null; patientId?: string | null; ctwaClid?: string | null; email?: string | null };
   onClose: () => void;
   onCancel: () => void;
   onCreate: (data: Omit<Conversion, 'id' | 'clinic_id' | 'created_at'>) => Promise<boolean>;
   createPatient: (p: { name: string; phone: string | null }) => Promise<{ id: string } | null>;
-  updateLead: (id: string, payload: { converted_patient_id: string }) => Promise<unknown>;
+  updateLead: (id: string, payload: { converted_patient_id?: string; email?: string }) => Promise<unknown>;
 }) {
   const { create: createTransaction } = useFinancial();
   const { data: protocols } = useProtocols();
@@ -763,6 +763,10 @@ function GanhoModal({ lead, onClose, onCancel, onCreate, createPatient, updateLe
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
+  // Atribuição Meta: o e-mail é o único dado de match que costuma faltar (clid/telefone já vêm do
+  // lead). Só pedimos quando o lead veio de anúncio (tem ctwa_clid) e ainda não tem e-mail.
+  const fromAd = !!lead.ctwaClid;
+  const [emailInput, setEmailInput] = useState(lead.email ?? '');
 
   const toggleProtocol = (id: string) =>
     setProtocolIds(prev => prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]);
@@ -782,6 +786,13 @@ function GanhoModal({ lead, onClose, onCancel, onCreate, createPatient, updateLe
         await updateLead(lead.id, { converted_patient_id: np.id });
       }
     }
+    // Atribuição Meta: grava o e-mail informado (coluna simples, sem risco de zerar JSONB) para
+    // subir a nota da conversão que a edge meta-capi-conversions enviará ao Meta.
+    const emailTrim = emailInput.trim();
+    if (emailTrim && emailTrim !== (lead.email ?? '')) {
+      await updateLead(lead.id, { email: emailTrim });
+    }
+
     // Cria a receita PRIMEIRO para vincular a conversão a ela (financial_transaction_id).
     // Esse vínculo deixa a limpeza automática confiável: quando o ticket sai de 'ganho', o
     // gatilho fn_purge_ticket_sale apaga a conversão E a receita ligada (sem órfão no Financeiro).
@@ -912,6 +923,38 @@ function GanhoModal({ lead, onClose, onCancel, onCreate, createPatient, updateLe
               className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
             />
           </div>
+
+          {/* Atribuição Meta Ads — só quando o lead veio de anúncio (tem ctwa_clid). O valor acima já
+              entra no evento; aqui só reforçamos os dados de match, pedindo o e-mail se faltar. */}
+          {fromAd && (
+            <div className="space-y-2 rounded-xl border border-blue-100 bg-blue-50/40 p-3">
+              <div className="flex items-center gap-1.5">
+                <ThumbsUp className="w-3.5 h-3.5 text-blue-500" />
+                <span className="text-xs font-black text-blue-700 uppercase tracking-wider">Atribuição Meta Ads</span>
+              </div>
+              <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
+                Este lead veio de anúncio Click-to-WhatsApp. A venda será enviada ao Meta para otimizar suas campanhas.
+              </p>
+              <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] font-semibold">
+                <span className="inline-flex items-center gap-1 text-emerald-600"><Check className="w-3 h-3" /> Clique do anúncio</span>
+                <span className={cn("inline-flex items-center gap-1", lead.phone ? "text-emerald-600" : "text-slate-400")}>
+                  {lead.phone ? <Check className="w-3 h-3" /> : <X className="w-3 h-3" />} Telefone
+                </span>
+                <span className={cn("inline-flex items-center gap-1", emailInput.trim() ? "text-emerald-600" : "text-slate-400")}>
+                  {emailInput.trim() ? <Check className="w-3 h-3" /> : <X className="w-3 h-3" />} E-mail
+                </span>
+              </div>
+              {!lead.email && (
+                <input
+                  type="email"
+                  value={emailInput}
+                  onChange={e => setEmailInput(e.target.value)}
+                  placeholder="E-mail do lead (opcional — aumenta a atribuição)"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
+                />
+              )}
+            </div>
+          )}
 
           <button
             onClick={handleSave}
@@ -2678,7 +2721,7 @@ export function LeadKanban() {
   const { byLead: conversionsByLead, create: createConversion, update: updateConversion } = useConversions();
   const { aiConfig, updateAI } = useSettings();
   const { data: orcamentos, save: saveOrcamento } = useOrcamentos();
-  const [ganhoLead, setGanhoLead] = useState<{ id: string; name: string; phone: string | null; patientId: string | null; prevStageId: string | null; ticketId: string } | null>(null);
+  const [ganhoLead, setGanhoLead] = useState<{ id: string; name: string; phone: string | null; patientId: string | null; prevStageId: string | null; ticketId: string; ctwaClid?: string | null; email?: string | null } | null>(null);
   const [lossLead, setLossLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
   const [orcamentoLead, setOrcamentoLead] = useState<{ id: string; name: string; phone: string | null; prevStageId: string | null; ticketId: string; initialQuote?: any; orcamentoId?: string | null } | null>(null);
   const [poLead, setPoLead] = useState<{ id: string; name: string; phone: string | null; quoteData: any; ticketId?: string | null } | null>(null);
@@ -2866,7 +2909,7 @@ export function LeadKanban() {
     // (Mover antes e reverter via moveTicket no "Cancelar" disparava "novo ciclo" em ticket
     // resolvido → ticket duplicado + purgava a conversão antes de confirmar. Agora Cancelar = no-op.)
     if (targetStage?.slug === 'ganho') {
-      setGanhoLead({ id: ticket.lead_id, name: ticket.lead?.name ?? '', phone: ticket.lead?.phone ?? null, patientId: ticket.lead?.converted_patient_id ?? null, prevStageId: ticket.stage_id, ticketId: ticket.id });
+      setGanhoLead({ id: ticket.lead_id, name: ticket.lead?.name ?? '', phone: ticket.lead?.phone ?? null, patientId: ticket.lead?.converted_patient_id ?? null, prevStageId: ticket.stage_id, ticketId: ticket.id, ctwaClid: ticket.lead?.ctwa_clid ?? null, email: ticket.lead?.email ?? null });
       return;
     }
     if (targetStage?.slug === 'perdido') {
@@ -2942,7 +2985,7 @@ export function LeadKanban() {
             if (isPerdido) {
               await closeTicket(openT.id, 'perdido');
             } else if (isConversao) {
-              setGanhoLead({ id: selectedLead.id, name: selectedLead.name, phone: selectedLead.phone ?? null, patientId: selectedLead.converted_patient_id ?? null, prevStageId: openT.stage_id, ticketId: openT.id });
+              setGanhoLead({ id: selectedLead.id, name: selectedLead.name, phone: selectedLead.phone ?? null, patientId: selectedLead.converted_patient_id ?? null, prevStageId: openT.stage_id, ticketId: openT.id, ctwaClid: selectedLead.ctwa_clid ?? null, email: selectedLead.email ?? null });
             } else {
               await moveTicket(openT.id, targetStageId);
             }
@@ -3989,7 +4032,7 @@ export function LeadKanban() {
                                       {statusDropdownTicketId === ticket.id && (
                                         <div className="absolute right-0 top-5 z-50 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden w-28" onClick={e => e.stopPropagation()}>
                                           <button
-                                            onClick={() => { setStatusDropdownTicketId(null); setGanhoLead({ id: lead.id, name: lead.name, phone: lead.phone ?? null, patientId: lead.converted_patient_id ?? null, prevStageId: ticket.stage_id, ticketId: ticket.id }); }}
+                                            onClick={() => { setStatusDropdownTicketId(null); setGanhoLead({ id: lead.id, name: lead.name, phone: lead.phone ?? null, patientId: lead.converted_patient_id ?? null, prevStageId: ticket.stage_id, ticketId: ticket.id, ctwaClid: lead.ctwa_clid ?? null, email: lead.email ?? null }); }}
                                             className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50 transition-colors"
                                           >
                                             <ThumbsUp className="w-3 h-3" /> Ganho
@@ -4484,6 +4527,25 @@ export function LeadKanban() {
                         >
                           Conversão
                         </button>
+                        {/* Evento CAPI enviado ao Meta ao entrar nesta etapa (só p/ etapa de conversão). */}
+                        {stage.is_conversion && (
+                          <select
+                            title="Evento enviado ao Meta (Conversions API) quando um lead entra nesta etapa"
+                            value={stage.capi_event_name ?? 'Purchase'}
+                            onChange={async (e) => {
+                              const ev = e.target.value;
+                              await updateStage(stage.id, { capi_event_name: ev } as any);
+                              setLocalStages(p => p.map(s => s.id === stage.id ? { ...s, capi_event_name: ev } : s));
+                            }}
+                            className="px-1.5 py-1 rounded-md text-[9px] font-black uppercase tracking-tighter bg-white border border-slate-200 text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-200 mr-1"
+                          >
+                            <option value="Purchase">Purchase</option>
+                            <option value="Lead">Lead</option>
+                            <option value="Schedule">Schedule</option>
+                            <option value="Contact">Contact</option>
+                            <option value="CompleteRegistration">CompleteRegistration</option>
+                          </select>
+                        )}
                         <button
                           disabled={idx === 0}
                           onClick={() => {
@@ -4737,7 +4799,7 @@ export function LeadKanban() {
             onClose={() => setChatLead(null)}
             isDragging={draggedLead !== null}
             onEdit={() => { const ticket = tickets.find(t => t.id === chatLead.ticketId); if (ticket?.lead) openEditModal(ticket); }}
-            onGanho={() => setGanhoLead({ id: chatLead.lead.id, name: chatLead.lead.name, phone: chatLead.lead.phone ?? null, patientId: chatLead.lead.converted_patient_id ?? null, prevStageId: null, ticketId: chatLead.ticketId })}
+            onGanho={() => setGanhoLead({ id: chatLead.lead.id, name: chatLead.lead.name, phone: chatLead.lead.phone ?? null, patientId: chatLead.lead.converted_patient_id ?? null, prevStageId: null, ticketId: chatLead.ticketId, ctwaClid: chatLead.lead.ctwa_clid ?? null, email: chatLead.lead.email ?? null })}
             onPerdido={() => setLossLead({ id: chatLead.lead.id, name: chatLead.lead.name, prevStageId: null, ticketId: chatLead.ticketId })}
             onStageChange={async (stageId) => {
               const targetStage = stages.find(s => s.id === stageId);
@@ -4746,7 +4808,7 @@ export function LeadKanban() {
                 if (targetStage?.slug === 'perdido') {
                   await closeTicket(ticket.id, 'perdido');
                 } else if (targetStage?.slug === 'ganho') {
-                  setGanhoLead({ id: chatLead.lead.id, name: chatLead.lead.name, phone: chatLead.lead.phone ?? null, patientId: chatLead.lead.converted_patient_id ?? null, prevStageId: ticket.stage_id, ticketId: ticket.id });
+                  setGanhoLead({ id: chatLead.lead.id, name: chatLead.lead.name, phone: chatLead.lead.phone ?? null, patientId: chatLead.lead.converted_patient_id ?? null, prevStageId: ticket.stage_id, ticketId: ticket.id, ctwaClid: chatLead.lead.ctwa_clid ?? null, email: chatLead.lead.email ?? null });
                 } else {
                   await moveTicket(ticket.id, stageId);
                 }

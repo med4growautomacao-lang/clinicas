@@ -2039,6 +2039,28 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
     const [googleIdSaving, setGoogleIdSaving] = useState(false);
     const [googleIdSaved, setGoogleIdSaved] = useState(false);
 
+    // Descoberta da WABA/dataset de conversões (CTWA) — chama a edge meta-waba-discover, que resolve
+    // e já grava clinics.meta_waba_id/meta_capi_dataset_id. Aqui só refletimos o resultado na tela.
+    const [wabaBusy, setWabaBusy] = useState(false);
+    const [manualWaba, setManualWaba] = useState('');
+    const [wabaMsg, setWabaMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+    const discoverWaba = async (useManual: boolean) => {
+        if (!clinicData.id) return;
+        setWabaBusy(true); setWabaMsg(null);
+        const payload: { clinic_id: string; waba_id?: string } = { clinic_id: clinicData.id };
+        if (useManual && manualWaba.trim()) payload.waba_id = manualWaba.trim();
+        const { data, error } = await supabase.functions.invoke('meta-waba-discover', { body: payload });
+        setWabaBusy(false);
+        if (error) { setWabaMsg({ kind: 'err', text: error.message }); return; }
+        if (data?.ok) {
+            onClinicChange({ meta_waba_id: data.waba_id ?? null, meta_capi_dataset_id: data.dataset_id ?? null });
+            setManualWaba('');
+            setWabaMsg({ kind: data.ready ? 'ok' : 'err', text: data.detail });
+        } else {
+            setWabaMsg({ kind: 'err', text: data?.detail || 'Não foi possível resolver a WABA.' });
+        }
+    };
+
     // Token do webhook nativo de formulários (external-forms-ingest?k=…). Mesmo padrão da aba
     // Integração Externa: carrega a linha da clínica e, se não existir, cria (o token nasce por
     // default no banco). Substitui a URL global do n8n (forms_tracking), que era igual para todas
@@ -2355,6 +2377,77 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                         <p className="text-[10px] text-slate-400 font-medium leading-relaxed pl-1">
                             ID do formulário nativo do Meta (Lead Ads / Instant Forms) usado para vincular os leads capturados a esta clínica.
                         </p>
+                    </div>
+
+                    {/* Atribuição de Conversões (CTWA) — WABA + dataset de Business Messaging.
+                        Fecha o loop: quando um lead vira venda, o Meta recebe a conversão e otimiza. */}
+                    <div className="space-y-3 md:col-span-2 pt-4 mt-2 border-t border-slate-100">
+                        <div>
+                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                                <Shield className="w-3.5 h-3.5 text-blue-500" /> Atribuição de Conversões (WhatsApp)
+                            </label>
+                            <p className="text-[11px] text-slate-400 font-medium leading-relaxed mt-1">
+                                Envia ao Meta a conversão (venda) dos leads que vieram de anúncio Click-to-WhatsApp, usando a
+                                WhatsApp Business Account (WABA) desta clínica. Necessário para o Meta otimizar por resultado.
+                            </p>
+                        </div>
+
+                        <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 flex flex-col sm:flex-row sm:items-center gap-3">
+                            <div className="flex-1 text-[11px] font-medium">
+                                <div className="flex items-center gap-1.5">
+                                    <span className="text-slate-400">WABA:</span>
+                                    {clinicData.meta_waba_id
+                                        ? <span className="font-mono font-bold text-slate-700">{clinicData.meta_waba_id}</span>
+                                        : <span className="text-slate-400">não configurada</span>}
+                                </div>
+                                <div className="flex items-center gap-1.5 mt-0.5">
+                                    <span className="text-slate-400">Dataset:</span>
+                                    {clinicData.meta_capi_dataset_id
+                                        ? <span className="font-mono font-bold text-emerald-600">{clinicData.meta_capi_dataset_id}</span>
+                                        : <span className="text-amber-600 font-semibold">pendente</span>}
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => discoverWaba(false)}
+                                disabled={wabaBusy || !clinicData.id}
+                                className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2 text-sm transition-colors shadow-sm"
+                            >
+                                {wabaBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />}
+                                Detectar WABA automaticamente
+                            </button>
+                        </div>
+
+                        <div className="flex flex-col sm:flex-row sm:items-end gap-2">
+                            <div className="flex-1 space-y-1">
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">WABA ID (manual, se a detecção falhar)</label>
+                                <input
+                                    type="text"
+                                    value={manualWaba}
+                                    onChange={(e) => setManualWaba(e.target.value)}
+                                    placeholder="Ex: 882390987724948"
+                                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm font-mono text-slate-700 placeholder:text-slate-300 focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all"
+                                />
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => discoverWaba(true)}
+                                disabled={wabaBusy || !manualWaba.trim()}
+                                className="bg-white hover:bg-blue-50 border border-slate-200 hover:border-blue-300 text-blue-600 px-4 py-2.5 rounded-xl font-bold text-sm transition-colors disabled:opacity-40"
+                            >
+                                Usar esta WABA
+                            </button>
+                        </div>
+
+                        {wabaMsg && (
+                            <div className={cn(
+                                "flex items-start gap-2 px-3 py-2.5 rounded-xl text-xs font-medium border",
+                                wabaMsg.kind === 'ok' ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-amber-50 border-amber-200 text-amber-700"
+                            )}>
+                                {wabaMsg.kind === 'ok' ? <Check className="w-4 h-4 shrink-0 mt-0.5" /> : <X className="w-4 h-4 shrink-0 mt-0.5" />}
+                                {wabaMsg.text}
+                            </div>
+                        )}
                     </div>
                 </CardContent>
             </Card>

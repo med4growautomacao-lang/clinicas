@@ -121,32 +121,38 @@ serve(async (req) => {
     else googleToken = token ?? null;
   }
 
-  // MCC + developer-token do Google são da AGÊNCIA (org): configurados UMA vez na org e
-  // herdados por todas as clínicas dela. Carregamos o mapa por org (fallback = valor da
-  // própria clínica, p/ clínica sem org ou org sem MCC). Só o customer_id é por-clínica.
-  const orgMcc = new Map<string, { id: string | null; token: string | null }>();
+  // Credenciais de AGÊNCIA (org), herdadas por todas as clínicas dela: MCC + developer-token do
+  // Google, e o token do Meta. Um mapa por org; a clínica pode sobrepor com valor próprio.
+  // Só o customer_id (Google) e o meta_ad_account_id (Meta) são por-clínica.
+  const orgAds = new Map<string, { mccId: string | null; mccToken: string | null; metaToken: string | null }>();
   {
     const { data: orgs } = await service
       .from("organizations")
-      .select("id, google_ad_mcc_id, google_ad_mcc_token")
-      .not("google_ad_mcc_token", "is", null);
-    for (const o of orgs ?? []) orgMcc.set(o.id, { id: o.google_ad_mcc_id, token: o.google_ad_mcc_token });
+      .select("id, google_ad_mcc_id, google_ad_mcc_token, meta_ad_token");
+    for (const o of orgs ?? []) orgAds.set(o.id, { mccId: o.google_ad_mcc_id, mccToken: o.google_ad_mcc_token, metaToken: o.meta_ad_token });
   }
   const resolveGoogle = (c: ClinicRow) => {
-    const o = c.organization_id ? orgMcc.get(c.organization_id) : undefined;
+    const o = c.organization_id ? orgAds.get(c.organization_id) : undefined;
     return {
-      mcc: (o?.id && String(o.id).trim() ? o.id : null) ?? c.google_ad_mcc_id,
-      token: (o?.token && String(o.token).trim() ? o.token : null) ?? c.google_ad_mcc_token,
+      mcc: (o?.mccId && String(o.mccId).trim() ? o.mccId : null) ?? c.google_ad_mcc_id,
+      token: (o?.mccToken && String(o.mccToken).trim() ? o.mccToken : null) ?? c.google_ad_mcc_token,
     };
+  };
+  // Token do Meta: o da clínica (override) OU o da org (compartilhado, cadastrado 1× em Gestão Org).
+  const resolveMetaToken = (c: ClinicRow): string | null => {
+    const own = (c.meta_token && String(c.meta_token).trim()) ? c.meta_token : null;
+    const org = c.organization_id ? orgAds.get(c.organization_id)?.metaToken : null;
+    return own ?? ((org && String(org).trim()) ? org : null);
   };
 
   // Próximo lote de clínicas ativas com Meta OU Google configurado.
-  // O gate do Google exige apenas o customer_id por-clínica; o MCC/token pode vir da org.
+  // O gate exige só o id por-clínica (meta_ad_account_id / google customer_id); o token pode vir
+  // da org — por isso NÃO filtramos por meta_token aqui (a resolução token clínica→org é em código).
   const { data: clinics, error: clinicsErr } = await service
     .from("clinics")
     .select("id, organization_id, meta_token, meta_ad_account_id, google_ad_account_id, google_ad_mcc_id, google_ad_mcc_token, meta_status, google_status")
     .eq("is_active", true)
-    .or("and(meta_token.not.is.null,meta_ad_account_id.not.is.null),google_ad_account_id.not.is.null")
+    .or("meta_ad_account_id.not.is.null,google_ad_account_id.not.is.null")
     .order("id", { ascending: true })
     .range(cursor, cursor + batchSize - 1);
 
@@ -159,8 +165,9 @@ serve(async (req) => {
   let metaOk = 0, googleOk = 0, errors = 0;
 
   await mapPool(list, CONCURRENCY, async (c) => {
-    if (wantMeta && c.meta_token && c.meta_ad_account_id) {
-      const { rows, error } = await fetchMetaDaily(c.meta_token, c.meta_ad_account_id, since, until);
+    const metaTok = resolveMetaToken(c);
+    if (wantMeta && metaTok && c.meta_ad_account_id) {
+      const { rows, error } = await fetchMetaDaily(metaTok, c.meta_ad_account_id, since, until);
       // Status reflete a BUSCA na API (não a gravação): erro de API → inativa; ok → reativa (se estava inativa).
       await applyAdStatus(service, c.id, "meta", c.meta_status, !error);
       if (error) { errors++; await registrar("meta_falhou", "Sincronização de investimento (Meta) falhou nesta clínica", "error", c.id, { error, since, until }); }

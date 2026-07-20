@@ -97,15 +97,22 @@ serve(async (req) => {
   // (3) Token + conta de anúncios da clínica (service role — segredo nunca vai ao browser).
   const { data: clinic, error: clinicErr } = await service
     .from("clinics")
-    .select("meta_token, meta_ad_account_id, meta_status")
+    .select("meta_token, meta_ad_account_id, meta_status, organization_id")
     .eq("id", clinicId)
     .single();
   if (clinicErr) {
     await registrarErro("clinica_nao_encontrada", "Falha ao ler credenciais Meta da clínica", "error", { detail: clinicErr.message });
     return json({ ok: false, error: "clinic_read_failed", detail: clinicErr.message }, 500);
   }
-  if (!clinic?.meta_token || !clinic?.meta_ad_account_id) {
-    return json({ ok: false, error: "meta_not_configured", detail: "Esta clínica não tem token/conta de anúncios do Meta configurados." }, 200);
+  // Token: o da clínica (override) OU o token da ORG (compartilhado, cadastrado 1× em Gestão Org ›
+  // Meta Ads). Assim a agência não precisa duplicar o mesmo token em cada clínica.
+  let metaToken = (clinic?.meta_token ?? "").trim();
+  if (!metaToken && clinic?.organization_id) {
+    const { data: org } = await service.from("organizations").select("meta_ad_token").eq("id", clinic.organization_id).maybeSingle();
+    metaToken = (org?.meta_ad_token ?? "").trim();
+  }
+  if (!metaToken || !clinic?.meta_ad_account_id) {
+    return json({ ok: false, error: "meta_not_configured", detail: "Sem token do Meta (nem da clínica nem da org) ou sem conta de anúncios configurada." }, 200);
   }
 
   const account = String(clinic.meta_ad_account_id).replace(/^act_/, "");
@@ -118,7 +125,7 @@ serve(async (req) => {
       let url: string | null =
         `https://graph.facebook.com/${GRAPH_VERSION}/act_${account}/insights` +
         `?fields=spend&level=account&time_increment=1&limit=500` +
-        `&time_range=${timeRange}&access_token=${encodeURIComponent(clinic.meta_token)}`;
+        `&time_range=${timeRange}&access_token=${encodeURIComponent(metaToken)}`;
 
       while (url) {
         const resp = await fetch(url);

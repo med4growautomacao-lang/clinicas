@@ -568,6 +568,8 @@ export interface FunnelStage {
   is_system: boolean;
   is_fixed: boolean;
   is_conversion: boolean;
+  // Nome do evento CAPI enviado ao Meta quando um lead entra nesta etapa (só vale se is_conversion).
+  capi_event_name?: string | null;
   color: string | null;
   created_at: string;
 }
@@ -1656,6 +1658,9 @@ export interface Clinic {
   meta_ad_account_id?: string | null;
   meta_pixel_id?: string | null;
   meta_forms_id?: string | null;
+  // CAPI de conversões (CTWA): WABA e dataset de Business Messaging, resolvidos por meta-waba-discover.
+  meta_waba_id?: string | null;
+  meta_capi_dataset_id?: string | null;
   wa_pre_msg?: string | null;
   organization_id?: string | null;
   category: string | null;

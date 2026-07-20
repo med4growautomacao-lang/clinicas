@@ -198,7 +198,24 @@ serve(async (req) => {
         }
         updated = rows.length;
       }
-      return json({ ok: true, updated, fetched: (j?.data ?? []).length });
+
+      // Reconcilia: remove da visão os templates que NÃO existem mais na WABA (deletados na Meta).
+      // Poupa os criados nos últimos 2min — a lista da Meta pode demorar a refletir um recém-criado.
+      const keepKeys = new Set(rows.map((r: any) => `${r.name}|${r.language}`));
+      const { data: existing } = await service
+        .from("meta_cloud_templates")
+        .select("id, name, language, created_at")
+        .eq("clinic_id", clinicId);
+      const cutoff = Date.now() - 120_000;
+      const toDelete = (existing ?? [])
+        .filter((e: any) => !keepKeys.has(`${e.name}|${e.language}`) && new Date(e.created_at).getTime() < cutoff)
+        .map((e: any) => e.id);
+      let removed = 0;
+      if (toDelete.length > 0) {
+        const { error: delErr } = await service.from("meta_cloud_templates").delete().in("id", toDelete);
+        if (!delErr) removed = toDelete.length;
+      }
+      return json({ ok: true, updated, removed, fetched: (j?.data ?? []).length });
     }
 
     // ───────────────────────────── send_template ───────────────────────────────

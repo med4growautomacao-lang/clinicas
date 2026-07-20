@@ -70,7 +70,7 @@ export function MetaOficial() {
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-24">
       {/* Cabeçalho */}
       <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
         <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}>

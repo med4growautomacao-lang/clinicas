@@ -1715,6 +1715,8 @@ export interface AIConfig {
   confirm_enabled: boolean;
   confirm_message: string;
   confirm_lead_time: number;
+  confirm_window_start?: number;
+  confirm_window_end?: number;
   confirm_post_enabled: boolean;
   confirm_post_message: string | null;
   followup_enabled: boolean;

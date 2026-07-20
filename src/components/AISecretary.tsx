@@ -145,6 +145,8 @@ function ConfirmationsView() {
         confirm_enabled: false,
         confirm_message: "Olá {paciente}, passando para confirmar sua consulta no dia {data} às {hora}. Podemos confirmar?",
         confirm_lead_time: 1440,
+        confirm_window_start: 6,
+        confirm_window_end: 22,
         confirm_post_enabled: false,
         confirm_post_message: "Perfeito, {paciente}! Sua consulta no dia {data} às {hora} está confirmada. Te aguardamos!",
         response_style: 'cordial',
@@ -303,6 +305,33 @@ function ConfirmationsView() {
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* Janela de envio (horário permitido, SP) — igual welcome/reengajamento */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1 flex items-center gap-2">
+                  <Clock className="w-3 h-3" /> Janela de envio
+                </label>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase">Das</span>
+                  <input
+                    type="number" min={0} max={23}
+                    value={localConfig.confirm_window_start ?? 6}
+                    onChange={(e) => setConfig({ confirm_window_start: Math.min(23, Math.max(0, parseInt(e.target.value) || 0)) })}
+                    className="w-16 px-3 py-2 border border-slate-200 rounded-lg font-bold text-teal-700 text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all"
+                  />
+                  <span className="text-[11px] font-bold text-slate-400 uppercase">às</span>
+                  <input
+                    type="number" min={1} max={24}
+                    value={localConfig.confirm_window_end ?? 22}
+                    onChange={(e) => setConfig({ confirm_window_end: Math.min(24, Math.max(1, parseInt(e.target.value) || 0)) })}
+                    className="w-16 px-3 py-2 border border-slate-200 rounded-lg font-bold text-teal-700 text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all"
+                  />
+                  <span className="text-[11px] font-bold text-slate-400 uppercase">h (Brasília)</span>
+                </div>
+                <p className="text-[11px] text-slate-400 font-medium pl-1">
+                  Fora desse horário, o lembrete espera a próxima janela pra enviar.
+                </p>
               </div>
             </div>
           ) : (

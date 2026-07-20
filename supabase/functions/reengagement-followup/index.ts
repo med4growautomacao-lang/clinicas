@@ -176,7 +176,7 @@ serve(async (req) => {
       // sender/type 'system': automação não é fala do Agente IA (atribuição + memória + ícone próprio)
       sender: "system",
       direction: "outbound",
-      message: { type: "system", content: `REENGAJAMENTO: ${joined}`, additional_kwargs: {}, response_metadata: {} },
+      message: { type: "system", content: joined, additional_kwargs: {}, response_metadata: {} },
     });
   }
 

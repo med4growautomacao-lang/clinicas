@@ -260,7 +260,7 @@ serve(async (req) => {
     await supabase.from("chat_messages").insert({
       // sender/type 'system': automação não é fala do Agente IA (atribuição + memória + ícone próprio)
       session_id, clinic_id, lead_id, sender: "system", direction: "outbound",
-      message: { type: "system", content: `FOLLOWUP: ${joined}`, additional_kwargs: {}, response_metadata: {} },
+      message: { type: "system", content: joined, additional_kwargs: {}, response_metadata: {} },
     });
     return json({ ok: true, sent: true, bubbles: bubbles.length, lead_id });
   }

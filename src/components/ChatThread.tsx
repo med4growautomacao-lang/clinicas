@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Bot, User, Loader2, MessageSquare, FileText, Download, RefreshCw } from "lucide-react";
+import { Bot, User, Loader2, MessageSquare, FileText, Download, RefreshCw, Cog } from "lucide-react";
 import { format, isToday, isYesterday } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/src/lib/utils";
@@ -411,6 +411,9 @@ export function ChatThread({
             {sorted.map((msg, i) => {
               const isOutbound = msg.direction === 'outbound';
               const isAI = msg.sender === 'ai';
+              // Automação (followups/lembretes/encerramento): ícone e bolha próprios,
+              // pra não se confundir com o que o Agente IA de fato respondeu.
+              const isSystem = msg.sender === 'system';
               const currentDate = new Date(msg.created_at);
               const prevDate = i > 0 ? new Date(sorted[i - 1].created_at) : null;
               const showDateSeparator = !prevDate ||
@@ -451,16 +454,21 @@ export function ChatThread({
                     ) : (
                       <div className={cn(
                         "w-8 h-8 rounded-lg shadow-sm flex-shrink-0 flex items-center justify-center",
+                        isSystem ? "bg-slate-400 shadow-md" :
                         isAI ? "bg-teal-600 shadow-md" :
                         (isOutbound ? "bg-slate-800 shadow-md" : "bg-white border border-slate-200")
                       )}>
-                        {isAI ? <Bot className="w-5 h-5 text-white" /> : <User className={cn("w-4 h-4", isOutbound ? "text-white" : "text-slate-400")} />}
+                        {isSystem ? <Cog className="w-4 h-4 text-white" />
+                          : isAI ? <Bot className="w-5 h-5 text-white" />
+                          : <User className={cn("w-4 h-4", isOutbound ? "text-white" : "text-slate-400")} />}
                       </div>
                     )}
 
                     <div className={cn(
                       "px-4 py-3 rounded-2xl text-sm shadow-sm max-w-full overflow-hidden break-words",
-                      isAI
+                      isSystem
+                        ? "bg-slate-100 border border-slate-200 text-slate-600 rounded-tr-none"
+                        : isAI
                         ? "bg-teal-600 text-white rounded-tr-none"
                         : (isOutbound
                             ? "bg-slate-800 text-white rounded-tr-none"
@@ -468,7 +476,7 @@ export function ChatThread({
                     )}>
                       {(() => {
                         const media = detectMedia(msg.message);
-                        if (media) return <MediaBubble media={media} dark={isOutbound || isAI} />;
+                        if (media) return <MediaBubble media={media} dark={(isOutbound || isAI) && !isSystem} />;
                         return (
                           <p className="text-sm font-medium leading-relaxed whitespace-pre-wrap break-words">
                             {extractMessageText(msg.message)}

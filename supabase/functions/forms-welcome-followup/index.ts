@@ -258,8 +258,9 @@ serve(async (req) => {
     // memória/conversa — mesma escrita que o n8n fazia
     const session_id = `${clinicNumber ?? ""}${leadNumber}`;
     await supabase.from("chat_messages").insert({
-      session_id, clinic_id, lead_id, sender: "ai", direction: "outbound",
-      message: { type: "ai", content: `FOLLOWUP: ${joined}`, additional_kwargs: {}, response_metadata: {} },
+      // sender/type 'system': automação não é fala do Agente IA (atribuição + memória + ícone próprio)
+      session_id, clinic_id, lead_id, sender: "system", direction: "outbound",
+      message: { type: "system", content: `FOLLOWUP: ${joined}`, additional_kwargs: {}, response_metadata: {} },
     });
     return json({ ok: true, sent: true, bubbles: bubbles.length, lead_id });
   }

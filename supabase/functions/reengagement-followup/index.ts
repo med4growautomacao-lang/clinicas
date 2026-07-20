@@ -158,9 +158,10 @@ serve(async (req) => {
       session_id,
       clinic_id,
       lead_id,
-      sender: "ai",
+      // sender/type 'system': automação não é fala do Agente IA (atribuição + memória + ícone próprio)
+      sender: "system",
       direction: "outbound",
-      message: { type: "ai", content: `REENGAJAMENTO: ${joined}`, additional_kwargs: {}, response_metadata: {} },
+      message: { type: "system", content: `REENGAJAMENTO: ${joined}`, additional_kwargs: {}, response_metadata: {} },
     });
   }
 

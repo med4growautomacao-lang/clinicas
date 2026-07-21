@@ -14,18 +14,27 @@ type Supa = ReturnType<typeof createClient>;
 export type SpendRow = { date: string; spend: number };
 export type SpendResult = { rows: SpendRow[]; error?: string };
 
-// Investimento por CAMPANHA × dia (Fase 1 do detalhamento — grava em marketing_spend_breakdown,
-// tabela PARALELA à marketing_data; não substitui o total por conta, que continua vindo de
-// fetchMetaDaily/fetchGoogleDaily acima e é a fonte única dos painéis). ad_platform = rede dentro
-// do Meta (facebook/instagram/audience_network/…); '' para Google (não tem essa dimensão aqui).
+// Investimento por CAMPANHA → CONJUNTO → ANÚNCIO × dia (Fase 2 do detalhamento — grava em
+// marketing_spend_breakdown, tabela PARALELA à marketing_data; não substitui o total por conta,
+// que continua vindo de fetchMetaDaily/fetchGoogleDaily acima e é a fonte única dos painéis).
+// ad_platform = rede dentro do Meta (facebook/instagram/audience_network/…); '' para Google
+// (não tem essa dimensão). adset_id/adset_name/ad_id/ad_name = '' quando a captura não desce
+// até aquele nível (ex.: Google só desce a conjunto/ad_group nesta fase, sem anúncio individual).
 export type SpendBreakdownRow = {
   date: string;
   ad_platform: string;
   campaign_id: string;
   campaign_name: string;
+  adset_id: string;
+  adset_name: string;
+  ad_id: string;
+  ad_name: string;
   spend: number;
 };
-export type SpendBreakdownResult = { rows: SpendBreakdownRow[]; error?: string };
+// truncated=true = bateu o teto de páginas de algum bloco de data — dado PARCIAL (investimento
+// subestimado nesse período). Contas grandes (ex.: milhares de anúncios) podem estourar; o
+// chamador deve logar isso na Central em vez de gravar em silêncio como se fosse completo.
+export type SpendBreakdownResult = { rows: SpendBreakdownRow[]; error?: string; truncated?: boolean };
 
 // moeda → 2 casas (centavos), round half-up.
 export const roundCents = (n: number) => Math.round(n * 100) / 100;
@@ -75,20 +84,24 @@ export async function fetchMetaDaily(
   return { rows };
 }
 
-// Gasto diário POR CAMPANHA × rede do Meta (level=campaign + breakdowns=publisher_platform).
-// Mesma janela/chunking de fetchMetaDaily; página com teto de segurança (best-effort, não deve
-// travar o sync do total se uma conta tiver MUITAS campanhas×dias).
+// Gasto diário POR ANÚNCIO × rede do Meta (level=ad + breakdowns=publisher_platform). level=ad
+// já devolve campaign_id/name + adset_id/name + ad_id/name JUNTOS em cada linha — 1 chamada
+// captura a hierarquia INTEIRA (campanha→conjunto→anúncio), mais barato que 3 chamadas separadas
+// por nível. Mesma janela/chunking de fetchMetaDaily; página com teto de segurança (best-effort,
+// não deve travar o sync do total se uma conta tiver MUITOS anúncios×dias).
 const META_BREAKDOWN_PAGE_CAP = 300;
-export async function fetchMetaCampaignBreakdown(
+export async function fetchMetaAdBreakdown(
   metaToken: string, adAccountId: string, since: string, until: string,
 ): Promise<SpendBreakdownResult> {
   const account = String(adAccountId).replace(/^act_/, "");
   const rows: SpendBreakdownRow[] = [];
+  let truncated = false;
   for (const chunk of dateChunks(since, until)) {
     const timeRange = encodeURIComponent(JSON.stringify({ since: chunk.since, until: chunk.until }));
     let url: string | null =
       `https://graph.facebook.com/${META_GRAPH_VERSION}/act_${account}/insights` +
-      `?fields=spend,campaign_id,campaign_name&level=campaign&breakdowns=publisher_platform` +
+      `?fields=spend,campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name` +
+      `&level=ad&breakdowns=publisher_platform` +
       `&time_increment=1&limit=500&time_range=${timeRange}&access_token=${encodeURIComponent(metaToken)}`;
     let pages = 0;
     while (url && pages < META_BREAKDOWN_PAGE_CAP) {
@@ -103,14 +116,19 @@ export async function fetchMetaCampaignBreakdown(
             ad_platform: String(d.publisher_platform ?? "").toLowerCase(),
             campaign_id: String(d.campaign_id ?? ""),
             campaign_name: String(d.campaign_name ?? ""),
+            adset_id: String(d.adset_id ?? ""),
+            adset_name: String(d.adset_name ?? ""),
+            ad_id: String(d.ad_id ?? ""),
+            ad_name: String(d.ad_name ?? ""),
             spend: roundCents(Number(d.spend) || 0),
           });
         }
       }
       url = j.paging?.next ?? null;
     }
+    if (url && pages >= META_BREAKDOWN_PAGE_CAP) truncated = true; // ainda tinha próxima página, mas o teto parou
   }
-  return { rows };
+  return { rows, truncated: truncated || undefined };
 }
 
 // ─── Google ──────────────────────────────────────────────────────────────────
@@ -183,18 +201,18 @@ export async function fetchGoogleDaily(
   return { rows };
 }
 
-// Gasto diário POR CAMPANHA do Google (mesma GAQL de fetchGoogleDaily, só que a projeção
-// INCLUI campaign.id/campaign.name em vez de descartá-los — FROM campaign já devolve 1 linha
-// por campanha×dia, então isto não muda a query nem a paginação, só captura mais colunas.
-// Sem breakdown de rede aqui (Google não tem Facebook/Instagram; ficaria noutra dimensão —
-// rede de veiculação — fora do escopo desta fase).
-export async function fetchGoogleCampaignBreakdown(
+// Gasto diário POR CAMPANHA → CONJUNTO (ad_group) do Google — FROM ad_group já devolve 1 linha
+// por conjunto×dia com campaign.id/name JUNTO (não precisa de query separada por nível, igual ao
+// Meta). Sem anúncio individual nesta fase (exigiria o recurso ad_group_ad, com sua própria
+// paginação/custo — fica pra depois se for útil). Sem breakdown de rede (Google não tem
+// Facebook/Instagram — outra dimensão, rede de veiculação, fora do escopo desta fase).
+export async function fetchGoogleAdGroupBreakdown(
   accessToken: string, devToken: string, mccId: string, customerId: string, since: string, until: string,
 ): Promise<SpendBreakdownResult> {
   const customer = String(customerId).replace(/\D/g, "");
   const loginCustomerId = String(mccId).replace(/\D/g, "");
   const query =
-    `SELECT segments.date, campaign.id, campaign.name, metrics.cost_micros FROM campaign ` +
+    `SELECT segments.date, campaign.id, campaign.name, ad_group.id, ad_group.name, metrics.cost_micros FROM ad_group ` +
     `WHERE segments.date BETWEEN '${since}' AND '${until}'`;
   const rows: SpendBreakdownRow[] = [];
   try {
@@ -227,6 +245,10 @@ export async function fetchGoogleCampaignBreakdown(
             ad_platform: "",
             campaign_id: String(r?.campaign?.id ?? ""),
             campaign_name: String(r?.campaign?.name ?? ""),
+            adset_id: String(r?.ad_group?.id ?? ""),
+            adset_name: String(r?.ad_group?.name ?? ""),
+            ad_id: "",
+            ad_name: "",
             spend: roundCents(micros / 1_000_000),
           });
         }
@@ -294,7 +316,7 @@ export async function upsertSpendBreakdown(
   if (rows.length === 0) return {};
   const byKey = new Map<string, SpendBreakdownRow>();
   for (const r of rows) {
-    const key = `${r.date}|${r.ad_platform}|${r.campaign_id}`;
+    const key = `${r.date}|${r.ad_platform}|${r.campaign_id}|${r.adset_id}|${r.ad_id}`;
     const acc = byKey.get(key);
     if (acc) acc.spend = roundCents(acc.spend + r.spend);
     else byKey.set(key, { ...r });
@@ -302,6 +324,7 @@ export async function upsertSpendBreakdown(
   const payload = [...byKey.values()].map((r) => ({
     clinic_id: clinicId, date: r.date, platform,
     ad_platform: r.ad_platform, campaign_id: r.campaign_id, campaign_name: r.campaign_name,
+    adset_id: r.adset_id, adset_name: r.adset_name, ad_id: r.ad_id, ad_name: r.ad_name,
     investment: r.spend,
   }));
   const { error } = await service.from("marketing_spend_breakdown")

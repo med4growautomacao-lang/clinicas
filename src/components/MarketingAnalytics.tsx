@@ -24,6 +24,8 @@ import {
   Download,
   Info,
   ChevronLeft,
+  ChevronRight,
+  ChevronDown,
   RefreshCw,
   Edit3,
   Link2,
@@ -1709,11 +1711,45 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
   );
 }
 
-// Investimento × Leads × Desfecho POR CAMPANHA (Fase 1 do detalhamento). investment/cpl/cac
-// null = "sem investimento sincronizado nesse período" — NUNCA renderizar como R$0,00 (mentiria
-// "leads de graça"; o correto é "—"). % Instagram é só do lado do GASTO (Meta não permite saber
-// em qual rede um lead específico clicou — a granularidade existe só no agregado da campanha).
+// ── Investimento × Leads × Desfecho — acordeão CAMPANHA → CONJUNTO → ANÚNCIO ──────────────
+// `rows` vem no grão MAIS FINO (1 linha por campanha×conjunto×anúncio×plataforma). Os totais de
+// campanha/conjunto são agregados AQUI (client-side), nunca no SQL: CPL/CAC são RAZÃO, não
+// aditivos — somar CPL de N anúncios não dá o CPL da campanha. A regra é sempre: soma investment/
+// leads/wins primeiro, divide DEPOIS — em CADA nível do acordeão.
+type RatioAgg = { investment: number | null; leads: number; wins: number; losses: number };
+
+function sumRatioAgg(rows: { investment: number | null; leads: number; wins: number; losses: number }[]): RatioAgg {
+  let sum = 0, hasAny = false, leads = 0, wins = 0, losses = 0;
+  for (const r of rows) {
+    if (r.investment != null) { sum += r.investment; hasAny = true; }
+    leads += r.leads; wins += r.wins; losses += r.losses;
+  }
+  return { investment: hasAny ? Math.round(sum * 100) / 100 : null, leads, wins, losses };
+}
+const campaignRatio = (investment: number | null, denom: number): number | null =>
+  (investment != null && denom > 0) ? Math.round((investment / denom) * 100) / 100 : null;
+
+function groupBy<T>(items: T[], keyFn: (t: T) => string): Map<string, T[]> {
+  const m = new Map<string, T[]>();
+  for (const it of items) {
+    const k = keyFn(it);
+    const arr = m.get(k);
+    if (arr) arr.push(it); else m.set(k, [it]);
+  }
+  return m;
+}
+
+const NO_ADSET = ' __sem_conjunto__';
+
 function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platformSplit: any[] }) {
+  const [openCampaigns, setOpenCampaigns] = useState<Set<string>>(new Set());
+  const [openAdsets, setOpenAdsets] = useState<Set<string>>(new Set());
+  const toggleCampaign = (k: string) => setOpenCampaigns(s => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const toggleAdset = (k: string) => setOpenAdsets(s => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+
+  // % Instagram é só do lado do GASTO — o Meta não permite saber em qual rede um lead
+  // específico clicou (a granularidade existe só no agregado da campanha). Só aparece na
+  // linha de campanha, não em conjunto/anúncio.
   const igShareByCampaign = useMemo(() => {
     const byCampaign = new Map<string, { ig: number; total: number }>();
     (platformSplit || []).forEach((r: any) => {
@@ -1726,6 +1762,36 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
     byCampaign.forEach((v, k) => { if (v.total > 0) out.set(k, (v.ig / v.total) * 100); });
     return out;
   }, [platformSplit]);
+
+  const campaignTree = useMemo(() => {
+    const byCampaign = groupBy(rows || [], (r: any) => r.campaign_name);
+    const campaigns = [...byCampaign.entries()].map(([campaignName, campaignRows]) => {
+      const agg = sumRatioAgg(campaignRows);
+      const byAdset = groupBy(campaignRows, (r: any) => r.adset_name ?? NO_ADSET);
+      const adsets = [...byAdset.entries()].map(([adsetKey, adsetRows]) => {
+        const adsetAgg = sumRatioAgg(adsetRows);
+        const adRows = (adsetRows as any[]).filter(r => r.ad_name != null);
+        const byAd = groupBy(adRows, (r: any) => r.ad_name);
+        const ads = [...byAd.entries()].map(([adName, adGroupRows]) => ({
+          key: adName, label: adName, ...sumRatioAgg(adGroupRows),
+        })).sort((a, b) => (b.investment ?? -1) - (a.investment ?? -1) || b.leads - a.leads);
+        return {
+          key: adsetKey,
+          label: adsetKey === NO_ADSET ? '(sem conjunto)' : adsetKey,
+          ...adsetAgg,
+          ads,
+        };
+      }).sort((a, b) => (b.investment ?? -1) - (a.investment ?? -1) || b.leads - a.leads);
+      return {
+        key: campaignName,
+        label: campaignName || '(sem nome)',
+        platform: campaignRows[0]?.platform,
+        ...agg,
+        adsets,
+      };
+    }).sort((a, b) => (b.investment ?? -1) - (a.investment ?? -1) || b.leads - a.leads);
+    return campaigns;
+  }, [rows]);
 
   const hasAnyInvestment = (rows || []).some((r: any) => r.investment != null);
   const fmtMoney = (v: number | null) => v == null ? '—' : `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -1741,7 +1807,7 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
           </div>
           <div className="flex flex-col">
             <CardTitle className="text-xs font-black text-slate-400 uppercase tracking-widest">Investimento por Campanha</CardTitle>
-            <span className="text-[9px] font-semibold text-slate-300 normal-case tracking-tight">gasto × leads × desfecho, por campanha do Meta/Google</span>
+            <span className="text-[9px] font-semibold text-slate-300 normal-case tracking-tight">gasto × leads × desfecho — campanha › conjunto › anúncio</span>
           </div>
         </div>
       </CardHeader>
@@ -1750,16 +1816,16 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
         <div className="flex items-center gap-2 px-4 py-3 mb-4 bg-amber-50 border border-amber-100 rounded-xl">
           <Target className="w-4 h-4 text-amber-500 shrink-0" />
           <p className="text-[11px] text-amber-700">
-            Ainda sem investimento sincronizado por campanha neste período. Use <b>Sincronizar Investimento</b> acima — a partir da próxima sincronização, o gasto por campanha passa a aparecer aqui.
+            Ainda sem investimento sincronizado neste período. Use <b>Sincronizar Investimento</b> acima — a partir da próxima sincronização, o gasto por campanha/conjunto/anúncio passa a aparecer aqui.
           </p>
         </div>
       )}
 
       <div className="overflow-x-auto -mx-2">
-        <table className="w-full text-sm min-w-[720px]">
+        <table className="w-full text-sm min-w-[760px]">
           <thead>
             <tr className="text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
-              <th className="text-left px-2 py-2">Campanha</th>
+              <th className="text-left px-2 py-2">Campanha / Conjunto / Anúncio</th>
               <th className="text-center px-2 py-2">Origem</th>
               <th className="text-right px-2 py-2">Investimento</th>
               <th className="text-right px-2 py-2">% Instagram</th>
@@ -1771,29 +1837,94 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
             </tr>
           </thead>
           <tbody>
-            {rows.map((r: any, idx: number) => {
-              const igShare = r.platform === 'meta_ads' ? igShareByCampaign.get(r.campaign_name) : undefined;
+            {campaignTree.map((camp) => {
+              const campOpen = openCampaigns.has(camp.key);
+              const igShare = camp.platform === 'meta_ads' ? igShareByCampaign.get(camp.key) : undefined;
+              const hasChildren = camp.adsets.length > 0;
               return (
-                <tr key={`${r.campaign_name}-${idx}`} className="border-b border-slate-50 hover:bg-slate-50/60 transition-colors">
-                  <td className="px-2 py-2.5 max-w-[280px] truncate text-slate-700 font-medium" title={r.campaign_name}>{r.campaign_name || '(sem nome)'}</td>
-                  <td className="px-2 py-2.5 text-center">
-                    <img src={r.platform === 'meta_ads' ? MetaLogo : GoogleLogo} alt={r.platform} className="w-4 h-4 inline-block object-contain opacity-80" />
-                  </td>
-                  <td className="px-2 py-2.5 text-right font-bold text-slate-800">{fmtMoney(r.investment)}</td>
-                  <td className="px-2 py-2.5 text-right text-slate-500">{igShare != null ? `${igShare.toFixed(0)}%` : '—'}</td>
-                  <td className="px-2 py-2.5 text-right text-slate-700">{r.leads}</td>
-                  <td className="px-2 py-2.5 text-right text-emerald-600 font-semibold">{r.wins}</td>
-                  <td className="px-2 py-2.5 text-right text-rose-500">{r.losses}</td>
-                  <td className="px-2 py-2.5 text-right text-slate-600">{fmtMoney(r.cpl)}</td>
-                  <td className="px-2 py-2.5 text-right font-bold text-indigo-600">{fmtMoney(r.cac)}</td>
-                </tr>
+                <React.Fragment key={camp.key}>
+                  <tr className="border-b border-slate-50 hover:bg-slate-50/60 transition-colors bg-slate-50/30">
+                    <td className="px-2 py-2.5 max-w-[320px]">
+                      <button
+                        type="button"
+                        onClick={() => hasChildren && toggleCampaign(camp.key)}
+                        className={cn("flex items-center gap-1.5 text-left w-full", hasChildren ? "cursor-pointer" : "cursor-default")}
+                        disabled={!hasChildren}
+                      >
+                        {hasChildren ? (
+                          campOpen ? <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        ) : <span className="w-3.5 shrink-0" />}
+                        <span className="truncate font-bold text-slate-800" title={camp.label}>{camp.label}</span>
+                      </button>
+                    </td>
+                    <td className="px-2 py-2.5 text-center">
+                      <img src={camp.platform === 'meta_ads' ? MetaLogo : GoogleLogo} alt={camp.platform} className="w-4 h-4 inline-block object-contain opacity-80" />
+                    </td>
+                    <td className="px-2 py-2.5 text-right font-bold text-slate-800">{fmtMoney(camp.investment)}</td>
+                    <td className="px-2 py-2.5 text-right text-slate-500">{igShare != null ? `${igShare.toFixed(0)}%` : '—'}</td>
+                    <td className="px-2 py-2.5 text-right text-slate-700">{camp.leads}</td>
+                    <td className="px-2 py-2.5 text-right text-emerald-600 font-semibold">{camp.wins}</td>
+                    <td className="px-2 py-2.5 text-right text-rose-500">{camp.losses}</td>
+                    <td className="px-2 py-2.5 text-right text-slate-600">{fmtMoney(campaignRatio(camp.investment, camp.leads))}</td>
+                    <td className="px-2 py-2.5 text-right font-bold text-indigo-600">{fmtMoney(campaignRatio(camp.investment, camp.wins))}</td>
+                  </tr>
+
+                  {campOpen && camp.adsets.map((adset) => {
+                    const adsetKey = `${camp.key}|${adset.key}`;
+                    const adsetOpen = openAdsets.has(adsetKey);
+                    const hasAds = adset.ads.length > 0;
+                    return (
+                      <React.Fragment key={adsetKey}>
+                        <tr className="border-b border-slate-50 hover:bg-slate-50/40 transition-colors">
+                          <td className="px-2 py-2 max-w-[320px] pl-8">
+                            <button
+                              type="button"
+                              onClick={() => hasAds && toggleAdset(adsetKey)}
+                              className={cn("flex items-center gap-1.5 text-left w-full", hasAds ? "cursor-pointer" : "cursor-default")}
+                              disabled={!hasAds}
+                            >
+                              {hasAds ? (
+                                adsetOpen ? <ChevronDown className="w-3 h-3 text-slate-300 shrink-0" /> : <ChevronRight className="w-3 h-3 text-slate-300 shrink-0" />
+                              ) : <span className="w-3 shrink-0" />}
+                              <span className="truncate text-slate-600 font-medium" title={adset.label}>{adset.label}</span>
+                            </button>
+                          </td>
+                          <td className="px-2 py-2" />
+                          <td className="px-2 py-2 text-right text-slate-700">{fmtMoney(adset.investment)}</td>
+                          <td className="px-2 py-2 text-right text-slate-300">—</td>
+                          <td className="px-2 py-2 text-right text-slate-600">{adset.leads}</td>
+                          <td className="px-2 py-2 text-right text-emerald-600">{adset.wins}</td>
+                          <td className="px-2 py-2 text-right text-rose-400">{adset.losses}</td>
+                          <td className="px-2 py-2 text-right text-slate-500">{fmtMoney(campaignRatio(adset.investment, adset.leads))}</td>
+                          <td className="px-2 py-2 text-right font-semibold text-indigo-500">{fmtMoney(campaignRatio(adset.investment, adset.wins))}</td>
+                        </tr>
+
+                        {adsetOpen && adset.ads.map((ad) => (
+                          <tr key={`${adsetKey}|${ad.key}`} className="border-b border-slate-50 hover:bg-slate-50/30 transition-colors">
+                            <td className="px-2 py-2 max-w-[320px] pl-14">
+                              <span className="truncate text-slate-500 text-[13px]" title={ad.label}>{ad.label}</span>
+                            </td>
+                            <td className="px-2 py-2" />
+                            <td className="px-2 py-2 text-right text-slate-600 text-[13px]">{fmtMoney(ad.investment)}</td>
+                            <td className="px-2 py-2 text-right text-slate-300">—</td>
+                            <td className="px-2 py-2 text-right text-slate-500 text-[13px]">{ad.leads}</td>
+                            <td className="px-2 py-2 text-right text-emerald-500 text-[13px]">{ad.wins}</td>
+                            <td className="px-2 py-2 text-right text-rose-400 text-[13px]">{ad.losses}</td>
+                            <td className="px-2 py-2 text-right text-slate-400 text-[13px]">{fmtMoney(campaignRatio(ad.investment, ad.leads))}</td>
+                            <td className="px-2 py-2 text-right font-medium text-indigo-400 text-[13px]">{fmtMoney(campaignRatio(ad.investment, ad.wins))}</td>
+                          </tr>
+                        ))}
+                      </React.Fragment>
+                    );
+                  })}
+                </React.Fragment>
               );
             })}
           </tbody>
         </table>
       </div>
       <p className="text-[10px] text-slate-400 mt-4">
-        CPL/CAC são do <b>coorte de entrada</b> no período (leads criados na janela) — leads recentes ainda podem converter depois, então o CAC de períodos muito recentes tende a subestimar. "—" = sem investimento sincronizado para essa campanha no período (não é gasto zero).
+        CPL/CAC são do <b>coorte de entrada</b> no período (leads criados na janela) — leads recentes ainda podem converter depois, então o CAC de períodos muito recentes tende a subestimar. Cada nível (campanha/conjunto/anúncio) soma investimento e leads primeiro, e SÓ DEPOIS calcula CPL/CAC — nunca é a soma dos CPL/CAC dos itens abaixo. "—" = sem investimento sincronizado para esse item no período (não é gasto zero); campanhas com sincronização parcial (alguns anúncios ainda sem dado) mostram a soma do que já foi sincronizado.
       </p>
     </Card>
   );

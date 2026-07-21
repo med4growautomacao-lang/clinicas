@@ -18,7 +18,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { applyAdStatus, fetchMetaCampaignBreakdown, upsertSpendBreakdown } from "../_shared/spend.ts";
+import { applyAdStatus, fetchMetaAdBreakdown, upsertSpendBreakdown } from "../_shared/spend.ts";
 
 const GRAPH_VERSION = "v24.0";
 const CHUNK_DAYS = 90;              // a insights diária tem teto de janela; fatiar em blocos ≤90d
@@ -181,18 +181,26 @@ serve(async (req) => {
     updated = rows.length;
   }
 
-  // (6) Investimento POR CAMPANHA × rede (facebook/instagram/…) — best-effort, NÃO bloqueia a
-  // resposta nem afeta o total acima (que já está gravado e é a fonte dos painéis). Falha aqui
-  // vira aviso na Central, mas o sync do total é considerado sucesso de qualquer forma.
+  // (6) Investimento POR ANÚNCIO (campanha→conjunto→anúncio) × rede — best-effort, NÃO bloqueia
+  // a resposta nem afeta o total acima (já gravado, fonte dos painéis). Falha vira aviso na
+  // Central; o sync do total é sucesso de qualquer forma.
   let breakdownRows = 0;
   try {
-    const bd = await fetchMetaCampaignBreakdown(metaToken, account, since, until);
+    const bd = await fetchMetaAdBreakdown(metaToken, account, since, until);
     if (bd.error) {
-      await registrarErro("breakdown_falhou", "Detalhamento por campanha do Meta falhou (total por conta OK)", "warning", { detail: bd.error });
-    } else if (bd.rows.length > 0) {
-      const up = await upsertSpendBreakdown(service, clinicId, "meta_ads", bd.rows);
-      if (up.error) await registrarErro("breakdown_gravacao_falhou", "Detalhamento por campanha do Meta veio, mas não foi gravado", "warning", { detail: up.error });
-      else breakdownRows = bd.rows.length;
+      await registrarErro("breakdown_falhou", "Detalhamento por anúncio do Meta falhou (total por conta OK)", "warning", { detail: bd.error });
+    } else {
+      if (bd.truncated) {
+        // Conta com MUITOS anúncios×dias bateu o teto de páginas — dado parcial gravado (melhor
+        // que nada), mas subestima o investimento por campanha/anúncio nesse período. Loga pra
+        // não virar um "número errado silencioso" — dá pra rodar de novo com janela menor.
+        await registrarErro("breakdown_truncado", "Detalhamento por anúncio do Meta veio PARCIAL (conta com muitos anúncios×dias) — investimento por campanha pode estar subestimado", "warning", { since, until, rows: bd.rows.length });
+      }
+      if (bd.rows.length > 0) {
+        const up = await upsertSpendBreakdown(service, clinicId, "meta_ads", bd.rows);
+        if (up.error) await registrarErro("breakdown_gravacao_falhou", "Detalhamento por anúncio do Meta veio, mas não foi gravado", "warning", { detail: up.error });
+        else breakdownRows = bd.rows.length;
+      }
     }
   } catch (e) {
     await registrarErro("breakdown_excecao", "Detalhamento por campanha do Meta quebrou (total por conta OK)", "warning", { detail: e instanceof Error ? e.message : String(e) });

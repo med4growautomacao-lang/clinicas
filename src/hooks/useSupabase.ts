@@ -1043,19 +1043,26 @@ export function useFunnelCohort(start: string | null, end: string | null) {
   );
 }
 
-// Investimento × leads × desfecho POR CAMPANHA (RPC marketing_campaign_investment).
-// investment/cpl/cac vêm null quando não há investimento sincronizado p/ a campanha no
-// período — NUNCA tratar null como 0 no front (0 significaria "gasto real zero" e mentiria;
-// null = "sem dado sincronizado ainda"). 1 linha por campanha (não por dia) — não pagina.
+// Investimento × leads × desfecho no grão MAIS FINO: campanha → conjunto → anúncio (RPC
+// marketing_campaign_investment). investment vem null quando não há investimento sincronizado
+// p/ aquele nó no período — NUNCA tratar null como 0 (0 significaria "gasto real zero" e
+// mentiria; null = "sem dado sincronizado ainda"). adset_name/ad_name vêm null quando a captura
+// de gasto não desce até ali (Google só tem conjunto nesta fase) OU quando é um lead sem spend
+// casado (mostra leads reais sem investimento atribuído).
+//
+// SEM cpl/cac aqui de propósito: são RAZÃO, não aditivos — não dá pra somar CPL de N anúncios
+// pra obter o CPL da campanha (precisa somar investment/leads primeiro, cpl DEPOIS). Como a UI
+// precisa fazer esse cálculo em CADA nível do acordeão (campanha/conjunto/anúncio), a conta vive
+// só no front (função campaignRatio, em MarketingAnalytics.tsx) — uma fonte só, não duplicada.
 export interface CampaignInvestmentRow {
   campaign_name: string;
+  adset_name: string | null;
+  ad_name: string | null;
   platform: 'meta_ads' | 'google_ads';
   investment: number | null;
   leads: number;
   wins: number;
   losses: number;
-  cpl: number | null;
-  cac: number | null;
 }
 export function useCampaignInvestment(start: string | null, end: string | null) {
   return useRpcRows<CampaignInvestmentRow>(
@@ -1063,13 +1070,13 @@ export function useCampaignInvestment(start: string | null, end: string | null) 
     start && end ? { p_start: start, p_end: end } : null,
     (r: any) => ({
       campaign_name: r.campaign_name,
+      adset_name: r.adset_name,
+      ad_name: r.ad_name,
       platform: r.platform,
       investment: r.investment == null ? null : Number(r.investment),
       leads: Number(r.leads) || 0,
       wins: Number(r.wins) || 0,
       losses: Number(r.losses) || 0,
-      cpl: r.cpl == null ? null : Number(r.cpl),
-      cac: r.cac == null ? null : Number(r.cac),
     })
   );
 }

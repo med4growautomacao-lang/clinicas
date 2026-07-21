@@ -22,7 +22,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { applyAdStatus, fetchGoogleCampaignBreakdown, upsertSpendBreakdown } from "../_shared/spend.ts";
+import { applyAdStatus, fetchGoogleAdGroupBreakdown, upsertSpendBreakdown } from "../_shared/spend.ts";
 
 const GAQL_VERSION = "v24";
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -229,7 +229,7 @@ serve(async (req) => {
   // (já gravado, fonte dos painéis). Reusa o mesmo accessToken/devToken/mccId já resolvidos.
   let breakdownRows = 0;
   try {
-    const bd = await fetchGoogleCampaignBreakdown(accessToken, devToken, mccId, customerId, since, until);
+    const bd = await fetchGoogleAdGroupBreakdown(accessToken, devToken, mccId, customerId, since, until);
     if (bd.error) {
       await registrarErro("breakdown_falhou", "Detalhamento por campanha do Google falhou (total por conta OK)", "warning", { detail: bd.error });
     } else if (bd.rows.length > 0) {

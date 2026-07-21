@@ -4352,6 +4352,28 @@ export function useConvAiClinicConfig() {
 
   useEffect(() => { fetch(); }, [fetch]);
 
+  // Ligar/desligar passa por RPC (e não pelo upsert genérico) porque ativar
+  // dispara o bootstrap do manual: sem ele a clínica passa até 24h sendo
+  // analisada sem conhecer o próprio funil.
+  const setEnabled = async (enabled: boolean) => {
+    if (!activeClinicId) return { success: false as const };
+    const { data, error } = await supabase.rpc('conv_ai_set_enabled', {
+      p_clinic_id: activeClinicId, p_enabled: enabled,
+    });
+    if (error) return { success: false as const };
+    await fetch();
+    return (data ?? { success: false }) as { success: boolean; enabled?: boolean; montando_manual?: boolean; error_code?: string };
+  };
+
+  // "Analisar agora": enfileira o que tem conversa recente e chama a edge na
+  // hora. Cooldown de 2 min no banco (o cron sozinho roda a cada 5).
+  const analisarAgora = async () => {
+    if (!activeClinicId) return { success: false as const };
+    const { data, error } = await supabase.rpc('conv_ai_request_analysis', { p_clinic_id: activeClinicId });
+    if (error) return { success: false as const };
+    return (data ?? { success: false }) as { success: boolean; enfileirados?: number; aguarde_segundos?: number; error_code?: string };
+  };
+
   const save = async (patch: Partial<ConvAiClinicConfig>) => {
     if (!activeClinicId) return false;
     const { error } = await supabase.from('conv_ai_clinic_config')
@@ -4394,5 +4416,5 @@ export function useConvAiClinicConfig() {
 
   const current = versions.find(v => v.is_current) ?? null;
 
-  return { config, versions, current, loading, save, rollback, editar, refetch: fetch };
+  return { config, versions, current, loading, save, rollback, editar, setEnabled, analisarAgora, refetch: fetch };
 }

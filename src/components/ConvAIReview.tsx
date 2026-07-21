@@ -227,7 +227,7 @@ function ColunaEixo({ eixo, modo, onModo, itens, vazioTexto, busy, onAprovar, on
 
 export function ConvAIReview() {
   const { pending, recentStages, loading, decide, refetch } = useConvAiInsights();
-  const { config, current, versions, loading: cfgLoading, save, rollback, editar } = useConvAiClinicConfig();
+  const { config, current, versions, loading: cfgLoading, save, rollback, editar, setEnabled, analisarAgora } = useConvAiClinicConfig();
   const { data: stages } = useFunnelStages();
   const { moveTicket, closeTicket } = useTickets();
   const { create: createConversion } = useConversions();
@@ -240,6 +240,52 @@ export function ConvAIReview() {
   const [editando, setEditando] = useState(false);
   const [rascunho, setRascunho] = useState("");
   const [salvandoPrompt, setSalvandoPrompt] = useState(false);
+  const [analisando, setAnalisando] = useState(false);
+  const [ativando, setAtivando] = useState(false);
+  const [aviso, setAviso] = useState<{ tipo: "ok" | "espera" | "info"; texto: string } | null>(null);
+
+  const flash = (tipo: "ok" | "espera" | "info", texto: string, ms = 6000) => {
+    setAviso({ tipo, texto });
+    setTimeout(() => setAviso(null), ms);
+  };
+
+  // Ligar a análise já monta o manual da clínica a partir das conversas que ela
+  // já tem, em vez de esperar o job da madrugada.
+  const handleToggle = async () => {
+    setAtivando(true);
+    const res = await setEnabled(!config?.enabled);
+    setAtivando(false);
+    if (!res.success) {
+      flash("info", res.error_code === "feature_off"
+        ? "Esta clínica ainda não tem a funcionalidade liberada. Fale com o suporte."
+        : "Não consegui alterar agora. Tente de novo.");
+      return;
+    }
+    if (res.enabled && res.montando_manual) {
+      flash("ok", "Análise ativada. Estou lendo as conversas já existentes para montar o manual desta clínica — leva um ou dois minutos. As primeiras sugestões chegam logo depois.", 12000);
+    } else if (res.enabled) {
+      flash("ok", "Análise ativada.");
+    }
+  };
+
+  // Não espera o ciclo automático (5 min): enfileira e chama o worker na hora.
+  const handleAnalisarAgora = async () => {
+    setAnalisando(true);
+    const res = await analisarAgora();
+    if (!res.success) {
+      setAnalisando(false);
+      if (res.error_code === "cooldown") {
+        flash("espera", `Acabei de rodar. Pode pedir de novo em ${res.aguarde_segundos ?? 0}s.`);
+      } else {
+        flash("info", "Ative a análise antes de pedir uma rodada.");
+      }
+      return;
+    }
+    flash("ok", `${res.enfileirados ?? 0} conversa(s) na fila. O resultado aparece aqui em alguns segundos.`);
+    // A edge trabalha de forma assíncrona: recarrega em passos até aparecer algo.
+    setTimeout(() => refetch(), 8000);
+    setTimeout(() => { refetch(); setAnalisando(false); }, 20000);
+  };
   const [ganho, setGanho] = useState<{
     id: string; name: string; phone: string | null; patientId: string | null;
     ticketId: string; ctwaClid: string | null; email: string | null; suggested: number | null;
@@ -318,19 +364,34 @@ export function ConvAIReview() {
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <button onClick={() => refetch()} title="Atualizar as duas filas"
-            className="p-2 rounded-xl border border-slate-200 bg-white text-slate-400 hover:text-teal-600 hover:border-teal-200 transition-colors">
-            <RefreshCw className="w-4 h-4" />
-          </button>
+          {!desligada && (
+            <button onClick={handleAnalisarAgora} disabled={analisando}
+              title="Enfileira as conversas recentes e analisa na hora, sem esperar o ciclo automático"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:text-teal-600 hover:border-teal-200 disabled:opacity-60 transition-colors">
+              <RefreshCw className={cn("w-3.5 h-3.5", analisando && "animate-spin")} />
+              {analisando ? "Analisando…" : "Analisar agora"}
+            </button>
+          )}
           <button
-            onClick={() => save({ enabled: !config?.enabled })}
-            className={cn("flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-colors",
+            onClick={handleToggle}
+            disabled={ativando}
+            className={cn("flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-colors disabled:opacity-60",
               desligada ? "bg-teal-600 hover:bg-teal-700 text-white" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50")}
           >
-            <Power className="w-3.5 h-3.5" /> {desligada ? "Ativar análise" : "Desativar"}
+            {ativando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Power className="w-3.5 h-3.5" />}
+            {desligada ? "Ativar análise" : "Desativar"}
           </button>
         </div>
       </div>
+
+      {aviso && (
+        <div className={cn("flex items-start gap-2 px-3 py-2.5 rounded-xl text-xs font-medium border",
+          aviso.tipo === "ok" ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+            : aviso.tipo === "espera" ? "bg-amber-50 border-amber-200 text-amber-700"
+            : "bg-slate-50 border-slate-200 text-slate-600")}>
+          <Sparkles className="w-3.5 h-3.5 shrink-0 mt-0.5" /> {aviso.texto}
+        </div>
+      )}
 
       {/* Duas colunas independentes: cada eixo com a sua configuração no topo e a
           fila que ela alimenta logo abaixo. */}

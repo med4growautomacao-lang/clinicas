@@ -35,8 +35,8 @@ export function ReportQuick({ start, end, className }: { start: Date; end: Date;
         p_clinic_id: clinicId,
         p_kind: "completo",
         p_entry_from: from, p_entry_to: to,
+        p_agenda_from: from, p_agenda_to: to,
         p_conv_from: from, p_conv_to: to,
-        p_appt_from: from, p_appt_to: to,
         p_compare: true,
       });
       if (error) throw error;
@@ -85,8 +85,8 @@ export function ReportQuick({ start, end, className }: { start: Date; end: Date;
         p_clinic_id: clinicId,
         p_kind: "completo",
         p_entry_from: from, p_entry_to: to,
+        p_agenda_from: from, p_agenda_to: to,
         p_conv_from: from, p_conv_to: to,
-        p_appt_from: from, p_appt_to: to,
         p_trigger: "manual",
       });
       if (error) throw error;

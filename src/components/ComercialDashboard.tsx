@@ -72,7 +72,7 @@ interface CommercialData {
   appointments: { total: number; ia: number; manual: number; byStatus: Record<string, number> };
   sla: { breaches: number; firstResponseMin: number; responseMin: number; overBreachMin: number; responseCycles: number; slaMinutes: number };
   finance: { revenue: number; revenueScoped: number; investment: number; investmentTotal: number; convertedValue: number; salesCycleDays: number; attendedConsults: number; defaultTicket: number };
-  outcomes: { won: number; lost: number };
+  outcomes: { won: number; lost: number; lossReasons: { reason: string; count: number }[] };
   agent: AgentFilter;
   csat: { type: string; answered: number; avg: number | null; distribution: { score: number; count: number }[] };
   funnel: { stage_id: string; name: string; slug: string | null; position: number; is_conversion: boolean; color: string | null; leads: number }[];
@@ -316,7 +316,10 @@ export function ComercialDashboard() {
   // Estado inicial padrão do Resultados: ESTE MÊS nos 2 calendários (Entrada e
   // Conversão) e "Todos" em agente/origem/canal (sempre abre nesse baseline).
   const initMonth = computeRange("month");
-  // Conversão = DATA DA CONSULTA (appointments.date). Alimenta p_appt no backend.
+  // Conversão = quando o negócio teve desfecho (COALESCE(outcome_at,closed_at))
+  // E quando a consulta foi realizada (appointments.date) — mesma janela, cada
+  // métrica lê sua própria coluna. Alimenta p_conv no backend. Toggle
+  // outcomeFilter (abaixo) escolhe Ganho/Perdido/Ambos dentro dessa janela.
   const [convRange, setConvRange] = useState<{ start: Date; end: Date } | null>(() => ({ start: initMonth.start, end: initMonth.end }));
   const [convLabel, setConvLabel] = useState(initMonth.label);
   const [isConvOpen, setIsConvOpen] = useState(false);
@@ -328,13 +331,16 @@ export function ComercialDashboard() {
   const [isEntryOpen, setIsEntryOpen] = useState(false);
   const [entryCal1, setEntryCal1] = useState<Date>(() => initMonth.start);
   const [entryCal2, setEntryCal2] = useState<Date>(() => addMonths(initMonth.start, 1));
-  // Agenda = DATA DE CRIAÇÃO do agendamento (appointments.created_at). Alimenta p_conv.
-  // Começa em ESTE MÊS; aceita "Todos" (null).
+  // Agendado = atividade operacional (mensagens/SLA/handoffs/automações/CSAT/
+  // investimento) + quando a consulta foi MARCADA (appointments.created_at).
+  // Alimenta p_agenda no backend. Começa em ESTE MÊS; aceita "Todos" (null).
   const [apptRange, setApptRange] = useState<{ start: Date; end: Date } | null>(() => ({ start: initMonth.start, end: initMonth.end }));
   const [apptLabel, setApptLabel] = useState(initMonth.label);
   const [isApptOpen, setIsApptOpen] = useState(false);
   const [apptCal1, setApptCal1] = useState<Date>(() => initMonth.start);
   const [apptCal2, setApptCal2] = useState<Date>(() => addMonths(initMonth.start, 1));
+  // Toggle Ganho/Perdido/Ambos — recorta o eixo Conversão por desfecho.
+  const [outcomeFilter, setOutcomeFilter] = useState<"ambos" | "ganho" | "perdido">("ambos");
   const [agent, setAgent] = useState<AgentFilter>("todos");
   // Origem e Canal são multi-seleção: array vazio = "Todos". Agente segue único.
   const [origin, setOrigin] = useState<OriginFilter[]>([]);
@@ -423,16 +429,17 @@ export function ComercialDashboard() {
       p_clinic_id: clinicId,
       p_entry_from: entryRange ? format(entryRange.start, "yyyy-MM-dd") : null,
       p_entry_to: entryRange ? format(entryRange.end, "yyyy-MM-dd") : null,
-      // Mapeamento calendário -> coluna no backend:
-      //   Agenda (apptRange)    -> p_conv -> appointments.created_at (geração: Geradas/CAC)
-      //   Conversão (convRange) -> p_appt -> appointments.date       (realização: realizadas/faturamento)
-      p_conv_from: apptRange ? format(apptRange.start, "yyyy-MM-dd") : null,
-      p_conv_to: apptRange ? format(apptRange.end, "yyyy-MM-dd") : null,
+      // Mapeamento calendário -> parâmetro no backend (nomes batem 1:1 agora):
+      //   Agendado (apptRange)  -> p_agenda -> atividade operacional + agendamento gerado
+      //   Conversão (convRange) -> p_conv   -> desfecho (outcome_at) + consulta realizada
+      p_agenda_from: apptRange ? format(apptRange.start, "yyyy-MM-dd") : null,
+      p_agenda_to: apptRange ? format(apptRange.end, "yyyy-MM-dd") : null,
       p_agent: agent,
       p_origin: origin.length ? origin.join(",") : "todos",
       p_channel: channel.length ? channel.join(",") : "todos",
-      p_appt_from: convRange ? format(convRange.start, "yyyy-MM-dd") : null,
-      p_appt_to: convRange ? format(convRange.end, "yyyy-MM-dd") : null,
+      p_conv_from: convRange ? format(convRange.start, "yyyy-MM-dd") : null,
+      p_conv_to: convRange ? format(convRange.end, "yyyy-MM-dd") : null,
+      p_outcome: outcomeFilter,
     };
     // SWR: pinta o cache na hora (troca de aba = instantâneo) e revalida em 2º plano;
     // o spinner só aparece na 1ª carga (sem cache). Projeto em us-east-1 => cada
@@ -453,7 +460,7 @@ export function ComercialDashboard() {
     } finally {
       if (gen === fetchGenRef.current && showSpinner) setLoading(false);
     }
-  }, [activeClinicId, profile?.clinic_id, convRange, entryRange, apptRange, agent, origin, channel]);
+  }, [activeClinicId, profile?.clinic_id, convRange, entryRange, apptRange, agent, origin, channel, outcomeFilter]);
 
   useEffect(() => {
     const clinicId = activeClinicId || profile?.clinic_id;
@@ -498,7 +505,7 @@ export function ComercialDashboard() {
   const [chatLead, setChatLead] = useState<Lead | null>(null);
 
   // Volta para a 1ª página sempre que um filtro/ordenação muda
-  useEffect(() => { setLeadsPage(0); }, [convRange, entryRange, apptRange, agent, origin, channel, leadsMetric, leadsSort, leadsSortDir]);
+  useEffect(() => { setLeadsPage(0); }, [convRange, entryRange, apptRange, agent, origin, channel, leadsMetric, leadsSort, leadsSortDir, outcomeFilter]);
 
   // Clique no cabeçalho: alterna a direção se já for a coluna ativa; senão troca de coluna
   // (datas/valor começam em desc = mais novo/maior; nome começa em asc = A→Z)
@@ -529,12 +536,13 @@ export function ComercialDashboard() {
         p_channel: channel.length ? channel.join(",") : "todos",
         p_limit: LEADS_PAGE_SIZE,
         p_offset: leadsPage * LEADS_PAGE_SIZE,
-        // Recorte por métrica de agendamento; Agenda (created_at) = apptRange
+        // Recorte por métrica de agendamento (ou 'perdidos'); Agendado (created_at) = apptRange
         p_metric: leadsMetric,
         p_agenda_from: apptRange ? format(apptRange.start, "yyyy-MM-dd") : null,
         p_agenda_to: apptRange ? format(apptRange.end, "yyyy-MM-dd") : null,
         p_sort: leadsSort,
         p_sort_dir: leadsSortDir,
+        p_outcome: outcomeFilter,
       });
       if (error) throw error;
       const r = res as { total: number; rows: LeadRow[]; metricCount?: number } | null;
@@ -546,7 +554,7 @@ export function ComercialDashboard() {
     } finally {
       setLeadsLoading(false);
     }
-  }, [activeClinicId, profile?.clinic_id, convRange, entryRange, apptRange, agent, origin, channel, leadsPage, leadsMetric, leadsSort, leadsSortDir]);
+  }, [activeClinicId, profile?.clinic_id, convRange, entryRange, apptRange, agent, origin, channel, leadsPage, leadsMetric, leadsSort, leadsSortDir, outcomeFilter]);
 
   useEffect(() => { fetchLeads(); }, [fetchLeads]);
 
@@ -576,11 +584,11 @@ export function ComercialDashboard() {
         p_kind: kind,
         p_entry_from: entryRange ? format(entryRange.start, "yyyy-MM-dd") : null,
         p_entry_to: entryRange ? format(entryRange.end, "yyyy-MM-dd") : null,
-        // Agenda (apptRange)->p_conv (created_at); Conversão (convRange)->p_appt (a.date)
-        p_conv_from: apptRange ? format(apptRange.start, "yyyy-MM-dd") : null,
-        p_conv_to: apptRange ? format(apptRange.end, "yyyy-MM-dd") : null,
-        p_appt_from: convRange ? format(convRange.start, "yyyy-MM-dd") : null,
-        p_appt_to: convRange ? format(convRange.end, "yyyy-MM-dd") : null,
+        // Agendado (apptRange)->p_agenda; Conversão (convRange)->p_conv (nomes batem 1:1)
+        p_agenda_from: apptRange ? format(apptRange.start, "yyyy-MM-dd") : null,
+        p_agenda_to: apptRange ? format(apptRange.end, "yyyy-MM-dd") : null,
+        p_conv_from: convRange ? format(convRange.start, "yyyy-MM-dd") : null,
+        p_conv_to: convRange ? format(convRange.end, "yyyy-MM-dd") : null,
         p_compare: true,
       });
       if (error) throw error;
@@ -623,10 +631,10 @@ export function ComercialDashboard() {
         p_kind: reportKind,
         p_entry_from: entryRange ? format(entryRange.start, "yyyy-MM-dd") : null,
         p_entry_to: entryRange ? format(entryRange.end, "yyyy-MM-dd") : null,
-        p_conv_from: apptRange ? format(apptRange.start, "yyyy-MM-dd") : null,
-        p_conv_to: apptRange ? format(apptRange.end, "yyyy-MM-dd") : null,
-        p_appt_from: convRange ? format(convRange.start, "yyyy-MM-dd") : null,
-        p_appt_to: convRange ? format(convRange.end, "yyyy-MM-dd") : null,
+        p_agenda_from: apptRange ? format(apptRange.start, "yyyy-MM-dd") : null,
+        p_agenda_to: apptRange ? format(apptRange.end, "yyyy-MM-dd") : null,
+        p_conv_from: convRange ? format(convRange.start, "yyyy-MM-dd") : null,
+        p_conv_to: convRange ? format(convRange.end, "yyyy-MM-dd") : null,
         p_trigger: "manual",
       });
       if (error) throw error;
@@ -691,8 +699,8 @@ export function ComercialDashboard() {
   // Denominador das taxas acompanha o filtro de agente: leads atendidos pela IA/humano
   // (= leadsTouched) ou a coorte inteira quando "Todos". Mantém coerência com o card "Leads".
   const leadsValue = agent === "ia" ? agents.ia.leadsTouched : agent === "humano" ? agents.humano.leadsTouched : data.newLeads;
-  // Geração = agendamentos CRIADOS (eixo Conversão). As taxas/custos de "agendamento"
-  // usam isto; "total" (appointments.total) agora é o total na AGENDA (eixo a.date).
+  // Geração = agendamentos CRIADOS (eixo Agendado). As taxas/custos de "agendamento"
+  // usam isto; "total" (appointments.total) é o total na AGENDA (eixo Conversão, a.date).
   const apptGenerated = (appointments as any).generated ?? 0;
   const convAgendRate = leadsValue > 0 ? (apptGenerated / leadsValue) * 100 : 0;          // agendamentos gerados ÷ leads
   const convConsultaRate = leadsValue > 0 ? (attended / leadsValue) * 100 : 0;          // parcial: realizadas ÷ leads
@@ -735,7 +743,7 @@ export function ComercialDashboard() {
     { id: "conversao_agend", title: "Conversão Lead → Agendamento", value: `${convAgendRate.toFixed(1)}%`, icon: Percent, color: "text-emerald-600", bg: "bg-emerald-50", sub: `${apptGenerated} agend. gerados ${agentNoun} ÷ ${leadsValue} ${leadsDenomLabel}`, agentScoped: true, originScoped: true },
     { id: "conversao_consulta", title: "Conversão Lead → Consulta", value: `${convConsultaRate.toFixed(1)}%`, valueLabel: "parcial", value2: `${convConsultaPrevistaRate.toFixed(1)}%`, value2Label: "previsto", icon: CheckCircle2, color: "text-green-600", bg: "bg-green-50", agentScoped: true, originScoped: true },
     { id: "consultas", title: "Consultas", value: attended, valueLabel: "realizadas", value2: toRealize, value2Label: "marcadas", icon: CheckCircle2, color: "text-emerald-600", bg: "bg-emerald-50", sub: "no período (Conversão)", agentScoped: true, originScoped: true },
-    { id: "consultas_geradas", title: "Agendamentos Gerados", value: apptGenerated, icon: CalendarCheck, color: "text-teal-600", bg: "bg-teal-50", sub: "criadas no período (Agenda)", agentScoped: true, originScoped: true },
+    { id: "consultas_geradas", title: "Agendamentos Gerados", value: apptGenerated, icon: CalendarCheck, color: "text-teal-600", bg: "bg-teal-50", sub: "criadas no período (Agendado)", agentScoped: true, originScoped: true },
     { id: "faturamento", title: "Vendas lançadas", value: noRevenueRecorded ? "—" : fmtBRL(realRevenue), valueLabel: "lançado", value2: projectedRevenue != null ? fmtBRL(projectedRevenue) : "—", value2Label: "previsto", icon: Wallet, color: "text-emerald-700", bg: "bg-emerald-50", agentScoped: true, originScoped: true },
     { id: "custo_agendamento", title: "Custo por Consulta", value: costPerRealizada != null ? fmtBRL(costPerRealizada) : "—", valueLabel: "parcial", value2: costPerAppt != null ? fmtBRL(costPerAppt) : "—", value2Label: "previsto", icon: Target, color: "text-rose-600", bg: "bg-rose-50", agentScoped: true, originScoped: true },
     { id: "cac", title: "CAC", value: cac != null ? fmtBRL(cac) : "—", valueLabel: "parcial", value2: cacPrevisto != null ? fmtBRL(cacPrevisto) : "—", value2Label: "previsto", icon: UserCheck, color: "text-rose-600", bg: "bg-rose-50", agentScoped: false, originScoped: true },
@@ -1127,16 +1135,18 @@ export function ComercialDashboard() {
             selected={entryRange ? { from: entryRange.start, to: entryRange.end } : undefined} onSelect={onEntrySelect}
             cal1={entryCal1} setCal1={setEntryCal1} cal2={entryCal2} setCal2={setEntryCal2}
           />
-          {/* Agenda = data de CRIAÇÃO do agendamento (appointments.created_at): rege Geradas / taxa Lead→Agend / CAC */}
+          {/* Agendado = atividade operacional + data de CRIAÇÃO do agendamento
+              (appointments.created_at): rege Geradas / taxa Lead→Agend / mensagens / SLA / investimento */}
           <DatePill
-            label="Agenda" valueLabel={apptLabel}
+            label="Agendado" valueLabel={apptLabel}
             rangeText={apptRange ? `${format(apptRange.start, "dd/MM")} - ${format(apptRange.end, "dd/MM")}` : "todas as datas"}
             open={isApptOpen} setOpen={setIsApptOpen}
             presets={[{ id: "todos", label: "Todos" }, ...RANGE_PRESETS]} activeLabel={apptLabel} onPreset={setApptById}
             selected={apptRange ? { from: apptRange.start, to: apptRange.end } : undefined} onSelect={onApptSelect}
             cal1={apptCal1} setCal1={setApptCal1} cal2={apptCal2} setCal2={setApptCal2}
           />
-          {/* Conversão = data da CONSULTA (appointments.date): rege realizadas / comparecimento / faturamento real */}
+          {/* Conversão = desfecho do negócio (outcome_at: Ganho/Perdido/Faturamento) E
+              data da CONSULTA (appointments.date: realizadas/comparecimento) — mesma janela */}
           <DatePill
             label="Conversão" valueLabel={convLabel}
             rangeText={convRange ? `${format(convRange.start, "dd/MM")} - ${format(convRange.end, "dd/MM")}` : "todas as datas"}
@@ -1144,6 +1154,16 @@ export function ComercialDashboard() {
             presets={[{ id: "todos", label: "Todos" }, ...RANGE_PRESETS]} activeLabel={convLabel} onPreset={setConvById}
             selected={convRange ? { from: convRange.start, to: convRange.end } : undefined} onSelect={onConvSelect}
             cal1={convCal1} setCal1={setConvCal1} cal2={convCal2} setCal2={setConvCal2}
+          />
+          {/* Toggle Ganho/Perdido/Ambos — recorta o eixo Conversão por desfecho */}
+          <FilterChips
+            value={outcomeFilter}
+            onChange={(id) => setOutcomeFilter(id as "ambos" | "ganho" | "perdido")}
+            options={[
+              { id: "ambos", label: "Ambos" },
+              { id: "ganho", label: "Ganho" },
+              { id: "perdido", label: "Perdido" },
+            ]}
           />
         </div>
       </div>

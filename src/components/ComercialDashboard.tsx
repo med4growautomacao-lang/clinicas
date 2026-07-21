@@ -37,6 +37,7 @@ import {
   Copy,
   Check,
   Store,
+  Filter,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { format, subDays, addMonths, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subMonths, subWeeks, parseISO } from "date-fns";
@@ -1177,15 +1178,10 @@ export function ComercialDashboard() {
           senão sumiriam as opções não-selecionadas). Vazio = todos os motivos. */}
       {outcomeFilter === "perdido" && data.outcomes.lossReasons.length > 0 && (
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Motivo:</span>
-          <FilterChips
-            multiple
-            value={lossReasonFilter}
+          <LossReasonFilterButton
+            reasons={data.outcomes.lossReasons}
+            selected={lossReasonFilter}
             onChange={setLossReasonFilter}
-            options={[
-              { id: "todos", label: "Todos" },
-              ...data.outcomes.lossReasons.map((r) => ({ id: r.reason, label: `${r.reason} (${r.count})` })),
-            ]}
           />
         </div>
       )}
@@ -1545,6 +1541,68 @@ function MetricsConfigButton({ metricsOrder, visibleMetrics, toggleMetric, moveM
                         </button>
                       </div>
                     </div>
+                  );
+                })}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// Dropdown do seletor de motivo de perda: lista ordenada por quantidade (desc),
+// multi-seleção, sem busca (a lista é curta — motivos são cadastrados, não texto livre).
+function LossReasonFilterButton({ reasons, selected, onChange }: { reasons: { reason: string; count: number }[]; selected: string[]; onChange: (v: string[]) => void }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const sorted = [...reasons].sort((a, b) => b.count - a.count);
+  const toggle = (reason: string) => onChange(selected.includes(reason) ? selected.filter((r) => r !== reason) : [...selected, reason]);
+  return (
+    <div className="relative">
+      <Button
+        onClick={() => setIsOpen(!isOpen)}
+        variant="outline"
+        className={cn("gap-2 transition-all shadow-sm", isOpen || selected.length > 0 ? "bg-teal-50 border-teal-200 text-teal-600 shadow-teal-100" : "border-slate-200 bg-white hover:bg-slate-50 text-slate-600")}
+      >
+        <Filter className="w-4 h-4" />
+        <span className="text-[10px] font-bold uppercase tracking-tight">
+          Filtrar por motivo{selected.length > 0 ? ` (${selected.length})` : ""}
+        </span>
+      </Button>
+      <AnimatePresence>
+        {isOpen && (
+          <>
+            <div className="fixed inset-0 z-[105]" onClick={() => setIsOpen(false)} />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="absolute top-full left-0 mt-2 w-72 bg-white rounded-2xl border border-slate-200 shadow-2xl z-[110] p-3 overflow-hidden"
+            >
+              <div className="flex items-center justify-between mb-2 pl-2 pr-1">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Motivo de Perda</p>
+                {selected.length > 0 && (
+                  <button onClick={() => onChange([])} className="text-[9px] font-bold text-teal-600 hover:text-teal-700 uppercase tracking-wide">
+                    Limpar
+                  </button>
+                )}
+              </div>
+              <div className="space-y-1 max-h-80 overflow-y-auto custom-scrollbar">
+                {sorted.map(({ reason, count }) => {
+                  const active = selected.includes(reason);
+                  return (
+                    <button
+                      key={reason}
+                      onClick={() => toggle(reason)}
+                      className={cn(
+                        "w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-[11px] font-bold transition-all text-left",
+                        active ? "bg-teal-50 text-teal-700" : "text-slate-600 hover:bg-slate-50"
+                      )}
+                    >
+                      <span className="truncate">{reason}</span>
+                      <span className={cn("shrink-0 tabular-nums", active ? "text-teal-600" : "text-slate-400")}>{count}</span>
+                    </button>
                   );
                 })}
               </div>

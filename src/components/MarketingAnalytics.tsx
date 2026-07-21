@@ -33,7 +33,8 @@ import {
   Activity,
   CheckCircle2,
   FileText,
-  Store
+  Store,
+  AlertTriangle
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -53,7 +54,7 @@ import {
 import { cn } from "@/src/lib/utils";
 import { TrendBarChart, fmtByType } from "./TrendBarChart";
 import { motion, AnimatePresence } from "framer-motion";
-import { useMarketing, MarketingData, useFunnelStages, useUtmFunnelCohort, useFunnelCohort, useMarketingKpis, MarketingKpiRow, useCampaignInvestment, useCampaignPlatformSplit } from "../hooks/useSupabase";
+import { useMarketing, MarketingData, useFunnelStages, useUtmFunnelCohort, useFunnelCohort, useMarketingKpis, MarketingKpiRow, useCampaignInvestment, useCampaignPlatformSplit, useLossReasons } from "../hooks/useSupabase";
 import { ReportQuick } from "./ReportQuick";
 import {
   format,
@@ -294,6 +295,10 @@ export function MarketingAnalytics() {
     format(dateRange.end, 'yyyy-MM-dd')
   );
   const campaignPlatformSplit = useCampaignPlatformSplit(
+    format(dateRange.start, 'yyyy-MM-dd'),
+    format(dateRange.end, 'yyyy-MM-dd')
+  );
+  const lossReasons = useLossReasons(
     format(dateRange.start, 'yyyy-MM-dd'),
     format(dateRange.end, 'yyyy-MM-dd')
   );
@@ -915,6 +920,7 @@ export function MarketingAnalytics() {
                 utmCohortCompare={utmCohortCompare}
                 campaignInvestment={campaignInvestment}
                 campaignPlatformSplit={campaignPlatformSplit}
+                lossReasons={lossReasons}
                 funnelOrder={funnelStagesOrder}
                 funnelHidden={effectiveFunnelHidden}
                 toggleFunnelStage={toggleFunnelStage}
@@ -1281,7 +1287,7 @@ function FunnelConfigButton({ stages, order, hidden, toggleStage, moveStage, fix
   );
 }
 
-function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, isComparing, visibleMetrics, metricsOrder, toggleMetric, moveMetric, funnelStages, funnelCohort, funnelCohortCompare, utmCohort, utmCohortCompare, campaignInvestment, campaignPlatformSplit, funnelOrder, funnelHidden, toggleFunnelStage, moveFunnelStage, selectedPlatform, selectedChannel }: any) {
+function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, isComparing, visibleMetrics, metricsOrder, toggleMetric, moveMetric, funnelStages, funnelCohort, funnelCohortCompare, utmCohort, utmCohortCompare, campaignInvestment, campaignPlatformSplit, lossReasons, funnelOrder, funnelHidden, toggleFunnelStage, moveFunnelStage, selectedPlatform, selectedChannel }: any) {
 
   const [selectedMetric, setSelectedMetric] = useState('leads');
   const latestPeriod = periods[periods.length - 1]?.label || '';
@@ -1707,6 +1713,8 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
       />
 
       <CampaignInvestmentSection rows={campaignInvestment} platformSplit={campaignPlatformSplit} />
+
+      <LossReasonsSection rows={lossReasons} />
     </div>
   );
 }
@@ -1925,6 +1933,88 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
       </div>
       <p className="text-[10px] text-slate-400 mt-4">
         Ganho/Perdido aqui são do <b>coorte de entrada</b> (leads que ENTRARAM nesta janela e o desfecho atual do ticket) — por isso costumam vir <b>menores</b> que o "Ganho" do Funil de Vendas acima, que conta pela <b>data da conversão</b> (pode incluir leads que entraram bem antes). Os dois estão certos: são perguntas diferentes. Aqui a pergunta é "dos leads que este investimento gerou, quantos já compraram" — a única forma de o CAC ficar ligado ao gasto real do período. Em janelas recentes, o coorte ainda está maturando (leads podem converter depois) — o CAC tende a cair conforme os dias passam. Cada nível (campanha/conjunto/anúncio) soma investimento e leads primeiro, e SÓ DEPOIS calcula CPL/CAC — nunca é a soma dos CPL/CAC dos itens abaixo. "—" = sem investimento sincronizado para esse item no período (não é gasto zero); campanhas com sincronização parcial (alguns anúncios ainda sem dado) mostram a soma do que já foi sincronizado.
+      </p>
+    </Card>
+  );
+}
+
+// ── Perdas por MOTIVO × campanha ──────────────────────────────────────────────────────────
+// `rows` vem no grão (campanha, motivo). Rankeamos motivo por total (somado entre campanhas)
+// e cada linha expande pra mostrar em quais campanhas aquele motivo mais aparece — o cruzamento
+// que decide corte de verba: "estou pagando por lead que nunca vou conseguir contatar".
+function LossReasonsSection({ rows }: { rows: any[] }) {
+  const [openReasons, setOpenReasons] = useState<Set<string>>(new Set());
+  const toggleReason = (k: string) => setOpenReasons(s => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+
+  const byReason = useMemo(() => {
+    const groups = groupBy(rows || [], (r: any) => r.loss_reason);
+    const totalLosses = (rows || []).reduce((s: number, r: any) => s + r.losses, 0);
+    return [...groups.entries()].map(([reason, reasonRows]) => {
+      const losses = (reasonRows as any[]).reduce((s, r) => s + r.losses, 0);
+      const campaigns = (reasonRows as any[])
+        .map((r: any) => ({ campaign_name: r.campaign_name, platform: r.platform, losses: r.losses, campaign_losses: r.campaign_losses, campaign_leads: r.campaign_leads, campaign_investment: r.campaign_investment }))
+        .sort((a, b) => b.losses - a.losses);
+      return { reason, losses, pct: totalLosses > 0 ? (losses / totalLosses) * 100 : 0, campaigns };
+    }).sort((a, b) => b.losses - a.losses);
+  }, [rows]);
+
+  const maxLosses = Math.max(1, ...byReason.map(r => r.losses));
+  const fmtMoney = (v: number | null) => v == null ? '—' : `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  if (!rows || rows.length === 0) return null;
+
+  return (
+    <Card className="bg-white border-slate-200 shadow-xl rounded-3xl p-8 overflow-hidden">
+      <CardHeader className="p-0 pb-6">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-rose-50 flex items-center justify-center">
+            <AlertTriangle className="w-5 h-5 text-rose-600" />
+          </div>
+          <div className="flex flex-col">
+            <CardTitle className="text-xs font-black text-slate-400 uppercase tracking-widest">Perdas por Motivo</CardTitle>
+            <span className="text-[9px] font-semibold text-slate-300 normal-case tracking-tight">motivo × campanha — coorte de entrada, mesmo período da tabela acima</span>
+          </div>
+        </div>
+      </CardHeader>
+
+      <div className="flex flex-col gap-2.5">
+        {byReason.map((r) => {
+          const open = openReasons.has(r.reason);
+          const widthPct = Math.max(6, (r.losses / maxLosses) * 100);
+          return (
+            <div key={r.reason} className="flex flex-col gap-1.5">
+              <button
+                type="button"
+                onClick={() => toggleReason(r.reason)}
+                className="flex items-center gap-3 text-left group"
+              >
+                {open ? <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />}
+                <span className="text-xs font-bold text-slate-700 w-56 shrink-0 truncate" title={r.reason}>{r.reason}</span>
+                <div className="flex-1 h-6 bg-rose-50 rounded-lg overflow-hidden relative min-w-[80px]">
+                  <div className="h-full bg-rose-200/70 group-hover:bg-rose-300/70 transition-colors rounded-lg" style={{ width: `${widthPct}%` }} />
+                </div>
+                <span className="text-xs font-black text-rose-600 w-14 text-right shrink-0">{r.losses}</span>
+                <span className="text-[10px] font-bold text-slate-400 w-12 text-right shrink-0">{r.pct.toFixed(0)}%</span>
+              </button>
+
+              {open && (
+                <div className="ml-6 pl-3 border-l-2 border-rose-100 flex flex-col gap-1">
+                  {r.campaigns.map((c: any) => (
+                    <div key={`${r.reason}|${c.campaign_name}`} className="flex items-center gap-3 text-[11px] py-1">
+                      <img src={c.platform === 'meta_ads' ? MetaLogo : GoogleLogo} alt={c.platform} className="w-3.5 h-3.5 object-contain opacity-70 shrink-0" />
+                      <span className="text-slate-600 truncate flex-1" title={c.campaign_name}>{c.campaign_name || '(sem nome)'}</span>
+                      <span className="text-rose-500 font-semibold shrink-0">{c.losses} de {c.campaign_losses} perdidos</span>
+                      <span className="text-slate-400 shrink-0 w-24 text-right">{fmtMoney(c.campaign_investment)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-[10px] text-slate-400 mt-5">
+        Mesmo coorte de entrada da tabela de Investimento por Campanha acima — os motivos de uma campanha somam exatamente o "Perdido" mostrado lá. O investimento na expansão é o TOTAL da campanha (não rateado por motivo — ratear seria estimativa em cima de estimativa); compare com "X de Y perdidos" pra ter a proporção.
       </p>
     </Card>
   );

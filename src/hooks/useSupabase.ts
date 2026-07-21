@@ -1096,6 +1096,35 @@ export function useCampaignPlatformSplit(start: string | null, end: string | nul
   );
 }
 
+// Perdas por MOTIVO × campanha (RPC marketing_loss_reasons). Mesmo coorte de entrada das
+// outras RPCs de investimento. campaign_investment/campaign_leads/campaign_losses vêm
+// REPETIDOS em cada linha de motivo daquela campanha (não são por-motivo) — servem de
+// contexto (ex.: "62 de 375 perdidos desta campanha foram por Sem dinheiro").
+export interface LossReasonRow {
+  campaign_name: string;
+  platform: 'meta_ads' | 'google_ads';
+  loss_reason: string;
+  losses: number;
+  campaign_investment: number | null;
+  campaign_leads: number;
+  campaign_losses: number;
+}
+export function useLossReasons(start: string | null, end: string | null) {
+  return useRpcRows<LossReasonRow>(
+    'marketing_loss_reasons',
+    start && end ? { p_start: start, p_end: end } : null,
+    (r: any) => ({
+      campaign_name: r.campaign_name,
+      platform: r.platform,
+      loss_reason: r.loss_reason,
+      losses: Number(r.losses) || 0,
+      campaign_investment: r.campaign_investment == null ? null : Number(r.campaign_investment),
+      campaign_leads: Number(r.campaign_leads) || 0,
+      campaign_losses: Number(r.campaign_losses) || 0,
+    })
+  );
+}
+
 // Igual ao useFunnelCohort, mas chama o RPC marketing_utm_funnel_cohort, que adiciona
 // as dimensões de UTM (campanha/conjunto/anúncio/termo/origem) ao agrupamento. Alimenta
 // a seção "Análise por UTM × Etapa" do Marketing. Contagem por ticket / última entrada

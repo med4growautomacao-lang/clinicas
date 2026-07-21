@@ -126,6 +126,7 @@ function ValidationModal({ isOpen, onClose, missingTags }: { isOpen: boolean, on
 
 function ConfirmationsView() {
   const { aiConfig, updateAI, loading } = useSettings();
+  const guard = useActivationGuard();
   const [saving, setSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [localConfig, setLocalConfig] = useState<any>(null);
@@ -240,7 +241,11 @@ function ConfirmationsView() {
                   <p className="text-[10px] font-semibold text-slate-500 uppercase pt-0.5">Ativar envio automático via WhatsApp</p>
                 </div>
                 <button
-                  onClick={() => { const v = !localConfig.confirm_enabled; setLocalConfig({ ...localConfig, confirm_enabled: v }); updateAI({ ...localConfig, confirm_enabled: v }); }}
+                  onClick={() => {
+                    const v = !localConfig.confirm_enabled;
+                    const apply = () => { setLocalConfig({ ...localConfig, confirm_enabled: v }); updateAI({ ...localConfig, confirm_enabled: v }); };
+                    if (v) guard("confirmation", apply); else apply();
+                  }}
                   className={cn("w-12 h-6 rounded-full relative transition-all shrink-0", localConfig.confirm_enabled ? "bg-teal-600" : "bg-slate-300")}
                 >
                   <div className={cn("w-4 h-4 bg-white rounded-full absolute top-1 transition-all shadow-sm", localConfig.confirm_enabled ? "right-1" : "left-1")}></div>
@@ -547,6 +552,7 @@ function FollowupStepEditor({ step, index, onUpdate, onRemove, onSetClosing }: {
 
 function FollowupsView() {
   const { aiConfig, updateAI, loading } = useSettings();
+  const guard = useActivationGuard();
   const [localConfig, setLocalConfig] = useState<any>(null);
   const { steps, loading: stepsLoading, addStep, updateStep, removeStep, setClosing } = useFollowupSteps();
 
@@ -586,7 +592,11 @@ function FollowupsView() {
               <p className="text-[10px] font-semibold text-slate-500 uppercase pt-0.5">Disparo automático após inatividade</p>
             </div>
             <button
-              onClick={() => { const v = !localConfig.followup_enabled; setLocalConfig({ ...localConfig, followup_enabled: v }); updateAI({ ...localConfig, followup_enabled: v }); }}
+              onClick={() => {
+                const v = !localConfig.followup_enabled;
+                const apply = () => { setLocalConfig({ ...localConfig, followup_enabled: v }); updateAI({ ...localConfig, followup_enabled: v }); };
+                if (v) guard("reengagement", apply); else apply();
+              }}
               className={cn(
                 "w-12 h-6 rounded-full relative transition-all",
                 localConfig.followup_enabled ? "bg-teal-600" : "bg-slate-300"
@@ -700,6 +710,7 @@ function FollowupsView() {
 
 function WelcomeFollowupView() {
   const { aiConfig, updateAI, loading } = useSettings();
+  const guard = useActivationGuard();
   const [saving, setSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [localConfig, setLocalConfig] = useState<any>(null);
@@ -746,7 +757,11 @@ function WelcomeFollowupView() {
               <p className="text-[10px] font-semibold text-slate-500 uppercase pt-0.5">Disparo automático para leads de formulário</p>
             </div>
             <button
-              onClick={() => { const v = !localConfig.welcome_message_enabled; setLocalConfig({ ...localConfig, welcome_message_enabled: v }); updateAI({ ...localConfig, welcome_message_enabled: v }); }}
+              onClick={() => {
+                const v = !localConfig.welcome_message_enabled;
+                const apply = () => { setLocalConfig({ ...localConfig, welcome_message_enabled: v }); updateAI({ ...localConfig, welcome_message_enabled: v }); };
+                if (v) guard("welcome", apply); else apply();
+              }}
               className={cn("w-12 h-6 rounded-full relative transition-all", localConfig.welcome_message_enabled ? "bg-teal-600" : "bg-slate-300")}
             >
               <div className={cn("w-4 h-4 bg-white rounded-full absolute top-1 transition-all shadow-sm", localConfig.welcome_message_enabled ? "right-1" : "left-1")} />
@@ -863,6 +878,7 @@ function WelcomeFollowupView() {
 
 function PosFollowupView() {
   const { aiConfig, updateAI, loading } = useSettings();
+  const guard = useActivationGuard();
   const [saving, setSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [localConfig, setLocalConfig] = useState<any>(null);
@@ -949,7 +965,11 @@ function PosFollowupView() {
                 <p className="text-[10px] font-semibold text-slate-500 uppercase pt-0.5">Disparo automático após o encerramento</p>
               </div>
               <button
-                onClick={() => { const v = !localConfig[keys.enabled]; setLocalConfig({ ...localConfig, [keys.enabled]: v }); updateAI({ ...localConfig, [keys.enabled]: v }); }}
+                onClick={() => {
+                  const v = !localConfig[keys.enabled];
+                  const apply = () => { setLocalConfig({ ...localConfig, [keys.enabled]: v }); updateAI({ ...localConfig, [keys.enabled]: v }); };
+                  if (v) guard(outcomeTab === "ganho" ? "pos_ganho" : "pos_perdido", apply); else apply();
+                }}
                 className={cn(
                   "w-12 h-6 rounded-full relative transition-all",
                   localConfig[keys.enabled] ? "bg-teal-600" : "bg-slate-300"
@@ -1231,10 +1251,280 @@ function PaymentConfigView() {
   );
 }
 
+/* ------------------------------------------------------------------------------------------------
+ * Trava de ativação: antes de LIGAR qualquer follow-up, mostra quem será afetado.
+ *
+ * A contagem NÃO é feita aqui. Quem responde é a RPC preview_followup_activation, que roda o MESMO
+ * predicado do motor no banco (só ignorando o toggle que está prestes a ser ligado). Reimplementar
+ * os gates no front faria o preview mentir na primeira divergência, e ainda bateria no clamp de
+ * 1000 linhas do PostgREST.
+ * ---------------------------------------------------------------------------------------------- */
+
+type FollowupKind =
+  | "welcome" | "reengagement" | "confirmation"
+  | "pos_ganho" | "pos_perdido"
+  | "finish_ganho" | "finish_perdido" | "finish_service";
+
+const FOLLOWUP_LABELS: Record<FollowupKind, string> = {
+  welcome: "Boas-vindas",
+  reengagement: "Reengajamento",
+  confirmation: "Confirmação",
+  pos_ganho: "Pós-Atendimento (Ganho)",
+  pos_perdido: "Pós-Atendimento (Perdido)",
+  finish_ganho: "Encerramento (Ganho)",
+  finish_perdido: "Encerramento (Perdido)",
+  finish_service: "Encerramento (Atendimento)",
+};
+
+interface FollowupPreview {
+  kind: string;
+  is_trigger: boolean;
+  whatsapp_ok: boolean;
+  whatsapp_status: string | null;
+  blocked_until: string | null;
+  in_window: boolean;
+  window_start: number | null;
+  window_end: number | null;
+  cap_por_rodada: number | null;
+  rodada_minutos: number | null;
+  agora: number;
+  proximas_horas: number;
+  proximos_dias: number;
+  total_7d: number;
+  primeiro_disparo: number;
+  escoamento_min: number;
+  historico_7d: number | null;
+  amostra: { nome: string; telefone: string; detalhe: string; quando: string; balde: string }[];
+}
+
+const ActivationGuardCtx = React.createContext<(kind: FollowupKind, activate: () => void) => void>(
+  (_kind, activate) => activate()
+);
+const useActivationGuard = () => React.useContext(ActivationGuardCtx);
+
+function formatDrain(min: number): string {
+  if (min <= 0) return "";
+  if (min < 60) return `~${min} min`;
+  const h = Math.floor(min / 60), m = min % 60;
+  return m === 0 ? `~${h}h` : `~${h}h ${m}min`;
+}
+
+function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
+  const { activeClinicId } = useAuth();
+  const [kind, setKind] = useState<FollowupKind | null>(null);
+  const [data, setData] = useState<FollowupPreview | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const pending = useRef<(() => void) | null>(null);
+
+  const guard = React.useCallback((k: FollowupKind, activate: () => void) => {
+    if (!activeClinicId) { activate(); return; }
+    pending.current = activate;
+    setKind(k); setData(null); setError(null); setLoading(true);
+    (async () => {
+      const { data: d, error: e } = await supabase
+        .rpc("preview_followup_activation", { p_clinic_id: activeClinicId, p_kind: k });
+      if (e) setError(e.message);
+      else setData(d as unknown as FollowupPreview);
+      setLoading(false);
+    })();
+  }, [activeClinicId]);
+
+  const close = () => { pending.current = null; setKind(null); setData(null); setError(null); };
+  const confirm = () => {
+    const fn = pending.current;
+    pending.current = null; setKind(null); setData(null); setError(null);
+    fn?.();
+  };
+
+  const badge = (b: string) =>
+    b === "agora" ? "bg-rose-100 text-rose-700"
+      : b === "horas" ? "bg-amber-100 text-amber-700"
+      : "bg-slate-100 text-slate-500";
+
+  return (
+    <ActivationGuardCtx.Provider value={guard}>
+      {children}
+
+      {kind && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col overflow-hidden">
+            <div className="px-6 py-5 border-b border-slate-100 flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">
+                  Ativar {FOLLOWUP_LABELS[kind]}?
+                </h3>
+                <p className="text-xs text-slate-500 font-medium pt-0.5">
+                  Veja quem vai ser impactado antes de ligar.
+                </p>
+              </div>
+              <button onClick={close} className="text-slate-400 hover:text-slate-700 shrink-0">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto custom-scrollbar px-6 py-5 space-y-5">
+              {loading && (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-7 h-7 text-teal-600 animate-spin" />
+                </div>
+              )}
+
+              {!loading && error && (
+                <div className="p-4 rounded-xl bg-rose-50 border border-rose-100 text-xs font-medium text-rose-700">
+                  Não foi possível calcular o impacto: {error}
+                </div>
+              )}
+
+              {!loading && data && data.is_trigger && (
+                <div className="space-y-4">
+                  <div className="p-4 rounded-xl bg-teal-50 border border-teal-100">
+                    <p className="text-sm font-bold text-teal-900 flex items-center gap-2">
+                      <Info className="w-4 h-4" /> Não afeta ninguém retroativamente
+                    </p>
+                    <p className="text-xs text-teal-700 font-medium leading-relaxed pt-1.5">
+                      O encerramento dispara no momento em que o ticket é fechado, não é uma fila.
+                      Ligar agora vale só para os próximos encerramentos, nada é enviado para
+                      atendimentos já fechados.
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-100">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      Para dimensionar
+                    </p>
+                    <p className="text-sm font-bold text-slate-800 pt-1">
+                      {data.historico_7d ?? 0} encerramento(s) nos últimos 7 dias teriam recebido a mensagem.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {!loading && data && !data.is_trigger && (
+                <>
+                  <div className="grid grid-cols-3 gap-3">
+                    {[
+                      { label: "Agora", value: data.agora, tone: "rose" },
+                      { label: "Próximas horas", value: data.proximas_horas, tone: "amber" },
+                      { label: "Próximos dias", value: data.proximos_dias, tone: "slate" },
+                    ].map((s) => (
+                      <div
+                        key={s.label}
+                        className={cn(
+                          "p-4 rounded-xl border text-center",
+                          s.tone === "rose" ? "bg-rose-50 border-rose-100"
+                            : s.tone === "amber" ? "bg-amber-50 border-amber-100"
+                            : "bg-slate-50 border-slate-100"
+                        )}
+                      >
+                        <p className={cn(
+                          "text-3xl font-bold",
+                          s.tone === "rose" ? "text-rose-700"
+                            : s.tone === "amber" ? "text-amber-700" : "text-slate-700"
+                        )}>{s.value}</p>
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 pt-1">
+                          {s.label}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {data.agora > 0 && data.cap_por_rodada && (
+                    <div className="p-4 rounded-xl bg-slate-50 border border-slate-100 space-y-1">
+                      <p className="text-xs font-bold text-slate-700 flex items-center gap-2">
+                        <Clock className="w-3.5 h-3.5" /> Como a fila escoa
+                      </p>
+                      <p className="text-xs text-slate-500 font-medium leading-relaxed">
+                        Saem <b>{data.primeiro_disparo}</b> no primeiro disparo (teto de{" "}
+                        {data.cap_por_rodada} por rodada, a cada {data.rodada_minutos} min).
+                        Os {data.agora} da fila levam <b>{formatDrain(data.escoamento_min)}</b> para
+                        serem enviados.
+                      </p>
+                    </div>
+                  )}
+
+                  {!data.whatsapp_ok && (
+                    <div className="p-4 rounded-xl bg-amber-50 border border-amber-100">
+                      <p className="text-xs font-bold text-amber-800 flex items-center gap-2">
+                        <AlertTriangle className="w-3.5 h-3.5" /> WhatsApp indisponível
+                      </p>
+                      <p className="text-[11px] text-amber-700 font-medium pt-1">
+                        Status: {data.whatsapp_status || "sem instância"}
+                        {data.blocked_until ? ` · envio bloqueado até ${new Date(data.blocked_until).toLocaleString("pt-BR")}` : ""}.
+                        Nada será enviado enquanto isso não for resolvido.
+                      </p>
+                    </div>
+                  )}
+
+                  {!data.in_window && data.window_start != null && (
+                    <div className="p-4 rounded-xl bg-slate-50 border border-slate-100">
+                      <p className="text-[11px] text-slate-600 font-medium">
+                        Fora da janela de envio ({data.window_start}h às {data.window_end}h).
+                        A fila só começa a sair quando a janela abrir.
+                      </p>
+                    </div>
+                  )}
+
+                  {data.amostra.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        Quem entra na fila ({data.amostra.length} de {data.total_7d})
+                      </p>
+                      <div className="border border-slate-100 rounded-xl divide-y divide-slate-50 max-h-64 overflow-y-auto custom-scrollbar">
+                        {data.amostra.map((p, i) => (
+                          <div key={i} className="px-3 py-2 flex items-center gap-3 text-xs">
+                            <span className={cn(
+                              "px-1.5 py-0.5 rounded text-[9px] font-bold uppercase shrink-0",
+                              badge(p.balde)
+                            )}>
+                              {p.balde === "agora" ? "agora" : p.balde === "horas" ? "hoje" : p.quando}
+                            </span>
+                            <span className="font-bold text-slate-800 truncate flex-1">{p.nome}</span>
+                            <span className="text-slate-400 font-medium shrink-0">{p.telefone}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-slate-400 font-medium italic">
+                        Amostra dos primeiros da fila, em ordem de envio.
+                      </p>
+                    </div>
+                  )}
+
+                  {data.total_7d === 0 && (
+                    <div className="p-4 rounded-xl bg-slate-50 border border-slate-100 text-xs text-slate-500 font-medium">
+                      Nenhum lead entra na fila nos próximos 7 dias. Pode ligar com segurança.
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div className="px-6 py-4 border-t border-slate-100 flex gap-3 justify-end">
+              <button
+                onClick={close}
+                className="px-5 py-2.5 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-100 transition-all"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirm}
+                disabled={loading}
+                className="px-5 py-2.5 rounded-lg text-xs font-bold text-white bg-teal-600 hover:bg-teal-700 disabled:opacity-50 transition-all shadow-sm"
+              >
+                {data && !data.is_trigger && data.agora > 0 ? "Ativar mesmo assim" : "Ativar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </ActivationGuardCtx.Provider>
+  );
+}
+
 function AllFollowupsView() {
   const [subTab, setSubTab] = useState<"welcome" | "reengagement" | "confirmation" | "finish_service" | "pos">("welcome");
 
   return (
+    <ActivationGuardProvider>
     <div className="space-y-6 h-full flex flex-col">
       <div className="flex bg-white p-1 rounded-xl border border-slate-200 gap-1 w-fit">
         {[
@@ -1275,6 +1565,7 @@ function AllFollowupsView() {
         </motion.div>
       </AnimatePresence>
     </div>
+    </ActivationGuardProvider>
   );
 }
 
@@ -1616,6 +1907,7 @@ function HandoffView() {
 
 function FinishServiceView() {
   const { aiConfig, updateAI, loading } = useSettings();
+  const guard = useActivationGuard();
   const [saving, setSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [localConfig, setLocalConfig] = useState<any>(null);
@@ -1705,7 +1997,15 @@ function FinishServiceView() {
                       <p className="text-[10px] font-semibold text-slate-500 uppercase pt-0.5">Disparo automático ao finalizar</p>
                     </div>
                     <button
-                      onClick={() => { const v = !localConfig[keys.enabled]; setLocalConfig({ ...localConfig, [keys.enabled]: v }); updateAI({ ...localConfig, [keys.enabled]: v }); }}
+                      onClick={() => {
+                        const v = !localConfig[keys.enabled];
+                        const apply = () => { setLocalConfig({ ...localConfig, [keys.enabled]: v }); updateAI({ ...localConfig, [keys.enabled]: v }); };
+                        if (v) guard(
+                          outcomeTab === "ganho" ? "finish_ganho"
+                            : outcomeTab === "perdido" ? "finish_perdido" : "finish_service",
+                          apply
+                        ); else apply();
+                      }}
                       className={cn(
                         "w-12 h-6 rounded-full relative transition-all",
                         localConfig[keys.enabled] ? "bg-teal-600" : "bg-slate-300"

@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import {
   Loader2, Check, X, Sparkles, TrendingUp, MessageSquare, ChevronDown, ChevronRight,
   ArrowRight, Quote, Brain, ShieldCheck, RefreshCw, History, Power,
-  Hand, ListChecks, Zap,
+  Hand, ListChecks, Zap, MoveRight,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { supabase } from "../lib/supabase";
@@ -45,40 +45,65 @@ const MODOS: Array<{ id: ConvAiMode; label: string; icon: typeof Hand; hint: (ei
     hint: (e) => e === "etapa" ? "A IA move o card sozinha." : "A IA fecha a venda sozinha e lança o faturamento." },
 ];
 
-function SeletorModo({ eixo, valor, onChange, disabled }: {
+// Cada eixo é um PAINEL próprio: são decisões independentes (uma mexe no card,
+// a outra em faturamento), e misturá-las num bloco só confunde quem configura.
+function PainelModo({ eixo, valor, onChange, disabled }: {
   eixo: "etapa" | "venda";
   valor: ConvAiMode;
   onChange: (m: ConvAiMode) => void;
   disabled?: boolean;
 }) {
+  const etapa = eixo === "etapa";
+  const Icone = etapa ? MoveRight : TrendingUp;
   return (
-    <div className={cn("flex-1 min-w-[260px]", disabled && "opacity-50 pointer-events-none")}>
-      <p className="text-[11px] font-black text-slate-500 uppercase tracking-wider mb-2">
-        {eixo === "etapa" ? "Mudança de etapa" : "Detecção de venda"}
-      </p>
+    <div className={cn(
+      "bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col",
+      disabled && "opacity-50 pointer-events-none"
+    )}>
+      <div className="flex items-start gap-2.5 mb-3">
+        <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
+          etapa ? "bg-violet-50 text-violet-600" : "bg-emerald-50 text-emerald-600")}>
+          <Icone className="w-4 h-4" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-black text-slate-900 leading-tight">
+            {etapa ? "Mudança de etapa" : "Detecção de venda"}
+          </p>
+          <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+            {etapa
+              ? "O que a IA faz quando a conversa indica que o card deveria estar em outra etapa."
+              : "O que a IA faz quando a conversa indica que o negócio foi fechado."}
+          </p>
+        </div>
+      </div>
+
       <div className="grid grid-cols-3 gap-1.5">
         {MODOS.map(m => {
           const Icon = m.icon;
           const sel = valor === m.id;
-          const perigo = eixo === "venda" && m.id === "auto";
+          const perigo = !etapa && m.id === "auto";
           return (
             <button key={m.id} type="button" onClick={() => onChange(m.id)}
-              className={cn("rounded-xl border p-2 text-left transition-all",
+              className={cn("rounded-xl border px-2 py-2 text-center transition-all",
                 sel
                   ? perigo
                     ? "border-amber-400 bg-amber-50 text-amber-800 ring-2 ring-amber-400/20"
-                    : "border-teal-500 bg-teal-50/60 text-teal-800 ring-2 ring-teal-500/20"
+                    : etapa
+                      ? "border-violet-400 bg-violet-50 text-violet-800 ring-2 ring-violet-400/20"
+                      : "border-emerald-400 bg-emerald-50 text-emerald-800 ring-2 ring-emerald-400/20"
                   : "border-slate-200 bg-white text-slate-500 hover:border-slate-300")}>
-              <span className="flex items-center gap-1.5 text-xs font-bold">
-                <Icon className="w-3.5 h-3.5" /> {m.label}
+              <span className="flex items-center justify-center gap-1.5 text-xs font-bold">
+                <Icon className="w-3.5 h-3.5 shrink-0" /> {m.label}
               </span>
             </button>
           );
         })}
       </div>
-      <p className="text-[11px] text-slate-500 mt-1.5 leading-snug">{MODOS.find(m => m.id === valor)?.hint(eixo)}</p>
-      {eixo === "venda" && valor === "auto" && (
-        <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mt-1.5 leading-snug">
+
+      <p className="text-[11px] text-slate-500 mt-2 leading-snug">{MODOS.find(m => m.id === valor)?.hint(eixo)}</p>
+
+      {!etapa && valor === "auto" && (
+        <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mt-2 leading-snug">
           A IA lança a conversão e o faturamento sem passar por você, e a conversão vai para a Meta.
           Cancelar a venda no CRM desfaz o lançamento, mas o evento já enviado à Meta não tem desfazer.
           Sem valor identificado na conversa, a venda cai na fila em vez de ser lançada.
@@ -161,49 +186,47 @@ export function ConvAIReview() {
     <div className="h-full overflow-y-auto custom-scrollbar pr-1 space-y-5 pb-10">
       {/* Estado do analista nesta clínica */}
       <div className={cn(
-        "rounded-2xl border p-4 space-y-4",
+        "rounded-2xl border p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3",
         desligada ? "bg-slate-50 border-slate-200" : "bg-teal-50/40 border-teal-200"
       )}>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-start gap-3">
-            <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center shrink-0",
-              desligada ? "bg-slate-200 text-slate-500" : "bg-teal-100 text-teal-700")}>
-              <Sparkles className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-sm font-black text-slate-900">
-                Análise de conversas {desligada ? "desligada" : "ativa"}
-              </p>
-              <p className="text-xs text-slate-500 mt-0.5 max-w-2xl">
-                A IA lê as conversas desta clínica e decide duas coisas: em que <b>etapa</b> o atendimento
-                deveria estar e se houve <b>venda</b>. Você escolhe abaixo se ela decide sozinha ou pede
-                sua confirmação em cada caso. Cada decisão sua afina o manual desta clínica.
-              </p>
-            </div>
+        <div className="flex items-start gap-3">
+          <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center shrink-0",
+            desligada ? "bg-slate-200 text-slate-500" : "bg-teal-100 text-teal-700")}>
+            <Sparkles className="w-5 h-5" />
           </div>
-          <button
-            onClick={() => save({ enabled: !config?.enabled })}
-            className={cn("flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-colors shrink-0",
-              desligada ? "bg-teal-600 hover:bg-teal-700 text-white" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50")}
-          >
-            <Power className="w-3.5 h-3.5" /> {desligada ? "Ativar análise" : "Desativar"}
-          </button>
+          <div>
+            <p className="text-sm font-black text-slate-900">
+              Análise de conversas {desligada ? "desligada" : "ativa"}
+            </p>
+            <p className="text-xs text-slate-500 mt-0.5 max-w-2xl">
+              A IA lê as conversas desta clínica e decide duas coisas, configuradas separadamente
+              abaixo. Cada decisão sua afina o manual desta clínica.
+            </p>
+          </div>
         </div>
+        <button
+          onClick={() => save({ enabled: !config?.enabled })}
+          className={cn("flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-colors shrink-0",
+            desligada ? "bg-teal-600 hover:bg-teal-700 text-white" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50")}
+        >
+          <Power className="w-3.5 h-3.5" /> {desligada ? "Ativar análise" : "Desativar"}
+        </button>
+      </div>
 
-        <div className="flex flex-col sm:flex-row gap-5 pt-1">
-          <SeletorModo
-            eixo="etapa"
-            valor={config?.stage_mode ?? "auto"}
-            disabled={desligada}
-            onChange={m => save({ stage_mode: m })}
-          />
-          <SeletorModo
-            eixo="venda"
-            valor={config?.sale_mode ?? "suggest"}
-            disabled={desligada}
-            onChange={m => save({ sale_mode: m })}
-          />
-        </div>
+      {/* Dois painéis independentes, lado a lado */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <PainelModo
+          eixo="etapa"
+          valor={config?.stage_mode ?? "auto"}
+          disabled={desligada}
+          onChange={m => save({ stage_mode: m })}
+        />
+        <PainelModo
+          eixo="venda"
+          valor={config?.sale_mode ?? "suggest"}
+          disabled={desligada}
+          onChange={m => save({ sale_mode: m })}
+        />
       </div>
 
       {/* Fila: o que a IA não aplicou sozinha e está esperando você */}

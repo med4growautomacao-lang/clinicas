@@ -37,7 +37,6 @@ import {
   Copy,
   Check,
   Store,
-  Filter,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { format, subDays, addMonths, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subMonths, subWeeks, parseISO } from "date-fns";
@@ -1160,31 +1159,17 @@ export function ComercialDashboard() {
             selected={convRange ? { from: convRange.start, to: convRange.end } : undefined} onSelect={onConvSelect}
             cal1={convCal1} setCal1={setConvCal1} cal2={convCal2} setCal2={setConvCal2}
           />
-          {/* Toggle Ganho/Perdido/Ambos — recorta o eixo Conversão por desfecho */}
-          <FilterChips
+          {/* Toggle Ganho/Perdido/Ambos — recorta o eixo Conversão por desfecho.
+              O próprio botão "Perdido" abre o seletor de motivo (não é um botão à parte). */}
+          <OutcomeFilterToggle
             value={outcomeFilter}
-            onChange={(id) => setOutcomeFilter(id as "ambos" | "ganho" | "perdido")}
-            options={[
-              { id: "ambos", label: "Ambos" },
-              { id: "ganho", label: "Ganho" },
-              { id: "perdido", label: "Perdido" },
-            ]}
+            onChange={setOutcomeFilter}
+            reasons={data.outcomes.lossReasons}
+            selectedReasons={lossReasonFilter}
+            onReasonsChange={setLossReasonFilter}
           />
         </div>
       </div>
-
-      {/* Seletor de motivo — só aparece com "Perdido" ativo. Opções e contagens vêm
-          de outcomes.lossReasons (recorte atual, ANTES de aplicar o próprio seletor —
-          senão sumiriam as opções não-selecionadas). Vazio = todos os motivos. */}
-      {outcomeFilter === "perdido" && data.outcomes.lossReasons.length > 0 && (
-        <div className="flex items-center gap-2 flex-wrap">
-          <LossReasonFilterButton
-            reasons={data.outcomes.lossReasons}
-            selected={lossReasonFilter}
-            onChange={setLossReasonFilter}
-          />
-        </div>
-      )}
 
       {/* Filtros globais (mudam os dados — mesmo design do Marketing): agente + origem + Relatório/Métricas à direita */}
       <div className="flex items-center gap-x-6 gap-y-3 flex-wrap">
@@ -1552,49 +1537,88 @@ function MetricsConfigButton({ metricsOrder, visibleMetrics, toggleMetric, moveM
   );
 }
 
-// Dropdown do seletor de motivo de perda: lista ordenada por quantidade (desc),
-// multi-seleção, sem busca (a lista é curta — motivos são cadastrados, não texto livre).
-function LossReasonFilterButton({ reasons, selected, onChange }: { reasons: { reason: string; count: number }[]; selected: string[]; onChange: (v: string[]) => void }) {
-  const [isOpen, setIsOpen] = useState(false);
+// Toggle Ambos/Ganho/Perdido — mesma caixa (pill) do FilterChips. O próprio
+// botão "Perdido" é o gatilho do seletor de motivo: clicar nele já ativa o
+// filtro; com ele ativo, clicar de novo abre/fecha o painel de motivos
+// ancorado NESSA MESMA caixa (não um botão separado abaixo).
+function OutcomeFilterToggle({
+  value, onChange, reasons, selectedReasons, onReasonsChange,
+}: {
+  value: "ambos" | "ganho" | "perdido";
+  onChange: (v: "ambos" | "ganho" | "perdido") => void;
+  reasons: { reason: string; count: number }[];
+  selectedReasons: string[];
+  onReasonsChange: (v: string[]) => void;
+}) {
+  const [isReasonsOpen, setIsReasonsOpen] = useState(false);
   const sorted = [...reasons].sort((a, b) => b.count - a.count);
-  const toggle = (reason: string) => onChange(selected.includes(reason) ? selected.filter((r) => r !== reason) : [...selected, reason]);
+  const toggleReason = (reason: string) =>
+    onReasonsChange(selectedReasons.includes(reason) ? selectedReasons.filter((r) => r !== reason) : [...selectedReasons, reason]);
+
+  const clickPerdido = () => {
+    if (value !== "perdido") { onChange("perdido"); setIsReasonsOpen(reasons.length > 0); }
+    else setIsReasonsOpen((o) => !o);
+  };
+  const clickOther = (v: "ambos" | "ganho") => { onChange(v); setIsReasonsOpen(false); };
+
   return (
     <div className="relative">
-      <Button
-        onClick={() => setIsOpen(!isOpen)}
-        variant="outline"
-        className={cn("gap-2 transition-all shadow-sm", isOpen || selected.length > 0 ? "bg-teal-50 border-teal-200 text-teal-600 shadow-teal-100" : "border-slate-200 bg-white hover:bg-slate-50 text-slate-600")}
-      >
-        <Filter className="w-4 h-4" />
-        <span className="text-[10px] font-bold uppercase tracking-tight">
-          Filtrar por motivo{selected.length > 0 ? ` (${selected.length})` : ""}
-        </span>
-      </Button>
+      <div className="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
+        {(["ambos", "ganho"] as const).map((id) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => clickOther(id)}
+            className={cn(
+              "px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all",
+              value === id ? "bg-slate-900 text-white shadow-md shadow-slate-200" : "text-slate-400 hover:text-slate-600 hover:bg-slate-50"
+            )}
+          >
+            {id === "ambos" ? "Ambos" : "Ganho"}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={clickPerdido}
+          className={cn(
+            "flex items-center gap-1 px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all",
+            value === "perdido" ? "bg-slate-900 text-white shadow-md shadow-slate-200" : "text-slate-400 hover:text-slate-600 hover:bg-slate-50"
+          )}
+        >
+          Perdido
+          {value === "perdido" && reasons.length > 0 && (
+            <>
+              {selectedReasons.length > 0 && <span className="text-teal-300">({selectedReasons.length})</span>}
+              <ChevronDown className={cn("w-3 h-3 transition-transform", isReasonsOpen ? "rotate-180" : "")} />
+            </>
+          )}
+        </button>
+      </div>
       <AnimatePresence>
-        {isOpen && (
+        {isReasonsOpen && value === "perdido" && (
           <>
-            <div className="fixed inset-0 z-[105]" onClick={() => setIsOpen(false)} />
+            <div className="fixed inset-0 z-[105]" onClick={() => setIsReasonsOpen(false)} />
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="absolute top-full left-0 mt-2 w-72 bg-white rounded-2xl border border-slate-200 shadow-2xl z-[110] p-3 overflow-hidden"
+              className="absolute top-full right-0 mt-2 w-72 bg-white rounded-2xl border border-slate-200 shadow-2xl z-[110] p-3 overflow-hidden"
             >
               <div className="flex items-center justify-between mb-2 pl-2 pr-1">
                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Motivo de Perda</p>
-                {selected.length > 0 && (
-                  <button onClick={() => onChange([])} className="text-[9px] font-bold text-teal-600 hover:text-teal-700 uppercase tracking-wide">
+                {selectedReasons.length > 0 && (
+                  <button onClick={() => onReasonsChange([])} className="text-[9px] font-bold text-teal-600 hover:text-teal-700 uppercase tracking-wide">
                     Limpar
                   </button>
                 )}
               </div>
               <div className="space-y-1 max-h-80 overflow-y-auto custom-scrollbar">
                 {sorted.map(({ reason, count }) => {
-                  const active = selected.includes(reason);
+                  const active = selectedReasons.includes(reason);
                   return (
                     <button
                       key={reason}
-                      onClick={() => toggle(reason)}
+                      onClick={() => toggleReason(reason)}
                       className={cn(
                         "w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-[11px] font-bold transition-all text-left",
                         active ? "bg-teal-50 text-teal-700" : "text-slate-600 hover:bg-slate-50"

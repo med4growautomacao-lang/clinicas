@@ -128,36 +128,37 @@ function Evidencias({ itens }: { itens: string[] | null }) {
   );
 }
 
-// Uma fila por eixo, cada uma com o vocabulário do seu tipo de decisão.
-function FilaSecao({ eixo, itens, vazioTexto, onRefetch, busy, onAprovar, onRecusar, stageName }: {
+// Uma COLUNA por eixo: a configuração daquele eixo e, logo abaixo, a fila que
+// ela alimenta. Ler de cima para baixo responde "o que a IA faz aqui" e "o que
+// está esperando por mim" sem cruzar a tela.
+function ColunaEixo({ eixo, modo, onModo, itens, vazioTexto, busy, onAprovar, onRecusar, stageName, disabled }: {
   eixo: "etapa" | "venda";
+  modo: ConvAiMode;
+  onModo: (m: ConvAiMode) => void;
   itens: ConvAiInsight[];
   vazioTexto: string;
-  onRefetch: () => void;
   busy: string | null;
   onAprovar: (i: ConvAiInsight) => void;
   onRecusar: (i: ConvAiInsight) => void;
   stageName: (id: string | null) => string;
+  disabled?: boolean;
 }) {
   const venda = eixo === "venda";
   const Icone = venda ? TrendingUp : MoveRight;
   return (
-    <div>
-      <div className="flex items-center justify-between mb-3">
-        <h3 className={cn("text-xs font-black uppercase tracking-widest flex items-center gap-2",
-          venda ? "text-emerald-600" : "text-violet-600")}>
-          <Icone className="w-3.5 h-3.5" />
-          {venda ? "Vendas para confirmar" : "Mudanças de etapa para confirmar"} ({itens.length})
-        </h3>
-        <button onClick={onRefetch} className="text-slate-400 hover:text-teal-600 transition-colors" title="Atualizar">
-          <RefreshCw className="w-4 h-4" />
-        </button>
-      </div>
+    <div className="space-y-3 min-w-0">
+      <PainelModo eixo={eixo} valor={modo} onChange={onModo} disabled={disabled} />
+
+      <h3 className={cn("text-xs font-black uppercase tracking-widest flex items-center gap-2 px-1 pt-1",
+        venda ? "text-emerald-600" : "text-violet-600")}>
+        <Icone className="w-3.5 h-3.5 shrink-0" />
+        {venda ? "Vendas para confirmar" : "Etapas para confirmar"} ({itens.length})
+      </h3>
 
       {itens.length === 0 ? (
-        <div className="bg-white rounded-2xl border border-slate-100 px-4 py-6 flex items-center gap-3">
+        <div className="bg-white rounded-2xl border border-slate-100 px-4 py-6 flex items-start gap-3">
           <MessageSquare className="w-5 h-5 text-slate-200 shrink-0" />
-          <p className="text-slate-400 text-xs">{vazioTexto}</p>
+          <p className="text-slate-400 text-xs leading-snug">{vazioTexto}</p>
         </div>
       ) : (
         <div className="space-y-2.5">
@@ -168,41 +169,39 @@ function FilaSecao({ eixo, itens, vazioTexto, onRefetch, busy, onAprovar, onRecu
               animate={{ opacity: 1, y: 0 }}
               className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4"
             >
-              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-black text-slate-900">{ins.leads?.name ?? "Contato"}</span>
-                    <Confianca valor={ins.confidence} />
-                    {ins.sale_value != null && (
-                      <span className="text-[11px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">
-                        R$ {Number(ins.sale_value).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
-                    {stageName(ins.previous_stage_id)} <ArrowRight className="w-3 h-3" /> {stageName(ins.suggested_stage_id)}
-                  </p>
-                  {ins.rationale && <p className="text-xs text-slate-600 mt-2">{ins.rationale}</p>}
-                  <Evidencias itens={ins.evidence} />
-                </div>
-                <div className="flex sm:flex-col gap-2 shrink-0">
-                  <button
-                    onClick={() => onAprovar(ins)}
-                    disabled={busy === ins.id}
-                    className={cn("flex-1 sm:flex-none disabled:opacity-50 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors",
-                      venda ? "bg-emerald-600 hover:bg-emerald-700" : "bg-violet-600 hover:bg-violet-700")}
-                  >
-                    {busy === ins.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-                    {venda ? "Confirmar venda" : "Mover card"}
-                  </button>
-                  <button
-                    onClick={() => onRecusar(ins)}
-                    disabled={busy === ins.id}
-                    className="flex-1 sm:flex-none bg-white border border-slate-200 hover:bg-rose-50 hover:border-rose-200 text-slate-600 hover:text-rose-600 px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
-                  >
-                    <X className="w-3.5 h-3.5" /> {venda ? "Não foi venda" : "Manter etapa"}
-                  </button>
-                </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm font-black text-slate-900">{ins.leads?.name ?? "Contato"}</span>
+                <Confianca valor={ins.confidence} />
+                {ins.sale_value != null && (
+                  <span className="text-[11px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">
+                    R$ {Number(ins.sale_value).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5 flex-wrap">
+                {stageName(ins.previous_stage_id)} <ArrowRight className="w-3 h-3 shrink-0" /> {stageName(ins.suggested_stage_id)}
+              </p>
+              {ins.rationale && <p className="text-xs text-slate-600 mt-2 leading-snug">{ins.rationale}</p>}
+              <Evidencias itens={ins.evidence} />
+
+              {/* Em coluna a largura é curta: as ações vão para o rodapé, não para a lateral. */}
+              <div className="flex gap-2 mt-3 pt-3 border-t border-slate-100">
+                <button
+                  onClick={() => onAprovar(ins)}
+                  disabled={busy === ins.id}
+                  className={cn("flex-1 disabled:opacity-50 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors",
+                    venda ? "bg-emerald-600 hover:bg-emerald-700" : "bg-violet-600 hover:bg-violet-700")}
+                >
+                  {busy === ins.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                  {venda ? "Confirmar venda" : "Mover card"}
+                </button>
+                <button
+                  onClick={() => onRecusar(ins)}
+                  disabled={busy === ins.id}
+                  className="flex-1 bg-white border border-slate-200 hover:bg-rose-50 hover:border-rose-200 text-slate-600 hover:text-rose-600 px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" /> {venda ? "Não foi venda" : "Manter etapa"}
+                </button>
               </div>
             </motion.div>
           ))}
@@ -290,66 +289,61 @@ export function ConvAIReview() {
             </p>
           </div>
         </div>
-        <button
-          onClick={() => save({ enabled: !config?.enabled })}
-          className={cn("flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-colors shrink-0",
-            desligada ? "bg-teal-600 hover:bg-teal-700 text-white" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50")}
-        >
-          <Power className="w-3.5 h-3.5" /> {desligada ? "Ativar análise" : "Desativar"}
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={() => refetch()} title="Atualizar as duas filas"
+            className="p-2 rounded-xl border border-slate-200 bg-white text-slate-400 hover:text-teal-600 hover:border-teal-200 transition-colors">
+            <RefreshCw className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => save({ enabled: !config?.enabled })}
+            className={cn("flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-colors",
+              desligada ? "bg-teal-600 hover:bg-teal-700 text-white" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50")}
+          >
+            <Power className="w-3.5 h-3.5" /> {desligada ? "Ativar análise" : "Desativar"}
+          </button>
+        </div>
       </div>
 
-      {/* Dois painéis independentes, lado a lado */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <PainelModo
+      {/* Duas colunas independentes: cada eixo com a sua configuração no topo e a
+          fila que ela alimenta logo abaixo. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+        <ColunaEixo
           eixo="etapa"
-          valor={config?.stage_mode ?? "auto"}
+          modo={config?.stage_mode ?? "auto"}
+          onModo={m => save({ stage_mode: m })}
+          itens={pendingEtapas}
           disabled={desligada}
-          onChange={m => save({ stage_mode: m })}
+          vazioTexto={desligada
+            ? "Ative a análise para a IA começar a ler as conversas."
+            : (config?.stage_mode ?? "auto") === "suggest"
+              ? "Nenhuma mudança de etapa aguardando."
+              : (config?.stage_mode === "auto"
+                ? "Está em Automático: a IA move os cards sozinha, e o histórico fica no final da página."
+                : "Está em Manual: a IA não mexe nos cards desta clínica.")}
+          busy={busy}
+          onAprovar={aprovar}
+          onRecusar={recusar}
+          stageName={stageName}
         />
-        <PainelModo
+        <ColunaEixo
           eixo="venda"
-          valor={config?.sale_mode ?? "suggest"}
+          modo={config?.sale_mode ?? "suggest"}
+          onModo={m => save({ sale_mode: m })}
+          itens={pendingVendas}
           disabled={desligada}
-          onChange={m => save({ sale_mode: m })}
+          vazioTexto={desligada
+            ? "Ative a análise para a IA começar a ler as conversas."
+            : (config?.sale_mode ?? "suggest") === "suggest"
+              ? "Nenhuma venda aguardando. Assim que a IA encontrar uma, ela aparece aqui."
+              : (config?.sale_mode === "auto"
+                ? "Está em Automático: a IA fecha as vendas sozinha e nada cai aqui."
+                : "Está em Manual: a IA não procura vendas nesta clínica.")}
+          busy={busy}
+          onAprovar={aprovar}
+          onRecusar={recusar}
+          stageName={stageName}
         />
       </div>
-
-      {/* Uma fila por eixo. Venda e etapa são revisões diferentes, com pessoas e
-          urgências diferentes: misturar as duas fazia a venda se perder no meio. */}
-      <FilaSecao
-        eixo="venda"
-        itens={pendingVendas}
-        vazioTexto={desligada
-          ? "Ative a análise para a IA começar a ler as conversas."
-          : (config?.sale_mode ?? "suggest") === "suggest"
-            ? "Nenhuma venda aguardando. Assim que a IA encontrar uma, ela aparece aqui."
-            : (config?.sale_mode === "auto"
-              ? "Detecção de venda está em Automático: a IA fecha sozinha e nada cai aqui."
-              : "Detecção de venda está em Manual: a IA não procura vendas nesta clínica.")}
-        onRefetch={refetch}
-        busy={busy}
-        onAprovar={aprovar}
-        onRecusar={recusar}
-        stageName={stageName}
-      />
-
-      <FilaSecao
-        eixo="etapa"
-        itens={pendingEtapas}
-        vazioTexto={desligada
-          ? "Ative a análise para a IA começar a ler as conversas."
-          : (config?.stage_mode ?? "auto") === "suggest"
-            ? "Nenhuma mudança de etapa aguardando."
-            : (config?.stage_mode === "auto"
-              ? "Mudança de etapa está em Automático: a IA move os cards sozinha (veja o histórico abaixo)."
-              : "Mudança de etapa está em Manual: a IA não mexe nos cards desta clínica.")}
-        onRefetch={refetch}
-        busy={busy}
-        onAprovar={aprovar}
-        onRecusar={recusar}
-        stageName={stageName}
-      />
 
       {/* Auditoria: o que a IA moveu sozinha */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm">

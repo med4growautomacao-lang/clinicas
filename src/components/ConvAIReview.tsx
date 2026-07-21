@@ -1,0 +1,313 @@
+import React, { useState } from "react";
+import { motion } from "framer-motion";
+import {
+  Loader2, Check, X, Sparkles, TrendingUp, MessageSquare, ChevronDown, ChevronRight,
+  ArrowRight, Quote, Brain, ShieldCheck, RefreshCw, History, Power,
+} from "lucide-react";
+import { cn } from "@/src/lib/utils";
+import { supabase } from "../lib/supabase";
+import {
+  useConvAiInsights, useConvAiClinicConfig, useFunnelStages, useTickets,
+  useConversions, usePatients, ConvAiInsight,
+} from "../hooks/useSupabase";
+import { GanhoModal } from "./LeadKanban";
+
+// Comercial › "Sugestões IA" — a fila que a IA NÃO aplica sozinha.
+//
+// Só VENDA entra em fila: a etapa comum a IA move direto (decisão do dono), e o
+// movimento fica listado abaixo apenas para auditoria. Corrigir uma etapa continua
+// sendo arrastar o card no CRM, e esse arrasto vira contra-exemplo do aprendizado.
+//
+// Confirmar uma venda abre o MESMO GanhoModal do Kanban: a venda é registrada pelo
+// caminho de sempre (conversão + receita + fechamento do ticket + CAPI).
+
+function Confianca({ valor }: { valor: number | null }) {
+  const pct = Math.round((valor ?? 0) * 100);
+  const cls = pct >= 85 ? "text-emerald-700 bg-emerald-50 border-emerald-200"
+    : pct >= 70 ? "text-teal-700 bg-teal-50 border-teal-200"
+    : "text-amber-700 bg-amber-50 border-amber-200";
+  return (
+    <span className={cn("text-[10px] font-black px-1.5 py-0.5 rounded border tracking-wider", cls)}>
+      {pct}% DE CONFIANÇA
+    </span>
+  );
+}
+
+function Evidencias({ itens }: { itens: string[] | null }) {
+  const lista = Array.isArray(itens) ? itens.filter(Boolean) : [];
+  if (lista.length === 0) return null;
+  return (
+    <div className="space-y-1.5 mt-2.5">
+      {lista.slice(0, 3).map((t, i) => (
+        <div key={i} className="flex gap-2 text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5">
+          <Quote className="w-3 h-3 text-slate-300 shrink-0 mt-0.5" />
+          <span className="italic">{String(t).slice(0, 300)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function ConvAIReview() {
+  const { pending, recentStages, loading, decide, refetch } = useConvAiInsights();
+  const { config, current, versions, loading: cfgLoading, save, rollback } = useConvAiClinicConfig();
+  const { data: stages } = useFunnelStages();
+  const { moveTicket, closeTicket } = useTickets();
+  const { create: createConversion } = useConversions();
+  const { create: createPatient } = usePatients();
+
+  const [busy, setBusy] = useState<string | null>(null);
+  const [showAudit, setShowAudit] = useState(false);
+  const [showPrompt, setShowPrompt] = useState(false);
+  const [ganho, setGanho] = useState<{
+    id: string; name: string; phone: string | null; patientId: string | null;
+    ticketId: string; ctwaClid: string | null; email: string | null; suggested: number | null;
+  } | null>(null);
+
+  const stageName = (id: string | null) => stages.find(s => s.id === id)?.name ?? "sem etapa";
+  const ganhoStage = stages.find(s => s.slug === "ganho");
+
+  const aprovar = async (ins: ConvAiInsight) => {
+    setBusy(ins.id);
+    const res = await decide(ins.id, "approve");
+    setBusy(null);
+    if (!res.success) return;
+    if (res.needs_ganho_modal) {
+      setGanho({
+        id: ins.lead_id ?? "",
+        name: ins.leads?.name ?? "Contato",
+        phone: ins.leads?.phone ?? null,
+        patientId: ins.leads?.converted_patient_id ?? null,
+        ticketId: ins.ticket_id,
+        ctwaClid: ins.leads?.ctwa_clid ?? null,
+        email: ins.leads?.email ?? null,
+        suggested: ins.sale_value,
+      });
+    }
+  };
+
+  const recusar = async (ins: ConvAiInsight) => {
+    setBusy(ins.id);
+    await decide(ins.id, "reject");
+    setBusy(null);
+  };
+
+  if (loading || cfgLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[300px] text-slate-400 gap-3">
+        <Loader2 className="w-6 h-6 animate-spin" /> <span className="text-sm font-medium">Carregando sugestões…</span>
+      </div>
+    );
+  }
+
+  const desligada = !config?.enabled;
+
+  return (
+    <div className="h-full overflow-y-auto custom-scrollbar pr-1 space-y-5 pb-10">
+      {/* Estado do analista nesta clínica */}
+      <div className={cn(
+        "rounded-2xl border p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3",
+        desligada ? "bg-slate-50 border-slate-200" : "bg-teal-50/50 border-teal-200"
+      )}>
+        <div className="flex items-start gap-3">
+          <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center shrink-0",
+            desligada ? "bg-slate-200 text-slate-500" : "bg-teal-100 text-teal-700")}>
+            <Sparkles className="w-5 h-5" />
+          </div>
+          <div>
+            <p className="text-sm font-black text-slate-900">
+              Análise de conversas {desligada ? "desligada" : "ativa"}
+            </p>
+            <p className="text-xs text-slate-500 mt-0.5 max-w-2xl">
+              A IA lê as conversas, move sozinha as etapas comuns do funil e traz para cá o que parece
+              <b> venda fechada</b>, para você confirmar ou recusar. Cada decisão sua afina o manual desta clínica.
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={() => save({ enabled: !config?.enabled })}
+          className={cn("flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-colors shrink-0",
+            desligada ? "bg-teal-600 hover:bg-teal-700 text-white" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50")}
+        >
+          <Power className="w-3.5 h-3.5" /> {desligada ? "Ativar análise" : "Desativar"}
+        </button>
+      </div>
+
+      {/* Fila de vendas sugeridas */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+            <TrendingUp className="w-3.5 h-3.5" /> Vendas sugeridas ({pending.length})
+          </h3>
+          <button onClick={() => refetch()} className="text-slate-400 hover:text-teal-600 transition-colors" title="Atualizar">
+            <RefreshCw className="w-4 h-4" />
+          </button>
+        </div>
+
+        {pending.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center">
+            <MessageSquare className="w-8 h-8 text-slate-200 mx-auto mb-2" />
+            <p className="text-slate-400 text-sm font-medium">Nenhuma venda aguardando decisão.</p>
+            <p className="text-slate-300 text-xs mt-1">
+              {desligada ? "Ative a análise para a IA começar a ler as conversas." : "Assim que a IA identificar uma, ela aparece aqui."}
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2.5">
+            {pending.map(ins => (
+              <motion.div
+                key={ins.id}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4"
+              >
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-black text-slate-900">{ins.leads?.name ?? "Contato"}</span>
+                      <Confianca valor={ins.confidence} />
+                      {ins.sale_value != null && (
+                        <span className="text-[11px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">
+                          R$ {Number(ins.sale_value).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
+                      {stageName(ins.previous_stage_id)} <ArrowRight className="w-3 h-3" /> {stageName(ins.suggested_stage_id)}
+                    </p>
+                    {ins.rationale && <p className="text-xs text-slate-600 mt-2">{ins.rationale}</p>}
+                    <Evidencias itens={ins.evidence} />
+                  </div>
+                  <div className="flex sm:flex-col gap-2 shrink-0">
+                    <button
+                      onClick={() => aprovar(ins)}
+                      disabled={busy === ins.id}
+                      className="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
+                    >
+                      {busy === ins.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Confirmar venda
+                    </button>
+                    <button
+                      onClick={() => recusar(ins)}
+                      disabled={busy === ins.id}
+                      className="flex-1 sm:flex-none bg-white border border-slate-200 hover:bg-rose-50 hover:border-rose-200 text-slate-600 hover:text-rose-600 px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
+                    >
+                      <X className="w-3.5 h-3.5" /> Não foi venda
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Auditoria: o que a IA moveu sozinha */}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm">
+        <button onClick={() => setShowAudit(v => !v)} className="w-full flex items-center justify-between p-4">
+          <span className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+            {showAudit ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+            Etapas movidas pela IA nas últimas 24h ({recentStages.length})
+          </span>
+        </button>
+        {showAudit && (
+          <div className="px-4 pb-4 space-y-2">
+            {recentStages.length === 0 && (
+              <p className="text-xs text-slate-400">Nenhuma etapa movida pela IA neste período.</p>
+            )}
+            {recentStages.map(ins => (
+              <div key={ins.id} className="flex items-start justify-between gap-3 border border-slate-100 rounded-xl px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-slate-700">{ins.leads?.name ?? "Contato"}</p>
+                  <p className="text-[11px] text-slate-500 flex items-center gap-1.5 mt-0.5">
+                    {stageName(ins.previous_stage_id)} <ArrowRight className="w-3 h-3" /> {stageName(ins.suggested_stage_id)}
+                    {ins.status === "shadow" && (
+                      <span className="text-[9px] font-black text-amber-600 bg-amber-50 border border-amber-200 rounded px-1 tracking-wider">
+                        SÓ OBSERVAÇÃO
+                      </span>
+                    )}
+                  </p>
+                  {ins.rationale && <p className="text-[11px] text-slate-400 mt-1">{ins.rationale}</p>}
+                </div>
+                <Confianca valor={ins.confidence} />
+              </div>
+            ))}
+            <p className="text-[11px] text-slate-400 pt-1">
+              Errou? Arraste o card no CRM. A correção vira exemplo e a IA aprende com ela.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Manual aprendido */}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm">
+        <button onClick={() => setShowPrompt(v => !v)} className="w-full flex items-center justify-between p-4">
+          <span className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+            {showPrompt ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+            <Brain className="w-3.5 h-3.5" /> Manual aprendido desta clínica
+            {current && <span className="text-teal-600">v{current.version}</span>}
+          </span>
+        </button>
+        {showPrompt && (
+          <div className="px-4 pb-4 space-y-3">
+            <p className="text-xs text-slate-500 flex items-start gap-1.5">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
+              Escrito pela própria IA a partir das conversas desta clínica e reescrito conforme suas decisões.
+              {config?.decisions_since_learn ? ` ${config.decisions_since_learn} decisão(ões) desde a última versão.` : ""}
+            </p>
+            {current ? (
+              <pre className="text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-xl p-3 whitespace-pre-wrap max-h-72 overflow-y-auto custom-scrollbar">
+                {current.content}
+              </pre>
+            ) : (
+              <p className="text-xs text-slate-400">
+                Ainda sem manual. A primeira versão é escrita automaticamente a partir do histórico de conversas
+                assim que a análise for ativada.
+              </p>
+            )}
+            {versions.length > 1 && (
+              <div className="space-y-1.5">
+                <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                  <History className="w-3 h-3" /> Versões
+                </p>
+                {versions.map(v => (
+                  <div key={v.id} className="flex items-center justify-between text-xs border border-slate-100 rounded-lg px-2.5 py-1.5">
+                    <span className="text-slate-600">
+                      <b>v{v.version}</b> · {v.source === "bootstrap" ? "histórico" : v.source === "learn" ? "aprendizado" : "manual"}
+                      {" · "}{new Date(v.created_at).toLocaleDateString("pt-BR")}
+                    </span>
+                    {v.is_current
+                      ? <span className="text-[10px] font-black text-teal-700 bg-teal-50 border border-teal-200 rounded px-1.5 py-0.5">EM USO</span>
+                      : <button onClick={() => rollback(v.version)} className="text-[11px] font-bold text-slate-500 hover:text-teal-600">
+                          voltar para esta
+                        </button>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Confirmar venda = mesmo fluxo do Kanban */}
+      {ganho && (
+        <GanhoModal
+          lead={{ id: ganho.id, name: ganho.name, phone: ganho.phone, patientId: ganho.patientId, ctwaClid: ganho.ctwaClid, email: ganho.email }}
+          ticketId={ganho.ticketId}
+          isConversionStage={ganhoStage?.is_conversion === true}
+          createPatient={createPatient as any}
+          updateLead={async (id, payload) => { await supabase.from("leads").update(payload).eq("id", id); }}
+          onClose={() => { setGanho(null); refetch(); }}
+          onCancel={() => { setGanho(null); refetch(); }}
+          onCreate={async (data) => {
+            const ok = await createConversion({ ...data, ticket_id: ganho.ticketId } as any);
+            if (ok) {
+              if (ganhoStage) await moveTicket(ganho.ticketId, ganhoStage.id);
+              await closeTicket(ganho.ticketId, "ganho");
+            }
+            return ok;
+          }}
+        />
+      )}
+    </div>
+  );
+}

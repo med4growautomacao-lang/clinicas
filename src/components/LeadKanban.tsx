@@ -744,7 +744,9 @@ function CurrencyInput({ value, onChange, className, placeholder, autoFocus }: {
   );
 }
 
-function GanhoModal({ lead, ticketId, isConversionStage, onClose, onCancel, onCreate, createPatient, updateLead }: {
+// Exportado porque a aba "Vendas sugeridas" (ConvAIReview) aprova a sugestão da IA
+// pelo MESMO caminho do Kanban: uma regra de negócio, um dono.
+export function GanhoModal({ lead, ticketId, isConversionStage, onClose, onCancel, onCreate, createPatient, updateLead }: {
   lead: { id: string; name: string; phone?: string | null; patientId?: string | null; ctwaClid?: string | null; email?: string | null };
   ticketId: string;
   isConversionStage: boolean;

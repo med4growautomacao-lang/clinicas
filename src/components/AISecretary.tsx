@@ -47,7 +47,8 @@ import { LeadKanban } from "./LeadKanban";
 import { ComercialDashboard } from "./ComercialDashboard";
 import { ChatThread } from "./ChatThread";
 import { ChatComposer } from "./ChatComposer";
-import { useLeads, useNotLeads, useChatMessages, useSettings, useFunnelStages, usePromptTemplates, FunnelStage, useFollowupSteps, FollowupStep } from "../hooks/useSupabase";
+import { useLeads, useNotLeads, useChatMessages, useSettings, useFunnelStages, usePromptTemplates, FunnelStage, useFollowupSteps, FollowupStep, useConvAiInsights } from "../hooks/useSupabase";
+import { ConvAIReview } from "./ConvAIReview";
 import { NotLeadPanel, NotLeadButton } from "./NotLeadPanel";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
@@ -1917,13 +1918,16 @@ function FinishServiceView() {
 }
 
 export function AISecretary() {
-  const [activeTab, setActiveTab] = useState<"chats" | "leads" | "dashboard" | "config" | "followups">(
+  const [activeTab, setActiveTab] = useState<"chats" | "leads" | "dashboard" | "config" | "followups" | "sugestoes">(
     () => (localStorage.getItem('aiSecretaryTab') as any) || "chats"
   );
   const { aiConfig, updateAI, clinic } = useSettings();
   const features = clinic?.features;
   const hasFollowup = features?.feature_followup !== false;
   const hasIA = features?.feature_ia !== false;
+  // Contador da fila do analista de conversas. Só VENDA entra em fila: a etapa
+  // comum a IA move sozinha (ver ConvAIReview).
+  const { pending: convAiPending } = useConvAiInsights();
 
   return (
     <div className="space-y-8 h-full flex flex-col">
@@ -1970,6 +1974,7 @@ export function AISecretary() {
             { id: "leads", label: "CRM", show: true },
             { id: "dashboard", label: "Resultados", show: true },
             { id: "chats", label: "Conversas", show: true },
+            { id: "sugestoes", label: convAiPending.length ? `Sugestões IA (${convAiPending.length})` : "Sugestões IA", show: hasIA },
             { id: "followups", label: "Follow-up", show: hasFollowup },
             { id: "config", label: "Configurações IA", show: hasIA },
           ].filter(t => t.show).map((tab) => (
@@ -2001,6 +2006,7 @@ export function AISecretary() {
           {activeTab === "chats" && <ChatsView />}
           {activeTab === "leads" && <LeadKanban />}
           {activeTab === "dashboard" && <ComercialDashboard />}
+          {activeTab === "sugestoes" && <ConvAIReview />}
           {activeTab === "followups" && <AllFollowupsView />}
 
           {activeTab === "config" && <ConfigView />}

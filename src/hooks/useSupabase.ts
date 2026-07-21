@@ -4203,3 +4203,138 @@ export function useNotifications() {
 
   return { data, loading, unreadCount, markAllRead, markRead, refetch: fetch };
 }
+
+// ─── IA Analista de Conversas ────────────────────────────────────────────────
+// Duas coisas moram aqui: a FILA de vendas sugeridas (o vendedor decide) e a
+// configuração por clínica (ligar, limiar, manual aprendido + versões).
+// A etapa comum a IA move sozinha, então ela NÃO aparece como pendência: só como
+// histórico de auditoria (status 'auto_applied').
+
+export interface ConvAiInsight {
+  id: string;
+  clinic_id: string;
+  ticket_id: string;
+  lead_id: string | null;
+  kind: 'stage' | 'sale';
+  suggested_stage_id: string | null;
+  previous_stage_id: string | null;
+  sale_value: number | null;
+  confidence: number | null;
+  rationale: string | null;
+  evidence: string[] | null;
+  status: string;
+  decided_at: string | null;
+  decision_note: string | null;
+  model: string | null;
+  created_at: string;
+  leads?: { name: string | null; phone: string | null; converted_patient_id: string | null; ctwa_clid: string | null; email: string | null } | null;
+}
+
+const CONV_AI_SELECT =
+  '*, leads(name, phone, converted_patient_id, ctwa_clid, email)';
+
+export function useConvAiInsights() {
+  const { activeClinicId } = useAuth();
+  const [pending, setPending] = useState<ConvAiInsight[]>([]);
+  const [recentStages, setRecentStages] = useState<ConvAiInsight[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = useCallback(async (silent = false) => {
+    if (!activeClinicId) { setLoading(false); return; }
+    if (!silent) setLoading(true);
+    const desde = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    const [{ data: pend }, { data: recentes }] = await Promise.all([
+      supabase.from('conv_ai_insights').select(CONV_AI_SELECT)
+        .eq('clinic_id', activeClinicId).eq('status', 'pending')
+        .order('created_at', { ascending: false }).limit(200),
+      supabase.from('conv_ai_insights').select(CONV_AI_SELECT)
+        .eq('clinic_id', activeClinicId).eq('kind', 'stage')
+        .in('status', ['auto_applied', 'shadow'])
+        .gte('created_at', desde)
+        .order('created_at', { ascending: false }).limit(100),
+    ]);
+    setPending((pend || []) as ConvAiInsight[]);
+    setRecentStages((recentes || []) as ConvAiInsight[]);
+    setLoading(false);
+  }, [activeClinicId]);
+
+  useEffect(() => { fetch(); }, [fetch]);
+
+  // Só sugestão de VENDA passa por aqui. 'approve' não fecha a venda: devolve
+  // needs_ganho_modal para a tela abrir o fluxo de sempre (finalize_ticket +
+  // conversão + CAPI). Uma regra de negócio, um dono.
+  const decide = async (id: string, decision: 'approve' | 'reject', note?: string) => {
+    const { data, error } = await supabase.rpc('decide_conv_ai_insight', {
+      p_insight_id: id, p_decision: decision, p_note: note ?? null,
+    });
+    if (error) return { success: false as const, error: error.message };
+    setPending(prev => prev.filter(i => i.id !== id));
+    return data as { success: boolean; needs_ganho_modal?: boolean; ticket_id?: string; lead_id?: string; suggested_value?: number | null; error_code?: string };
+  };
+
+  return { pending, recentStages, loading, decide, refetch: fetch };
+}
+
+export interface ConvAiPromptVersion {
+  id: string;
+  version: number;
+  content: string;
+  source: 'bootstrap' | 'learn' | 'manual';
+  based_on_decisions: number;
+  is_current: boolean;
+  created_at: string;
+}
+
+export interface ConvAiClinicConfig {
+  clinic_id: string;
+  enabled: boolean;
+  min_confidence_stage: number | null;
+  prompt_version: number;
+  decisions_since_learn: number;
+  last_learned_at: string | null;
+  last_analysis_at: string | null;
+}
+
+export function useConvAiClinicConfig() {
+  const { activeClinicId } = useAuth();
+  const [config, setConfig] = useState<ConvAiClinicConfig | null>(null);
+  const [versions, setVersions] = useState<ConvAiPromptVersion[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = useCallback(async () => {
+    if (!activeClinicId) { setLoading(false); return; }
+    const [{ data: cfg }, { data: vs }] = await Promise.all([
+      supabase.from('conv_ai_clinic_config').select('*').eq('clinic_id', activeClinicId).maybeSingle(),
+      supabase.from('conv_ai_prompt_versions').select('id, version, content, source, based_on_decisions, is_current, created_at')
+        .eq('clinic_id', activeClinicId).order('version', { ascending: false }).limit(20),
+    ]);
+    setConfig((cfg as ConvAiClinicConfig) ?? null);
+    setVersions((vs || []) as ConvAiPromptVersion[]);
+    setLoading(false);
+  }, [activeClinicId]);
+
+  useEffect(() => { fetch(); }, [fetch]);
+
+  const save = async (patch: Partial<ConvAiClinicConfig>) => {
+    if (!activeClinicId) return false;
+    const { error } = await supabase.from('conv_ai_clinic_config')
+      .upsert({ clinic_id: activeClinicId, ...patch, updated_at: new Date().toISOString() }, { onConflict: 'clinic_id' });
+    if (error) return false;
+    setConfig(prev => ({ ...(prev ?? { clinic_id: activeClinicId, enabled: false, min_confidence_stage: null, prompt_version: 0, decisions_since_learn: 0, last_learned_at: null, last_analysis_at: null }), ...patch }));
+    return true;
+  };
+
+  const rollback = async (version: number) => {
+    if (!activeClinicId) return false;
+    const { data, error } = await supabase.rpc('conv_ai_rollback_prompt', {
+      p_clinic_id: activeClinicId, p_version: version,
+    });
+    if (error || !(data as any)?.success) return false;
+    await fetch();
+    return true;
+  };
+
+  const current = versions.find(v => v.is_current) ?? null;
+
+  return { config, versions, current, loading, save, rollback, refetch: fetch };
+}

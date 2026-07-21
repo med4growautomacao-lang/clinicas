@@ -39,3 +39,15 @@ enabled = true
 # Callback da WhatsApp Cloud API oficial — a Meta chama sem Authorization.
 verify_jwt = false
 entrypoint = "./functions/meta-cloud-webhook/index.ts"
+
+[functions.conv-ai-analyst]
+enabled = true
+# Disparada pelo pg_cron via system_http_post (sem JWT).
+verify_jwt = false
+entrypoint = "./functions/conv-ai-analyst/index.ts"
+
+[functions.conv-ai-learn]
+enabled = true
+# Disparada pelo pg_cron via system_http_post (sem JWT).
+verify_jwt = false
+entrypoint = "./functions/conv-ai-learn/index.ts"

@@ -1924,7 +1924,7 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
         </table>
       </div>
       <p className="text-[10px] text-slate-400 mt-4">
-        CPL/CAC são do <b>coorte de entrada</b> no período (leads criados na janela) — leads recentes ainda podem converter depois, então o CAC de períodos muito recentes tende a subestimar. Cada nível (campanha/conjunto/anúncio) soma investimento e leads primeiro, e SÓ DEPOIS calcula CPL/CAC — nunca é a soma dos CPL/CAC dos itens abaixo. "—" = sem investimento sincronizado para esse item no período (não é gasto zero); campanhas com sincronização parcial (alguns anúncios ainda sem dado) mostram a soma do que já foi sincronizado.
+        Ganho/Perdido aqui são do <b>coorte de entrada</b> (leads que ENTRARAM nesta janela e o desfecho atual do ticket) — por isso costumam vir <b>menores</b> que o "Ganho" do Funil de Vendas acima, que conta pela <b>data da conversão</b> (pode incluir leads que entraram bem antes). Os dois estão certos: são perguntas diferentes. Aqui a pergunta é "dos leads que este investimento gerou, quantos já compraram" — a única forma de o CAC ficar ligado ao gasto real do período. Em janelas recentes, o coorte ainda está maturando (leads podem converter depois) — o CAC tende a cair conforme os dias passam. Cada nível (campanha/conjunto/anúncio) soma investimento e leads primeiro, e SÓ DEPOIS calcula CPL/CAC — nunca é a soma dos CPL/CAC dos itens abaixo. "—" = sem investimento sincronizado para esse item no período (não é gasto zero); campanhas com sincronização parcial (alguns anúncios ainda sem dado) mostram a soma do que já foi sincronizado.
       </p>
     </Card>
   );

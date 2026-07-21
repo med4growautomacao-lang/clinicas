@@ -128,6 +128,90 @@ function Evidencias({ itens }: { itens: string[] | null }) {
   );
 }
 
+// Uma fila por eixo, cada uma com o vocabulário do seu tipo de decisão.
+function FilaSecao({ eixo, itens, vazioTexto, onRefetch, busy, onAprovar, onRecusar, stageName }: {
+  eixo: "etapa" | "venda";
+  itens: ConvAiInsight[];
+  vazioTexto: string;
+  onRefetch: () => void;
+  busy: string | null;
+  onAprovar: (i: ConvAiInsight) => void;
+  onRecusar: (i: ConvAiInsight) => void;
+  stageName: (id: string | null) => string;
+}) {
+  const venda = eixo === "venda";
+  const Icone = venda ? TrendingUp : MoveRight;
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className={cn("text-xs font-black uppercase tracking-widest flex items-center gap-2",
+          venda ? "text-emerald-600" : "text-violet-600")}>
+          <Icone className="w-3.5 h-3.5" />
+          {venda ? "Vendas para confirmar" : "Mudanças de etapa para confirmar"} ({itens.length})
+        </h3>
+        <button onClick={onRefetch} className="text-slate-400 hover:text-teal-600 transition-colors" title="Atualizar">
+          <RefreshCw className="w-4 h-4" />
+        </button>
+      </div>
+
+      {itens.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-slate-100 px-4 py-6 flex items-center gap-3">
+          <MessageSquare className="w-5 h-5 text-slate-200 shrink-0" />
+          <p className="text-slate-400 text-xs">{vazioTexto}</p>
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          {itens.map(ins => (
+            <motion.div
+              key={ins.id}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-black text-slate-900">{ins.leads?.name ?? "Contato"}</span>
+                    <Confianca valor={ins.confidence} />
+                    {ins.sale_value != null && (
+                      <span className="text-[11px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">
+                        R$ {Number(ins.sale_value).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
+                    {stageName(ins.previous_stage_id)} <ArrowRight className="w-3 h-3" /> {stageName(ins.suggested_stage_id)}
+                  </p>
+                  {ins.rationale && <p className="text-xs text-slate-600 mt-2">{ins.rationale}</p>}
+                  <Evidencias itens={ins.evidence} />
+                </div>
+                <div className="flex sm:flex-col gap-2 shrink-0">
+                  <button
+                    onClick={() => onAprovar(ins)}
+                    disabled={busy === ins.id}
+                    className={cn("flex-1 sm:flex-none disabled:opacity-50 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors",
+                      venda ? "bg-emerald-600 hover:bg-emerald-700" : "bg-violet-600 hover:bg-violet-700")}
+                  >
+                    {busy === ins.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                    {venda ? "Confirmar venda" : "Mover card"}
+                  </button>
+                  <button
+                    onClick={() => onRecusar(ins)}
+                    disabled={busy === ins.id}
+                    className="flex-1 sm:flex-none bg-white border border-slate-200 hover:bg-rose-50 hover:border-rose-200 text-slate-600 hover:text-rose-600 px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <X className="w-3.5 h-3.5" /> {venda ? "Não foi venda" : "Manter etapa"}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ConvAIReview() {
   const { pending, recentStages, loading, decide, refetch } = useConvAiInsights();
   const { config, current, versions, loading: cfgLoading, save, rollback } = useConvAiClinicConfig();
@@ -146,6 +230,8 @@ export function ConvAIReview() {
 
   const stageName = (id: string | null) => stages.find(s => s.id === id)?.name ?? "sem etapa";
   const ganhoStage = stages.find(s => s.slug === "ganho");
+  const pendingVendas = pending.filter(i => i.kind === "sale");
+  const pendingEtapas = pending.filter(i => i.kind === "stage");
 
   const aprovar = async (ins: ConvAiInsight) => {
     setBusy(ins.id);
@@ -229,83 +315,41 @@ export function ConvAIReview() {
         />
       </div>
 
-      {/* Fila: o que a IA não aplicou sozinha e está esperando você */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-            <TrendingUp className="w-3.5 h-3.5" /> Aguardando sua decisão ({pending.length})
-          </h3>
-          <button onClick={() => refetch()} className="text-slate-400 hover:text-teal-600 transition-colors" title="Atualizar">
-            <RefreshCw className="w-4 h-4" />
-          </button>
-        </div>
+      {/* Uma fila por eixo. Venda e etapa são revisões diferentes, com pessoas e
+          urgências diferentes: misturar as duas fazia a venda se perder no meio. */}
+      <FilaSecao
+        eixo="venda"
+        itens={pendingVendas}
+        vazioTexto={desligada
+          ? "Ative a análise para a IA começar a ler as conversas."
+          : (config?.sale_mode ?? "suggest") === "suggest"
+            ? "Nenhuma venda aguardando. Assim que a IA encontrar uma, ela aparece aqui."
+            : (config?.sale_mode === "auto"
+              ? "Detecção de venda está em Automático: a IA fecha sozinha e nada cai aqui."
+              : "Detecção de venda está em Manual: a IA não procura vendas nesta clínica.")}
+        onRefetch={refetch}
+        busy={busy}
+        onAprovar={aprovar}
+        onRecusar={recusar}
+        stageName={stageName}
+      />
 
-        {pending.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center">
-            <MessageSquare className="w-8 h-8 text-slate-200 mx-auto mb-2" />
-            <p className="text-slate-400 text-sm font-medium">Nada aguardando decisão.</p>
-            <p className="text-slate-300 text-xs mt-1">
-              {desligada
-                ? "Ative a análise para a IA começar a ler as conversas."
-                : "Só chega aqui o que estiver em Sugestão nos controles acima."}
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-2.5">
-            {pending.map(ins => (
-              <motion.div
-                key={ins.id}
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4"
-              >
-                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-black text-slate-900">{ins.leads?.name ?? "Contato"}</span>
-                      <span className={cn("text-[10px] font-black px-1.5 py-0.5 rounded border tracking-wider",
-                        ins.kind === "sale"
-                          ? "text-emerald-700 bg-emerald-50 border-emerald-200"
-                          : "text-violet-700 bg-violet-50 border-violet-200")}>
-                        {ins.kind === "sale" ? "VENDA" : "ETAPA"}
-                      </span>
-                      <Confianca valor={ins.confidence} />
-                      {ins.sale_value != null && (
-                        <span className="text-[11px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">
-                          R$ {Number(ins.sale_value).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
-                      {stageName(ins.previous_stage_id)} <ArrowRight className="w-3 h-3" /> {stageName(ins.suggested_stage_id)}
-                    </p>
-                    {ins.rationale && <p className="text-xs text-slate-600 mt-2">{ins.rationale}</p>}
-                    <Evidencias itens={ins.evidence} />
-                  </div>
-                  <div className="flex sm:flex-col gap-2 shrink-0">
-                    <button
-                      onClick={() => aprovar(ins)}
-                      disabled={busy === ins.id}
-                      className={cn("flex-1 sm:flex-none disabled:opacity-50 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors",
-                        ins.kind === "sale" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-violet-600 hover:bg-violet-700")}
-                    >
-                      {busy === ins.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-                      {ins.kind === "sale" ? "Confirmar venda" : "Mover card"}
-                    </button>
-                    <button
-                      onClick={() => recusar(ins)}
-                      disabled={busy === ins.id}
-                      className="flex-1 sm:flex-none bg-white border border-slate-200 hover:bg-rose-50 hover:border-rose-200 text-slate-600 hover:text-rose-600 px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
-                    >
-                      <X className="w-3.5 h-3.5" /> {ins.kind === "sale" ? "Não foi venda" : "Manter etapa"}
-                    </button>
-                  </div>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        )}
-      </div>
+      <FilaSecao
+        eixo="etapa"
+        itens={pendingEtapas}
+        vazioTexto={desligada
+          ? "Ative a análise para a IA começar a ler as conversas."
+          : (config?.stage_mode ?? "auto") === "suggest"
+            ? "Nenhuma mudança de etapa aguardando."
+            : (config?.stage_mode === "auto"
+              ? "Mudança de etapa está em Automático: a IA move os cards sozinha (veja o histórico abaixo)."
+              : "Mudança de etapa está em Manual: a IA não mexe nos cards desta clínica.")}
+        onRefetch={refetch}
+        busy={busy}
+        onAprovar={aprovar}
+        onRecusar={recusar}
+        stageName={stageName}
+      />
 
       {/* Auditoria: o que a IA moveu sozinha */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm">

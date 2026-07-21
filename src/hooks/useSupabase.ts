@@ -1043,6 +1043,52 @@ export function useFunnelCohort(start: string | null, end: string | null) {
   );
 }
 
+// Investimento × leads × desfecho POR CAMPANHA (RPC marketing_campaign_investment).
+// investment/cpl/cac vêm null quando não há investimento sincronizado p/ a campanha no
+// período — NUNCA tratar null como 0 no front (0 significaria "gasto real zero" e mentiria;
+// null = "sem dado sincronizado ainda"). 1 linha por campanha (não por dia) — não pagina.
+export interface CampaignInvestmentRow {
+  campaign_name: string;
+  platform: 'meta_ads' | 'google_ads';
+  investment: number | null;
+  leads: number;
+  wins: number;
+  losses: number;
+  cpl: number | null;
+  cac: number | null;
+}
+export function useCampaignInvestment(start: string | null, end: string | null) {
+  return useRpcRows<CampaignInvestmentRow>(
+    'marketing_campaign_investment',
+    start && end ? { p_start: start, p_end: end } : null,
+    (r: any) => ({
+      campaign_name: r.campaign_name,
+      platform: r.platform,
+      investment: r.investment == null ? null : Number(r.investment),
+      leads: Number(r.leads) || 0,
+      wins: Number(r.wins) || 0,
+      losses: Number(r.losses) || 0,
+      cpl: r.cpl == null ? null : Number(r.cpl),
+      cac: r.cac == null ? null : Number(r.cac),
+    })
+  );
+}
+
+// Split de investimento por REDE dentro do Meta (facebook/instagram/…), por campanha.
+// Só o lado do GASTO — não junta com leads (rede de veiculação não chega no UTM do lead).
+export interface CampaignPlatformSplitRow {
+  campaign_name: string;
+  ad_platform: string;
+  investment: number;
+}
+export function useCampaignPlatformSplit(start: string | null, end: string | null) {
+  return useRpcRows<CampaignPlatformSplitRow>(
+    'marketing_campaign_platform_split',
+    start && end ? { p_start: start, p_end: end } : null,
+    (r: any) => ({ campaign_name: r.campaign_name, ad_platform: r.ad_platform, investment: Number(r.investment) || 0 })
+  );
+}
+
 // Igual ao useFunnelCohort, mas chama o RPC marketing_utm_funnel_cohort, que adiciona
 // as dimensões de UTM (campanha/conjunto/anúncio/termo/origem) ao agrupamento. Alimenta
 // a seção "Análise por UTM × Etapa" do Marketing. Contagem por ticket / última entrada

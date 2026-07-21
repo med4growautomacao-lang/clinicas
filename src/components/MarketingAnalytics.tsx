@@ -51,7 +51,7 @@ import {
 import { cn } from "@/src/lib/utils";
 import { TrendBarChart, fmtByType } from "./TrendBarChart";
 import { motion, AnimatePresence } from "framer-motion";
-import { useMarketing, MarketingData, useFunnelStages, useUtmFunnelCohort, useFunnelCohort, useMarketingKpis, MarketingKpiRow } from "../hooks/useSupabase";
+import { useMarketing, MarketingData, useFunnelStages, useUtmFunnelCohort, useFunnelCohort, useMarketingKpis, MarketingKpiRow, useCampaignInvestment, useCampaignPlatformSplit } from "../hooks/useSupabase";
 import { ReportQuick } from "./ReportQuick";
 import {
   format,
@@ -282,6 +282,16 @@ export function MarketingAnalytics() {
   // e ESTOURA o max_rows do PostgREST em clínica grande, cortando etapas inteiras (Ganho
   // sumia do funil da Intubação, 5367>5000). O leve fica em ~centenas de linhas.
   const funnelCohort = useFunnelCohort(
+    format(dateRange.start, 'yyyy-MM-dd'),
+    format(dateRange.end, 'yyyy-MM-dd')
+  );
+  // Investimento por campanha (Fase 1 do detalhamento) + split por rede dentro do Meta.
+  // Sem "compare" nesta 1ª versão — a tabela é do período principal só.
+  const campaignInvestment = useCampaignInvestment(
+    format(dateRange.start, 'yyyy-MM-dd'),
+    format(dateRange.end, 'yyyy-MM-dd')
+  );
+  const campaignPlatformSplit = useCampaignPlatformSplit(
     format(dateRange.start, 'yyyy-MM-dd'),
     format(dateRange.end, 'yyyy-MM-dd')
   );
@@ -901,6 +911,8 @@ export function MarketingAnalytics() {
                 funnelCohortCompare={funnelCohortCompare}
                 utmCohort={utmCohort}
                 utmCohortCompare={utmCohortCompare}
+                campaignInvestment={campaignInvestment}
+                campaignPlatformSplit={campaignPlatformSplit}
                 funnelOrder={funnelStagesOrder}
                 funnelHidden={effectiveFunnelHidden}
                 toggleFunnelStage={toggleFunnelStage}
@@ -1267,7 +1279,7 @@ function FunnelConfigButton({ stages, order, hidden, toggleStage, moveStage, fix
   );
 }
 
-function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, isComparing, visibleMetrics, metricsOrder, toggleMetric, moveMetric, funnelStages, funnelCohort, funnelCohortCompare, utmCohort, utmCohortCompare, funnelOrder, funnelHidden, toggleFunnelStage, moveFunnelStage, selectedPlatform, selectedChannel }: any) {
+function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, isComparing, visibleMetrics, metricsOrder, toggleMetric, moveMetric, funnelStages, funnelCohort, funnelCohortCompare, utmCohort, utmCohortCompare, campaignInvestment, campaignPlatformSplit, funnelOrder, funnelHidden, toggleFunnelStage, moveFunnelStage, selectedPlatform, selectedChannel }: any) {
 
   const [selectedMetric, setSelectedMetric] = useState('leads');
   const latestPeriod = periods[periods.length - 1]?.label || '';
@@ -1691,7 +1703,99 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
         selectedPlatform={selectedPlatform}
         selectedChannel={selectedChannel}
       />
+
+      <CampaignInvestmentSection rows={campaignInvestment} platformSplit={campaignPlatformSplit} />
     </div>
+  );
+}
+
+// Investimento × Leads × Desfecho POR CAMPANHA (Fase 1 do detalhamento). investment/cpl/cac
+// null = "sem investimento sincronizado nesse período" — NUNCA renderizar como R$0,00 (mentiria
+// "leads de graça"; o correto é "—"). % Instagram é só do lado do GASTO (Meta não permite saber
+// em qual rede um lead específico clicou — a granularidade existe só no agregado da campanha).
+function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platformSplit: any[] }) {
+  const igShareByCampaign = useMemo(() => {
+    const byCampaign = new Map<string, { ig: number; total: number }>();
+    (platformSplit || []).forEach((r: any) => {
+      const acc = byCampaign.get(r.campaign_name) || { ig: 0, total: 0 };
+      acc.total += r.investment || 0;
+      if (r.ad_platform === 'instagram') acc.ig += r.investment || 0;
+      byCampaign.set(r.campaign_name, acc);
+    });
+    const out = new Map<string, number>();
+    byCampaign.forEach((v, k) => { if (v.total > 0) out.set(k, (v.ig / v.total) * 100); });
+    return out;
+  }, [platformSplit]);
+
+  const hasAnyInvestment = (rows || []).some((r: any) => r.investment != null);
+  const fmtMoney = (v: number | null) => v == null ? '—' : `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  if (!rows || rows.length === 0) return null;
+
+  return (
+    <Card className="bg-white border-slate-200 shadow-xl rounded-3xl p-8 overflow-hidden">
+      <CardHeader className="p-0 pb-6">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center">
+            <DollarSign className="w-5 h-5 text-indigo-600" />
+          </div>
+          <div className="flex flex-col">
+            <CardTitle className="text-xs font-black text-slate-400 uppercase tracking-widest">Investimento por Campanha</CardTitle>
+            <span className="text-[9px] font-semibold text-slate-300 normal-case tracking-tight">gasto × leads × desfecho, por campanha do Meta/Google</span>
+          </div>
+        </div>
+      </CardHeader>
+
+      {!hasAnyInvestment && (
+        <div className="flex items-center gap-2 px-4 py-3 mb-4 bg-amber-50 border border-amber-100 rounded-xl">
+          <Target className="w-4 h-4 text-amber-500 shrink-0" />
+          <p className="text-[11px] text-amber-700">
+            Ainda sem investimento sincronizado por campanha neste período. Use <b>Sincronizar Investimento</b> acima — a partir da próxima sincronização, o gasto por campanha passa a aparecer aqui.
+          </p>
+        </div>
+      )}
+
+      <div className="overflow-x-auto -mx-2">
+        <table className="w-full text-sm min-w-[720px]">
+          <thead>
+            <tr className="text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
+              <th className="text-left px-2 py-2">Campanha</th>
+              <th className="text-center px-2 py-2">Origem</th>
+              <th className="text-right px-2 py-2">Investimento</th>
+              <th className="text-right px-2 py-2">% Instagram</th>
+              <th className="text-right px-2 py-2">Leads</th>
+              <th className="text-right px-2 py-2">Ganho</th>
+              <th className="text-right px-2 py-2">Perdido</th>
+              <th className="text-right px-2 py-2">CPL</th>
+              <th className="text-right px-2 py-2">CAC</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r: any, idx: number) => {
+              const igShare = r.platform === 'meta_ads' ? igShareByCampaign.get(r.campaign_name) : undefined;
+              return (
+                <tr key={`${r.campaign_name}-${idx}`} className="border-b border-slate-50 hover:bg-slate-50/60 transition-colors">
+                  <td className="px-2 py-2.5 max-w-[280px] truncate text-slate-700 font-medium" title={r.campaign_name}>{r.campaign_name || '(sem nome)'}</td>
+                  <td className="px-2 py-2.5 text-center">
+                    <img src={r.platform === 'meta_ads' ? MetaLogo : GoogleLogo} alt={r.platform} className="w-4 h-4 inline-block object-contain opacity-80" />
+                  </td>
+                  <td className="px-2 py-2.5 text-right font-bold text-slate-800">{fmtMoney(r.investment)}</td>
+                  <td className="px-2 py-2.5 text-right text-slate-500">{igShare != null ? `${igShare.toFixed(0)}%` : '—'}</td>
+                  <td className="px-2 py-2.5 text-right text-slate-700">{r.leads}</td>
+                  <td className="px-2 py-2.5 text-right text-emerald-600 font-semibold">{r.wins}</td>
+                  <td className="px-2 py-2.5 text-right text-rose-500">{r.losses}</td>
+                  <td className="px-2 py-2.5 text-right text-slate-600">{fmtMoney(r.cpl)}</td>
+                  <td className="px-2 py-2.5 text-right font-bold text-indigo-600">{fmtMoney(r.cac)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[10px] text-slate-400 mt-4">
+        CPL/CAC são do <b>coorte de entrada</b> no período (leads criados na janela) — leads recentes ainda podem converter depois, então o CAC de períodos muito recentes tende a subestimar. "—" = sem investimento sincronizado para essa campanha no período (não é gasto zero).
+      </p>
+    </Card>
   );
 }
 

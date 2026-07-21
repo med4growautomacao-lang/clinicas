@@ -157,6 +157,8 @@ BEGIN
   WHERE cm.clinic_id = p_clinic_id
     AND (p_agenda_from IS NULL OR cm.created_at::date >= p_agenda_from)
     AND (p_agenda_to   IS NULL OR cm.created_at::date <= p_agenda_to)
+    AND (p_entry_from IS NULL OR l.created_at::date >= p_entry_from)
+    AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
     AND COALESCE(l.is_not_lead, false) = false
     AND (p_origin = 'todos'
       OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
@@ -220,6 +222,8 @@ BEGIN
     WHERE al.clinic_id = p_clinic_id AND al.status = 'sent'
       AND (p_agenda_from IS NULL OR al.triggered_at::date >= p_agenda_from)
       AND (p_agenda_to   IS NULL OR al.triggered_at::date <= p_agenda_to)
+      AND (p_entry_from IS NULL OR l.created_at::date >= p_entry_from)
+      AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
       AND COALESCE(l.is_not_lead, false) = false
       AND (p_origin = 'todos'
         OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
@@ -230,6 +234,8 @@ BEGIN
   WHERE clinic_id = p_clinic_id AND csat_score IS NOT NULL
     AND (p_agenda_from IS NULL OR csat_answered_at::date >= p_agenda_from)
     AND (p_agenda_to   IS NULL OR csat_answered_at::date <= p_agenda_to)
+    AND (p_entry_from IS NULL OR created_at::date >= p_entry_from)
+    AND (p_entry_to   IS NULL OR created_at::date <= p_entry_to)
     AND COALESCE(is_not_lead, false) = false
     AND (p_origin = 'todos'
       OR (CASE WHEN source = 'meta_ads' THEN 'meta' WHEN source = 'google_ads' THEN 'google' WHEN source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR capture_channel = ANY(string_to_array(p_channel, ',')));
@@ -240,6 +246,8 @@ BEGIN
     WHERE clinic_id = p_clinic_id AND csat_score IS NOT NULL
       AND (p_agenda_from IS NULL OR csat_answered_at::date >= p_agenda_from)
       AND (p_agenda_to   IS NULL OR csat_answered_at::date <= p_agenda_to)
+      AND (p_entry_from IS NULL OR created_at::date >= p_entry_from)
+      AND (p_entry_to   IS NULL OR created_at::date <= p_entry_to)
       AND COALESCE(is_not_lead, false) = false
       AND (p_origin = 'todos'
         OR (CASE WHEN source = 'meta_ads' THEN 'meta' WHEN source = 'google_ads' THEN 'google' WHEN source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR capture_channel = ANY(string_to_array(p_channel, ',')))
@@ -439,6 +447,8 @@ BEGIN
       COUNT(*) FILTER (WHERE cm.sender = 'human' AND cm.direction = 'outbound') AS human_msgs
     FROM chat_messages cm LEFT JOIN leads l ON l.id = cm.lead_id
     WHERE cm.clinic_id = p_clinic_id AND cm.created_at::date BETWEEN v_d_from AND v_d_to
+      AND (p_entry_from IS NULL OR l.created_at::date >= p_entry_from)
+      AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
       AND COALESCE(l.is_not_lead, false) = false
       AND (p_origin = 'todos'
         OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
@@ -447,6 +457,8 @@ BEGIN
   ld AS (
     SELECT created_at::date AS d, COUNT(*) AS leads FROM leads
     WHERE clinic_id = p_clinic_id AND created_at::date BETWEEN v_d_from AND v_d_to
+      AND (p_entry_from IS NULL OR created_at::date >= p_entry_from)
+      AND (p_entry_to   IS NULL OR created_at::date <= p_entry_to)
       AND COALESCE(is_not_lead, false) = false
       AND (p_origin = 'todos'
         OR (CASE WHEN source = 'meta_ads' THEN 'meta' WHEN source = 'google_ads' THEN 'google' WHEN source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR capture_channel = ANY(string_to_array(p_channel, ',')))
@@ -459,6 +471,8 @@ BEGIN
     FROM appointments a
     LEFT JOIN tickets t ON t.id = a.ticket_id LEFT JOIN leads l ON l.id = t.lead_id
     WHERE a.clinic_id = p_clinic_id AND a.created_at::date BETWEEN v_d_from AND v_d_to
+      AND (p_entry_from IS NULL OR l.created_at::date >= p_entry_from)
+      AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
       AND COALESCE(l.is_not_lead, false) = false
       AND (p_agent = 'todos' OR (p_agent = 'ia' AND a.source = 'ia') OR (p_agent = 'humano' AND a.source = 'manual'))
       AND (p_origin = 'todos'
@@ -469,6 +483,8 @@ BEGIN
     SELECT a.date AS d, COUNT(*) AS realizadas FROM appointments a
     LEFT JOIN tickets t ON t.id = a.ticket_id LEFT JOIN leads l ON l.id = t.lead_id
     WHERE a.clinic_id = p_clinic_id AND a.status IN ('realizado', 'compareceu') AND a.date BETWEEN v_d_from AND v_d_to
+      AND (p_entry_from IS NULL OR l.created_at::date >= p_entry_from)
+      AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
       AND COALESCE(l.is_not_lead, false) = false
       AND (p_agent = 'todos' OR (p_agent = 'ia' AND a.source = 'ia') OR (p_agent = 'humano' AND a.source = 'manual'))
       AND (p_origin = 'todos'
@@ -481,6 +497,8 @@ BEGIN
     LEFT JOIN leads l ON l.id = c.lead_id
     WHERE c.clinic_id = p_clinic_id AND c.description IS DISTINCT FROM 'Orçamento Enviado'
       AND c.converted_at::date BETWEEN v_d_from AND v_d_to
+      AND (p_entry_from IS NULL OR l.created_at::date >= p_entry_from)
+      AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
       AND COALESCE(l.is_not_lead, false) = false
       AND (p_agent = 'todos' OR EXISTS (SELECT 1 FROM public.vw_lead_agent_class v WHERE v.lead_id = l.id AND v.clinic_id = p_clinic_id AND v.agent = p_agent))
       AND (p_origin = 'todos'
@@ -491,6 +509,8 @@ BEGIN
     FROM lead_stage_history h JOIN leads l ON l.id = h.lead_id
     WHERE v_agenda_funil AND h.clinic_id = p_clinic_id AND h.new_stage_id = v_agendado_stage_id
       AND h.changed_at::date BETWEEN v_d_from AND v_d_to
+      AND (p_entry_from IS NULL OR l.created_at::date >= p_entry_from)
+      AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
       AND COALESCE(l.is_not_lead, false) = false
       AND (p_origin = 'todos'
         OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
@@ -501,6 +521,8 @@ BEGIN
     FROM lead_stage_history h JOIN leads l ON l.id = h.lead_id
     WHERE v_agenda_funil AND h.clinic_id = p_clinic_id AND h.new_stage_id = v_ganho_stage_id
       AND h.changed_at::date BETWEEN v_d_from AND v_d_to
+      AND (p_entry_from IS NULL OR l.created_at::date >= p_entry_from)
+      AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
       AND COALESCE(l.is_not_lead, false) = false
       AND (p_origin = 'todos'
         OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
@@ -511,6 +533,8 @@ BEGIN
     FROM tickets t JOIN leads l ON l.id = t.lead_id
     WHERE t.clinic_id = p_clinic_id AND t.outcome = 'ganho'
       AND COALESCE(t.outcome_at, t.closed_at)::date BETWEEN v_d_from AND v_d_to
+      AND (p_entry_from IS NULL OR l.created_at::date >= p_entry_from)
+      AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
       AND COALESCE(l.is_not_lead, false) = false
       AND (p_origin = 'todos'
         OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
@@ -526,14 +550,19 @@ BEGIN
   hd AS (
     SELECT handoff_triggered_at::date AS d, COUNT(*) AS handoffs FROM leads
     WHERE clinic_id = p_clinic_id AND handoff_triggered_at IS NOT NULL AND handoff_triggered_at::date BETWEEN v_d_from AND v_d_to
+      AND (p_entry_from IS NULL OR created_at::date >= p_entry_from)
+      AND (p_entry_to   IS NULL OR created_at::date <= p_entry_to)
       AND COALESCE(is_not_lead, false) = false
       AND (p_origin = 'todos'
         OR (CASE WHEN source = 'meta_ads' THEN 'meta' WHEN source = 'google_ads' THEN 'google' WHEN source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR capture_channel = ANY(string_to_array(p_channel, ',')))
     GROUP BY 1
   ),
   fu AS (
-    SELECT al.triggered_at::date AS d, COUNT(*) AS followups FROM automation_logs al
+    SELECT al.triggered_at::date AS d, COUNT(*) AS followups FROM automation_logs al LEFT JOIN leads l ON l.id = al.lead_id
     WHERE al.clinic_id = p_clinic_id AND al.type = 'followup' AND al.status = 'sent' AND al.triggered_at::date BETWEEN v_d_from AND v_d_to
+      AND (p_entry_from IS NULL OR l.created_at::date >= p_entry_from)
+      AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
+      AND COALESCE(l.is_not_lead, false) = false
     GROUP BY 1
   )
   SELECT jsonb_agg(jsonb_build_object(

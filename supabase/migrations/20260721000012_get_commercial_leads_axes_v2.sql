@@ -175,7 +175,9 @@ BEGIN
       AND (p_loss_reasons IS NULL OR btrim(p_loss_reasons) = ''
         OR COALESCE(NULLIF(t4.loss_reason, ''), '(sem motivo registrado)') = ANY(string_to_array(p_loss_reasons, ',')));
   ELSE
-    SELECT COUNT(*) INTO v_metric_count
+    -- COUNT(DISTINCT l.id): lead pode ter mais de 1 agendamento na janela (ex:
+    -- reagendado) — sem DISTINCT o JOIN duplica a contagem desse lead.
+    SELECT COUNT(DISTINCT l.id) INTO v_metric_count
     FROM leads l
     JOIN tickets t ON t.lead_id = l.id
     JOIN appointments a ON a.ticket_id = t.id AND a.clinic_id = p_clinic_id

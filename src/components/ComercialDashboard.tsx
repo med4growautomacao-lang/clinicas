@@ -1150,24 +1150,27 @@ export function ComercialDashboard() {
             cal1={apptCal1} setCal1={setApptCal1} cal2={apptCal2} setCal2={setApptCal2}
           />
           {/* Conversão = desfecho do negócio (outcome_at: Ganho/Perdido/Faturamento) E
-              data da CONSULTA (appointments.date: realizadas/comparecimento) — mesma janela */}
-          <DatePill
-            label="Conversão" valueLabel={convLabel}
-            rangeText={convRange ? `${format(convRange.start, "dd/MM")} - ${format(convRange.end, "dd/MM")}` : "todas as datas"}
-            open={isConvOpen} setOpen={setIsConvOpen}
-            presets={[{ id: "todos", label: "Todos" }, ...RANGE_PRESETS]} activeLabel={convLabel} onPreset={setConvById}
-            selected={convRange ? { from: convRange.start, to: convRange.end } : undefined} onSelect={onConvSelect}
-            cal1={convCal1} setCal1={setConvCal1} cal2={convCal2} setCal2={setConvCal2}
-          />
-          {/* Toggle Ganho/Perdido/Ambos — recorta o eixo Conversão por desfecho.
-              O próprio botão "Perdido" abre o seletor de motivo (não é um botão à parte). */}
-          <OutcomeFilterToggle
-            value={outcomeFilter}
-            onChange={setOutcomeFilter}
-            reasons={data.outcomes.lossReasons}
-            selectedReasons={lossReasonFilter}
-            onReasonsChange={setLossReasonFilter}
-          />
+              data da CONSULTA (appointments.date: realizadas/comparecimento) — mesma janela.
+              O toggle Ganho/Perdido/Ambos pertence a ESTE calendário — mesma caixa, não separado. */}
+          <div className="relative flex items-center gap-1 bg-white p-1.5 rounded-2xl border border-slate-200 shadow-sm">
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1.5">Conversão</span>
+            <DateRangePopover
+              valueLabel={convLabel}
+              rangeText={convRange ? `${format(convRange.start, "dd/MM")} - ${format(convRange.end, "dd/MM")}` : "todas as datas"}
+              presets={[{ id: "todos", label: "Todos" }, ...RANGE_PRESETS]} activeLabel={convLabel} onPreset={setConvById}
+              selected={convRange ? { from: convRange.start, to: convRange.end } : undefined} onSelect={onConvSelect}
+              month1={convCal1} setMonth1={setConvCal1} month2={convCal2} setMonth2={setConvCal2}
+              open={isConvOpen} setOpen={setIsConvOpen} presetsTitle="Conversão"
+            />
+            <div className="w-px h-5 bg-slate-200 mx-0.5" />
+            <OutcomeFilterToggle
+              value={outcomeFilter}
+              onChange={setOutcomeFilter}
+              reasons={data.outcomes.lossReasons}
+              selectedReasons={lossReasonFilter}
+              onReasonsChange={setLossReasonFilter}
+            />
+          </div>
         </div>
       </div>
 
@@ -1562,8 +1565,8 @@ function OutcomeFilterToggle({
   const clickOther = (v: "ambos" | "ganho") => { onChange(v); setIsReasonsOpen(false); };
 
   return (
-    <div className="relative">
-      <div className="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
+    <>
+      <div className="flex items-center gap-1">
         {(["ambos", "ganho"] as const).map((id) => (
           <button
             key={id}
@@ -1634,6 +1637,6 @@ function OutcomeFilterToggle({
           </>
         )}
       </AnimatePresence>
-    </div>
+    </>
   );
 }

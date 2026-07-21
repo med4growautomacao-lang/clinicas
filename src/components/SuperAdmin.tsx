@@ -543,6 +543,8 @@ function EditClinicModal({
     ownerName: '', ownerEmail: '', ownerPassword: '', // Only for creation
     feature_followup: clinic?.features?.feature_followup !== false,
     feature_ia: clinic?.features?.feature_ia !== false,
+    // Opt-in (só vale com === true): é funcionalidade nova e custa LLM por conversa.
+    feature_conv_ai: (clinic?.features as any)?.feature_conv_ai === true,
   });
   const [saving, setSaving] = useState(false);
   const [showPass, setShowPass] = useState(false);
@@ -554,8 +556,13 @@ function EditClinicModal({
       ...form,
       organization_id: form.organization_id === '' ? null : form.organization_id,
       // Preserva outras flags do JSONB (ex.: agenda_via_funil, lida pelo painel Comercial) — o form
-      // só controla feature_followup/feature_ia; reconstruir do zero apagaria as demais.
-      features: { ...(clinic?.features || {}), feature_followup: form.feature_followup, feature_ia: form.feature_ia },
+      // só controla as flags abaixo; reconstruir do zero apagaria as demais.
+      features: {
+        ...(clinic?.features || {}),
+        feature_followup: form.feature_followup,
+        feature_ia: form.feature_ia,
+        feature_conv_ai: form.feature_conv_ai,
+      },
     });
     setSaving(false);
     onClose();
@@ -684,6 +691,18 @@ function EditClinicModal({
                   className={cn("w-10 h-5 rounded-full relative transition-all flex-shrink-0", form.feature_ia ? "bg-violet-600" : "bg-slate-300")}
                 >
                   <div className={cn("w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all shadow-sm", form.feature_ia ? "right-0.5" : "left-0.5")} />
+                </button>
+              </div>
+              <div className="flex items-center justify-between py-2 px-3 rounded-xl bg-slate-50 border border-slate-100">
+                <div>
+                  <p className="text-xs font-bold text-slate-700">Sugestões da IA</p>
+                  <p className="text-[10px] text-slate-400">IA lê as conversas e sugere etapa e venda</p>
+                </div>
+                <button type="button"
+                  onClick={() => setForm(f => ({ ...f, feature_conv_ai: !f.feature_conv_ai }))}
+                  className={cn("w-10 h-5 rounded-full relative transition-all flex-shrink-0", form.feature_conv_ai ? "bg-teal-600" : "bg-slate-300")}
+                >
+                  <div className={cn("w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all shadow-sm", form.feature_conv_ai ? "right-0.5" : "left-0.5")} />
                 </button>
               </div>
             </div>

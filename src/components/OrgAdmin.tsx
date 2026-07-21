@@ -25,7 +25,7 @@ interface Clinic {
   whatsapp_status?: string | null;
   category?: string | null;
   // feature_chat_send é opt-in (só vale com === true); as demais são opt-out (!== false).
-  features?: { feature_followup?: boolean; feature_ia?: boolean; feature_chat_send?: boolean } | null;
+  features?: { feature_followup?: boolean; feature_ia?: boolean; feature_chat_send?: boolean; feature_conv_ai?: boolean } | null;
   meta_status?: ChannelStatus;
   google_status?: ChannelStatus;
   site_status?: ChannelStatus;
@@ -121,7 +121,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
 
   // Modal: nova clínica
   const [showClinicModal, setShowClinicModal] = useState(false);
-  const [clinicForm, setClinicForm] = useState<{ name: string; plan: string; category: string; ownerName: string; ownerEmail: string; ownerPassword: string; feature_followup: boolean; feature_ia: boolean; feature_chat_send: boolean; meta_status: ChannelStatus; google_status: ChannelStatus; site_status: ChannelStatus; forms_status: ChannelStatus; trafficManagerId: string }>({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '', feature_followup: true, feature_ia: true, feature_chat_send: false, meta_status: 'none', google_status: 'none', site_status: 'none', forms_status: 'none', trafficManagerId: '' });
+  const [clinicForm, setClinicForm] = useState<{ name: string; plan: string; category: string; ownerName: string; ownerEmail: string; ownerPassword: string; feature_followup: boolean; feature_ia: boolean; feature_chat_send: boolean; feature_conv_ai: boolean; meta_status: ChannelStatus; google_status: ChannelStatus; site_status: ChannelStatus; forms_status: ChannelStatus; trafficManagerId: string }>({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '', feature_followup: true, feature_ia: true, feature_chat_send: false, feature_conv_ai: false, meta_status: 'none', google_status: 'none', site_status: 'none', forms_status: 'none', trafficManagerId: '' });
   const [categoryFilter, setCategoryFilter] = useState('');
   const [memberFilters, setMemberFilters] = useState<Record<string, string>>({});
   const [inactiveFilter, setInactiveFilter] = useState<string>(''); // '' | 'any' | 'meta' | 'google' | 'site' | 'forms' | 'whatsapp'
@@ -343,7 +343,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
     setClinicSaving(false);
     if (error) { setClinicError(error.message); return; }
     setShowClinicModal(false);
-    setClinicForm({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '', feature_followup: true, feature_ia: true, feature_chat_send: false, meta_status: 'none', google_status: 'none', site_status: 'none', forms_status: 'none', trafficManagerId: '' });
+    setClinicForm({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '', feature_followup: true, feature_ia: true, feature_chat_send: false, feature_conv_ai: false, meta_status: 'none', google_status: 'none', site_status: 'none', forms_status: 'none', trafficManagerId: '' });
     fetchClinics();
   };
 
@@ -357,7 +357,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
         plan: clinicForm.plan,
         category: clinicForm.category || 'clinica',
         // Preserva outras flags do JSONB (ex.: agenda_via_funil) — o form só controla os 3 toggles.
-        features: { ...((editClinicTarget as any)?.features || {}), feature_followup: clinicForm.feature_followup, feature_ia: clinicForm.feature_ia, feature_chat_send: clinicForm.feature_chat_send },
+        features: { ...((editClinicTarget as any)?.features || {}), feature_followup: clinicForm.feature_followup, feature_ia: clinicForm.feature_ia, feature_chat_send: clinicForm.feature_chat_send, feature_conv_ai: clinicForm.feature_conv_ai },
         meta_status: clinicForm.meta_status,
         google_status: clinicForm.google_status,
         site_status: clinicForm.site_status,
@@ -385,7 +385,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
     setClinicSaving(false);
     if (error) { setClinicError(error.message); return; }
     setEditClinicTarget(null);
-    setClinicForm({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '', feature_followup: true, feature_ia: true, feature_chat_send: false, meta_status: 'none', google_status: 'none', site_status: 'none', forms_status: 'none', trafficManagerId: '' });
+    setClinicForm({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '', feature_followup: true, feature_ia: true, feature_chat_send: false, feature_conv_ai: false, meta_status: 'none', google_status: 'none', site_status: 'none', forms_status: 'none', trafficManagerId: '' });
     fetchClinics();
   };
 
@@ -1063,6 +1063,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                                           feature_followup: clinic.features?.feature_followup !== false,
                                           feature_ia: clinic.features?.feature_ia !== false,
                                           feature_chat_send: clinic.features?.feature_chat_send === true,
+                                          feature_conv_ai: clinic.features?.feature_conv_ai === true,
                                           meta_status: clinic.meta_status || 'none',
                                           google_status: clinic.google_status || 'none',
                                           site_status: clinic.site_status || 'none',
@@ -1459,6 +1460,19 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                           className={cn("w-10 h-5 rounded-full relative transition-all flex-shrink-0", clinicForm.feature_chat_send ? "bg-emerald-600" : "bg-slate-300")}
                         >
                           <div className={cn("w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all shadow-sm", clinicForm.feature_chat_send ? "right-0.5" : "left-0.5")} />
+                        </button>
+                      </div>
+                      <div className="flex items-center justify-between py-2 px-3 rounded-xl bg-slate-50 border border-slate-100">
+                        <div>
+                          <p className="text-xs font-bold text-slate-700">Sugestões da IA</p>
+                          <p className="text-[10px] text-slate-400">IA lê as conversas e sugere etapa e venda</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setClinicForm(f => ({ ...f, feature_conv_ai: !f.feature_conv_ai }))}
+                          className={cn("w-10 h-5 rounded-full relative transition-all flex-shrink-0", clinicForm.feature_conv_ai ? "bg-teal-600" : "bg-slate-300")}
+                        >
+                          <div className={cn("w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all shadow-sm", clinicForm.feature_conv_ai ? "right-0.5" : "left-0.5")} />
                         </button>
                       </div>
                     </div>

@@ -1925,9 +1925,19 @@ export function AISecretary() {
   const features = clinic?.features;
   const hasFollowup = features?.feature_followup !== false;
   const hasIA = features?.feature_ia !== false;
-  // Contador da fila do analista de conversas. Só VENDA entra em fila: a etapa
-  // comum a IA move sozinha (ver ConvAIReview).
+  // Opt-in (só com === true): a análise custa LLM por conversa, então a aba só
+  // existe onde o Super Admin liberou a funcionalidade.
+  const hasConvAi = features?.feature_conv_ai === true;
   const { pending: convAiPending } = useConvAiInsights();
+
+  // A aba fica no localStorage: se a funcionalidade for desligada enquanto ela
+  // estava aberta, cai para Conversas em vez de deixar a tela em branco.
+  useEffect(() => {
+    if (activeTab === "sugestoes" && !hasConvAi) {
+      setActiveTab("chats");
+      localStorage.setItem('aiSecretaryTab', 'chats');
+    }
+  }, [activeTab, hasConvAi]);
 
   return (
     <div className="space-y-8 h-full flex flex-col">
@@ -1974,7 +1984,7 @@ export function AISecretary() {
             { id: "leads", label: "CRM", show: true },
             { id: "dashboard", label: "Resultados", show: true },
             { id: "chats", label: "Conversas", show: true },
-            { id: "sugestoes", label: convAiPending.length ? `Sugestões IA (${convAiPending.length})` : "Sugestões IA", show: hasIA },
+            { id: "sugestoes", label: convAiPending.length ? `Sugestões IA (${convAiPending.length})` : "Sugestões IA", show: hasConvAi },
             { id: "followups", label: "Follow-up", show: hasFollowup },
             { id: "config", label: "Configurações IA", show: hasIA },
           ].filter(t => t.show).map((tab) => (
@@ -2006,7 +2016,7 @@ export function AISecretary() {
           {activeTab === "chats" && <ChatsView />}
           {activeTab === "leads" && <LeadKanban />}
           {activeTab === "dashboard" && <ComercialDashboard />}
-          {activeTab === "sugestoes" && <ConvAIReview />}
+          {activeTab === "sugestoes" && hasConvAi && <ConvAIReview />}
           {activeTab === "followups" && <AllFollowupsView />}
 
           {activeTab === "config" && <ConfigView />}

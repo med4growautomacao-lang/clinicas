@@ -568,6 +568,8 @@ export interface FunnelStage {
   is_system: boolean;
   is_fixed: boolean;
   is_conversion: boolean;
+  // Etapa existe e recebe lead normalmente, mas não desenha coluna no Kanban. NÃO é exclusão.
+  is_hidden: boolean;
   // Nome do evento CAPI enviado ao Meta quando um lead entra nesta etapa (só vale se is_conversion).
   capi_event_name?: string | null;
   color: string | null;
@@ -1750,7 +1752,7 @@ export interface Clinic {
   google_ad_mcc_id?: string | null;
   google_ad_mcc_token?: string | null;
   // feature_chat_send é opt-in (só vale com === true); as demais são opt-out (!== false).
-  features?: { feature_followup?: boolean; feature_ia?: boolean; agenda_via_funil?: boolean; feature_chat_send?: boolean } | null;
+  features?: { feature_followup?: boolean; feature_ia?: boolean; agenda_via_funil?: boolean; feature_chat_send?: boolean; feature_conv_ai?: boolean } | null;
   meta_status?: 'none' | 'inactive' | 'active';
   google_status?: 'none' | 'inactive' | 'active';
   site_status?: 'none' | 'inactive' | 'active';

@@ -144,6 +144,8 @@ serve(async (req) => {
       const ud: Record<string, unknown> = { whatsapp_business_account_id: waba, ctwa_clid: clid };
       const ph = phoneDigits(lead?.phone); if (ph) ud.ph = await sha256(ph);
       if (lead?.email) ud.em = await sha256(String(lead.email));
+      const nameParts = String(lead?.name ?? "").trim().split(/\s+/).filter(Boolean);
+      if (nameParts.length) { ud.fn = await sha256(nameParts[0]); if (nameParts.length > 1) ud.ln = await sha256(nameParts[nameParts.length - 1]); }
       if (lead?.rast_id) ud.external_id = await sha256(String(lead.rast_id));
       payload = { event_name: ctwaEventName(eventName), event_time: eventTime(7), action_source: "business_messaging", messaging_channel: "whatsapp", event_id: debugTicketId, user_data: ud };
       if (value != null) payload.custom_data = { currency: "BRL", value, order_id: debugTicketId };
@@ -334,6 +336,12 @@ serve(async (req) => {
       const ph = phoneDigits(lead?.phone);
       if (ph) userData.ph = await sha256(ph);
       if (lead?.email) userData.em = await sha256(String(lead.email));
+      // fn/ln (nome) — a Meta recomenda mandar o máximo de dados de match; temos o nome do lead.
+      const nameParts = String(lead?.name ?? "").trim().split(/\s+/).filter(Boolean);
+      if (nameParts.length) {
+        userData.fn = await sha256(nameParts[0]);
+        if (nameParts.length > 1) userData.ln = await sha256(nameParts[nameParts.length - 1]);
+      }
       if (lead?.rast_id) userData.external_id = await sha256(String(lead.rast_id));
       const payload: Record<string, unknown> = {
         event_name: ctwaEventName(ev.event_name),

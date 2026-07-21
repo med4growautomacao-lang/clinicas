@@ -744,9 +744,10 @@ function CurrencyInput({ value, onChange, className, placeholder, autoFocus }: {
   );
 }
 
-function GanhoModal({ lead, ticketId, onClose, onCancel, onCreate, createPatient, updateLead }: {
+function GanhoModal({ lead, ticketId, isConversionStage, onClose, onCancel, onCreate, createPatient, updateLead }: {
   lead: { id: string; name: string; phone?: string | null; patientId?: string | null; ctwaClid?: string | null; email?: string | null };
   ticketId: string;
+  isConversionStage: boolean;
   onClose: () => void;
   onCancel: () => void;
   onCreate: (data: Omit<Conversion, 'id' | 'clinic_id' | 'created_at'>) => Promise<boolean>;
@@ -823,14 +824,19 @@ function GanhoModal({ lead, ticketId, onClose, onCancel, onCreate, createPatient
     });
     if (ok) {
       setDone(true);
-      // DEBUG (TEMPORÁRIO, p/ aprovação Meta): dispara a conversão na hora e mostra payload+resposta,
-      // em vez de fechar. Depois da aprovação, apagar este bloco e voltar ao setTimeout(onClose, 1000).
-      setCapiResult('loading');
-      try {
-        const { data, error } = await supabase.functions.invoke('meta-capi-conversions', { body: { debug_ticket_id: ticketId } });
-        setCapiResult(error ? { ok: false, error: error.message } : data);
-      } catch (e) {
-        setCapiResult({ ok: false, error: e instanceof Error ? e.message : String(e) });
+      // Só dispara CAPI quando 'ganho' É a etapa de conversão desta clínica. Se a conversão está em
+      // outra etapa (ex.: 'agendado'), mover para ganho não gera evento — então fecha normal.
+      if (isConversionStage) {
+        // DEBUG (TEMPORÁRIO, p/ aprovação Meta): dispara a conversão na hora e mostra payload+resposta.
+        setCapiResult('loading');
+        try {
+          const { data, error } = await supabase.functions.invoke('meta-capi-conversions', { body: { debug_ticket_id: ticketId } });
+          setCapiResult(error ? { ok: false, error: error.message } : data);
+        } catch (e) {
+          setCapiResult({ ok: false, error: e instanceof Error ? e.message : String(e) });
+        }
+      } else {
+        setTimeout(onClose, 1000);
       }
     }
     setSaving(false);
@@ -939,7 +945,7 @@ function GanhoModal({ lead, ticketId, onClose, onCancel, onCreate, createPatient
 
           {/* Atribuição Meta Ads — só quando o lead veio de anúncio (tem ctwa_clid). O valor acima já
               entra no evento; aqui só reforçamos os dados de match, pedindo o e-mail se faltar. */}
-          {(fromAd || !lead.email) && (
+          {isConversionStage && (fromAd || !lead.email) && (
             <div className="space-y-2 rounded-xl border border-blue-100 bg-blue-50/40 p-3">
               <div className="flex items-center gap-1.5">
                 <ThumbsUp className="w-3.5 h-3.5 text-blue-500" />
@@ -4818,6 +4824,7 @@ export function LeadKanban() {
         <GanhoModal
           lead={ganhoLead}
           ticketId={ganhoLead.ticketId}
+          isConversionStage={stages.find(s => s.slug === 'ganho')?.is_conversion === true}
           createPatient={createPatient}
           updateLead={update}
           onClose={() => setGanhoLead(null)}

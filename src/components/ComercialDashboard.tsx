@@ -740,13 +740,13 @@ export function ComercialDashboard() {
   const projectedRoas = fin.investment > 0 && projectedRevenue != null ? projectedRevenue / fin.investment : null;
   const leadsDenomLabel = agent === "todos" ? "leads" : "leads atendidos";
 
-  type Kpi = { id: string; title: string; value: React.ReactNode; icon: any; color: string; bg: string; sub?: string; valueLabel?: string; value2?: React.ReactNode; value2Label?: string; agentScoped: boolean; originScoped: boolean };
+  type Kpi = { id: string; title: string; value: React.ReactNode; icon: any; color: string; bg: string; sub?: string; valueLabel?: string; value2?: React.ReactNode; value2Label?: string; value3?: React.ReactNode; value3Label?: string; value4?: React.ReactNode; value4Label?: string; agentScoped: boolean; originScoped: boolean };
   const allKpis: Kpi[] = [
     { id: "leads", title: "Leads", value: leadsValue, icon: Users, color: "text-cyan-600", bg: "bg-cyan-50", sub: agent === "todos" ? "entraram no período" : agent === "ia" ? "maioria das respostas pela IA" : "maioria das respostas por humano", agentScoped: true, originScoped: true },
     { id: "nao_atendidos", title: "Não atendidos", value: data.leadsNotAttended ?? 0, icon: XCircle, color: "text-rose-600", bg: "bg-rose-50", sub: "entraram e ninguém respondeu", agentScoped: false, originScoped: true },
     { id: "conversao_agend", title: "Conversão Lead → Agendamento", value: `${convAgendRate.toFixed(1)}%`, icon: Percent, color: "text-emerald-600", bg: "bg-emerald-50", sub: `${apptGenerated} agend. gerados ${agentNoun} ÷ ${leadsValue} ${leadsDenomLabel}`, agentScoped: true, originScoped: true },
     { id: "conversao_consulta", title: "Conversão Lead → Consulta", value: `${convConsultaRate.toFixed(1)}%`, valueLabel: "parcial", value2: `${convConsultaPrevistaRate.toFixed(1)}%`, value2Label: "previsto", icon: CheckCircle2, color: "text-green-600", bg: "bg-green-50", agentScoped: true, originScoped: true },
-    { id: "consultas", title: "Consultas", value: attended, valueLabel: "realizadas", value2: toRealize, value2Label: "marcadas", icon: CheckCircle2, color: "text-emerald-600", bg: "bg-emerald-50", sub: "no período (Conversão)", agentScoped: true, originScoped: true },
+    { id: "consultas", title: "Consultas", value: attended, valueLabel: "realizadas", value2: toRealize, value2Label: "marcadas", value3: noShow, value3Label: "faltou", value4: canceled, value4Label: "cancelado", icon: CheckCircle2, color: "text-emerald-600", bg: "bg-emerald-50", sub: "no período (Conversão)", agentScoped: true, originScoped: true },
     { id: "consultas_geradas", title: "Agendamentos Gerados", value: apptGenerated, icon: CalendarCheck, color: "text-teal-600", bg: "bg-teal-50", sub: "criadas no período (Agendado)", agentScoped: true, originScoped: true },
     { id: "faturamento", title: "Vendas lançadas", value: noRevenueRecorded ? "—" : fmtBRL(realRevenue), valueLabel: "lançado", value2: projectedRevenue != null ? fmtBRL(projectedRevenue) : "—", value2Label: "previsto", icon: Wallet, color: "text-emerald-700", bg: "bg-emerald-50", agentScoped: true, originScoped: true },
     { id: "custo_agendamento", title: "Custo por Consulta", value: costPerRealizada != null ? fmtBRL(costPerRealizada) : "—", valueLabel: "parcial", value2: costPerAppt != null ? fmtBRL(costPerAppt) : "—", value2Label: "previsto", icon: Target, color: "text-rose-600", bg: "bg-rose-50", agentScoped: true, originScoped: true },
@@ -1270,6 +1270,16 @@ export function ComercialDashboard() {
                 {stat.value2 != null && (
                   <p className="text-[10px] font-bold text-slate-400 mt-1 whitespace-nowrap uppercase tracking-wider">
                     {stat.value2Label}: <span className="text-slate-600 font-black normal-case">{stat.value2}</span>
+                  </p>
+                )}
+                {stat.value3 != null && (
+                  <p className="text-[10px] font-bold text-slate-400 mt-1 whitespace-nowrap uppercase tracking-wider">
+                    {stat.value3Label}: <span className="text-slate-600 font-black normal-case">{stat.value3}</span>
+                  </p>
+                )}
+                {stat.value4 != null && (
+                  <p className="text-[10px] font-bold text-slate-400 mt-1 whitespace-nowrap uppercase tracking-wider">
+                    {stat.value4Label}: <span className="text-slate-600 font-black normal-case">{stat.value4}</span>
                   </p>
                 )}
               </div>

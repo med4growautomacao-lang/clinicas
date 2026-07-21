@@ -1,26 +1,32 @@
 import React, { useState } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Loader2, Check, X, Sparkles, TrendingUp, MessageSquare, ChevronDown, ChevronRight,
   ArrowRight, Quote, Brain, ShieldCheck, RefreshCw, History, Power,
-  Hand, ListChecks, Zap, MoveRight,
+  Hand, ListChecks, Zap, MoveRight, Pencil,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { supabase } from "../lib/supabase";
 import {
   useConvAiInsights, useConvAiClinicConfig, useFunnelStages, useTickets,
-  useConversions, usePatients, ConvAiInsight, ConvAiMode,
+  useConversions, usePatients, ConvAiInsight, ConvAiMode, Lead,
 } from "../hooks/useSupabase";
 import { GanhoModal } from "./LeadKanban";
+import { LeadChat } from "./LeadChat";
 
-// Comercial › "Sugestões IA" — a fila que a IA NÃO aplica sozinha.
+// Comercial › "Sugestões IA".
 //
-// Só VENDA entra em fila: a etapa comum a IA move direto (decisão do dono), e o
-// movimento fica listado abaixo apenas para auditoria. Corrigir uma etapa continua
-// sendo arrastar o card no CRM, e esse arrasto vira contra-exemplo do aprendizado.
+// Duas COLUNAS independentes, uma por eixo (etapa e venda). Cada coluna tem o
+// seletor de 3 modos daquele eixo (Manual / Sugestão / Automático) e, embaixo, a
+// fila que aquele modo alimenta. Só cai na fila o que estiver em "Sugestão".
 //
-// Confirmar uma venda abre o MESMO GanhoModal do Kanban: a venda é registrada pelo
-// caminho de sempre (conversão + receita + fechamento do ticket + CAPI).
+// Confirmar uma venda abre o MESMO GanhoModal do Kanban (conversão + receita +
+// fechamento do ticket + CAPI). Aprovar uma etapa passa pelo dono único do
+// stage_id. Nenhum caminho de escrita é duplicado aqui.
+//
+// O manual da clínica é editável nesta tela: o bootstrap aprende do histórico, e
+// o histórico rotula a conversa com o desfecho FINAL do ticket — foi assim que a
+// IA confundiu "agendamento confirmado" (etapa Agendado) com venda na Vaz.
 
 function Confianca({ valor }: { valor: number | null }) {
   const pct = Math.round((valor ?? 0) * 100);
@@ -131,7 +137,7 @@ function Evidencias({ itens }: { itens: string[] | null }) {
 // Uma COLUNA por eixo: a configuração daquele eixo e, logo abaixo, a fila que
 // ela alimenta. Ler de cima para baixo responde "o que a IA faz aqui" e "o que
 // está esperando por mim" sem cruzar a tela.
-function ColunaEixo({ eixo, modo, onModo, itens, vazioTexto, busy, onAprovar, onRecusar, stageName, disabled }: {
+function ColunaEixo({ eixo, modo, onModo, itens, vazioTexto, busy, onAprovar, onRecusar, onVerConversa, stageName, disabled }: {
   eixo: "etapa" | "venda";
   modo: ConvAiMode;
   onModo: (m: ConvAiMode) => void;
@@ -140,6 +146,7 @@ function ColunaEixo({ eixo, modo, onModo, itens, vazioTexto, busy, onAprovar, on
   busy: string | null;
   onAprovar: (i: ConvAiInsight) => void;
   onRecusar: (i: ConvAiInsight) => void;
+  onVerConversa: (i: ConvAiInsight) => void;
   stageName: (id: string | null) => string;
   disabled?: boolean;
 }) {
@@ -187,6 +194,13 @@ function ColunaEixo({ eixo, modo, onModo, itens, vazioTexto, busy, onAprovar, on
               {/* Em coluna a largura é curta: as ações vão para o rodapé, não para a lateral. */}
               <div className="flex gap-2 mt-3 pt-3 border-t border-slate-100">
                 <button
+                  onClick={() => onVerConversa(ins)}
+                  title="Abrir a conversa para conferir a evidência"
+                  className="shrink-0 bg-white border border-slate-200 hover:border-teal-300 hover:text-teal-600 text-slate-500 px-2.5 py-2 rounded-xl transition-colors"
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                </button>
+                <button
                   onClick={() => onAprovar(ins)}
                   disabled={busy === ins.id}
                   className={cn("flex-1 disabled:opacity-50 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors",
@@ -213,7 +227,7 @@ function ColunaEixo({ eixo, modo, onModo, itens, vazioTexto, busy, onAprovar, on
 
 export function ConvAIReview() {
   const { pending, recentStages, loading, decide, refetch } = useConvAiInsights();
-  const { config, current, versions, loading: cfgLoading, save, rollback } = useConvAiClinicConfig();
+  const { config, current, versions, loading: cfgLoading, save, rollback, editar } = useConvAiClinicConfig();
   const { data: stages } = useFunnelStages();
   const { moveTicket, closeTicket } = useTickets();
   const { create: createConversion } = useConversions();
@@ -222,6 +236,10 @@ export function ConvAIReview() {
   const [busy, setBusy] = useState<string | null>(null);
   const [showAudit, setShowAudit] = useState(false);
   const [showPrompt, setShowPrompt] = useState(false);
+  const [conversa, setConversa] = useState<{ lead: Lead; ticketId: string } | null>(null);
+  const [editando, setEditando] = useState(false);
+  const [rascunho, setRascunho] = useState("");
+  const [salvandoPrompt, setSalvandoPrompt] = useState(false);
   const [ganho, setGanho] = useState<{
     id: string; name: string; phone: string | null; patientId: string | null;
     ticketId: string; ctwaClid: string | null; email: string | null; suggested: number | null;
@@ -255,6 +273,16 @@ export function ConvAIReview() {
     setBusy(ins.id);
     await decide(ins.id, "reject");
     setBusy(null);
+  };
+
+  // Auditar a evidência na fonte: abre a MESMA conversa do Kanban. O card só
+  // traz o lead resumido (o embed do insight), então busca o lead inteiro aqui.
+  const verConversa = async (ins: ConvAiInsight) => {
+    if (!ins.lead_id) return;
+    setBusy(ins.id);
+    const { data } = await supabase.from("leads").select("*").eq("id", ins.lead_id).maybeSingle();
+    setBusy(null);
+    if (data) setConversa({ lead: data, ticketId: ins.ticket_id });
   };
 
   if (loading || cfgLoading) {
@@ -323,6 +351,7 @@ export function ConvAIReview() {
           busy={busy}
           onAprovar={aprovar}
           onRecusar={recusar}
+          onVerConversa={verConversa}
           stageName={stageName}
         />
         <ColunaEixo
@@ -341,6 +370,7 @@ export function ConvAIReview() {
           busy={busy}
           onAprovar={aprovar}
           onRecusar={recusar}
+          onVerConversa={verConversa}
           stageName={stageName}
         />
       </div>
@@ -393,12 +423,56 @@ export function ConvAIReview() {
         </button>
         {showPrompt && (
           <div className="px-4 pb-4 space-y-3">
-            <p className="text-xs text-slate-500 flex items-start gap-1.5">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
-              Escrito pela própria IA a partir das conversas desta clínica e reescrito conforme suas decisões.
-              {config?.decisions_since_learn ? ` ${config.decisions_since_learn} decisão(ões) desde a última versão.` : ""}
-            </p>
-            {current ? (
+            <div className="flex items-start justify-between gap-3">
+              <p className="text-xs text-slate-500 flex items-start gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
+                Escrito pela própria IA a partir das conversas desta clínica e reescrito conforme suas decisões.
+                É isto que ela usa para decidir. Se estiver errado, corrija aqui: vale a partir da próxima análise.
+                {config?.decisions_since_learn ? ` ${config.decisions_since_learn} decisão(ões) desde a última versão.` : ""}
+              </p>
+              {current && !editando && (
+                <button
+                  onClick={() => { setRascunho(current.content); setEditando(true); }}
+                  className="shrink-0 flex items-center gap-1.5 text-[11px] font-bold text-slate-500 hover:text-teal-600 border border-slate-200 hover:border-teal-200 rounded-lg px-2 py-1 transition-colors"
+                >
+                  <Pencil className="w-3 h-3" /> Corrigir
+                </button>
+              )}
+            </div>
+
+            {editando ? (
+              <div className="space-y-2">
+                <textarea
+                  value={rascunho}
+                  onChange={e => setRascunho(e.target.value)}
+                  className="w-full h-72 p-3 text-xs font-mono border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 resize-y"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={async () => {
+                      setSalvandoPrompt(true);
+                      const ok = await editar(rascunho);
+                      setSalvandoPrompt(false);
+                      if (ok) setEditando(false);
+                    }}
+                    disabled={salvandoPrompt || !rascunho.trim()}
+                    className="bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5"
+                  >
+                    {salvandoPrompt ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                    Salvar como nova versão
+                  </button>
+                  <button
+                    onClick={() => setEditando(false)}
+                    className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 px-3 py-2 rounded-xl text-xs font-bold"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  A versão atual não é apagada: fica no histórico abaixo e você pode voltar para ela quando quiser.
+                </p>
+              </div>
+            ) : current ? (
               <pre className="text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-xl p-3 whitespace-pre-wrap max-h-72 overflow-y-auto custom-scrollbar">
                 {current.content}
               </pre>
@@ -431,6 +505,17 @@ export function ConvAIReview() {
           </div>
         )}
       </div>
+
+      {/* Auditoria manual: a mesma conversa que o Kanban abre */}
+      <AnimatePresence>
+        {conversa && (
+          <LeadChat
+            lead={conversa.lead}
+            ticketId={conversa.ticketId}
+            onClose={() => setConversa(null)}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Confirmar venda = mesmo fluxo do Kanban */}
       {ganho && (

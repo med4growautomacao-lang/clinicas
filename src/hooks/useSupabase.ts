@@ -4377,7 +4377,20 @@ export function useConvAiClinicConfig() {
     return true;
   };
 
+  // Corrigir o manual na mão. Necessário porque o bootstrap aprende do histórico,
+  // e o histórico rotula a conversa com o desfecho FINAL do ticket — o que já fez
+  // a IA confundir "agendamento confirmado" (etapa) com venda fechada.
+  const editar = async (content: string) => {
+    if (!activeClinicId) return false;
+    const { data, error } = await supabase.rpc('conv_ai_edit_prompt', {
+      p_clinic_id: activeClinicId, p_content: content,
+    });
+    if (error || !(data as any)?.success) return false;
+    await fetch();
+    return true;
+  };
+
   const current = versions.find(v => v.is_current) ?? null;
 
-  return { config, versions, current, loading, save, rollback, refetch: fetch };
+  return { config, versions, current, loading, save, rollback, editar, refetch: fetch };
 }

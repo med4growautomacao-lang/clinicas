@@ -5096,6 +5096,13 @@ export function LeadKanban() {
                       }
                       return;
                     }
+                    // A etapa 'agendado' é movida automaticamente pelo trigger fn_auto_move_lead_to_agendado
+                    // (não passa pelo performDrop). Se ela for a etapa de conversão desta clínica, aplica o
+                    // mesmo enriquecimento de atribuição usado nos demais fluxos.
+                    const agendadoStage = stages.find(s => s.slug === 'agendado');
+                    if (agendadoStage?.is_conversion && sl.ctwa_clid && !sl.email) {
+                      setAttribLead({ id: sl.id, name: sl.name, phone: sl.phone ?? null, ctwaClid: sl.ctwa_clid ?? null });
+                    }
                     setScheduleLead(null);
                   }}
                 >

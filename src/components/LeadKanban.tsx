@@ -3407,51 +3407,13 @@ export function LeadKanban() {
                   <motion.div key={rule.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="rounded-2xl border-2 border-teal-200 bg-gradient-to-b from-teal-50/50 to-white overflow-hidden shadow-lg shadow-teal-50">
                     <div className="px-6 py-4 bg-teal-50 border-b border-teal-100 flex items-center gap-3">
                       <span className="w-7 h-7 rounded-lg bg-teal-600 text-white text-xs font-black flex items-center justify-center">{idx + 1}</span>
-                      <p className="text-sm font-bold text-teal-800">âœï¸ Editando regra</p>
+                      <p className="text-sm font-bold text-teal-800 flex items-center gap-1.5"><Pencil className="w-3.5 h-3.5" /> Editando regra</p>
                     </div>
                     <div className="p-6 space-y-5">
+                      {/* Contexto e Resposta esperada saíram: nenhum motor lê esses
+                          campos. O que a IA precisa saber do negócio mora no manual
+                          da clínica (Comercial › Sugestões IA), que é versionado. */}
                       <div className="grid grid-cols-2 gap-5">
-                        <div className="space-y-2">
-                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                            <MessageSquare className="w-3 h-3 text-blue-500" />
-                            Contexto
-                          </label>
-                          <textarea
-                            rows={3}
-                            value={newRule.context}
-                            onChange={e => setNewRule(p => ({ ...p, context: e.target.value }))}
-                            placeholder="Ex: Para qualificar o Lead apos explicar como funciona a consulta..."
-                            className="w-full px-3 py-2.5 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 font-medium resize-none transition-all"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                            <Send className="w-3 h-3 text-emerald-500" />
-                            Mensagem a Enviar
-                          </label>
-                          <textarea
-                            rows={3}
-                            value={newRule.message_to_send}
-                            onChange={e => setNewRule(p => ({ ...p, message_to_send: e.target.value }))}
-                            placeholder="Ex: Parabens pela decisao! Para continuarmos..."
-                            className="w-full px-3 py-2.5 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 font-medium resize-none transition-all"
-                          />
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-3 gap-5">
-                        <div className="space-y-2">
-                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                            <MessageSquare className="w-3 h-3 text-amber-500" />
-                            Resposta Esperada do Lead
-                          </label>
-                          <input
-                            type="text"
-                            value={newRule.lead_response}
-                            onChange={e => setNewRule(p => ({ ...p, lead_response: e.target.value }))}
-                            placeholder="Ex: Se a resposta for sim ou positiva"
-                            className="w-full px-3 py-2.5 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 font-medium transition-all"
-                          />
-                        </div>
                         <div className="space-y-2">
                           <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
                             <Zap className="w-3 h-3 text-violet-500" />
@@ -3478,6 +3440,19 @@ export function LeadKanban() {
                             ))}
                           </select>
                         </div>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                          <Send className="w-3 h-3 text-emerald-500" />
+                          Mensagem a Enviar
+                        </label>
+                        <textarea
+                          rows={2}
+                          value={newRule.message_to_send}
+                          onChange={e => setNewRule(p => ({ ...p, message_to_send: e.target.value }))}
+                          placeholder="Ex: Parabens pela decisao! Para continuarmos..."
+                          className="w-full px-3 py-2.5 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 font-medium resize-y transition-all"
+                        />
                       </div>
                       <div className="flex gap-3 pt-2">
                         <Button
@@ -3583,29 +3558,7 @@ export function LeadKanban() {
                         </div>
                       </div>
                     </div>
-                    <div className="px-6 py-4 grid grid-cols-2 lg:grid-cols-4 gap-4">
-                      {rule.context && (
-                        <div className="flex gap-2.5">
-                          <div className="w-6 h-6 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0 mt-0.5">
-                            <MessageSquare className="w-3.5 h-3.5 text-blue-500" />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-[9px] font-bold text-blue-500 uppercase tracking-wider">Contexto</p>
-                            <p className="text-xs text-slate-600 leading-relaxed mt-1">{rule.context}</p>
-                          </div>
-                        </div>
-                      )}
-                      {rule.lead_response && (
-                        <div className="flex gap-2.5">
-                          <div className="w-6 h-6 rounded-lg bg-amber-50 flex items-center justify-center flex-shrink-0 mt-0.5">
-                            <MessageSquare className="w-3.5 h-3.5 text-amber-500" />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-[9px] font-bold text-amber-500 uppercase tracking-wider">Resposta do Lead</p>
-                            <p className="text-xs text-slate-600 leading-relaxed mt-1">{rule.lead_response}</p>
-                          </div>
-                        </div>
-                      )}
+                    <div className="px-6 py-4 grid grid-cols-2 lg:grid-cols-3 gap-4">
                       {rule.message_to_send && (
                         <div className="flex gap-2.5">
                           <div className="w-6 h-6 rounded-lg bg-emerald-50 flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -3699,51 +3652,10 @@ export function LeadKanban() {
               {isAddingRule && !editingRuleId && (
                 <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="rounded-2xl border-2 border-teal-200 bg-gradient-to-b from-teal-50/50 to-white overflow-hidden shadow-lg shadow-teal-50">
                   <div className="px-6 py-4 bg-teal-50 border-b border-teal-100">
-                    <p className="text-sm font-bold text-teal-800">âœ¨ Nova regra de automacao</p>
+                    <p className="text-sm font-bold text-teal-800 flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5" /> Nova regra de automacao</p>
                   </div>
                   <div className="p-6 space-y-5">
                     <div className="grid grid-cols-2 gap-5">
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                          <MessageSquare className="w-3 h-3 text-blue-500" />
-                          Contexto
-                        </label>
-                        <textarea
-                          rows={3}
-                          value={newRule.context}
-                          onChange={e => setNewRule(p => ({ ...p, context: e.target.value }))}
-                          placeholder="Ex: Para qualificar o Lead apos explicar como funciona a consulta..."
-                          className="w-full px-3 py-2.5 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 font-medium resize-none transition-all"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                          <Send className="w-3 h-3 text-emerald-500" />
-                          Mensagem a Enviar
-                        </label>
-                        <textarea
-                          rows={3}
-                          value={newRule.message_to_send}
-                          onChange={e => setNewRule(p => ({ ...p, message_to_send: e.target.value }))}
-                          placeholder="Ex: Parabens pela decisao! Para continuarmos..."
-                          className="w-full px-3 py-2.5 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 font-medium resize-none transition-all"
-                        />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-3 gap-5">
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                          <MessageSquare className="w-3 h-3 text-amber-500" />
-                          Resposta Esperada do Lead
-                        </label>
-                        <input
-                          type="text"
-                          value={newRule.lead_response}
-                          onChange={e => setNewRule(p => ({ ...p, lead_response: e.target.value }))}
-                          placeholder="Ex: Se a resposta for sim ou positiva"
-                          className="w-full px-3 py-2.5 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 font-medium transition-all"
-                        />
-                      </div>
                       <div className="space-y-2">
                         <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
                           <Zap className="w-3 h-3 text-violet-500" />
@@ -3770,6 +3682,19 @@ export function LeadKanban() {
                           ))}
                         </select>
                       </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                        <Send className="w-3 h-3 text-emerald-500" />
+                        Mensagem a Enviar
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={newRule.message_to_send}
+                        onChange={e => setNewRule(p => ({ ...p, message_to_send: e.target.value }))}
+                        placeholder="Ex: Parabens pela decisao! Para continuarmos..."
+                        className="w-full px-3 py-2.5 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 font-medium resize-y transition-all"
+                      />
                     </div>
                     <div className="flex gap-3 pt-2">
                       <Button
@@ -3936,7 +3861,10 @@ export function LeadKanban() {
 
       <div className="flex-1 min-h-0">
         <KanbanScrollContainer>
-          {stages.map((stage) => {
+          {/* 'sincronizacao' oculta temporariamente: virou lixeira de leads sem etapa (fallback
+              corrigido em 21/07 para nunca mais cair aqui). Etapa continua existindo no banco
+              (is_system, não pode ser excluída) — só sai da visualização do Kanban. */}
+          {stages.filter(s => s.slug !== 'sincronizacao').map((stage) => {
             const stageTickets = filteredTickets
               .filter(t => t.stage_id === stage.id)
               .sort((a, b) => {

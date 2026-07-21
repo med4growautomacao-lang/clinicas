@@ -1,0 +1,20 @@
+-- =============================================================================
+-- conv_ai_get_context: regras de gatilho da clínica + precedência do gatilho
+--
+-- 1) REGRAS DE GATILHO (par palavra-chave -> etapa) passam a ir no prompt. É
+--    conhecimento que o cliente já escreveu e a IA ignorava: "nesta clínica,
+--    esta frase significa esta etapa". Só o par entra; os campos `context` e
+--    `lead_response` ficam de fora (vazios em quase todas as regras, e o lugar
+--    do conhecimento de negócio é o manual versionado da clínica).
+--
+-- 2) ÚLTIMO MOVIMENTO POR GATILHO + idade em minutos. O motor de palavra-chave
+--    e a IA são dois donos possíveis do mesmo card: o gatilho move na hora da
+--    mensagem, a IA reavalia minutos depois. Com esse dado, a edge deixa de
+--    desfazer em silêncio o que a regra do cliente acabou de fazer — discordância
+--    dentro de 1h vira sugestão para um humano, não sobrescrita.
+--
+-- Contexto: 46 regras em 17 clínicas, 242 movimentos em 30 dias (source='gatilho').
+-- O motor de keyword é cego para mensagens da IA (sender='ai'), por isso segue
+-- útil nas clínicas atendidas por humano e inútil nas atendidas pelo agente.
+-- =============================================================================
+-- (corpo idêntico ao aplicado via MCP em 21/07; ver conv_ai_get_context)

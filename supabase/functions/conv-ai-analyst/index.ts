@@ -216,9 +216,18 @@ function buildUserPrompt(ctx: any): string {
     ? `\n## Manual desta empresa (o que a experiência dela já ensinou)\n${ctx.clinic_prompt}\n`
     : "";
 
+  // Regras de gatilho que a própria empresa cadastrou. É a declaração explícita
+  // de "esta frase significa esta etapa aqui", e existe um motor literal que já
+  // as aplica: contradizê-las sem motivo é desfazer o que o cliente configurou.
+  const regras = (ctx.clinic_rules ?? []).length
+    ? `\n## Regras que esta empresa cadastrou (respeite-as)
+${(ctx.clinic_rules ?? []).map((r: any) => `- quando a mensagem contém "${r.quando_a_mensagem_contem}" → etapa "${r.etapa}"`).join("\n")}
+Um motor automático já aplica essas regras ao pé da letra. Você cobre o que elas não pegam: as mesmas intenções ditas com outras palavras, e o que não tem frase-padrão.\n`
+    : "";
+
   return `## Empresa
 ${ctx.clinic?.name ?? "-"}${ctx.clinic?.category === "outro" ? " (não é clínica: 'paciente' aqui é cliente e 'consulta' é atendimento ou serviço)" : ""}
-${manual}
+${manual}${regras}
 ## Etapas do funil desta empresa
 ${stages || "(nenhuma etapa cadastrada)"}
 
@@ -369,9 +378,26 @@ async function analisarTicket(item: any, cfg: any, dry: boolean, debug = false):
       evidence: Array.isArray(parsed?.stage?.evidence) ? parsed.stage.evidence : [],
     };
 
+    // Precedência do motor de palavra-chave: se ele moveu este card há pouco e a
+    // IA discorda, a IA NÃO desfaz. Vira sugestão, e um humano decide. Dois
+    // motores se sobrescrevendo em silêncio é pior que uma linha na fila.
+    const gatilhoRecente =
+      ctx.last_trigger_stage_id != null &&
+      ctx.last_trigger_minutes != null &&
+      Number(ctx.last_trigger_minutes) <= 60 &&
+      ctx.last_trigger_stage_id === ctx.ticket?.stage_id &&
+      sugStage.id !== ctx.last_trigger_stage_id;
+
     if (stageConf < minStage) {
       if (!dry) await admin.from("conv_ai_insights").insert({ ...stageRow, status: "skipped_low_confidence" });
       resultado = "low_confidence";
+    } else if (gatilhoRecente) {
+      await gravarAberto({
+        ...stageRow,
+        status: aplicando ? "pending" : "shadow",
+        rationale: `[Discorda de uma regra de gatilho aplicada há ${Math.round(Number(ctx.last_trigger_minutes))} min] ${stageRow.rationale}`,
+      });
+      resultado = aplicando ? "stage_pending_conflito_gatilho" : "stage_shadow";
     } else if (stageMode === "suggest") {
       await gravarAberto({ ...stageRow, status: aplicando ? "pending" : "shadow" });
       resultado = aplicando ? "stage_pending" : "stage_shadow";

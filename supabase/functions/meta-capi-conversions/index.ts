@@ -57,6 +57,22 @@ function ctwaEventName(raw: string | null | undefined): string {
   return CTWA_VALID_EVENT_NAMES.has(n) ? n : "LeadSubmitted";
 }
 
+// Nome do CRM que vai em custom_data.lead_event_source (guia "Evento de CRM" da Meta). É a marca do
+// nosso sistema; a Meta usa só como rótulo da origem. Trocar aqui se o produto mudar de nome.
+const CRM_NAME = "MedDesk";
+
+// custom_data do caminho OFFLINE. Para o formato de CRM (action_source=system_generated) a Meta EXIGE
+// event_source='crm' + lead_event_source. physical_store é evento de loja física e não leva isso.
+function buildOfflineCustomData(actionSource: string, value: number | null, ticketId: string): Record<string, unknown> {
+  const cd: Record<string, unknown> = {};
+  if (actionSource === "system_generated") {
+    cd.event_source = "crm";
+    cd.lead_event_source = CRM_NAME;
+  }
+  if (value != null) { cd.currency = "BRL"; cd.value = value; cd.order_id = ticketId; }
+  return cd;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   const json = (o: unknown, s = 200) =>
@@ -164,7 +180,7 @@ serve(async (req) => {
         if (parts.length) { ud.fn = await sha256(parts[0]); if (parts.length > 1) ud.ln = await sha256(parts[parts.length - 1]); }
         if (lead?.rast_id) ud.external_id = await sha256(String(lead.rast_id));
         payload = { event_name: eventName || "Lead", event_time: eventTime(offlineActionSource === "physical_store" ? 62 : 7), action_source: offlineActionSource, event_id: debugTicketId, user_data: ud };
-        if (value != null) payload.custom_data = { currency: "BRL", value, order_id: debugTicketId };
+        payload.custom_data = buildOfflineCustomData(offlineActionSource, value, debugTicketId);
         endpoint = pixel;
       }
     }
@@ -403,7 +419,9 @@ serve(async (req) => {
       event_id: ev.ticket_id,
       user_data: userData,
     };
-    if (value != null) payload.custom_data = { currency: "BRL", value, order_id: ev.ticket_id };
+    // Evento de CRM (guia oficial da Meta): action_source=system_generated exige custom_data com
+    // event_source='crm' + lead_event_source (nome do CRM). physical_store é evento de loja, sem isso.
+    payload.custom_data = buildOfflineCustomData(offlineActionSource, value, ev.ticket_id);
     const r = await deliverAndRecord(ev.id, ev.clinic_id, ev.ticket_id, pixel, offTok, payload, "offline");
     if (r === "sent") sent++; else errored++;
   }

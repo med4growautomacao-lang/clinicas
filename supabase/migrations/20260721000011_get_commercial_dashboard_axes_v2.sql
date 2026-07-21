@@ -9,7 +9,8 @@ CREATE OR REPLACE FUNCTION public.get_commercial_dashboard(
   p_channel text DEFAULT 'todos'::text,
   p_conv_from date DEFAULT NULL::date,
   p_conv_to date DEFAULT NULL::date,
-  p_outcome text DEFAULT 'ambos'::text
+  p_outcome text DEFAULT 'ambos'::text,
+  p_loss_reasons text DEFAULT NULL::text
 )
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -270,6 +271,9 @@ BEGIN
     AND (p_entry_from IS NULL OR l.created_at::date >= p_entry_from)
     AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
     AND COALESCE(l.is_not_lead, false) = false
+    -- Seletor de motivo (só aparece na tela com toggle=Perdido): não afeta Ganho.
+    AND (p_loss_reasons IS NULL OR btrim(p_loss_reasons) = '' OR t.outcome <> 'perdido'
+      OR COALESCE(NULLIF(t.loss_reason, ''), '(sem motivo registrado)') = ANY(string_to_array(p_loss_reasons, ',')))
     AND (p_origin = 'todos'
       OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
 
@@ -332,6 +336,8 @@ BEGIN
     AND (p_entry_from IS NULL OR l.created_at::date >= p_entry_from)
     AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
     AND COALESCE(l.is_not_lead, false) = false
+    AND (p_loss_reasons IS NULL OR btrim(p_loss_reasons) = '' OR t.outcome <> 'perdido'
+      OR COALESCE(NULLIF(t.loss_reason, ''), '(sem motivo registrado)') = ANY(string_to_array(p_loss_reasons, ',')))
     AND (p_origin = 'todos'
       OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
 
@@ -589,3 +595,5 @@ $function$;
 -- Assinatura mudou (p_appt_from/to saíram, p_agenda_from/to e p_outcome
 -- entraram) — precisa dropar o overload antigo, senão fica ambíguo pro PostgREST.
 DROP FUNCTION IF EXISTS public.get_commercial_dashboard(uuid, date, date, date, date, text, text, text, date, date);
+-- p_loss_reasons entrou depois (11 -> 12 args) — dropa esse overload intermediário também.
+DROP FUNCTION IF EXISTS public.get_commercial_dashboard(uuid, date, date, date, date, text, text, text, date, date, text);

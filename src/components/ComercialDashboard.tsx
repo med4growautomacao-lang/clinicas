@@ -341,6 +341,8 @@ export function ComercialDashboard() {
   const [apptCal2, setApptCal2] = useState<Date>(() => addMonths(initMonth.start, 1));
   // Toggle Ganho/Perdido/Ambos — recorta o eixo Conversão por desfecho.
   const [outcomeFilter, setOutcomeFilter] = useState<"ambos" | "ganho" | "perdido">("ambos");
+  // Seletor de motivo (só aparece com outcomeFilter="perdido"); vazio = todos os motivos.
+  const [lossReasonFilter, setLossReasonFilter] = useState<string[]>([]);
   const [agent, setAgent] = useState<AgentFilter>("todos");
   // Origem e Canal são multi-seleção: array vazio = "Todos". Agente segue único.
   const [origin, setOrigin] = useState<OriginFilter[]>([]);
@@ -440,6 +442,7 @@ export function ComercialDashboard() {
       p_conv_from: convRange ? format(convRange.start, "yyyy-MM-dd") : null,
       p_conv_to: convRange ? format(convRange.end, "yyyy-MM-dd") : null,
       p_outcome: outcomeFilter,
+      p_loss_reasons: outcomeFilter === "perdido" && lossReasonFilter.length ? lossReasonFilter.join(",") : null,
     };
     // SWR: pinta o cache na hora (troca de aba = instantâneo) e revalida em 2º plano;
     // o spinner só aparece na 1ª carga (sem cache). Projeto em us-east-1 => cada
@@ -460,7 +463,7 @@ export function ComercialDashboard() {
     } finally {
       if (gen === fetchGenRef.current && showSpinner) setLoading(false);
     }
-  }, [activeClinicId, profile?.clinic_id, convRange, entryRange, apptRange, agent, origin, channel, outcomeFilter]);
+  }, [activeClinicId, profile?.clinic_id, convRange, entryRange, apptRange, agent, origin, channel, outcomeFilter, lossReasonFilter]);
 
   useEffect(() => {
     const clinicId = activeClinicId || profile?.clinic_id;
@@ -505,7 +508,7 @@ export function ComercialDashboard() {
   const [chatLead, setChatLead] = useState<Lead | null>(null);
 
   // Volta para a 1ª página sempre que um filtro/ordenação muda
-  useEffect(() => { setLeadsPage(0); }, [convRange, entryRange, apptRange, agent, origin, channel, leadsMetric, leadsSort, leadsSortDir, outcomeFilter]);
+  useEffect(() => { setLeadsPage(0); }, [convRange, entryRange, apptRange, agent, origin, channel, leadsMetric, leadsSort, leadsSortDir, outcomeFilter, lossReasonFilter]);
 
   // Clique no cabeçalho: alterna a direção se já for a coluna ativa; senão troca de coluna
   // (datas/valor começam em desc = mais novo/maior; nome começa em asc = A→Z)
@@ -543,6 +546,7 @@ export function ComercialDashboard() {
         p_sort: leadsSort,
         p_sort_dir: leadsSortDir,
         p_outcome: outcomeFilter,
+        p_loss_reasons: outcomeFilter === "perdido" && lossReasonFilter.length ? lossReasonFilter.join(",") : null,
       });
       if (error) throw error;
       const r = res as { total: number; rows: LeadRow[]; metricCount?: number } | null;
@@ -554,7 +558,7 @@ export function ComercialDashboard() {
     } finally {
       setLeadsLoading(false);
     }
-  }, [activeClinicId, profile?.clinic_id, convRange, entryRange, apptRange, agent, origin, channel, leadsPage, leadsMetric, leadsSort, leadsSortDir, outcomeFilter]);
+  }, [activeClinicId, profile?.clinic_id, convRange, entryRange, apptRange, agent, origin, channel, leadsPage, leadsMetric, leadsSort, leadsSortDir, outcomeFilter, lossReasonFilter]);
 
   useEffect(() => { fetchLeads(); }, [fetchLeads]);
 
@@ -1167,6 +1171,24 @@ export function ComercialDashboard() {
           />
         </div>
       </div>
+
+      {/* Seletor de motivo — só aparece com "Perdido" ativo. Opções e contagens vêm
+          de outcomes.lossReasons (recorte atual, ANTES de aplicar o próprio seletor —
+          senão sumiriam as opções não-selecionadas). Vazio = todos os motivos. */}
+      {outcomeFilter === "perdido" && data.outcomes.lossReasons.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Motivo:</span>
+          <FilterChips
+            multiple
+            value={lossReasonFilter}
+            onChange={setLossReasonFilter}
+            options={[
+              { id: "todos", label: "Todos" },
+              ...data.outcomes.lossReasons.map((r) => ({ id: r.reason, label: `${r.reason} (${r.count})` })),
+            ]}
+          />
+        </div>
+      )}
 
       {/* Filtros globais (mudam os dados — mesmo design do Marketing): agente + origem + Relatório/Métricas à direita */}
       <div className="flex items-center gap-x-6 gap-y-3 flex-wrap">

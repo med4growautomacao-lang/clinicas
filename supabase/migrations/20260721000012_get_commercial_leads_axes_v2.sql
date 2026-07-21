@@ -14,7 +14,8 @@ CREATE OR REPLACE FUNCTION public.get_commercial_leads(
   p_agenda_to date DEFAULT NULL::date,
   p_sort text DEFAULT 'entrada'::text,
   p_sort_dir text DEFAULT 'desc'::text,
-  p_outcome text DEFAULT 'ambos'::text
+  p_outcome text DEFAULT 'ambos'::text,
+  p_loss_reasons text DEFAULT NULL::text
 )
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -61,12 +62,15 @@ BEGIN
           AND ((p_agent = 'ia'     AND cm.sender = 'ai')
             OR (p_agent = 'humano' AND cm.sender = 'human' AND cm.direction = 'outbound'))
       ))
-      -- Toggle Ganho/Perdido/Ambos — eixo Conversão (outcome_at).
+      -- Toggle Ganho/Perdido/Ambos — eixo Conversão (outcome_at). Seletor de
+      -- motivo (só ativo com p_outcome='perdido') recorta ainda mais.
       AND (p_outcome = 'ambos' OR EXISTS (
         SELECT 1 FROM tickets t3
         WHERE t3.lead_id = l.id AND t3.clinic_id = p_clinic_id AND t3.outcome = p_outcome
           AND (p_conv_from IS NULL OR COALESCE(t3.outcome_at, t3.closed_at)::date >= p_conv_from)
           AND (p_conv_to   IS NULL OR COALESCE(t3.outcome_at, t3.closed_at)::date <= p_conv_to)
+          AND (p_loss_reasons IS NULL OR btrim(p_loss_reasons) = '' OR p_outcome <> 'perdido'
+            OR COALESCE(NULLIF(t3.loss_reason, ''), '(sem motivo registrado)') = ANY(string_to_array(p_loss_reasons, ',')))
       ))
       -- Recorte por métrica de agendamento OU por perdido (drill-down das métricas do topo)
       AND (
@@ -76,6 +80,8 @@ BEGIN
           WHERE t4.lead_id = l.id AND t4.clinic_id = p_clinic_id AND t4.outcome = 'perdido'
             AND (p_conv_from IS NULL OR COALESCE(t4.outcome_at, t4.closed_at)::date >= p_conv_from)
             AND (p_conv_to   IS NULL OR COALESCE(t4.outcome_at, t4.closed_at)::date <= p_conv_to)
+            AND (p_loss_reasons IS NULL OR btrim(p_loss_reasons) = ''
+              OR COALESCE(NULLIF(t4.loss_reason, ''), '(sem motivo registrado)') = ANY(string_to_array(p_loss_reasons, ',')))
         ))
         OR (p_metric IN ('gerados', 'realizadas', 'marcados') AND EXISTS (
           SELECT 1 FROM appointments a
@@ -165,7 +171,9 @@ BEGIN
             OR (p_agent = 'humano' AND cm.sender = 'human' AND cm.direction = 'outbound'))
       ))
       AND (p_conv_from IS NULL OR COALESCE(t4.outcome_at, t4.closed_at)::date >= p_conv_from)
-      AND (p_conv_to   IS NULL OR COALESCE(t4.outcome_at, t4.closed_at)::date <= p_conv_to);
+      AND (p_conv_to   IS NULL OR COALESCE(t4.outcome_at, t4.closed_at)::date <= p_conv_to)
+      AND (p_loss_reasons IS NULL OR btrim(p_loss_reasons) = ''
+        OR COALESCE(NULLIF(t4.loss_reason, ''), '(sem motivo registrado)') = ANY(string_to_array(p_loss_reasons, ',')));
   ELSE
     SELECT COUNT(*) INTO v_metric_count
     FROM leads l
@@ -203,3 +211,5 @@ $function$;
 -- Assinatura ganhou p_outcome no final — muda a contagem de tipos posicionais
 -- (15 -> 16), então precisa dropar o overload antigo pra não ficar ambíguo.
 DROP FUNCTION IF EXISTS public.get_commercial_leads(uuid, date, date, date, date, text, text, integer, integer, text, text, date, date, text, text);
+-- p_loss_reasons entrou depois (16 -> 17) — dropa esse overload intermediário também.
+DROP FUNCTION IF EXISTS public.get_commercial_leads(uuid, date, date, date, date, text, text, integer, integer, text, text, date, date, text, text, text);

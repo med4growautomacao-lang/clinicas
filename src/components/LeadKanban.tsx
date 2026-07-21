@@ -1043,21 +1043,25 @@ function GanhoModal({ lead, ticketId, isConversionStage, onClose, onCancel, onCr
 // Modal leve de atribuição para etapa de conversão que NÃO é 'ganho' (ex.: "Compareceu"). O evento
 // CAPI já foi enfileirado pelo backend ao entrar na etapa; aqui só pedimos o e-mail que falta para
 // subir a nota da atribuição. Só aparece para lead de anúncio (tem ctwa_clid) sem e-mail.
-function AtribMetaModal({ lead, onClose, onSaveEmail }: {
+// Três saídas distintas:
+//  • Salvar  → mantém a conversão e envia ao Meta (com o e-mail, se informado).
+//  • Pular   → mantém a conversão no funil, mas NÃO envia o evento ao Meta.
+//  • Fechar (X) → cancela a conversão inteira: volta o card à etapa anterior e, no Agendado, cancela
+//    o agendamento. O clique fora NÃO fecha de propósito (evitar desfazer conversão por acidente).
+function AtribMetaModal({ lead, onSave, onSkip, onCancelAll }: {
   lead: { id: string; name: string; phone: string | null; ctwaClid: string | null };
-  onClose: () => void;
-  onSaveEmail: (email: string) => Promise<void>;
+  onSave: (email: string) => Promise<void>;
+  onSkip: () => Promise<void>;
+  onCancelAll: () => Promise<void>;
 }) {
   const [email, setEmail] = useState('');
-  const [saving, setSaving] = useState(false);
-  const save = async () => {
-    setSaving(true);
-    if (email.trim()) await onSaveEmail(email.trim());
-    setSaving(false);
-    onClose();
-  };
+  const [busy, setBusy] = useState<null | 'save' | 'skip' | 'cancel'>(null);
+  const disabled = busy !== null;
+  const doSave = async () => { setBusy('save'); await onSave(email.trim()); };
+  const doSkip = async () => { setBusy('skip'); await onSkip(); };
+  const doCancel = async () => { setBusy('cancel'); await onCancelAll(); };
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
@@ -1071,11 +1075,13 @@ function AtribMetaModal({ lead, onClose, onSaveEmail }: {
               <ThumbsUp className="w-4 h-4 text-blue-500" />
               <h3 className="text-base font-black text-slate-900">Atribuição Meta Ads</h3>
             </div>
-            <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4 text-slate-400" /></button>
+            <button onClick={doCancel} disabled={disabled} title="Cancelar a conversão (volta o card e, se houver, cancela o agendamento)" className="p-1.5 hover:bg-rose-50 rounded-lg disabled:opacity-40">
+              {busy === 'cancel' ? <Loader2 className="w-4 h-4 text-rose-400 animate-spin" /> : <X className="w-4 h-4 text-slate-400" />}
+            </button>
           </div>
           <p className="text-xs text-slate-500 font-medium leading-relaxed">
             <b>{lead.name}</b> veio de anúncio Click-to-WhatsApp e entrou na etapa de conversão. A conversão
-            já será enviada ao Meta — informe o e-mail para aumentar a atribuição (opcional).
+            será enviada ao Meta — informe o e-mail para aumentar a atribuição (opcional).
           </p>
           <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] font-semibold">
             <span className="inline-flex items-center gap-1 text-emerald-600"><Check className="w-3 h-3" /> Clique do anúncio</span>
@@ -1092,14 +1098,19 @@ function AtribMetaModal({ lead, onClose, onSaveEmail }: {
             />
           </div>
           <div className="flex gap-2">
-            <button onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">Pular</button>
+            <button onClick={doSkip} disabled={disabled} title="Mantém a conversão no funil, mas não envia ao Meta" className="flex-1 py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 transition-colors flex items-center justify-center gap-2">
+              {busy === 'skip' ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Pular
+            </button>
             <button
-              onClick={save} disabled={saving}
+              onClick={doSave} disabled={disabled}
               className="flex-1 py-2.5 rounded-xl text-sm font-black bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white flex items-center justify-center gap-2 transition-colors"
             >
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Salvar
+              {busy === 'save' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Salvar
             </button>
           </div>
+          <p className="text-[10px] text-slate-400 text-center leading-relaxed">
+            <b>Salvar</b> envia ao Meta · <b>Pular</b> mantém sem enviar · <b>X</b> cancela a conversão
+          </p>
         </div>
       </motion.div>
     </div>
@@ -2851,9 +2862,10 @@ export function LeadKanban() {
   const { aiConfig, updateAI } = useSettings();
   const { data: orcamentos, save: saveOrcamento } = useOrcamentos();
   const [ganhoLead, setGanhoLead] = useState<{ id: string; name: string; phone: string | null; patientId: string | null; prevStageId: string | null; ticketId: string; ctwaClid?: string | null; email?: string | null } | null>(null);
-  // Captura de atribuição para etapa de conversão que NÃO é 'ganho' (ex.: "Compareceu") — só p/ lead
-  // de anúncio (tem ctwa_clid) com e-mail faltando, para enriquecer a conversão enviada ao Meta.
-  const [attribLead, setAttribLead] = useState<{ id: string; name: string; phone: string | null; ctwaClid: string | null } | null>(null);
+  // Captura de atribuição para etapa de conversão que NÃO é 'ganho' (ex.: "Compareceu"/"Agendado") —
+  // só p/ lead de anúncio (tem ctwa_clid) com e-mail faltando, para enriquecer a conversão. Carrega o
+  // contexto do desfazer: ticket, etapa anterior (voltar o card) e o agendamento (cancelar), se houver.
+  const [attribLead, setAttribLead] = useState<{ id: string; name: string; phone: string | null; ctwaClid: string | null; ticketId: string; prevStageId: string | null; appointmentId: string | null } | null>(null);
   const [lossLead, setLossLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
   const [orcamentoLead, setOrcamentoLead] = useState<{ id: string; name: string; phone: string | null; prevStageId: string | null; ticketId: string; initialQuote?: any; orcamentoId?: string | null } | null>(null);
   const [poLead, setPoLead] = useState<{ id: string; name: string; phone: string | null; quoteData: any; ticketId?: string | null } | null>(null);
@@ -2868,7 +2880,7 @@ export function LeadKanban() {
   const [formData, setFormData] = useState({ name: '', phone: '', source: 'sincronizacao', capture_channel: 'whatsapp', stage_id: '', estimated_value: '', loss_reason: '', avatar_url: '' });
   const [submitting, setSubmitting] = useState(false);
   const [chatLead, setChatLead] = useState<{ lead: any; ticketId: string } | null>(null);
-  const [scheduleLead, setScheduleLead] = useState<{ lead: Lead; ticketId: string } | null>(null);
+  const [scheduleLead, setScheduleLead] = useState<{ lead: Lead; ticketId: string; prevStageId: string | null } | null>(null);
   const [scheduleForm, setScheduleForm] = useState({ doctor_id: '', date: '', time: '', notes: '', consultation_type_id: '' as string });
   const [scheduleSubmitting, setScheduleSubmitting] = useState(false);
   const [scheduleSlots, setScheduleSlots] = useState<string[] | null>(null);
@@ -3029,7 +3041,7 @@ export function LeadKanban() {
     // o appointment é criado (trigger fn_auto_move_lead_to_agendado). Se cancelar, não move.
     if (targetStage?.slug === 'agendado') {
       if (ticket.lead) {
-        setScheduleLead({ lead: ticket.lead, ticketId: ticket.id });
+        setScheduleLead({ lead: ticket.lead, ticketId: ticket.id, prevStageId: ticket.stage_id });
         setScheduleForm({ doctor_id: doctors[0]?.id || '', date: '', time: '', notes: '', consultation_type_id: '' });
         setScheduleError(null);
         setScheduleSlots(null);
@@ -3060,7 +3072,7 @@ export function LeadKanban() {
     // anúncio e falta e-mail, pede para enriquecer a atribuição. Orgânico não pede (sem clid, nada vai
     // ao Meta); 'ganho' já é tratado pelo GanhoModal acima.
     if (targetStage?.is_conversion && targetStage.slug !== 'ganho' && ticket.lead?.ctwa_clid && !ticket.lead?.email) {
-      setAttribLead({ id: ticket.lead_id, name: ticket.lead?.name ?? '', phone: ticket.lead?.phone ?? null, ctwaClid: ticket.lead?.ctwa_clid ?? null });
+      setAttribLead({ id: ticket.lead_id, name: ticket.lead?.name ?? '', phone: ticket.lead?.phone ?? null, ctwaClid: ticket.lead?.ctwa_clid ?? null, ticketId: ticket.id, prevStageId: ticket.stage_id, appointmentId: null });
     }
   };
 
@@ -4157,7 +4169,7 @@ export function LeadKanban() {
                                   </div>
                                 ) : (
                                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <button title="Agendar consulta" onClick={() => { setScheduleLead({ lead, ticketId: ticket.id }); setScheduleForm({ doctor_id: doctors[0]?.id || '', date: '', time: '', notes: '', consultation_type_id: '' }); setScheduleError(null); setScheduleSlots(null); }} className="p-0.5 text-slate-400 hover:text-indigo-600 rounded transition-colors"><CalendarPlus className="w-3 h-3" /></button>
+                                  <button title="Agendar consulta" onClick={() => { setScheduleLead({ lead, ticketId: ticket.id, prevStageId: ticket.stage_id }); setScheduleForm({ doctor_id: doctors[0]?.id || '', date: '', time: '', notes: '', consultation_type_id: '' }); setScheduleError(null); setScheduleSlots(null); }} className="p-0.5 text-slate-400 hover:text-indigo-600 rounded transition-colors"><CalendarPlus className="w-3 h-3" /></button>
                                   <button title="Marcar como Não Lead" onClick={e => { e.stopPropagation(); setConfirmingNotLeadId(ticket.id); }} className="p-0.5 text-slate-400 hover:text-slate-700 rounded transition-colors"><UserX className="w-3 h-3" /></button>
                                   {!ticket.outcome && !isClosed && (
                                     <div className="relative">
@@ -4845,8 +4857,22 @@ export function LeadKanban() {
       {attribLead && (
         <AtribMetaModal
           lead={attribLead}
-          onClose={() => setAttribLead(null)}
-          onSaveEmail={async (email) => { await update(attribLead.id, { email }); }}
+          onSave={async (email) => {
+            if (email) await update(attribLead.id, { email });
+            setAttribLead(null);
+          }}
+          onSkip={async () => {
+            await supabase.rpc('cancel_meta_capi_event', { p_ticket_id: attribLead.ticketId, p_delete: false });
+            setAttribLead(null);
+          }}
+          onCancelAll={async () => {
+            // Desfaz a conversão: cancela o agendamento (se houver), volta o card à etapa anterior e
+            // apaga o evento CAPI da fila (p_delete → permite reenfileirar se o lead reconverter depois).
+            if (attribLead.appointmentId) await supabase.rpc('cancel_appointment', { p_appointment_id: attribLead.appointmentId });
+            if (attribLead.prevStageId) await moveTicket(attribLead.ticketId, attribLead.prevStageId);
+            await supabase.rpc('cancel_meta_capi_event', { p_ticket_id: attribLead.ticketId, p_delete: true });
+            setAttribLead(null);
+          }}
         />
       )}
 
@@ -4959,10 +4985,11 @@ export function LeadKanban() {
                 } else if (targetStage?.slug === 'ganho') {
                   setGanhoLead({ id: chatLead.lead.id, name: chatLead.lead.name, phone: chatLead.lead.phone ?? null, patientId: chatLead.lead.converted_patient_id ?? null, prevStageId: ticket.stage_id, ticketId: ticket.id, ctwaClid: chatLead.lead.ctwa_clid ?? null, email: chatLead.lead.email ?? null });
                 } else {
+                  const prevStage = ticket.stage_id;
                   await moveTicket(ticket.id, stageId);
                   // Etapa de conversão não-'ganho' + lead de anúncio sem e-mail → enriquece atribuição.
                   if (targetStage?.is_conversion && chatLead.lead.ctwa_clid && !chatLead.lead.email) {
-                    setAttribLead({ id: chatLead.lead.id, name: chatLead.lead.name, phone: chatLead.lead.phone ?? null, ctwaClid: chatLead.lead.ctwa_clid ?? null });
+                    setAttribLead({ id: chatLead.lead.id, name: chatLead.lead.name, phone: chatLead.lead.phone ?? null, ctwaClid: chatLead.lead.ctwa_clid ?? null, ticketId: ticket.id, prevStageId: prevStage, appointmentId: null });
                   }
                 }
               }
@@ -5082,7 +5109,7 @@ export function LeadKanban() {
                       setScheduleError(error.message || 'Erro ao agendar.');
                       return;
                     }
-                    const result = data as { success: boolean; error_code?: string };
+                    const result = data as { success: boolean; error_code?: string; appointment_id?: string };
                     if (!result?.success) {
                       const msgs: Record<string, string> = {
                         slot_conflict: 'Esse horário acabou de ser reservado. Escolha outro.',
@@ -5108,7 +5135,7 @@ export function LeadKanban() {
                     // mesmo enriquecimento de atribuição usado nos demais fluxos.
                     const agendadoStage = stages.find(s => s.slug === 'agendado');
                     if (agendadoStage?.is_conversion && sl.ctwa_clid && !sl.email) {
-                      setAttribLead({ id: sl.id, name: sl.name, phone: sl.phone ?? null, ctwaClid: sl.ctwa_clid ?? null });
+                      setAttribLead({ id: sl.id, name: sl.name, phone: sl.phone ?? null, ctwaClid: sl.ctwa_clid ?? null, ticketId: scheduleLead.ticketId, prevStageId: scheduleLead.prevStageId ?? null, appointmentId: result.appointment_id ?? null });
                     }
                     setScheduleLead(null);
                   }}

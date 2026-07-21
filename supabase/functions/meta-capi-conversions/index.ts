@@ -46,6 +46,17 @@ function phoneDigits(raw: string | null | undefined): string | null {
   return p.length >= 12 ? p : null;
 }
 
+// event_name para business_messaging (CTWA) é uma lista MUITO mais restrita que a do pixel/offline
+// (testado direto na Graph: só "Purchase" e "LeadSubmitted" passam — "Lead", "Schedule", "Contact" e
+// "CompleteRegistration" são recusados com error_subcode 2804066, mesmo sendo nomes padrão válidos no
+// pixel). O seletor de evento por etapa é compartilhado pelos 2 caminhos, então mapeamos aqui — o
+// caminho offline manda o nome cru (ev.event_name), só o CTWA passa por este normalizador.
+const CTWA_VALID_EVENT_NAMES = new Set(["Purchase", "LeadSubmitted"]);
+function ctwaEventName(raw: string | null | undefined): string {
+  const n = (raw ?? "").trim() || "Purchase";
+  return CTWA_VALID_EVENT_NAMES.has(n) ? n : "LeadSubmitted";
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   const json = (o: unknown, s = 200) =>
@@ -134,7 +145,7 @@ serve(async (req) => {
       const ph = phoneDigits(lead?.phone); if (ph) ud.ph = await sha256(ph);
       if (lead?.email) ud.em = await sha256(String(lead.email));
       if (lead?.rast_id) ud.external_id = await sha256(String(lead.rast_id));
-      payload = { event_name: eventName || "Purchase", event_time: eventTime(7), action_source: "business_messaging", messaging_channel: "whatsapp", event_id: debugTicketId, user_data: ud };
+      payload = { event_name: ctwaEventName(eventName), event_time: eventTime(7), action_source: "business_messaging", messaging_channel: "whatsapp", event_id: debugTicketId, user_data: ud };
       if (value != null) payload.custom_data = { currency: "BRL", value, order_id: debugTicketId };
       endpoint = dataset;
     } else {
@@ -325,7 +336,7 @@ serve(async (req) => {
       if (lead?.email) userData.em = await sha256(String(lead.email));
       if (lead?.rast_id) userData.external_id = await sha256(String(lead.rast_id));
       const payload: Record<string, unknown> = {
-        event_name: ev.event_name || "Purchase",
+        event_name: ctwaEventName(ev.event_name),
         event_time: eventTime(7),
         action_source: "business_messaging",
         messaging_channel: "whatsapp",

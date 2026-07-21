@@ -13,8 +13,9 @@
 //   • Observabilidade: toda falha vai para a Central de Erros (log_system_error, scope abaixo).
 //
 // Ordem de importância dos dados de atribuição (o que sobe a nota da Meta), montados abaixo:
-//   1) ctwa_clid  2) whatsapp_business_account_id  3) dataset correto  4) value+currency
-//   5) event_time na janela  6) ph  7) external_id (rast_id)  8) em
+//   0) lead_id (Instant Form, prioridade MAIS ALTA — em claro)  1) ctwa_clid
+//   2) whatsapp_business_account_id  3) dataset correto  4) value+currency
+//   5) event_time na janela  6) ph  7) external_id (rast_id)  8) em  9) fn/ln
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -130,6 +131,11 @@ serve(async (req) => {
     const { data: lead } = t.lead_id
       ? await service.from("leads").select("id, name, phone, email, ctwa_clid, rast_id").eq("id", t.lead_id).maybeSingle()
       : { data: null };
+    // lead_id da Meta (Instant Form) para esse lead, se houver — vai em claro no user_data.
+    const { data: formSub } = t.lead_id
+      ? await service.from("meta_form_submissions").select("external_id").eq("lead_id", t.lead_id).limit(1).maybeSingle()
+      : { data: null };
+    const metaLeadId = String(formSub?.external_id ?? "").trim() || null;
     const { data: convRow } = await service.from("conversions").select("value, converted_at").eq("ticket_id", debugTicketId).order("converted_at", { ascending: false }).limit(1).maybeSingle();
     const { data: outbox } = await service.from("meta_capi_events").select("id, event_name").eq("ticket_id", debugTicketId).maybeSingle();
     const eventName = outbox?.event_name ?? null;
@@ -163,6 +169,7 @@ serve(async (req) => {
       const nameParts = String(lead?.name ?? "").trim().split(/\s+/).filter(Boolean);
       if (nameParts.length) { ud.fn = await sha256(nameParts[0]); if (nameParts.length > 1) ud.ln = await sha256(nameParts[nameParts.length - 1]); }
       if (lead?.rast_id) ud.external_id = await sha256(String(lead.rast_id));
+      if (metaLeadId) ud.lead_id = metaLeadId;
       payload = { event_name: ctwaEventName(eventName), event_time: eventTime(7), action_source: "business_messaging", messaging_channel: "whatsapp", event_id: debugTicketId, user_data: ud };
       if (value != null) payload.custom_data = { currency: "BRL", value, order_id: debugTicketId };
       endpoint = dataset;
@@ -179,6 +186,7 @@ serve(async (req) => {
         const parts = String(lead?.name ?? "").trim().split(/\s+/).filter(Boolean);
         if (parts.length) { ud.fn = await sha256(parts[0]); if (parts.length > 1) ud.ln = await sha256(parts[parts.length - 1]); }
         if (lead?.rast_id) ud.external_id = await sha256(String(lead.rast_id));
+        if (metaLeadId) ud.lead_id = metaLeadId;
         payload = { event_name: eventName || "Lead", event_time: eventTime(offlineActionSource === "physical_store" ? 62 : 7), action_source: offlineActionSource, event_id: debugTicketId, user_data: ud };
         payload.custom_data = buildOfflineCustomData(offlineActionSource, value, debugTicketId);
         endpoint = pixel;
@@ -227,12 +235,16 @@ serve(async (req) => {
   const leadIds = [...new Set(pend.map((p) => p.lead_id).filter(Boolean))] as string[];
   const ticketIds = [...new Set(pend.map((p) => p.ticket_id))];
 
-  const [{ data: clinics }, { data: leads }, { data: convs }, { data: tickets }, { data: platTokenRaw }] = await Promise.all([
+  const [{ data: clinics }, { data: leads }, { data: convs }, { data: tickets }, { data: platTokenRaw }, { data: formSubs }] = await Promise.all([
     service.from("clinics").select("id, meta_waba_id, meta_capi_dataset_id, meta_token, meta_pixel_id, organization_id").in("id", clinicIds),
     leadIds.length ? service.from("leads").select("id, name, phone, email, ctwa_clid, rast_id").in("id", leadIds) : Promise.resolve({ data: [] as any[] }),
     service.from("conversions").select("ticket_id, value, converted_at").in("ticket_id", ticketIds).order("converted_at", { ascending: false }),
     service.from("tickets").select("id, outcome_at").in("id", ticketIds),
     service.rpc("get_meta_cloud_secret", { p_name: "META_CLOUD_TOKEN" }),
+    // lead_id da Meta (id de 15-17 dígitos do Instant Form): mora em meta_form_submissions.external_id,
+    // ligado ao nosso lead por lead_id. Só existe p/ leads captados por Formulário Meta — os de anúncio
+    // que caem no WhatsApp (CTWA) não têm. É o dado de match de prioridade MAIS ALTA da Meta.
+    leadIds.length ? service.from("meta_form_submissions").select("lead_id, external_id").in("lead_id", leadIds) : Promise.resolve({ data: [] as any[] }),
   ]);
 
   const platformToken = (typeof platTokenRaw === "string" ? platTokenRaw : "").trim();
@@ -242,6 +254,13 @@ serve(async (req) => {
   const clinicById = new Map((clinics ?? []).map((c: any) => [c.id, c]));
   const leadById = new Map((leads ?? []).map((l: any) => [l.id, l]));
   const ticketById = new Map((tickets ?? []).map((t: any) => [t.id, t]));
+  // lead_id da Meta por lead (mantido como STRING: 16-17 dígitos estouram o inteiro seguro do JS e
+  // perderiam precisão se convertidos p/ Number — a Meta aceita o lead_id como texto numérico).
+  const metaLeadIdByLead = new Map<string, string>();
+  for (const s of formSubs ?? []) {
+    const ext = String(s?.external_id ?? "").trim();
+    if (s?.lead_id && ext && !metaLeadIdByLead.has(s.lead_id)) metaLeadIdByLead.set(s.lead_id, ext);
+  }
   // Conversão mais recente por ticket (já veio ordenado desc).
   const convByTicket = new Map<string, any>();
   for (const c of convs ?? []) if (!convByTicket.has(c.ticket_id)) convByTicket.set(c.ticket_id, c);
@@ -359,6 +378,9 @@ serve(async (req) => {
         if (nameParts.length > 1) userData.ln = await sha256(nameParts[nameParts.length - 1]);
       }
       if (lead?.rast_id) userData.external_id = await sha256(String(lead.rast_id));
+      // lead_id vai em CLARO (não hasheado) — é o id do Instant Form da Meta, ela casa pelo valor exato.
+      const metaLeadId = lead?.id ? metaLeadIdByLead.get(lead.id) : null;
+      if (metaLeadId) userData.lead_id = metaLeadId;
       const payload: Record<string, unknown> = {
         event_name: ctwaEventName(ev.event_name),
         event_time: eventTime(7),
@@ -410,6 +432,8 @@ serve(async (req) => {
       if (nameParts.length > 1) userData.ln = await sha256(nameParts[nameParts.length - 1]);
     }
     if (lead?.rast_id) userData.external_id = await sha256(String(lead.rast_id));
+    const metaLeadIdOff = lead?.id ? metaLeadIdByLead.get(lead.id) : null;
+    if (metaLeadIdOff) userData.lead_id = metaLeadIdOff;
     const payload: Record<string, unknown> = {
       event_name: ev.event_name || "Lead",
       // Janela por action_source: physical_store aceita 62 dias (backfill de vendas passadas);

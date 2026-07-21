@@ -18,7 +18,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { applyAdStatus } from "../_shared/spend.ts";
+import { applyAdStatus, fetchMetaCampaignBreakdown, upsertSpendBreakdown } from "../_shared/spend.ts";
 
 const GRAPH_VERSION = "v24.0";
 const CHUNK_DAYS = 90;              // a insights diária tem teto de janela; fatiar em blocos ≤90d
@@ -181,5 +181,22 @@ serve(async (req) => {
     updated = rows.length;
   }
 
-  return json({ ok: true, days: rows.length, updated, total_spend: totalSpend, from: since, to: until });
+  // (6) Investimento POR CAMPANHA × rede (facebook/instagram/…) — best-effort, NÃO bloqueia a
+  // resposta nem afeta o total acima (que já está gravado e é a fonte dos painéis). Falha aqui
+  // vira aviso na Central, mas o sync do total é considerado sucesso de qualquer forma.
+  let breakdownRows = 0;
+  try {
+    const bd = await fetchMetaCampaignBreakdown(metaToken, account, since, until);
+    if (bd.error) {
+      await registrarErro("breakdown_falhou", "Detalhamento por campanha do Meta falhou (total por conta OK)", "warning", { detail: bd.error });
+    } else if (bd.rows.length > 0) {
+      const up = await upsertSpendBreakdown(service, clinicId, "meta_ads", bd.rows);
+      if (up.error) await registrarErro("breakdown_gravacao_falhou", "Detalhamento por campanha do Meta veio, mas não foi gravado", "warning", { detail: up.error });
+      else breakdownRows = bd.rows.length;
+    }
+  } catch (e) {
+    await registrarErro("breakdown_excecao", "Detalhamento por campanha do Meta quebrou (total por conta OK)", "warning", { detail: e instanceof Error ? e.message : String(e) });
+  }
+
+  return json({ ok: true, days: rows.length, updated, total_spend: totalSpend, from: since, to: until, breakdown_rows: breakdownRows });
 });

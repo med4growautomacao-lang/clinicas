@@ -22,7 +22,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { applyAdStatus } from "../_shared/spend.ts";
+import { applyAdStatus, fetchGoogleCampaignBreakdown, upsertSpendBreakdown } from "../_shared/spend.ts";
 
 const GAQL_VERSION = "v24";
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -225,5 +225,21 @@ serve(async (req) => {
     updated = rows.length;
   }
 
-  return json({ ok: true, days: rows.length, updated, total_spend: totalSpend, from: since, to: until });
+  // (7) Investimento POR CAMPANHA — best-effort, NÃO bloqueia a resposta nem afeta o total acima
+  // (já gravado, fonte dos painéis). Reusa o mesmo accessToken/devToken/mccId já resolvidos.
+  let breakdownRows = 0;
+  try {
+    const bd = await fetchGoogleCampaignBreakdown(accessToken, devToken, mccId, customerId, since, until);
+    if (bd.error) {
+      await registrarErro("breakdown_falhou", "Detalhamento por campanha do Google falhou (total por conta OK)", "warning", { detail: bd.error });
+    } else if (bd.rows.length > 0) {
+      const up = await upsertSpendBreakdown(service, clinicId, "google_ads", bd.rows);
+      if (up.error) await registrarErro("breakdown_gravacao_falhou", "Detalhamento por campanha do Google veio, mas não foi gravado", "warning", { detail: up.error });
+      else breakdownRows = bd.rows.length;
+    }
+  } catch (e) {
+    await registrarErro("breakdown_excecao", "Detalhamento por campanha do Google quebrou (total por conta OK)", "warning", { detail: e instanceof Error ? e.message : String(e) });
+  }
+
+  return json({ ok: true, days: rows.length, updated, total_spend: totalSpend, from: since, to: until, breakdown_rows: breakdownRows });
 });

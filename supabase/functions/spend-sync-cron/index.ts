@@ -16,14 +16,17 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { fetchMetaDaily, fetchGoogleDaily, getGoogleAccessToken, upsertSpend, applyAdStatus } from "../_shared/spend.ts";
+import { fetchMetaDaily, fetchGoogleDaily, getGoogleAccessToken, upsertSpend, applyAdStatus, fetchMetaCampaignBreakdown, fetchGoogleCampaignBreakdown, upsertSpendBreakdown } from "../_shared/spend.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const DEFAULT_CONFIG = { enabled: false, every_hours: 24, run_hour_sp: 5, lookback_days: 1, platforms: ["meta_ads", "google_ads"], batch_size: 300 };
+// breakdown_enabled: OFF por padrão. O detalhamento por campanha dobra as chamadas ao Google Ads
+// (teto de quota diária) e ao Meta em TODAS as clínicas a cada tick — só liga aqui depois que o
+// front que consome marketing_spend_breakdown estiver no ar (o botão manual já captura, sem esperar).
+const DEFAULT_CONFIG = { enabled: false, every_hours: 24, run_hour_sp: 5, lookback_days: 1, platforms: ["meta_ads", "google_ads"], batch_size: 300, breakdown_enabled: false };
 const CONCURRENCY = 8; // contas processadas em paralelo por lote
 
 interface ClinicRow {
@@ -163,6 +166,7 @@ serve(async (req) => {
 
   const list = (clinics ?? []) as ClinicRow[];
   let metaOk = 0, googleOk = 0, errors = 0;
+  const breakdownEnabled = cfg.breakdown_enabled === true;
 
   await mapPool(list, CONCURRENCY, async (c) => {
     const metaTok = resolveMetaToken(c);
@@ -175,6 +179,15 @@ serve(async (req) => {
         const up = await upsertSpend(service, c.id, "meta_ads", rows);
         if (up.error) { errors++; await registrar("meta_upsert_falhou", "Gravação do investimento (Meta) falhou", "error", c.id, { error: up.error }); }
         else metaOk++;
+        // Detalhamento por campanha × rede — best-effort, atrás do flag; não conta em errors/metaOk.
+        if (breakdownEnabled) {
+          const bd = await fetchMetaCampaignBreakdown(metaTok, c.meta_ad_account_id, since, until);
+          if (bd.error) await registrar("meta_breakdown_falhou", "Detalhamento por campanha (Meta) falhou nesta clínica", "warning", c.id, { error: bd.error });
+          else if (bd.rows.length > 0) {
+            const upBd = await upsertSpendBreakdown(service, c.id, "meta_ads", bd.rows);
+            if (upBd.error) await registrar("meta_breakdown_gravacao_falhou", "Detalhamento por campanha (Meta) veio, mas não foi gravado", "warning", c.id, { error: upBd.error });
+          }
+        }
       }
     }
     const g = resolveGoogle(c);
@@ -186,6 +199,16 @@ serve(async (req) => {
         const up = await upsertSpend(service, c.id, "google_ads", rows);
         if (up.error) { errors++; await registrar("google_upsert_falhou", "Gravação do investimento (Google) falhou", "error", c.id, { error: up.error }); }
         else googleOk++;
+        // Detalhamento por campanha — best-effort, atrás do flag; dobra as chamadas ao Google Ads
+        // (teto de quota diária), por isso fica OFF por padrão (ver breakdown_enabled).
+        if (breakdownEnabled) {
+          const bd = await fetchGoogleCampaignBreakdown(googleToken, g.token, g.mcc, c.google_ad_account_id, since, until);
+          if (bd.error) await registrar("google_breakdown_falhou", "Detalhamento por campanha (Google) falhou nesta clínica", "warning", c.id, { error: bd.error });
+          else if (bd.rows.length > 0) {
+            const upBd = await upsertSpendBreakdown(service, c.id, "google_ads", bd.rows);
+            if (upBd.error) await registrar("google_breakdown_gravacao_falhou", "Detalhamento por campanha (Google) veio, mas não foi gravado", "warning", c.id, { error: upBd.error });
+          }
+        }
       }
     }
   });

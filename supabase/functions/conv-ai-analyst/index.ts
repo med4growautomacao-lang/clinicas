@@ -292,9 +292,42 @@ async function analisarTicket(item: any, cfg: any, dry: boolean, debug = false):
 
   let resultado = "no_change";
 
-  // ── Caminho VENDA: nunca aplica, sempre vai para a fila do vendedor ────────
-  if (saleDetected || (sugStage?.is_conversion && stageConf >= minStage)) {
-    const row = {
+  // Modo por clínica em cada eixo: off | suggest | auto. O kill-switch GLOBAL
+  // manda em cima de tudo: fora de 'active' nada é aplicado, só registrado.
+  const stageMode: string = item.stage_mode ?? "auto";
+  const saleMode: string = item.sale_mode ?? "suggest";
+  const aplicando = cfg.mode === "active" && !dry;
+
+  // 1 registro em aberto por ticket (índice único). Reanálise ATUALIZA o que
+  // existe em vez de empilhar (vale também para 'shadow', senão o modo de teste
+  // enche a tabela de linhas repetidas do mesmo ticket).
+  const gravarAberto = async (row: Record<string, unknown>) => {
+    if (dry) return null;
+    const { data: existing } = await admin
+      .from("conv_ai_insights")
+      .select("id")
+      .eq("ticket_id", item.ticket_id)
+      .in("status", ["pending", "shadow"])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (existing?.id) {
+      await admin.from("conv_ai_insights").update(row).eq("id", existing.id);
+      return existing.id as string;
+    }
+    const { data: inserted } = await admin
+      .from("conv_ai_insights").insert(row).select("id").maybeSingle();
+    return (inserted?.id as string) ?? null;
+  };
+
+  // ── Caminho VENDA ─────────────────────────────────────────────────────────
+  if (saleMode === "off" && (saleDetected || (sugStage?.is_conversion && stageConf >= minStage))) {
+    // Eixo desligado nesta clínica: não registra nem aplica. Cai direto no
+    // finish do item da fila lá embaixo (dar return aqui deixaria a fila presa
+    // em 'running' para sempre).
+    resultado = "sale_off";
+  } else if (saleDetected || (sugStage?.is_conversion && stageConf >= minStage)) {
+    const row: Record<string, unknown> = {
       ...base,
       kind: "sale",
       suggested_stage_id: conversionStage?.id ?? sugStage?.id ?? null,
@@ -302,44 +335,49 @@ async function analisarTicket(item: any, cfg: any, dry: boolean, debug = false):
       confidence: Math.max(saleConf, sugStage?.is_conversion ? stageConf : 0),
       rationale: String(parsed?.sale?.rationale ?? parsed?.stage?.rationale ?? "").slice(0, 1000),
       evidence: Array.isArray(parsed?.sale?.evidence) ? parsed.sale.evidence : [],
-      status: cfg.mode === "active" ? "pending" : "shadow",
+      status: aplicando ? "pending" : "shadow",
     };
-    if (!dry) {
-      // 1 sugestão em aberto por ticket (índice único). Reanálise ATUALIZA a que
-      // existe em vez de empilhar (vale também para 'shadow', senão o modo de
-      // teste enche a tabela de linhas repetidas do mesmo ticket).
-      const { data: existing } = await admin
-        .from("conv_ai_insights")
-        .select("id")
-        .eq("ticket_id", item.ticket_id)
-        .in("status", ["pending", "shadow"])
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (existing?.id) {
-        await admin.from("conv_ai_insights").update(row).eq("id", existing.id);
+    const insightId = await gravarAberto(row);
+    resultado = aplicando ? "sale_pending" : "sale_shadow";
+
+    // 'auto': fecha a venda pelo mesmo caminho do GanhoModal (conversão → etapa
+    // de conversão → finalize_ticket), via RPC. Sem valor conhecido a RPC recusa
+    // e a sugestão FICA pendente para um humano decidir.
+    if (aplicando && saleMode === "auto" && insightId) {
+      const { data: res, error } = await admin.rpc("conv_ai_auto_close_sale", { p_insight_id: insightId });
+      if (error) throw new Error(`auto_close_sale: ${error.message}`);
+      if (res?.success) {
+        resultado = "sale_auto_closed";
       } else {
-        await admin.from("conv_ai_insights").insert(row);
+        resultado = `sale_pending_${res?.error_code ?? "recusada"}`;
+        if (res?.error_code === "no_value") {
+          await registrarErro("venda_auto_sem_valor",
+            "IA detectou venda mas não achou valor: ficou pendente em vez de lançar faturamento zerado",
+            "warning", item.clinic_id, { ticket_id: item.ticket_id, insight_id: insightId });
+        }
       }
     }
-    resultado = cfg.mode === "active" ? "sale_pending" : "sale_shadow";
   }
-  // ── Caminho ETAPA comum: aplica sozinha ───────────────────────────────────
-  else if (sugStage && sugStage.id !== ctx.ticket?.stage_id) {
+  // ── Caminho ETAPA comum ───────────────────────────────────────────────────
+  else if (stageMode === "off" && sugStage && sugStage.id !== ctx.ticket?.stage_id) {
+    resultado = "stage_off";
+  } else if (sugStage && sugStage.id !== ctx.ticket?.stage_id) {
+    const stageRow: Record<string, unknown> = {
+      ...base, kind: "stage", suggested_stage_id: sugStage.id,
+      confidence: stageConf,
+      rationale: String(parsed?.stage?.rationale ?? "").slice(0, 1000),
+      evidence: Array.isArray(parsed?.stage?.evidence) ? parsed.stage.evidence : [],
+    };
+
     if (stageConf < minStage) {
-      if (!dry) {
-        await admin.from("conv_ai_insights").insert({
-          ...base, kind: "stage", suggested_stage_id: sugStage.id,
-          confidence: stageConf,
-          rationale: String(parsed?.stage?.rationale ?? "").slice(0, 1000),
-          evidence: Array.isArray(parsed?.stage?.evidence) ? parsed.stage.evidence : [],
-          status: "skipped_low_confidence",
-        });
-      }
+      if (!dry) await admin.from("conv_ai_insights").insert({ ...stageRow, status: "skipped_low_confidence" });
       resultado = "low_confidence";
+    } else if (stageMode === "suggest") {
+      await gravarAberto({ ...stageRow, status: aplicando ? "pending" : "shadow" });
+      resultado = aplicando ? "stage_pending" : "stage_shadow";
     } else {
       let applied = false;
-      if (cfg.mode === "active" && !dry) {
+      if (aplicando) {
         const { data: res, error: mvErr } = await admin.rpc("set_ticket_stage", {
           p_ticket_id: item.ticket_id,
           p_new_stage_id: sugStage.id,
@@ -351,13 +389,7 @@ async function analisarTicket(item: any, cfg: any, dry: boolean, debug = false):
         applied = res?.success === true && res?.blocked !== true;
       }
       if (!dry) {
-        await admin.from("conv_ai_insights").insert({
-          ...base, kind: "stage", suggested_stage_id: sugStage.id,
-          confidence: stageConf,
-          rationale: String(parsed?.stage?.rationale ?? "").slice(0, 1000),
-          evidence: Array.isArray(parsed?.stage?.evidence) ? parsed.stage.evidence : [],
-          status: applied ? "auto_applied" : "shadow",
-        });
+        await admin.from("conv_ai_insights").insert({ ...stageRow, status: applied ? "auto_applied" : "shadow" });
       }
       resultado = applied ? "stage_applied" : "stage_shadow";
     }
@@ -424,16 +456,24 @@ serve(async (req) => {
       });
     }
 
-    // Limiar por clínica (override opcional do global)
+    // Config por clínica: limiar (override do global) e o modo de cada eixo.
     const clinicIds = [...new Set(batch.map((b) => b.clinic_id))];
     const { data: confs } = await admin
-      .from("conv_ai_clinic_config").select("clinic_id, min_confidence_stage").in("clinic_id", clinicIds);
-    const minByClinic = new Map((confs ?? []).map((c: any) => [c.clinic_id, c.min_confidence_stage]));
+      .from("conv_ai_clinic_config")
+      .select("clinic_id, min_confidence_stage, stage_mode, sale_mode")
+      .in("clinic_id", clinicIds);
+    const cfgByClinic = new Map((confs ?? []).map((c: any) => [c.clinic_id, c]));
 
     const results: Record<string, number> = {};
     const detalhes: any[] = [];
     for (const item of batch) {
-      const enriched = { ...item, min_confidence_stage: minByClinic.get(item.clinic_id) ?? null };
+      const cc = cfgByClinic.get(item.clinic_id) ?? {};
+      const enriched = {
+        ...item,
+        min_confidence_stage: cc.min_confidence_stage ?? null,
+        stage_mode: cc.stage_mode ?? "auto",
+        sale_mode: cc.sale_mode ?? "suggest",
+      };
       try {
         const r = await analisarTicket(enriched, cfg, dry, debug);
         if (debug) detalhes.push(r);

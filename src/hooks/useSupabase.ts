@@ -4314,9 +4314,15 @@ export interface ConvAiPromptVersion {
   created_at: string;
 }
 
+// Modo por eixo, no mesmo espírito do kill-switch global do Super Admin:
+// 'off' = a IA não mexe · 'suggest' = vai para a fila · 'auto' = a IA aplica.
+export type ConvAiMode = 'off' | 'suggest' | 'auto';
+
 export interface ConvAiClinicConfig {
   clinic_id: string;
   enabled: boolean;
+  stage_mode: ConvAiMode;
+  sale_mode: ConvAiMode;
   min_confidence_stage: number | null;
   prompt_version: number;
   decisions_since_learn: number;
@@ -4349,7 +4355,15 @@ export function useConvAiClinicConfig() {
     const { error } = await supabase.from('conv_ai_clinic_config')
       .upsert({ clinic_id: activeClinicId, ...patch, updated_at: new Date().toISOString() }, { onConflict: 'clinic_id' });
     if (error) return false;
-    setConfig(prev => ({ ...(prev ?? { clinic_id: activeClinicId, enabled: false, min_confidence_stage: null, prompt_version: 0, decisions_since_learn: 0, last_learned_at: null, last_analysis_at: null }), ...patch }));
+    setConfig(prev => ({
+      ...(prev ?? {
+        clinic_id: activeClinicId, enabled: false,
+        stage_mode: 'auto' as ConvAiMode, sale_mode: 'suggest' as ConvAiMode,
+        min_confidence_stage: null, prompt_version: 0, decisions_since_learn: 0,
+        last_learned_at: null, last_analysis_at: null,
+      }),
+      ...patch,
+    }));
     return true;
   };
 

@@ -3,12 +3,13 @@ import { motion } from "framer-motion";
 import {
   Loader2, Check, X, Sparkles, TrendingUp, MessageSquare, ChevronDown, ChevronRight,
   ArrowRight, Quote, Brain, ShieldCheck, RefreshCw, History, Power,
+  Hand, ListChecks, Zap,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { supabase } from "../lib/supabase";
 import {
   useConvAiInsights, useConvAiClinicConfig, useFunnelStages, useTickets,
-  useConversions, usePatients, ConvAiInsight,
+  useConversions, usePatients, ConvAiInsight, ConvAiMode,
 } from "../hooks/useSupabase";
 import { GanhoModal } from "./LeadKanban";
 
@@ -30,6 +31,60 @@ function Confianca({ valor }: { valor: number | null }) {
     <span className={cn("text-[10px] font-black px-1.5 py-0.5 rounded border tracking-wider", cls)}>
       {pct}% DE CONFIANÇA
     </span>
+  );
+}
+
+// Seletor de 3 estados, o mesmo espírito do kill-switch do Super Admin, só que
+// por clínica e por eixo (etapa e venda).
+const MODOS: Array<{ id: ConvAiMode; label: string; icon: typeof Hand; hint: (eixo: "etapa" | "venda") => string }> = [
+  { id: "off", label: "Manual", icon: Hand,
+    hint: (e) => e === "etapa" ? "A IA não move card nenhum." : "A IA não procura vendas." },
+  { id: "suggest", label: "Sugestão", icon: ListChecks,
+    hint: (e) => e === "etapa" ? "Toda mudança de etapa vai para a fila abaixo." : "As vendas vão para a fila abaixo." },
+  { id: "auto", label: "Automático", icon: Zap,
+    hint: (e) => e === "etapa" ? "A IA move o card sozinha." : "A IA fecha a venda sozinha e lança o faturamento." },
+];
+
+function SeletorModo({ eixo, valor, onChange, disabled }: {
+  eixo: "etapa" | "venda";
+  valor: ConvAiMode;
+  onChange: (m: ConvAiMode) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className={cn("flex-1 min-w-[260px]", disabled && "opacity-50 pointer-events-none")}>
+      <p className="text-[11px] font-black text-slate-500 uppercase tracking-wider mb-2">
+        {eixo === "etapa" ? "Mudança de etapa" : "Detecção de venda"}
+      </p>
+      <div className="grid grid-cols-3 gap-1.5">
+        {MODOS.map(m => {
+          const Icon = m.icon;
+          const sel = valor === m.id;
+          const perigo = eixo === "venda" && m.id === "auto";
+          return (
+            <button key={m.id} type="button" onClick={() => onChange(m.id)}
+              className={cn("rounded-xl border p-2 text-left transition-all",
+                sel
+                  ? perigo
+                    ? "border-amber-400 bg-amber-50 text-amber-800 ring-2 ring-amber-400/20"
+                    : "border-teal-500 bg-teal-50/60 text-teal-800 ring-2 ring-teal-500/20"
+                  : "border-slate-200 bg-white text-slate-500 hover:border-slate-300")}>
+              <span className="flex items-center gap-1.5 text-xs font-bold">
+                <Icon className="w-3.5 h-3.5" /> {m.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-[11px] text-slate-500 mt-1.5 leading-snug">{MODOS.find(m => m.id === valor)?.hint(eixo)}</p>
+      {eixo === "venda" && valor === "auto" && (
+        <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mt-1.5 leading-snug">
+          A IA lança a conversão e o faturamento sem passar por você, e a conversão vai para a Meta.
+          Cancelar a venda no CRM desfaz o lançamento, mas o evento já enviado à Meta não tem desfazer.
+          Sem valor identificado na conversa, a venda cai na fila em vez de ser lançada.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -106,38 +161,56 @@ export function ConvAIReview() {
     <div className="h-full overflow-y-auto custom-scrollbar pr-1 space-y-5 pb-10">
       {/* Estado do analista nesta clínica */}
       <div className={cn(
-        "rounded-2xl border p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3",
-        desligada ? "bg-slate-50 border-slate-200" : "bg-teal-50/50 border-teal-200"
+        "rounded-2xl border p-4 space-y-4",
+        desligada ? "bg-slate-50 border-slate-200" : "bg-teal-50/40 border-teal-200"
       )}>
-        <div className="flex items-start gap-3">
-          <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center shrink-0",
-            desligada ? "bg-slate-200 text-slate-500" : "bg-teal-100 text-teal-700")}>
-            <Sparkles className="w-5 h-5" />
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center shrink-0",
+              desligada ? "bg-slate-200 text-slate-500" : "bg-teal-100 text-teal-700")}>
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-sm font-black text-slate-900">
+                Análise de conversas {desligada ? "desligada" : "ativa"}
+              </p>
+              <p className="text-xs text-slate-500 mt-0.5 max-w-2xl">
+                A IA lê as conversas desta clínica e decide duas coisas: em que <b>etapa</b> o atendimento
+                deveria estar e se houve <b>venda</b>. Você escolhe abaixo se ela decide sozinha ou pede
+                sua confirmação em cada caso. Cada decisão sua afina o manual desta clínica.
+              </p>
+            </div>
           </div>
-          <div>
-            <p className="text-sm font-black text-slate-900">
-              Análise de conversas {desligada ? "desligada" : "ativa"}
-            </p>
-            <p className="text-xs text-slate-500 mt-0.5 max-w-2xl">
-              A IA lê as conversas, move sozinha as etapas comuns do funil e traz para cá o que parece
-              <b> venda fechada</b>, para você confirmar ou recusar. Cada decisão sua afina o manual desta clínica.
-            </p>
-          </div>
+          <button
+            onClick={() => save({ enabled: !config?.enabled })}
+            className={cn("flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-colors shrink-0",
+              desligada ? "bg-teal-600 hover:bg-teal-700 text-white" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50")}
+          >
+            <Power className="w-3.5 h-3.5" /> {desligada ? "Ativar análise" : "Desativar"}
+          </button>
         </div>
-        <button
-          onClick={() => save({ enabled: !config?.enabled })}
-          className={cn("flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-colors shrink-0",
-            desligada ? "bg-teal-600 hover:bg-teal-700 text-white" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50")}
-        >
-          <Power className="w-3.5 h-3.5" /> {desligada ? "Ativar análise" : "Desativar"}
-        </button>
+
+        <div className="flex flex-col sm:flex-row gap-5 pt-1">
+          <SeletorModo
+            eixo="etapa"
+            valor={config?.stage_mode ?? "auto"}
+            disabled={desligada}
+            onChange={m => save({ stage_mode: m })}
+          />
+          <SeletorModo
+            eixo="venda"
+            valor={config?.sale_mode ?? "suggest"}
+            disabled={desligada}
+            onChange={m => save({ sale_mode: m })}
+          />
+        </div>
       </div>
 
-      {/* Fila de vendas sugeridas */}
+      {/* Fila: o que a IA não aplicou sozinha e está esperando você */}
       <div>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-            <TrendingUp className="w-3.5 h-3.5" /> Vendas sugeridas ({pending.length})
+            <TrendingUp className="w-3.5 h-3.5" /> Aguardando sua decisão ({pending.length})
           </h3>
           <button onClick={() => refetch()} className="text-slate-400 hover:text-teal-600 transition-colors" title="Atualizar">
             <RefreshCw className="w-4 h-4" />
@@ -147,9 +220,11 @@ export function ConvAIReview() {
         {pending.length === 0 ? (
           <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center">
             <MessageSquare className="w-8 h-8 text-slate-200 mx-auto mb-2" />
-            <p className="text-slate-400 text-sm font-medium">Nenhuma venda aguardando decisão.</p>
+            <p className="text-slate-400 text-sm font-medium">Nada aguardando decisão.</p>
             <p className="text-slate-300 text-xs mt-1">
-              {desligada ? "Ative a análise para a IA começar a ler as conversas." : "Assim que a IA identificar uma, ela aparece aqui."}
+              {desligada
+                ? "Ative a análise para a IA começar a ler as conversas."
+                : "Só chega aqui o que estiver em Sugestão nos controles acima."}
             </p>
           </div>
         ) : (
@@ -165,6 +240,12 @@ export function ConvAIReview() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-black text-slate-900">{ins.leads?.name ?? "Contato"}</span>
+                      <span className={cn("text-[10px] font-black px-1.5 py-0.5 rounded border tracking-wider",
+                        ins.kind === "sale"
+                          ? "text-emerald-700 bg-emerald-50 border-emerald-200"
+                          : "text-violet-700 bg-violet-50 border-violet-200")}>
+                        {ins.kind === "sale" ? "VENDA" : "ETAPA"}
+                      </span>
                       <Confianca valor={ins.confidence} />
                       {ins.sale_value != null && (
                         <span className="text-[11px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">
@@ -182,16 +263,18 @@ export function ConvAIReview() {
                     <button
                       onClick={() => aprovar(ins)}
                       disabled={busy === ins.id}
-                      className="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
+                      className={cn("flex-1 sm:flex-none disabled:opacity-50 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors",
+                        ins.kind === "sale" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-violet-600 hover:bg-violet-700")}
                     >
-                      {busy === ins.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Confirmar venda
+                      {busy === ins.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                      {ins.kind === "sale" ? "Confirmar venda" : "Mover card"}
                     </button>
                     <button
                       onClick={() => recusar(ins)}
                       disabled={busy === ins.id}
                       className="flex-1 sm:flex-none bg-white border border-slate-200 hover:bg-rose-50 hover:border-rose-200 text-slate-600 hover:text-rose-600 px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
                     >
-                      <X className="w-3.5 h-3.5" /> Não foi venda
+                      <X className="w-3.5 h-3.5" /> {ins.kind === "sale" ? "Não foi venda" : "Manter etapa"}
                     </button>
                   </div>
                 </div>

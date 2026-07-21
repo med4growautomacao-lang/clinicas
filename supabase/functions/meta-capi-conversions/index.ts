@@ -120,24 +120,23 @@ serve(async (req) => {
     const value = (convRow?.value != null && Number.isFinite(Number(convRow.value)) && Number(convRow.value) > 0) ? Number(convRow.value) : null;
     const eventTime = (w: number) => { let x = rawTime ? Math.floor(new Date(rawTime).getTime() / 1000) : nowSecD; if (!Number.isFinite(x) || x > nowSecD || x < nowSecD - w * 86400) x = nowSecD; return x; };
     const clid = (lead?.ctwa_clid ?? "").trim();
+    const dataset = (clinic?.meta_capi_dataset_id ?? "").trim();
+    const waba = (clinic?.meta_waba_id ?? "").trim();
+    const ctwaToken = providerMode ? (platformToken || (clinic?.meta_token ?? "").trim()) : ((clinic?.meta_token ?? "").trim() || platformToken);
 
     let endpoint = "", token = "", kind = "", skip = "";
     let payload: Record<string, unknown> | null = null;
-    if (clid) {
-      const dataset = (clinic?.meta_capi_dataset_id ?? "").trim();
-      const waba = (clinic?.meta_waba_id ?? "").trim();
-      token = providerMode ? (platformToken || (clinic?.meta_token ?? "").trim()) : ((clinic?.meta_token ?? "").trim() || platformToken);
+    // CTWA só quando a clínica TEM WABA/dataset; senão (inclusive lead de anúncio sem WABA) → offline.
+    if (clid && dataset && waba && ctwaToken) {
+      token = ctwaToken;
       kind = "ctwa";
-      if (!dataset || !waba || !token) { skip = "CTWA sem WABA/dataset/token"; }
-      else {
-        const ud: Record<string, unknown> = { whatsapp_business_account_id: waba, ctwa_clid: clid };
-        const ph = phoneDigits(lead?.phone); if (ph) ud.ph = await sha256(ph);
-        if (lead?.email) ud.em = await sha256(String(lead.email));
-        if (lead?.rast_id) ud.external_id = await sha256(String(lead.rast_id));
-        payload = { event_name: eventName || "Purchase", event_time: eventTime(7), action_source: "business_messaging", messaging_channel: "whatsapp", event_id: debugTicketId, user_data: ud };
-        if (value != null) payload.custom_data = { currency: "BRL", value, order_id: debugTicketId };
-        endpoint = dataset;
-      }
+      const ud: Record<string, unknown> = { whatsapp_business_account_id: waba, ctwa_clid: clid };
+      const ph = phoneDigits(lead?.phone); if (ph) ud.ph = await sha256(ph);
+      if (lead?.email) ud.em = await sha256(String(lead.email));
+      if (lead?.rast_id) ud.external_id = await sha256(String(lead.rast_id));
+      payload = { event_name: eventName || "Purchase", event_time: eventTime(7), action_source: "business_messaging", messaging_channel: "whatsapp", event_id: debugTicketId, user_data: ud };
+      if (value != null) payload.custom_data = { currency: "BRL", value, order_id: debugTicketId };
+      endpoint = dataset;
     } else {
       const pixel = (clinic?.meta_pixel_id ?? "").trim();
       token = (clinic?.meta_token ?? "").trim() || orgToken || platformToken;
@@ -314,24 +313,12 @@ serve(async (req) => {
     };
 
     const clid = (lead?.ctwa_clid ?? "").trim();
+    const dataset = (clinic?.meta_capi_dataset_id ?? "").trim();
+    const waba = (clinic?.meta_waba_id ?? "").trim();
+    const ctwaToken = pickToken((clinic?.meta_token ?? "").trim());
 
-    // ── Caminho 1: CTWA (lead veio de anúncio) → dataset da WABA, action_source business_messaging ──
-    if (clid) {
-      const dataset = (clinic?.meta_capi_dataset_id ?? "").trim();
-      const waba = (clinic?.meta_waba_id ?? "").trim();
-      const token = pickToken((clinic?.meta_token ?? "").trim());
-      if (!dataset || !waba || !token) {
-        await service.from("meta_capi_events").update({
-          status: "skipped", last_error: "clínica sem WABA/dataset/token de CAPI configurados",
-        }).eq("id", ev.id);
-        if (!loggedMissingConfig.has(ev.clinic_id + ":ctwa")) {
-          loggedMissingConfig.add(ev.clinic_id + ":ctwa");
-          await registrar("clinica_sem_config", "Conversão pronta mas a clínica não tem WABA/dataset CAPI configurados",
-            "warn", ev.clinic_id, { tem_dataset: !!dataset, tem_waba: !!waba, tem_token: !!token });
-        }
-        skipped++;
-        continue;
-      }
+    // ── Caminho 1: CTWA (lead de anúncio COM WABA/dataset) → dataset da WABA, business_messaging ──
+    if (clid && dataset && waba && ctwaToken) {
       const userData: Record<string, unknown> = { whatsapp_business_account_id: waba, ctwa_clid: clid };
       const ph = phoneDigits(lead?.phone);
       if (ph) userData.ph = await sha256(ph);
@@ -346,17 +333,19 @@ serve(async (req) => {
         user_data: userData,
       };
       if (value != null) payload.custom_data = { currency: "BRL", value, order_id: ev.ticket_id };
-      const r = await deliverAndRecord(ev.id, ev.clinic_id, ev.ticket_id, dataset, token, payload, "ctwa");
+      const r = await deliverAndRecord(ev.id, ev.clinic_id, ev.ticket_id, dataset, ctwaToken, payload, "ctwa");
       if (r === "sent") sent++; else errored++;
       continue;
     }
 
-    // ── Caminho 2: OFFLINE (lead orgânico / sem clique) → pixel, casa por PII (telefone/e-mail/nome) ──
-    // A Meta dobrou a Offline Conversions API na Conversions API unificada (mai/2025): action_source
-    // system_generated/physical_store, sem ctwa_clid, no pixel (dataset unificado). Só se ligado.
+    // ── Caminho 2: OFFLINE (pixel) — lead ORGÂNICO ou lead de ANÚNCIO SEM WABA (fallback) ──
+    // A Meta dobrou a Offline Conversions API na Conversions API unificada (mai/2025). Lead de anúncio
+    // de clínica sem WABA (uazapi não onboardada) também cai aqui: perde o clid determinístico, mas a
+    // conversão ainda chega ao Meta pelo pixel (casa por telefone/e-mail/nome). Só se ligado.
     if (!sendOffline) {
       await service.from("meta_capi_events").update({
-        status: "skipped", last_error: "lead sem ctwa_clid e envio offline desligado",
+        status: "skipped",
+        last_error: clid ? "lead de anúncio sem WABA e envio offline desligado" : "lead sem ctwa_clid e envio offline desligado",
       }).eq("id", ev.id);
       skipped++;
       continue;

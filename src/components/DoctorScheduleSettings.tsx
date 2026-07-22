@@ -4,6 +4,7 @@ import { Button } from "./ui/button";
 import { motion } from "framer-motion";
 import { Doctor, ConsultationType, useConsultationTypes } from "../hooks/useSupabase";
 import { supabase } from "../lib/supabase";
+import { useAuth } from "../contexts/AuthContext";
 import { cn } from "@/src/lib/utils";
 
 interface DoctorScheduleSettingsProps {
@@ -24,10 +25,45 @@ const WEEKDAYS = [
   { id: '6', label: 'Sábado' },
 ];
 
+type Nature = NonNullable<ConsultationType['nature']>;
+
+// A natureza do modelo. Antes disso, a distinção vivia no TÍTULO ("Primeira Online",
+// "Seguimento Online") — e título é texto livre: metade das clínicas nomeia os modelos só pela
+// modalidade ("Presencial"), e nelas a natureza era indeterminável. Agora é campo.
+//
+// 'retorno' NÃO é sinônimo de 'seguimento': retorno é a cortesia gratuita com prazo, seguimento é
+// consulta nova paga de quem já se consultou.
+const NATURE_OPTIONS: { value: Nature; label: string; labelOutro: string; hint: string }[] = [
+  { value: 'primeira',   label: 'Primeira consulta', labelOutro: 'Primeiro atendimento',
+    hint: 'Quem nunca foi atendido aqui.' },
+  { value: 'retorno',    label: 'Retorno (cortesia)', labelOutro: 'Retorno (cortesia)',
+    hint: 'Gratuito, dentro de um prazo após a consulta anterior.' },
+  { value: 'seguimento', label: 'Seguimento', labelOutro: 'Novo atendimento',
+    hint: 'Consulta nova paga de quem já se consultou.' },
+];
+
+// ~40% dos tenants não são clínica (category = 'outro'): ali "paciente" é cliente e "consulta" é
+// atendimento. Sidebar e Comercial já viram os rótulos pela categoria; aqui segue o mesmo padrão.
+function useModelLabels() {
+  const { activeClinicCategory } = useAuth();
+  const isOutro = activeClinicCategory === 'outro';
+  return {
+    isOutro,
+    plural: isOutro ? 'Modelos de Atendimento' : 'Modelos de Consultas',
+    novo: isOutro ? 'Novo Modelo' : 'Novo Modelo',
+    vazio: isOutro ? 'Nenhum modelo de atendimento cadastrado.' : 'Nenhum modelo de consulta cadastrado.',
+    natureLabel: (n: Nature) => {
+      const o = NATURE_OPTIONS.find(x => x.value === n);
+      return o ? (isOutro ? o.labelOutro : o.label) : n;
+    },
+  };
+}
+
 export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorScheduleSettingsProps) {
   const [activeTab, setActiveTab] = useState<'availability' | 'limits' | 'days' | 'blocked_times'>('availability');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const labels = useModelLabels();
 
   const defaultHours = {
     "0": [],
@@ -165,7 +201,7 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
               activeTab === 'limits' ? "border-teal-600 text-teal-800" : "border-transparent text-slate-500 hover:text-slate-700"
             )}
           >
-            <SlidersHorizontal className="w-4 h-4" /> Tipos de Consultas
+            <SlidersHorizontal className="w-4 h-4" /> {labels.plural}
           </button>
           <button
             onClick={() => setActiveTab('days')}
@@ -265,23 +301,23 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
             </motion.div>
           )}
 
-          {/* ── Tipos de Consultas: galeria de tipos ── */}
+          {/* ── Modelos de Consultas: galeria de modelos ── */}
           {activeTab === 'limits' && (
             <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}>
               <div className="flex items-center justify-between mb-4">
-                <h4 className="font-bold text-slate-800 text-sm uppercase tracking-wider">Tipos de Consulta</h4>
+                <h4 className="font-bold text-slate-800 text-sm uppercase tracking-wider">{labels.plural}</h4>
                 <button
                   onClick={() => setEditingType('new')}
                   className="text-xs font-bold text-teal-600 bg-teal-50 px-3 py-1.5 rounded-md hover:bg-teal-100 transition-colors flex items-center gap-1.5"
                 >
-                  <Plus className="w-3.5 h-3.5" /> Novo Tipo
+                  <Plus className="w-3.5 h-3.5" /> {labels.novo}
                 </button>
               </div>
               {consultationTypes.length === 0 ? (
                 <div className="text-center py-12 bg-white border border-dashed border-slate-200 rounded-xl">
                   <Tag className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                  <p className="text-sm font-medium text-slate-400">Nenhum tipo de consulta cadastrado.</p>
-                  <p className="text-xs text-slate-400 mt-1">Clique em "Novo Tipo" para criar.</p>
+                  <p className="text-sm font-medium text-slate-400">{labels.vazio}</p>
+                  <p className="text-xs text-slate-400 mt-1">Clique em "{labels.novo}" para criar.</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -323,6 +359,19 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
                         </div>
                       </div>
                       <ul className="text-xs text-slate-500 font-medium space-y-1 list-disc list-inside marker:text-slate-300">
+                        <li>
+                          <span className="font-semibold text-slate-600">Natureza:</span>{' '}
+                          {ct.nature ? (
+                            <>
+                              {labels.natureLabel(ct.nature)}
+                              {ct.nature === 'retorno' && ct.return_window_days != null && ` (até ${ct.return_window_days} dias)`}
+                            </>
+                          ) : (
+                            /* Sem natureza, a IA volta a adivinhar pela descrição. Sinalizado em âmbar
+                               porque é ação pendente da clínica, não um estado normal. */
+                            <span className="text-amber-600 font-semibold">não classificada</span>
+                          )}
+                        </li>
                         <li><span className="font-semibold text-slate-600">Duração:</span> {ct.consultation_duration} min</li>
                         {ct.slot_step != null && ct.slot_step !== ct.consultation_duration && (
                           <li><span className="font-semibold text-slate-600">Vagas:</span> a cada {ct.slot_step} min</li>
@@ -543,6 +592,8 @@ function ConsultationTypeEditor({ doctorId, clinicId, existing, doctorWorkingHou
   const [slug, setSlug] = useState(existing?.slug ?? '');
   const [slugTouched, setSlugTouched] = useState(!!existing);
   const [modality, setModality] = useState<'presencial' | 'online'>(existing?.modality ?? 'presencial');
+  const [nature, setNature] = useState<Nature | null>(existing?.nature ?? null);
+  const [returnWindowDays, setReturnWindowDays] = useState<number | null>(existing?.return_window_days ?? null);
   const [description, setDescription] = useState<string>(existing?.description ?? '');
   const [duration, setDuration] = useState<number>(existing?.consultation_duration ?? 30);
   const [slotStep, setSlotStep] = useState<number | null>(existing?.slot_step ?? null);
@@ -569,6 +620,7 @@ function ConsultationTypeEditor({ doctorId, clinicId, existing, doctorWorkingHou
   const [error, setError] = useState<string | null>(null);
   const [showSlug, setShowSlug] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const labels = useModelLabels();
 
   const handleAddCustomShift = (dayId: string) => {
     setCustomHours(prev => ({ ...prev, [dayId]: [...(prev[dayId] || []), { start: '08:00', end: '12:00' }] }));
@@ -626,6 +678,10 @@ function ConsultationTypeEditor({ doctorId, clinicId, existing, doctorWorkingHou
         slug: finalSlug,
         name: name.trim(),
         modality,
+        nature,
+        // O banco barra prazo fora de 'retorno' (consultation_types_return_window_so_em_retorno).
+        // Zerar aqui evita que trocar a natureza deixe um prazo órfão e estoure a constraint.
+        return_window_days: nature === 'retorno' ? returnWindowDays : null,
         description: description.trim() || null,
         is_active: isActive,
         consultation_duration: duration,
@@ -757,6 +813,66 @@ function ConsultationTypeEditor({ doctorId, clinicId, existing, doctorWorkingHou
                 <Video className="w-4 h-4" /> Online
               </button>
             </div>
+          </div>
+
+          <div className="p-4 bg-white rounded-xl border border-slate-200">
+            <label className="block text-sm font-bold text-slate-700 mb-1">Natureza</label>
+            <p className="text-xs text-slate-400 font-medium mb-3">
+              É por aqui que a IA sabe se o modelo serve para quem nunca veio ou para quem já se consultou.
+              Sem isso, ela precisa adivinhar pela descrição.
+            </p>
+            <div className="space-y-2">
+              {NATURE_OPTIONS.map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => setNature(nature === opt.value ? null : opt.value)}
+                  className={cn(
+                    "w-full text-left px-3 py-2.5 rounded-lg border transition-all",
+                    nature === opt.value
+                      ? "bg-teal-50 border-teal-500 ring-1 ring-teal-200"
+                      : "bg-white border-slate-200 hover:border-teal-300"
+                  )}
+                >
+                  <span className={cn("block font-semibold text-sm", nature === opt.value ? "text-teal-800" : "text-slate-700")}>
+                    {labels.isOutro ? opt.labelOutro : opt.label}
+                  </span>
+                  <span className="block text-xs text-slate-500 font-medium mt-0.5">{opt.hint}</span>
+                </button>
+              ))}
+            </div>
+            {nature == null && (
+              <p className="text-xs text-amber-600 font-medium mt-2.5">
+                Não classificado: este modelo pode ser oferecido em qualquer situação.
+              </p>
+            )}
+
+            {/* O prazo só existe no retorno de cortesia. Hoje esse número vive em texto solto
+                (Lorena: 15 dias no prompt; Tyago: "menos de um mês" na descrição). */}
+            {nature === 'retorno' && (
+              <div className="mt-3 pt-3 border-t border-slate-100">
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                  Prazo do retorno
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={365}
+                    value={returnWindowDays ?? ''}
+                    onChange={e => {
+                      const v = e.target.value.trim();
+                      setReturnWindowDays(v === '' ? null : Math.max(1, Math.min(365, Number(v))));
+                    }}
+                    placeholder="15"
+                    className="w-24 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-teal-200 focus:outline-none"
+                  />
+                  <span className="text-sm text-slate-500 font-medium">dias após a consulta anterior</span>
+                </div>
+                <p className="text-xs text-slate-400 font-medium mt-1.5">
+                  Deixe vazio se não houver prazo definido.
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="p-4 bg-white rounded-xl border border-slate-200">

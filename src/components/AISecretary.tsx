@@ -1283,8 +1283,8 @@ function PaymentConfigView() {
               <h4 className="font-bold text-sm">Como funciona (Fase 1)</h4>
             </div>
             <ol className="space-y-2.5 text-xs text-slate-600 leading-relaxed font-medium list-decimal pl-4">
-              <li>Você marca quais <b>tipos de consulta</b> exigem pré-pagamento (na tela de Tipos de Consulta).</li>
-              <li>Quando o paciente vai agendar um desses tipos, a IA envia <b>PIX + dados + link de cartão</b>.</li>
+              <li>Você marca quais <b>modelos de consulta</b> exigem pré-pagamento (na tela de Modelos de Consultas).</li>
+              <li>Quando o paciente vai agendar um desses modelos, a IA envia <b>PIX + dados + link de cartão</b>.</li>
               <li>O paciente envia o <b>comprovante</b>; a IA lê e sinaliza (valor confere / não confere / ilegível).</li>
               <li>A equipe é <b>notificada no grupo e no sino</b> para dar o OK final.</li>
             </ol>
@@ -2812,9 +2812,10 @@ function PromptLayersExplainer() {
         </div>
 
         <p className="text-[11px] text-slate-400 leading-relaxed pl-1">
-          Fora dos dois prompts: as <strong className="text-slate-500">descrições dos tipos de consulta</strong> não ficam aqui.
-          O agente as lê direto do cadastro (Agenda › Tipos de Consulta) na hora de oferecer horários — é lá que se ensina
-          quando usar cada tipo.
+          Fora dos dois prompts: os <strong className="text-slate-500">Modelos de Consultas</strong> não ficam aqui.
+          O agente lê direto do cadastro (Agenda › Modelos de Consultas) na hora de oferecer horários. É lá que se define
+          a <strong className="text-slate-500">natureza</strong> de cada modelo (primeira, retorno ou seguimento), e é a
+          descrição que ensina as nuances de quando usar cada um.
         </p>
       </div>
     </div>

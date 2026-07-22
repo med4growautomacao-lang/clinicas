@@ -200,6 +200,8 @@ Aparece em **Super Admin › Central de Erros** (fingerprint agregado; EVENTO co
 ## Supabase
 - **project_id: `yzpclhuifquhfqpiwysh`** — o MCP **exige** esse parâmetro em toda chamada; sem ele a chamada falha.
 - **Migrations:** aplicar via MCP `apply_migration` — **não rodar SQL solto** para mudança de schema.
+- **Nome de migration = timestamp real** (`YYYYMMDDHHMMSS_nome.sql`, ex.: `20260722203227_...`), **nunca sequencial** (`...000004`).
+  ⚠️ Sequencial **colide entre sessões paralelas**: cada uma escolhe "o próximo livre" e chega no mesmo número. Já aconteceu — há duas `20260722000004_*` no repo. O `apply_migration` grava no banco o timestamp **da hora da aplicação**, então nome sequencial também faz a ordem dos arquivos **mentir** sobre a ordem real.
 - **Deploy de edge function:** Supabase CLI. O **PAT já está no `.mcp.json`** — que é **gitignored**.
   ⚠️ **Nunca** commitar o token, nem colá-lo em arquivo rastreado. Referencie a origem, não o valor.
 
@@ -209,6 +211,16 @@ Aparece em **Super Admin › Central de Erros** (fingerprint agregado; EVENTO co
 ## Windows / PowerShell
 - Mensagem de commit: **usar `git commit -F <arquivo>`**. Here-string (`@'...'@`) **quebra** com acento e aspas — já custou chamadas perdidas.
 - PowerShell 5.1: **não existe `&&`/`||`**. Encadear com `;` ou `if ($?) { }`.
+
+## ⚠️ Até 4 sessões editam este repo AO MESMO TEMPO
+
+Você **não enxerga as outras sessões** e elas não te avisam. Trabalhe assumindo que há trabalho alheio, pela metade, na mesma árvore.
+
+**Nunca `git add -A`, `git add .` nem `git commit -a`.** Rode `git status` e **liste no `git add` só os arquivos que ESTA sessão editou** — arquivo que você não tocou fica de fora, mesmo que pareça pronto. Já houve commit levando junto a frente de outra sessão.
+
+O que **não** precisa de cuidado: editar arquivo. O harness recusa sobrescrever o que você não leu e avisa quando mudou no disco. **O ponto cego é o índice do git.**
+
+⚠️ **Banco, edge function e n8n são UM só para todas as sessões** — worktree e regra nenhuma isolam isso. Antes de `apply_migration`, deploy ou mexer em workflow, lembre que outra sessão pode estar no mesmo objeto, **em produção com pacientes reais**.
 
 ## Fuso horário — o banco MISTURA os dois tipos
 O negócio é todo em **`America/Sao_Paulo`**, mas as colunas **não são uniformes**. **Confira o tipo antes de converter** — converter duas vezes desloca em 3h e **ninguém percebe**:

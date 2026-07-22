@@ -246,7 +246,9 @@ function ConfirmationsView() {
                     const v = !localConfig.confirm_enabled;
                     // Grava SÓ a chave que mudou: o apply roda depois da janela de confirmação, e
                     // mandar o localConfig inteiro regravaria um snapshot velho por cima do servidor.
-                    const apply = () => { setLocalConfig({ ...localConfig, confirm_enabled: v }); updateAI({ confirm_enabled: v }); };
+                    // Sem linha em ai_config ainda, manda o objeto semeado (senão o INSERT criaria
+                    // um registro só com esta coluna e o resto viria do default da tabela).
+                    const apply = () => { setLocalConfig({ ...localConfig, confirm_enabled: v }); updateAI(aiConfig ? { confirm_enabled: v } : { ...localConfig, confirm_enabled: v }); };
                     if (v) guard("confirmation", apply); else apply();
                   }}
                   className={cn("w-12 h-6 rounded-full relative transition-all shrink-0", localConfig.confirm_enabled ? "bg-teal-600" : "bg-slate-300")}
@@ -597,7 +599,7 @@ function FollowupsView() {
             <button
               onClick={() => {
                 const v = !localConfig.followup_enabled;
-                const apply = () => { setLocalConfig({ ...localConfig, followup_enabled: v }); updateAI({ followup_enabled: v }); };
+                const apply = () => { setLocalConfig({ ...localConfig, followup_enabled: v }); updateAI(aiConfig ? { followup_enabled: v } : { ...localConfig, followup_enabled: v }); };
                 if (v) guard("reengagement", apply); else apply();
               }}
               className={cn(
@@ -762,7 +764,7 @@ function WelcomeFollowupView() {
             <button
               onClick={() => {
                 const v = !localConfig.welcome_message_enabled;
-                const apply = () => { setLocalConfig({ ...localConfig, welcome_message_enabled: v }); updateAI({ welcome_message_enabled: v }); };
+                const apply = () => { setLocalConfig({ ...localConfig, welcome_message_enabled: v }); updateAI(aiConfig ? { welcome_message_enabled: v } : { ...localConfig, welcome_message_enabled: v }); };
                 if (v) guard("welcome", apply); else apply();
               }}
               className={cn("w-12 h-6 rounded-full relative transition-all", localConfig.welcome_message_enabled ? "bg-teal-600" : "bg-slate-300")}
@@ -970,7 +972,7 @@ function PosFollowupView() {
               <button
                 onClick={() => {
                   const v = !localConfig[keys.enabled];
-                  const apply = () => { setLocalConfig({ ...localConfig, [keys.enabled]: v }); updateAI({ [keys.enabled]: v }); };
+                  const apply = () => { setLocalConfig({ ...localConfig, [keys.enabled]: v }); updateAI(aiConfig ? { [keys.enabled]: v } : { ...localConfig, [keys.enabled]: v }); };
                   if (v) guard(outcomeTab === "ganho" ? "pos_ganho" : "pos_perdido", apply); else apply();
                 }}
                 className={cn(
@@ -2043,7 +2045,7 @@ function FinishServiceView() {
                     <button
                       onClick={() => {
                         const v = !localConfig[keys.enabled];
-                        const apply = () => { setLocalConfig({ ...localConfig, [keys.enabled]: v }); updateAI({ [keys.enabled]: v }); };
+                        const apply = () => { setLocalConfig({ ...localConfig, [keys.enabled]: v }); updateAI(aiConfig ? { [keys.enabled]: v } : { ...localConfig, [keys.enabled]: v }); };
                         if (v) guard(
                           outcomeTab === "ganho" ? "finish_ganho"
                             : outcomeTab === "perdido" ? "finish_perdido" : "finish_service",

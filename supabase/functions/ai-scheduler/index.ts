@@ -68,13 +68,13 @@ async function findDoctorTypes(
 ): Promise<any[]> {
   if (ctId) {
     const { data } = await supabaseClient.from("consultation_types")
-      .select("id, slug, modality, is_active").eq("id", ctId).eq("doctor_id", doctorId).maybeSingle();
+      .select("id, slug, modality, is_active, consultation_duration").eq("id", ctId).eq("doctor_id", doctorId).maybeSingle();
     if (data) return data.is_active === false ? [] : [data];
     // ctId não pertence a este médico -> tenta resolver por modalidade/slug abaixo
   }
   const key = (modalityOrSlug || "").trim().toLowerCase();
   const { data: types } = await supabaseClient.from("consultation_types")
-    .select("id, slug, modality, is_active").eq("doctor_id", doctorId).eq("is_active", true);
+    .select("id, slug, modality, is_active, consultation_duration").eq("doctor_id", doctorId).eq("is_active", true);
   const list = types || [];
   // "online"/"presencial" são MODALIDADES, não slugs — mesmo que exista um tipo cujo slug
   // seja "online" (Seguimento Online). Tratá-las como modalidade faz uma clínica com
@@ -93,6 +93,135 @@ function preferType(matches: any[]): any {
   return matches.find((t: any) => (t.slug || "").toLowerCase().includes("primeira")) || matches[0];
 }
 
+// ─── Política de oferta: AGRUPAR, não espalhar ────────────────────────────────
+// get_available_slots devolve TODOS os livres em ordem cronológica. Oferecer os
+// primeiros da lista (que era o que o modelo fazia, por falta de qualquer critério)
+// esburaca a agenda: com uma consulta às 17:30, o próximo paciente caía às 15:00 e o
+// médico ficava 2h15 ocioso na clínica para atender 15 minutos. Aqui o motor decide
+// QUAIS oferecer; a lista completa continua no retorno para o paciente que pede outro
+// período. Regra: encostar no que já existe; dia vazio começa cedo.
+const SUGGESTED_COUNT = 2;
+
+type Busy = { start: number; end: number };
+
+function hhmmToMin(t: string): number {
+  const [h, m] = (t || "").split(":").map((n) => Number(n) || 0);
+  return h * 60 + m;
+}
+
+function pickSuggestedSlots(slots: string[], busy: Busy[], durationMinutes: number): string[] {
+  if (slots.length <= SUGGESTED_COUNT) return [...slots];
+  // Dia sem nada marcado: o começo do expediente JÁ é o agrupamento ideal (o médico
+  // entra, atende e vai embora). É também o que a recepção pede: "prioridade mais cedo".
+  if (busy.length === 0) return slots.slice(0, SUGGESTED_COUNT);
+  // Default alinhado ao do banco (appointments.duration_minutes / consultation_duration
+  // são NOT NULL DEFAULT 60). Um default menor aqui encurtaria o `end` e faria um slot
+  // sobreposto parecer livre.
+  const dur = durationMinutes > 0 ? durationMinutes : 60;
+  const scored: { s: string; start: number; gap: number }[] = [];
+  for (const s of slots) {
+    const start = hhmmToMin(s);
+    const end = start + dur;
+    let gap = Number.MAX_SAFE_INTEGER;
+    let overlaps = false;
+    for (const b of busy) {
+      // Sobreposição não é "gap zero": é slot inválido. Tratá-la como 0 a
+      // empataria com o slot que encosta perfeitamente e a colocaria no topo.
+      if (start < b.end && end > b.start) { overlaps = true; break; }
+      const d = start >= b.end ? start - b.end : b.start - end;
+      if (d < gap) gap = d;
+    }
+    if (overlaps) continue;
+    scored.push({ s, start, gap });
+  }
+  // get_available_slots já filtra ocupados; se ainda assim tudo colidir (durações
+  // divergentes), volta ao comportamento antigo em vez de não oferecer nada.
+  if (scored.length === 0) return slots.slice(0, SUGGESTED_COUNT);
+  // Menor janela ociosa primeiro; empate desempata pelo mais cedo.
+  scored.sort((a, b) => (a.gap - b.gap) || (a.start - b.start));
+  return scored.slice(0, SUGGESTED_COUNT).map((x) => x.s);
+}
+
+/** Frase com os horários livres que não estão entre os sugeridos, limitada e com contador. */
+function otherSlotsPhrase(all: string[], suggested: string[], maxOthers = Infinity): string {
+  const others = all.filter((s) => !suggested.includes(s));
+  if (others.length === 0) return "";
+  const shown = others.length > maxOthers ? others.slice(0, maxOthers) : others;
+  const restante = others.length - shown.length;
+  return restante > 0
+    ? `${shown.join(", ")} (+${restante}, peça VER_HORARIOS nesse dia para a lista completa)`
+    : shown.join(", ");
+}
+
+// O readable_summary é o que o modelo de fato lê. Ele precisa dizer três coisas ao mesmo
+// tempo: o que oferecer AGORA, que existem outros horários, e que ele PODE usar os outros
+// quando o paciente pedir. Esconder o resto da lista prenderia a IA no primeiro palpite.
+const REGRA_DE_OFERTA =
+  'REGRA DE OFERTA: ofereça primeiro os horários marcados como "OFEREÇA ESTES". ' +
+  "Se o paciente recusar, pedir outro período (mais cedo, mais tarde, manhã, tarde) ou outro dia, " +
+  'ofereça à vontade os "outros livres" desta lista ou chame VER_HORARIOS em outra data. ' +
+  "Nunca ofereça horário que não esteja nessas listas.";
+
+// `maxOthers` omitido = lista todos os outros horários.
+function doctorAvailabilityLine(a: any, dateLabel: string, maxOthers = Infinity): string {
+  if (!a.available_slots || a.available_slots.length === 0) {
+    return `${a.doctor_name}: sem horários disponíveis em ${dateLabel}.`;
+  }
+  const sug: string[] = a.suggested_slots || [];
+  const motivo = a.grouped
+    ? " (encaixam junto às consultas já marcadas, sem deixar o médico ocioso)"
+    : "";
+  let linha = `${a.doctor_name} em ${dateLabel}: OFEREÇA ESTES: ${sug.join(", ")}${motivo}.`;
+  const outros = otherSlotsPhrase(a.available_slots, sug, maxOthers);
+  if (outros) linha += ` Outros livres nesse dia: ${outros}.`;
+  return linha;
+}
+
+// Consultas já marcadas, para saber onde encostar. Mesmo critério de ocupação de
+// get_available_slots (`status NOT IN ('cancelado','faltou')`) — se divergir, a IA passa
+// a sugerir horário colado numa consulta que não existe mais.
+async function fetchBusyMap(
+  supabaseClient: any, clinicId: string | null, doctorIds: string[], dateFrom: string, dateTo: string,
+): Promise<Map<string, Busy[]>> {
+  const map = new Map<string, Busy[]>();
+  if (doctorIds.length === 0) return map;
+  const { data, error } = await supabaseClient
+    .from("appointments")
+    .select("doctor_id, date, time, duration_minutes")
+    .in("doctor_id", doctorIds)
+    .gte("date", dateFrom).lte("date", dateTo)
+    .not("status", "in", "(cancelado,faltou)");
+  if (error) {
+    // Não é fatal: sem isso a oferta volta a ser "os primeiros da lista", que é o
+    // comportamento antigo. Mas é silencioso, então precisa aparecer na Central.
+    await registrarErro(
+      "agenda_ocupada_nao_carregou",
+      "Não deu para ler as consultas já marcadas — a IA vai oferecer horários sem agrupar (agenda esburacada)",
+      "warning", clinicId, { erro: error.message, medicos: doctorIds.length, de: dateFrom, ate: dateTo },
+    );
+    return map;
+  }
+  const rows = data || [];
+  // O PostgREST clampa a resposta em max_rows e não avisa. Se bater o teto, parte das
+  // consultas não entrou na conta e a sugestão degrada em silêncio.
+  if (rows.length >= 1000) {
+    await registrarErro(
+      "agenda_ocupada_truncada",
+      "A leitura das consultas marcadas bateu o teto do PostgREST — o agrupamento de horários pode estar incompleto",
+      "warning", clinicId, { linhas: rows.length, de: dateFrom, ate: dateTo },
+    );
+  }
+  for (const r of rows) {
+    const key = `${r.doctor_id}|${r.date}`;
+    const start = hhmmToMin(String(r.time || ""));
+    const end = start + (Number(r.duration_minutes) > 0 ? Number(r.duration_minutes) : 15);
+    const list = map.get(key);
+    if (list) list.push({ start, end });
+    else map.set(key, [{ start, end }]);
+  }
+  return map;
+}
+
 async function fetchSlotsForDoctorDate(
   supabaseClient: any,
   clinicId: string | null,
@@ -101,9 +230,22 @@ async function fetchSlotsForDoctorDate(
   modality: string = "presencial",
   consultationTypeId?: string,
 ): Promise<string[]> {
+  return (await fetchSlotsDetailed(supabaseClient, clinicId, doctorId, date, modality, consultationTypeId)).slots;
+}
+
+async function fetchSlotsDetailed(
+  supabaseClient: any,
+  clinicId: string | null,
+  doctorId: string,
+  date: string,
+  modality: string = "presencial",
+  consultationTypeId?: string,
+): Promise<{ slots: string[]; durationMinutes: number }> {
   const matches = await findDoctorTypes(supabaseClient, doctorId, consultationTypeId, modality);
-  if (matches.length === 0) return [];
-  const typeId = preferType(matches).id;
+  if (matches.length === 0) return { slots: [], durationMinutes: 0 };
+  const chosen = preferType(matches);
+  const typeId = chosen.id;
+  const durationMinutes = Number(chosen.consultation_duration) || 0;
   const { data, error } = await supabaseClient.rpc("get_available_slots", {
     p_doctor_id: doctorId, p_date: date, p_consultation_type_id: typeId,
   });
@@ -118,9 +260,12 @@ async function fetchSlotsForDoctorDate(
       "critical", clinicId,
       { erro: error.message, doctor_id: doctorId, data: date, tipo_consulta: typeId },
     );
-    return [];
+    return { slots: [], durationMinutes };
   }
-  return (data || []).map((s: any) => (s.slot_time || "").toString().substring(0, 5));
+  return {
+    slots: (data || []).map((s: any) => (s.slot_time || "").toString().substring(0, 5)),
+    durationMinutes,
+  };
 }
 
 // Busca alternativas de horario para a IA oferecer: tenta a data pedida e os 14 dias seguintes.
@@ -131,11 +276,18 @@ async function findAlternativeSlots(
   fromDate: string,
   modality: string,
   consultationTypeId?: string,
-): Promise<{ date: string; slots: string[] } | null> {
+): Promise<{ date: string; slots: string[]; suggested: string[] } | null> {
   for (let i = 0; i <= 14; i++) {
     const d = addDays(fromDate, i);
-    const slots = await fetchSlotsForDoctorDate(supabaseClient, clinicId, doctorId, d, modality, consultationTypeId);
-    if (slots.length > 0) return { date: d, slots: slots.slice(0, 8) };
+    const { slots, durationMinutes } = await fetchSlotsDetailed(supabaseClient, clinicId, doctorId, d, modality, consultationTypeId);
+    if (slots.length > 0) {
+      const busyMap = await fetchBusyMap(supabaseClient, clinicId, [doctorId], d, d);
+      const suggested = pickSuggestedSlots(slots, busyMap.get(`${doctorId}|${d}`) || [], durationMinutes);
+      // Lista completa: truncar aqui já escondeu do modelo a faixa do meio do dia
+      // (os sugeridos podem ser do fim do expediente), e a IA passava a dizer ao
+      // paciente que não havia horário à tarde. Quem monta o texto é que limita.
+      return { date: d, slots, suggested };
+    }
   }
   return null;
 }
@@ -257,15 +409,25 @@ serve(async (req) => {
       const { data: doctors, error: doctorsError } = await doctorsQuery;
       if (doctorsError) throw doctorsError;
 
+      // Uma leitura só das consultas marcadas em toda a janela: é o que permite oferecer
+      // horário colado no que já existe em vez de sempre o começo do expediente.
+      const busyMap = await fetchBusyMap(
+        supabaseClient, clinic_id, (doctors || []).map((d: any) => d.id),
+        dateList[0], dateList[dateList.length - 1],
+      );
+
       const days_availability: any[] = [];
       for (const d of dateList) {
         const perDoctor = await Promise.all(
           (doctors || []).map(async (doc: any) => {
-            const available_slots = await fetchSlotsForDoctorDate(supabaseClient, clinic_id, doc.id, d, modality, ctId);
+            const { slots, durationMinutes } = await fetchSlotsDetailed(supabaseClient, clinic_id, doc.id, d, modality, ctId);
+            const busy = busyMap.get(`${doc.id}|${d}`) || [];
             return {
               doctor_id: doc.id,
               doctor_name: doc.name || doc.clinic_users?.full_name || "Médico sem nome",
-              available_slots,
+              available_slots: slots,
+              suggested_slots: pickSuggestedSlots(slots, busy, durationMinutes),
+              grouped: busy.length > 0,
             };
           })
         );
@@ -278,14 +440,27 @@ serve(async (req) => {
 
         let next_available: { date: string; availability: any[] } | null = null;
         if (totalSlots === 0) {
+          // Uma leitura só para os 14 dias: dentro do laço isso era uma consulta por
+          // dia, dobrando a latência no caminho mais lento (agenda cheia), com a IA
+          // esperando de forma síncrona no meio da conversa.
+          const probeBusy = await fetchBusyMap(
+            supabaseClient, clinic_id, (doctors || []).map((d: any) => d.id),
+            addDays(date, 1), addDays(date, 14),
+          );
           for (let i = 1; i <= 14; i++) {
             const tryDate = addDays(date, i);
             const probe = await Promise.all(
-              (doctors || []).map(async (doc: any) => ({
-                doctor_id: doc.id,
-                doctor_name: doc.name || doc.clinic_users?.full_name || "Médico sem nome",
-                available_slots: await fetchSlotsForDoctorDate(supabaseClient, clinic_id, doc.id, tryDate, modality, ctId),
-              }))
+              (doctors || []).map(async (doc: any) => {
+                const { slots, durationMinutes } = await fetchSlotsDetailed(supabaseClient, clinic_id, doc.id, tryDate, modality, ctId);
+                const busy = probeBusy.get(`${doc.id}|${tryDate}`) || [];
+                return {
+                  doctor_id: doc.id,
+                  doctor_name: doc.name || doc.clinic_users?.full_name || "Médico sem nome",
+                  available_slots: slots,
+                  suggested_slots: pickSuggestedSlots(slots, busy, durationMinutes),
+                  grouped: busy.length > 0,
+                };
+              })
             );
             const probeTotal = probe.reduce((s, a) => s + a.available_slots.length, 0);
             if (probeTotal > 0) {
@@ -296,21 +471,19 @@ serve(async (req) => {
         }
 
         let readable_summary = single.availability
-          .map((a: any) =>
-            a.available_slots.length === 0
-              ? `${a.doctor_name}: Sem horários disponíveis em ${single.date}.`
-              : `${a.doctor_name}: Horários disponíveis em ${single.date} às ${a.available_slots.join(", ")}.`
-          )
+          .map((a: any) => doctorAvailabilityLine(a, single.date))
           .join("\n");
 
         if (totalSlots === 0 && next_available) {
           const lines = next_available.availability
             .filter((a: any) => a.available_slots.length > 0)
-            .map((a: any) => `  ${a.doctor_name}: ${a.available_slots.join(", ")}`);
+            .map((a: any) => `  ${doctorAvailabilityLine(a, next_available!.date)}`);
           readable_summary += `\n\nPróxima data disponível: ${next_available.date}\n${lines.join("\n")}`;
         } else if (totalSlots === 0 && !next_available) {
           readable_summary += `\n\nSem disponibilidade nos próximos 14 dias.`;
         }
+
+        if (totalSlots > 0 || next_available) readable_summary += `\n\n${REGRA_DE_OFERTA}`;
 
         return new Response(
           JSON.stringify({
@@ -328,14 +501,16 @@ serve(async (req) => {
       for (const day of days_availability) {
         const dayLines = day.availability
           .filter((a: any) => a.available_slots.length > 0)
-          .map((a: any) => `  ${a.doctor_name}: ${a.available_slots.join(", ")}`);
+          // Janela larga: a lista completa de todo dia de todo médico estoura o contexto.
+          // Os sugeridos vêm sempre; os outros ficam limitados, com o total sinalizado.
+          .map((a: any) => `  ${doctorAvailabilityLine(a, day.date, 10)}`);
         if (dayLines.length > 0) {
           summaryLines.push(`${day.date}:`);
           summaryLines.push(...dayLines);
         }
       }
       const readable_summary = summaryLines.length > 0
-        ? summaryLines.join("\n")
+        ? `${summaryLines.join("\n")}\n\n${REGRA_DE_OFERTA}`
         : `Sem horários disponíveis no período solicitado (${dateList[0]} a ${dateList[dateList.length-1]}).`;
       return new Response(
         JSON.stringify({
@@ -415,7 +590,7 @@ serve(async (req) => {
           const alt = await findAlternativeSlots(supabaseClient, clinic_id, doctor_id, date, finalModality, resolvedTypeId);
           if (alt) {
             extra.alternatives = alt;
-            next_step = `NÃO repita o mesmo horário. Ofereça ao paciente estes horários disponíveis em ${alt.date}: ${alt.slots.join(", ")}. Quando ele escolher, chame MARCAR_HORARIO novamente com o horário escolhido.`;
+            next_step = `NÃO repita o mesmo horário. Ofereça ao paciente estes horários em ${alt.date}: ${alt.suggested.join(", ")}. Se ele pedir outro período, os demais livres desse dia são: ${otherSlotsPhrase(alt.slots, alt.suggested, 10)}. Quando ele escolher, chame MARCAR_HORARIO novamente com o horário escolhido.`;
           } else {
             next_step = "Sem horários disponíveis nos próximos 14 dias para este médico. Consulte VER_HORARIOS em datas mais distantes ou ofereça outro profissional (LISTAR_TIPOS_CONSULTA).";
           }
@@ -517,7 +692,7 @@ serve(async (req) => {
           const alt = await findAlternativeSlots(supabaseClient, clinic_id, targetDoctor, date, altModality, rctId);
           if (alt) {
             extra.alternatives = alt;
-            next_step = `Ofereça ao paciente os horários disponíveis em ${alt.date}: ${alt.slots.join(", ")} e chame REAGENDAR_HORARIO novamente com o escolhido.`;
+            next_step = `Ofereça ao paciente estes horários em ${alt.date}: ${alt.suggested.join(", ")} (se ele pedir outro período, os demais livres são: ${otherSlotsPhrase(alt.slots, alt.suggested, 10)}) e chame REAGENDAR_HORARIO novamente com o escolhido.`;
           } else {
             next_step = "Sem horários próximos disponíveis. Consulte VER_HORARIOS em outras datas ou outro médico.";
           }

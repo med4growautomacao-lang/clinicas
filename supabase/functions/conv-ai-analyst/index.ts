@@ -130,14 +130,30 @@ async function callLlm(
   }
 
   if (provider === "openai") {
+    // A geração GPT-5 trocou max_tokens por max_completion_tokens (400 no antigo)
+    // e só aceita temperature no default. Modelos anteriores seguem no formato
+    // velho, então mandamos o campo certo para cada família.
+    const gpt5 = /^(gpt-5|o[134])/.test(model);
+    const body: Record<string, unknown> = {
+      model,
+      messages: [{ role: "system", content: system }, { role: "user", content: user }],
+    };
+    if (gpt5) {
+      // Modelo de raciocínio: os tokens de "pensar" saem do MESMO teto da
+      // resposta. Com o teto justo do JSON, ele gasta tudo raciocinando e
+      // devolve conteúdo vazio. Daí a folga e o esforço no mínimo: aqui a
+      // tarefa é classificar com um manual pronto, não deduzir do zero.
+      body.max_completion_tokens = Math.max(maxTokens, 4000);
+      body.reasoning_effort = "low";
+    } else {
+      body.max_tokens = maxTokens;
+      body.temperature = temperature;
+    }
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
-      signal: AbortSignal.timeout(60000),
+      signal: AbortSignal.timeout(90000),
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        model, temperature, max_tokens: maxTokens,
-        messages: [{ role: "system", content: system }, { role: "user", content: user }],
-      }),
+      body: JSON.stringify(body),
     });
     if (!r.ok) throw new Error(`openai ${r.status}: ${(await r.text().catch(() => "")).slice(0, 300)}`);
     const j = await r.json();
@@ -430,7 +446,14 @@ async function analisarTicket(item: any, cfg: any, dry: boolean, debug = false):
       .eq("clinic_id", item.clinic_id);
   }
   return debug
-    ? { resultado, parsed, etapa_atual: ctx.ticket?.stage_name, tem_manual: !!ctx.clinic_prompt, mensagens: (ctx.messages ?? []).length }
+    ? {
+        resultado, parsed,
+        etapa_atual: ctx.ticket?.stage_name,
+        tem_manual: !!ctx.clinic_prompt,
+        mensagens: (ctx.messages ?? []).length,
+        modelo: `${cfg.provider}/${cfg.model}`,
+        tokens: { entrada: out.tokens_in, saida: out.tokens_out },
+      }
     : resultado;
 }
 
@@ -441,12 +464,17 @@ serve(async (req) => {
   const dry = url.searchParams.get("dry") === "1";
   const oneTicket = url.searchParams.get("ticket");
   const debug = url.searchParams.get("debug") === "1";
+  // Override de modelo SÓ para comparar provedores em dry-run de um ticket.
+  // Nunca afeta a config salva nem uma rodada real: é bancada de teste.
+  const provOverride = dry && oneTicket ? url.searchParams.get("provider") : null;
+  const modelOverride = dry && oneTicket ? url.searchParams.get("model") : null;
 
   try {
     const { data: row } = await admin
       .from("system_settings").select("value").eq("id", "conv_ai_config").maybeSingle();
     let cfg: any = { ...DEFAULTS };
     try { cfg = { ...DEFAULTS, ...JSON.parse(row?.value ?? "{}") }; } catch { /* default */ }
+    if (provOverride) cfg = { ...cfg, provider: provOverride, model: modelOverride ?? cfg.model };
 
     if (cfg.mode === "off" && !oneTicket) {
       return new Response(JSON.stringify({ skipped: "mode_off" }), {

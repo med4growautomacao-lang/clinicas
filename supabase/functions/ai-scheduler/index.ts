@@ -93,6 +93,23 @@ function preferType(matches: any[]): any {
   return matches.find((t: any) => (t.slug || "").toLowerCase().includes("primeira")) || matches[0];
 }
 
+const DIAS_SEMANA = [
+  "Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado",
+];
+
+// "2026-07-27" + "09:00:00" -> "Segunda-feira, 27/07 às 09h"
+// Monta a partir dos componentes, sem Date/Intl com fuso: a data já É de São Paulo e
+// converter aqui deslocaria o dia (o runtime do edge é UTC).
+function formatarQuando(date: string, time: string): string {
+  const [y, m, d] = String(date || "").split("-").map(Number);
+  const [hh, mi] = String(time || "").slice(0, 5).split(":");
+  if (!y || !m || !d) return `${date} às ${String(time || "").slice(0, 5)}`;
+  const diaSemana = DIAS_SEMANA[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+  const dm = `${String(d).padStart(2, "0")}/${String(m).padStart(2, "0")}`;
+  const hora = mi && mi !== "00" ? `${hh}h${mi}` : `${hh}h`;
+  return `${diaSemana}, ${dm} às ${hora}`;
+}
+
 // ─── Política de oferta: AGRUPAR, não espalhar ────────────────────────────────
 // get_available_slots devolve TODOS os livres em ordem cronológica. Oferecer os
 // primeiros da lista (que era o que o modelo fazia, por falta de qualquer critério)
@@ -363,14 +380,35 @@ serve(async (req) => {
         id: t.id, doctor_id: t.doctor_id, doctor_name: t.doctor_name,
         slug: t.slug, name: t.name, modality: t.modality,
         description: t.description, duration: t.consultation_duration,
+        nature: t.nature ?? null, return_window_days: t.return_window_days ?? null,
       }));
-      const lines = list.map((t: any) =>
-        `- [${t.id}] ${t.name} (${t.modality}, ${t.duration}min) com ${t.doctor_name}` +
-        (t.description ? `: ${t.description}` : "")
-      );
+      // A natureza entra no texto, nao so no JSON: e o readable_summary que o modelo de fato le.
+      // Antes disso a unica pista era a description em prosa, e foi assim que 3 dos 10 agendamentos
+      // da IA na Lorena sairam como "Seguimento" para paciente que nunca tinha consultado.
+      const natureLabel = (t: any): string => {
+        if (t.nature === "primeira") return "PRIMEIRA CONSULTA: so para quem NUNCA se consultou aqui";
+        if (t.nature === "seguimento") return "SEGUIMENTO: consulta nova paga, para quem JA se consultou";
+        if (t.nature === "retorno") {
+          return "RETORNO DE CORTESIA (gratuito)" +
+            (t.return_window_days ? `, valido ate ${t.return_window_days} dias apos a consulta anterior` : "");
+        }
+        return "";
+      };
+      const lines = list.map((t: any) => {
+        const nat = natureLabel(t);
+        return `- [${t.id}] ${t.name} (${t.modality}, ${t.duration}min) com ${t.doctor_name}` +
+          (nat ? ` [${nat}]` : "") +
+          (t.description ? `: ${t.description}` : "");
+      });
+      const temNatureza = list.some((t: any) => t.nature);
       const readable_summary = list.length === 0
         ? "Nenhum tipo de consulta cadastrado para esta clinica."
-        : `Tipos disponiveis (use o ID em VER_HORARIOS e MARCAR_HORARIO):\n${lines.join("\n")}`;
+        : `Tipos disponiveis (use o ID em VER_HORARIOS e MARCAR_HORARIO):\n${lines.join("\n")}` +
+          (temNatureza
+            ? "\n\nA natureza entre colchetes MANDA na escolha: cruze com VER_HISTORICO_PACIENTE " +
+              "(is_first_consultation) e use o tipo compativel. A description so desempata entre tipos " +
+              "de MESMA natureza. Tipo sem natureza serve para qualquer caso."
+            : "");
       return new Response(JSON.stringify({ success: true, types: list, readable_summary }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
     } else if (action === "get_availability") {
@@ -635,9 +673,35 @@ serve(async (req) => {
           { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
         );
       }
-      const { data: apt } = await supabaseClient.from("appointments").select("*").eq("id", result.appointment_id).maybeSingle();
+      // O caminho de SUCESSO era o único sem texto pronto nem next_step: devolvia a linha crua
+      // e deixava o modelo redigir a confirmação de memória. Foi assim que um paciente escolheu
+      // segunda 09h, o banco gravou segunda 09h e a mensagem enviada disse "sexta, 15h" (o
+      // primeiro horário que a IA tinha oferecido). O agendamento certo não adianta nada se o
+      // paciente aparece noutro dia. Agora o texto sai daqui, já formatado.
+      const { data: aptRow } = await supabaseClient.from("appointments")
+        .select("*, doctors(name)").eq("id", result.appointment_id).maybeSingle();
+      const { doctors: aptDoctor, ...aptFlat } = (aptRow || {}) as any;
+      const dataFinal = aptRow?.date ?? date;
+      const horaFinal = String(aptRow?.time ?? time).slice(0, 5);
+      const medicoFinal = aptDoctor?.name || "";
+      const quando = formatarQuando(dataFinal, horaFinal);
+      const jaExistia = result.idempotent || false;
+      const readable_summary =
+        `${jaExistia ? "Este agendamento JÁ estava gravado (chamada repetida) e continua valendo" : "Agendamento GRAVADO na agenda"}: ` +
+        `${quando}${medicoFinal ? `, com ${medicoFinal}` : ""} (data ${dataFinal}, horário ${horaFinal}).`;
+      const next_step =
+        "Confirme ao paciente EXATAMENTE a data, o horário e o médico que estão em readable_summary. " +
+        "NÃO use nenhum horário que você tenha oferecido antes nesta conversa: o que vale é o desta " +
+        "resposta, porque é o que ficou na agenda da clínica. Se divergir do que você tinha em mente, " +
+        "o certo é o desta resposta.";
       return new Response(
-        JSON.stringify({ success: true, idempotent: result.idempotent || false, appointment: apt }),
+        JSON.stringify({
+          success: true,
+          idempotent: jaExistia,
+          appointment: { ...aptFlat, doctor_name: medicoFinal || null },
+          readable_summary,
+          next_step,
+        }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
       );
     } else if (action === "reschedule_appointment") {
@@ -703,7 +767,15 @@ serve(async (req) => {
         );
       }
       return new Response(
-        JSON.stringify({ success: true, appointment_id, date: rr.date, time: rr.time, doctor_name: rr.doctor_name, readable_summary: `Consulta reagendada para ${rr.date} às ${rr.time} com ${rr.doctor_name}. Confirme os novos dados ao paciente.` }),
+        JSON.stringify({
+          success: true, appointment_id, date: rr.date, time: rr.time, doctor_name: rr.doctor_name,
+          readable_summary: `Consulta REAGENDADA na agenda para ${formatarQuando(rr.date, String(rr.time || ""))}` +
+            `${rr.doctor_name ? `, com ${rr.doctor_name}` : ""} (data ${rr.date}, horário ${String(rr.time || "").slice(0, 5)}).`,
+          next_step:
+            "Confirme ao paciente EXATAMENTE a data, o horário e o médico que estão em readable_summary. " +
+            "NÃO repita o horário antigo nem um horário oferecido antes nesta conversa: o que vale é o " +
+            "desta resposta, porque é o que ficou na agenda da clínica.",
+        }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
       );
     } else if (action === "cancel_appointment") {
@@ -830,24 +902,57 @@ serve(async (req) => {
 
       if (!patient && oldLeadIds.length === 0) {
         return new Response(
-          JSON.stringify({ success: true, patient_found: false, had_previous_journey: false, tickets: [], readable_summary: "Primeiro contato — sem histórico anterior." }),
+          JSON.stringify({
+            success: true, patient_found: false, had_previous_journey: false,
+            is_first_consultation: true, has_upcoming_appointment: false, upcoming: null,
+            tickets: [], readable_summary: "Primeiro contato — sem histórico anterior.",
+          }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
         );
       }
 
+      const hojeSP = todaySP();
       let stats: any = { appointments_realized: 0, appointments_total: 0, total_paid: 0 };
+      // is_first_consultation e has_upcoming_appointment sao FATOS, calculados aqui. Antes o agente
+      // tinha de deduzi-los de patient_found/had_previous_journey, e os dois respondiam outra
+      // pergunta: patient_found vira true no instante em que book_appointment cria o paciente (nos
+      // 10 agendamentos da IA na Lorena, patients.created_at == appointments.created_at em 100%),
+      // ou seja, quem marcou e faltou ja aparecia como "paciente".
+      let isFirstConsultation = true;
+      let upcoming: any = null;
       if (patient) {
         const { data: allAppts } = await supabaseClient.from("appointments")
-          .select("status").eq("clinic_id", clinic_id).eq("patient_id", patient.id);
-        stats.appointments_total = (allAppts || []).length;
-        stats.appointments_realized = (allAppts || []).filter((a: any) => a.status === "realizado" || a.status === "compareceu").length;
+          .select("id, date, time, status, doctor:doctors(id, name)")
+          .eq("clinic_id", clinic_id).eq("patient_id", patient.id);
+        const appts = allAppts || [];
+        stats.appointments_total = appts.length;
+        stats.appointments_realized = appts.filter((a: any) => a.status === "realizado" || a.status === "compareceu").length;
+
+        // "Primeira consulta" = nunca COMPARECEU. Ter agendamento marcado (ou ter faltado) nao
+        // consome a primeira consulta: a pessoa continua sem nunca ter sido atendida.
+        isFirstConsultation = stats.appointments_realized === 0;
+
+        const futuros = appts
+          .filter((a: any) => a.date >= hojeSP && a.status !== "cancelado")
+          .sort((a: any, b: any) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
+        if (futuros.length > 0) {
+          const f = futuros[0];
+          upcoming = {
+            appointment_id: f.id, date: f.date, time: (f.time || "").toString().substring(0, 5),
+            doctor_name: f.doctor?.name || "—",
+            status: f.status, status_label: STATUS_LABEL[f.status] || f.status,
+          };
+        }
 
         const { data: txs } = await supabaseClient.from("financial_transactions")
           .select("amount").eq("clinic_id", clinic_id).eq("patient_id", patient.id).eq("status", "pago");
         stats.total_paid = (txs || []).reduce((s: number, t: any) => s + Number(t.amount || 0), 0);
       }
 
-      const ticketLines = tickets.map((t: any, i: number) => {
+      // So jornadas ENCERRADAS: o ticket aberto aqui e o desta conversa (aberto pelo trigger antes
+      // de a IA rodar), e listar a conversa em curso como "jornada anterior" e o mesmo erro que
+      // inflava o had_previous_journey.
+      const ticketLines = tickets.filter((t: any) => t.closed_at != null).map((t: any, i: number) => {
         const date = t.closed_at ? new Date(t.closed_at).toISOString().split("T")[0] : (t.opened_at ? new Date(t.opened_at).toISOString().split("T")[0] : "?");
         const outcome = t.outcome ? ` [${t.outcome}]` : "";
         const sum = t.summary ? `: ${t.summary}` : (t.notes ? `: ${t.notes}` : "");
@@ -855,21 +960,40 @@ serve(async (req) => {
       });
 
       const lines: string[] = [];
+      // A conclusao vem PRIMEIRO: e ela que decide a natureza do modelo em LISTAR_TIPOS_CONSULTA.
+      lines.push(isFirstConsultation
+        ? "PRIMEIRA CONSULTA: esta pessoa nunca compareceu a uma consulta aqui. Use um tipo de natureza 'primeira'."
+        : "JA E PACIENTE: ja compareceu a consulta aqui. NAO use tipo de natureza 'primeira'.");
+      if (upcoming) {
+        lines.push(
+          `ATENCAO, JA TEM CONSULTA MARCADA para ${upcoming.date} as ${upcoming.time} com ${upcoming.doctor_name} ` +
+          `(${upcoming.status_label}). Nao ofereca agendamento novo: descubra se ela quer CONFIRMAR, REMARCAR ` +
+          `(REAGENDAR_HORARIO) ou CANCELAR (CANCELAR_HORARIO). appointment_id: ${upcoming.appointment_id}`
+        );
+      }
       if (patient) lines.push(`Paciente ${patient.name} já cadastrado.`);
-      else lines.push(`Phone reconhecido (lead antigo) mas sem paciente cadastrado.`);
+      else lines.push(`Phone reconhecido (lead antigo) mas sem paciente cadastrado. Ainda nao ha cadastro: colete os dados conforme a instrucao da clinica.`);
       if (stats.appointments_total > 0) lines.push(`${stats.appointments_realized}/${stats.appointments_total} consulta(s) realizada(s). Total pago: R$ ${stats.total_paid.toFixed(2).replace(".", ",")}.`);
       if (ticketLines.length > 0) {
-        lines.push(`Jornadas anteriores:`);
+        lines.push(`Jornadas anteriores encerradas:`);
         lines.push(...ticketLines);
       } else {
-        lines.push(`Sem jornadas anteriores registradas.`);
+        lines.push(`Sem jornadas anteriores encerradas.`);
       }
 
       return new Response(
         JSON.stringify({
           success: true,
           patient_found: !!patient,
-          had_previous_journey: tickets.length > 0,
+          // So conta jornada ENCERRADA. Antes era `tickets.length > 0`, e o ticket desta propria
+          // conversa entrava na conta: o trigger trg_auto_open_ticket abre o ticket no insert em
+          // chat_messages, ou seja, ANTES de a IA rodar. Resultado medido na Lorena: 263 dos 264
+          // leads voltavam had_previous_journey = true, 197 deles sem nem ter cadastro de paciente,
+          // e o prompt do sistema manda nao recoletar cadastro de quem tem esse flag ligado.
+          had_previous_journey: tickets.some((t: any) => t.closed_at != null),
+          is_first_consultation: isFirstConsultation,
+          has_upcoming_appointment: !!upcoming,
+          upcoming,
           patient: patient ? { id: patient.id, name: patient.name, cpf: patient.cpf } : null,
           tickets,
           stats,

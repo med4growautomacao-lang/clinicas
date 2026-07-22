@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { X, Save, Clock, CalendarDays, Plus, Trash2, Loader2, AlertCircle, SlidersHorizontal, Tag, Video, MapPin } from "lucide-react";
+import { X, Save, Clock, CalendarDays, Plus, Trash2, Loader2, AlertCircle, SlidersHorizontal, Tag, Video, MapPin, Copy } from "lucide-react";
 import { Button } from "./ui/button";
 import { motion } from "framer-motion";
 import { Doctor, ConsultationType, useConsultationTypes } from "../hooks/useSupabase";
@@ -88,6 +88,36 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
 
   const [blockedTimes, setBlockedTimes] = useState<BlockedTime[]>(doctor.blocked_times || []);
   const [newBlockedTime, setNewBlockedTime] = useState<BlockedTime>({ date: '', start: '08:00', end: '09:00' });
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
+
+  const handleDuplicateType = async (ct: ConsultationType) => {
+    setError(null);
+    setDuplicatingId(ct.id);
+    try {
+      // UNIQUE (doctor_id, slug): a cópia precisa de identificador próprio. O sufixo numérico
+      // cobre duplicar o mesmo modelo várias vezes seguidas.
+      const usados = new Set(consultationTypes.map(t => t.slug));
+      const base = `${ct.slug}-copia`;
+      let slug = base;
+      let n = 2;
+      while (usados.has(slug)) { slug = `${base}-${n}`; n++; }
+
+      const { id: _id, created_at: _createdAt, ...campos } = ct;
+      const novo = await createType({
+        ...campos,
+        slug,
+        name: `${ct.name} (cópia)`,
+        // Nasce INATIVA de propósito. Uma cópia idêntica e já ativa deixaria a IA com dois
+        // modelos de mesma natureza e mesma descrição no mesmo instante, que é exatamente a
+        // ambiguidade que a natureza veio resolver. Quem duplica ajusta e liga.
+        is_active: false,
+      });
+      if (!novo) { setError('Não foi possível duplicar o modelo. Tente novamente.'); return; }
+      setEditingType(novo);
+    } finally {
+      setDuplicatingId(null);
+    }
+  };
 
   const handleAddShift = (dayId: string) => {
     setWorkingHours(prev => ({
@@ -386,13 +416,25 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
                           <li><span className="font-semibold text-slate-600">Aviso mínimo:</span> {ct.min_notice_minutes >= 1440 ? Math.floor(ct.min_notice_minutes / 1440) + ' dia(s)' : ct.min_notice_minutes >= 60 ? Math.floor(ct.min_notice_minutes / 60) + ' h' : ct.min_notice_minutes + ' min'}</li>
                         )}
                       </ul>
-                      {ct.working_hours_override != null && (
-                        <div className="flex items-center gap-1.5 mt-2">
+                      <div className="flex items-center justify-between gap-2 mt-3 pt-2.5 border-t border-slate-100">
+                        {ct.working_hours_override != null ? (
                           <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 flex items-center gap-1">
                             <Clock className="w-2.5 h-2.5" /> Horários próprios
                           </span>
-                        </div>
-                      )}
+                        ) : <span />}
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); handleDuplicateType(ct); }}
+                          disabled={duplicatingId === ct.id}
+                          title="Criar um modelo novo com estas mesmas configurações"
+                          className="text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-teal-600 transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                        >
+                          {duplicatingId === ct.id
+                            ? <Loader2 className="w-3 h-3 animate-spin" />
+                            : <Copy className="w-3 h-3" />}
+                          Duplicar
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>

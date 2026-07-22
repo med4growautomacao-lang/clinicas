@@ -360,10 +360,10 @@ export function DoctorsManagement() {
                             initial={{ opacity: 0, scale: 0.95, y: 20 }}
                             animate={{ opacity: 1, scale: 1, y: 0 }}
                             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                            className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden"
+                            className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden max-h-[90dvh] flex flex-col"
                             onClick={e => e.stopPropagation()}
                         >
-                            <div className="flex items-center justify-between p-6 border-b border-slate-100">
+                            <div className="flex items-center justify-between p-6 border-b border-slate-100 shrink-0">
                                 <h3 className="text-lg font-bold text-slate-900">
                                     {modalMode === 'create' ? 'Adicionar Profissional' : 'Editar Profissional'}
                                 </h3>
@@ -372,7 +372,7 @@ export function DoctorsManagement() {
                                 </button>
                             </div>
 
-                            <div className="p-6 space-y-4">
+                            <div className="p-6 space-y-4 flex-1 min-h-0 overflow-y-auto custom-scrollbar">
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 font-bold">Nome completo *</label>
                                     <input
@@ -441,7 +441,7 @@ export function DoctorsManagement() {
                                 </div>
                             </div>
 
-                            <div className="flex gap-3 p-6 border-t border-slate-100 bg-slate-50">
+                            <div className="flex gap-3 p-6 border-t border-slate-100 bg-slate-50 shrink-0">
                                 <Button variant="outline" className="flex-1 font-bold" onClick={() => setShowModal(false)}>
                                     Cancelar
                                 </Button>

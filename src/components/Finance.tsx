@@ -436,12 +436,12 @@ export function Finance() {
       <AnimatePresence>
         {showModal && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
-              <div className="flex items-center justify-between p-6 border-b border-slate-100">
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden max-h-[90dvh] flex flex-col" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between p-6 border-b border-slate-100 shrink-0">
                 <h3 className="text-lg font-bold text-slate-900">{selectedTx ? 'Editar Transação' : 'Nova Transação'}</h3>
                 <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
               </div>
-              <div className="p-6 space-y-4">
+              <div className="p-6 space-y-4 flex-1 min-h-0 overflow-y-auto custom-scrollbar">
                 <div className="flex gap-2 p-1 bg-slate-100 rounded-lg">
                   <button onClick={() => setFormData(p => ({ ...p, type: 'receita' }))} className={cn("flex-1 py-2 text-xs font-bold rounded-md transition-all", formData.type === 'receita' ? "bg-white text-emerald-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>RECEITA</button>
                   <button onClick={() => setFormData(p => ({ ...p, type: 'despesa' }))} className={cn("flex-1 py-2 text-xs font-bold rounded-md transition-all", formData.type === 'despesa' ? "bg-white text-rose-500 shadow-sm" : "text-slate-500 hover:text-slate-700")}>DESPESA</button>
@@ -495,7 +495,7 @@ export function Finance() {
                   </select>
                 </div>
               </div>
-              <div className="flex gap-3 p-6 border-t border-slate-100 bg-slate-50">
+              <div className="flex gap-3 p-6 border-t border-slate-100 bg-slate-50 shrink-0">
                 <Button variant="outline" className="flex-1" onClick={() => setShowModal(false)}>Cancelar</Button>
                 <Button className={cn("flex-1", formData.type === 'receita' ? "bg-teal-600 hover:bg-teal-700" : "bg-rose-500 hover:bg-rose-600")} onClick={handleSubmit} disabled={!formData.amount || !formData.description || submitting}>
                   {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : selectedTx ? <Edit2 className="w-4 h-4 mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
@@ -511,7 +511,7 @@ export function Finance() {
       <AnimatePresence>
         {showDeleteConfirm && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setShowDeleteConfirm(false)}>
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-y-auto overflow-x-hidden custom-scrollbar max-h-[90dvh]" onClick={e => e.stopPropagation()}>
               <div className="p-6 text-center">
                 <div className="w-12 h-12 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-4"><AlertCircle className="w-6 h-6 text-rose-600" /></div>
                 <h3 className="text-xl font-bold text-slate-900 mb-2">Excluir Transação</h3>

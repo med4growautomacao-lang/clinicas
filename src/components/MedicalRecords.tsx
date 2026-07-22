@@ -615,7 +615,7 @@ function MedicalRecordsContent({ encKey, onLock }: { encKey: CryptoKey; onLock: 
             <AnimatePresence>
                 {showDeleteRecordConfirm && (
                     <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setShowDeleteRecordConfirm(false)}>
-                        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-y-auto overflow-x-hidden custom-scrollbar max-h-[90dvh]" onClick={e => e.stopPropagation()}>
                             <div className="p-6 text-center">
                                 <AlertCircle className="w-10 h-10 text-rose-500 mx-auto mb-3" />
                                 <h3 className="text-lg font-bold mb-2">Excluir Registro</h3>
@@ -689,7 +689,7 @@ function MedicalRecordsContent({ encKey, onLock }: { encKey: CryptoKey; onLock: 
             <AnimatePresence>
                 {showDeletePrescConfirm && (
                     <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setShowDeletePrescConfirm(false)}>
-                        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-y-auto overflow-x-hidden custom-scrollbar max-h-[90dvh]" onClick={e => e.stopPropagation()}>
                             <div className="p-6 text-center"><AlertCircle className="w-10 h-10 text-rose-500 mx-auto mb-3" /><h3 className="text-lg font-bold mb-1">Excluir Receita</h3><p className="text-slate-500 text-sm">Esta ação não pode ser desfeita.</p></div>
                             <div className="flex gap-3 p-6 border-t bg-slate-50">
                                 <Button variant="outline" className="flex-1" onClick={() => setShowDeletePrescConfirm(false)}>Cancelar</Button>
@@ -766,7 +766,7 @@ function MedicalRecordsContent({ encKey, onLock }: { encKey: CryptoKey; onLock: 
             <AnimatePresence>
                 {showDeleteExamConfirm && (
                     <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setShowDeleteExamConfirm(false)}>
-                        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-y-auto overflow-x-hidden custom-scrollbar max-h-[90dvh]" onClick={e => e.stopPropagation()}>
                             <div className="p-6 text-center"><AlertCircle className="w-10 h-10 text-rose-500 mx-auto mb-3" /><h3 className="text-lg font-bold mb-1">Excluir Pedido de Exames</h3><p className="text-slate-500 text-sm">Esta ação não pode ser desfeita.</p></div>
                             <div className="flex gap-3 p-6 border-t bg-slate-50">
                                 <Button variant="outline" className="flex-1" onClick={() => setShowDeleteExamConfirm(false)}>Cancelar</Button>

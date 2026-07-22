@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import { useToast } from "./ui/toast";
+import { Modal, ModalHeader, ModalBody, ModalFooter } from "./ui/modal";
 import { matchesSearch, leadSearchOrFilter } from "../lib/search";
 import { LeadJourney } from "./LeadJourney";
 import {
@@ -630,7 +631,7 @@ function LossModal({ lead, onClose, onCancel, onConfirm }: {
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-y-auto overflow-x-hidden custom-scrollbar max-h-[90dvh]"
         onClick={e => e.stopPropagation()}
       >
         <div className="h-1.5 bg-rose-500" />
@@ -1067,7 +1068,7 @@ function AtribMetaModal({ lead, onSave, onSkip, onCancelAll }: {
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-y-auto overflow-x-hidden custom-scrollbar max-h-[90dvh]"
         onClick={e => e.stopPropagation()}
       >
         <div className="h-1.5 bg-blue-500" />
@@ -2774,7 +2775,7 @@ function ReopenChoiceModal({ info, targetStageName, checkAppointment, onKeep, on
   return (
     <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={busy ? undefined : onClose}>
       <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-y-auto overflow-x-hidden custom-scrollbar max-h-[90dvh]" onClick={e => e.stopPropagation()}>
         <div className="h-1.5 bg-amber-500" />
         <div className="p-6 space-y-4">
           <div className="flex items-start justify-between gap-3">
@@ -4487,7 +4488,7 @@ export function LeadKanban() {
       <AnimatePresence>
         {showDeleteConfirm && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setShowDeleteConfirm(false)}>
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-y-auto overflow-x-hidden custom-scrollbar max-h-[90dvh]" onClick={e => e.stopPropagation()}>
               <div className="p-6 text-center">
                 <div className="w-12 h-12 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-4"><AlertCircle className="w-6 h-6 text-rose-600" /></div>
                 <h3 className="text-xl font-bold text-slate-900 mb-2">Excluir Ticket</h3>
@@ -4521,7 +4522,7 @@ export function LeadKanban() {
         {/* Aviso: ticket com agendamento em aberto não pode ser resolvido */}
         {resolveBlocked && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setResolveBlocked(null)}>
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-y-auto overflow-x-hidden custom-scrollbar max-h-[90dvh]" onClick={e => e.stopPropagation()}>
               <div className="p-6 text-center">
                 <div className="w-12 h-12 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-4"><AlertCircle className="w-6 h-6 text-amber-600" /></div>
                 <h3 className="text-xl font-bold text-slate-900 mb-2">Atualize o status do paciente</h3>
@@ -4969,24 +4970,15 @@ export function LeadKanban() {
       </AnimatePresence>
 
       {/* Quick Schedule Modal */}
-      <AnimatePresence>
-        {scheduleLead && (
-          <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4" onClick={() => setScheduleLead(null)}>
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden"
-              onClick={e => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between p-5 border-b border-slate-100">
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">Agendar Consulta</h3>
-                  <p className="text-xs text-slate-400 mt-0.5">{scheduleLead.lead.name}</p>
-                </div>
-                <button onClick={() => setScheduleLead(null)} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-full"><X className="w-4 h-4" /></button>
-              </div>
-              <div className="p-5 space-y-3">
+      {scheduleLead && (
+        <Modal open onClose={() => setScheduleLead(null)} size="sm" zIndexClass="z-[70]">
+          <ModalHeader
+            title="Agendar Consulta"
+            subtitle={scheduleLead.lead.name}
+            onClose={() => setScheduleLead(null)}
+            className="p-5"
+          />
+          <ModalBody className="p-5 space-y-3">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Médico *</label>
                   <select value={scheduleForm.doctor_id} onChange={e => setScheduleForm(p => ({ ...p, doctor_id: e.target.value, time: '' }))} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium outline-none focus:ring-2 focus:ring-teal-200">
@@ -5052,9 +5044,9 @@ export function LeadKanban() {
                     {scheduleError}
                   </div>
                 )}
-              </div>
-              <div className="flex gap-3 p-5 border-t border-slate-100 bg-slate-50">
-                <Button variant="outline" className="flex-1 font-bold" onClick={() => setScheduleLead(null)}>Cancelar</Button>
+          </ModalBody>
+          <ModalFooter className="p-5">
+            <Button variant="outline" className="flex-1 font-bold" onClick={() => setScheduleLead(null)}>Cancelar</Button>
                 <Button
                   className="flex-1 font-bold bg-teal-600 hover:bg-teal-700"
                   disabled={!scheduleForm.doctor_id || !scheduleForm.date || !scheduleForm.time || scheduleSubmitting}
@@ -5110,14 +5102,12 @@ export function LeadKanban() {
                     setScheduleLead(null);
                   }}
                 >
-                  {scheduleSubmitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CalendarPlus className="w-4 h-4 mr-2" />}
-                  Agendar
-                </Button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+              {scheduleSubmitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CalendarPlus className="w-4 h-4 mr-2" />}
+              Agendar
+            </Button>
+          </ModalFooter>
+        </Modal>
+      )}
     </div>
   );
 }

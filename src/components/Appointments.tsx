@@ -31,6 +31,7 @@ import { cn } from "@/src/lib/utils";
 import { matchesSearch } from "../lib/search";
 import { MoneyInput } from "./ui/money-input";
 import { motion, AnimatePresence } from "framer-motion";
+import { Modal, ModalHeader, ModalBody, ModalFooter } from "./ui/modal";
 import {
   format,
   startOfMonth,
@@ -1065,16 +1066,13 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
       </Card>
 
       {/* Create Appointment Modal */}
-      <AnimatePresence>
-        {showModal && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative" onClick={e => e.stopPropagation()}>
-              <div className="flex items-center justify-between p-6 border-b border-slate-100">
-                <h3 className="text-lg font-bold text-slate-900">{selectedAppointment ? 'Editar Consulta' : 'Nova Consulta'}</h3>
-                <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
-              </div>
+      <Modal open={showModal} onClose={() => setShowModal(false)} size="md">
+        <ModalHeader
+          title={selectedAppointment ? 'Editar Consulta' : 'Nova Consulta'}
+          onClose={() => setShowModal(false)}
+        />
 
-              <div className="p-6 space-y-4">
+        <ModalBody>
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Paciente *</label>
                   <PatientSearchSelector
@@ -1251,25 +1249,22 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
                     {error}
                   </div>
                 )}
-              </div>
+        </ModalBody>
 
-              <div className="flex gap-3 p-6 border-t border-slate-100 bg-slate-50">
-                <Button variant="outline" className="flex-1" onClick={() => setShowModal(false)}>Cancelar</Button>
-                <Button className="flex-1" onClick={handleSubmit} disabled={!formData.patient_id || !formData.doctor_id || !formData.date || !formData.time || submitting}>
-                  {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : selectedAppointment ? <Edit2 className="w-4 h-4 mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
-                  {selectedAppointment ? 'Atualizar' : 'Agendar'}
-                </Button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+        <ModalFooter>
+          <Button variant="outline" className="flex-1" onClick={() => setShowModal(false)}>Cancelar</Button>
+          <Button className="flex-1" onClick={handleSubmit} disabled={!formData.patient_id || !formData.doctor_id || !formData.date || !formData.time || submitting}>
+            {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : selectedAppointment ? <Edit2 className="w-4 h-4 mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
+            {selectedAppointment ? 'Atualizar' : 'Agendar'}
+          </Button>
+        </ModalFooter>
+      </Modal>
 
       {/* Delete Confirmation Modal */}
       <AnimatePresence>
         {showDeleteConfirm && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setShowDeleteConfirm(false)}>
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-y-auto overflow-x-hidden custom-scrollbar max-h-[90dvh]" onClick={e => e.stopPropagation()}>
               <div className="p-6 text-center">
                 <div className="w-12 h-12 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-4"><AlertCircle className="w-6 h-6 text-rose-600" /></div>
                 <h3 className="text-xl font-bold text-slate-900 mb-2">Excluir Agendamento</h3>
@@ -1297,7 +1292,7 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
       <AnimatePresence>
         {blockToDelete && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4" onClick={() => { if (!deletingBlock) { setBlockToDelete(null); setError(null); } }}>
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-y-auto overflow-x-hidden custom-scrollbar max-h-[90dvh]" onClick={e => e.stopPropagation()}>
               <div className="p-6 text-center">
                 <div className="w-12 h-12 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-4"><AlertCircle className="w-6 h-6 text-rose-600" /></div>
                 <h3 className="text-xl font-bold text-slate-900 mb-2">Remover Bloqueio</h3>
@@ -1490,19 +1485,14 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
       </AnimatePresence>
 
       {/* Modal de Bloqueio */}
-      <AnimatePresence>
-        {showBlockModal && selectedDay && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4" onClick={() => setShowBlockModal(false)}>
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
-              <div className="flex items-center justify-between p-6 border-b border-slate-100">
-                <div>
-                  <h3 className="text-lg font-bold text-slate-900">Bloquear Horário</h3>
-                  <p className="text-xs text-slate-500 font-medium capitalize">{format(parseISO(selectedDay), "EEEE, d 'de' MMMM", { locale: ptBR })}</p>
-                </div>
-                <button onClick={() => setShowBlockModal(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
-              </div>
+      <Modal open={!!(showBlockModal && selectedDay)} onClose={() => setShowBlockModal(false)} size="md" zIndexClass="z-[70]">
+        <ModalHeader
+          title="Bloquear Horário"
+          subtitle={selectedDay ? <span className="capitalize">{format(parseISO(selectedDay), "EEEE, d 'de' MMMM", { locale: ptBR })}</span> : undefined}
+          onClose={() => setShowBlockModal(false)}
+        />
 
-              <div className="p-6 space-y-4">
+        <ModalBody>
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Médico *</label>
                   <CustomDropdown
@@ -1688,19 +1678,16 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
                     </div>
                   )}
                 </div>
-              </div>
+        </ModalBody>
 
-              <div className="flex gap-3 p-6 border-t border-slate-100 bg-slate-50">
-                <Button variant="outline" className="flex-1" onClick={() => setShowBlockModal(false)}>Cancelar</Button>
-                <Button variant="destructive" className="flex-1" onClick={handleSubmitBlock} disabled={!blockForm.doctor_id || submittingBlock}>
-                  {submittingBlock ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Trash2 className="w-4 h-4 mr-2" />}
-                  Bloquear
-                </Button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+        <ModalFooter>
+          <Button variant="outline" className="flex-1" onClick={() => setShowBlockModal(false)}>Cancelar</Button>
+          <Button variant="destructive" className="flex-1" onClick={handleSubmitBlock} disabled={!blockForm.doctor_id || submittingBlock}>
+            {submittingBlock ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Trash2 className="w-4 h-4 mr-2" />}
+            Bloquear
+          </Button>
+        </ModalFooter>
+      </Modal>
 
       {/* Status dropdown — rendered outside card to escape overflow-hidden */}
       {openStatusApt && (

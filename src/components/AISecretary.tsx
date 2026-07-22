@@ -78,7 +78,7 @@ function ValidationModal({ isOpen, onClose, missingTags }: { isOpen: boolean, on
           initial={{ scale: 0.9, opacity: 0, y: 20 }}
           animate={{ scale: 1, opacity: 1, y: 0 }}
           exit={{ scale: 0.9, opacity: 0, y: 20 }}
-          className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-200"
+          className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-y-auto overflow-x-hidden custom-scrollbar max-h-[90dvh] border border-slate-200"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="h-2 bg-amber-500" />
@@ -3313,7 +3313,7 @@ function ConfigView() {
     <AnimatePresence>
       {resetConfirm && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setResetConfirm(null)}>
-          <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
+          <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-y-auto overflow-x-hidden custom-scrollbar max-h-[90dvh]" onClick={e => e.stopPropagation()}>
             <div className="p-6 text-center">
               <div className={cn("w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4", resetConfirm.mode === 'full' ? 'bg-rose-50' : 'bg-amber-50')}>
                 {resetConfirm.mode === 'full'

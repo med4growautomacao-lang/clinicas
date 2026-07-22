@@ -480,16 +480,16 @@ export function OrgTasks({ organizationId, orgUsers, clinics, canManage = true }
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.96, y: 8 }}
               onClick={(e) => e.stopPropagation()}
-              className="bg-white rounded-2xl w-full max-w-md shadow-xl overflow-hidden"
+              className="bg-white rounded-2xl w-full max-w-md shadow-xl overflow-hidden max-h-[90dvh] flex flex-col"
             >
-              <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+              <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
                 <p className="text-sm font-bold text-slate-800">{editing ? "Editar Tarefa" : "Nova Tarefa"}</p>
                 <button onClick={() => setModalOpen(false)} className="text-slate-400 hover:text-slate-600">
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
-              <div className="p-6 space-y-5">
+              <div className="p-6 space-y-5 flex-1 min-h-0 overflow-y-auto custom-scrollbar">
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Título</label>
                   <input
@@ -605,7 +605,7 @@ export function OrgTasks({ organizationId, orgUsers, clinics, canManage = true }
                 </div>
               </div>
 
-              <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between">
+              <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between shrink-0">
                 {editing ? (
                   <button
                     onClick={handleDelete}

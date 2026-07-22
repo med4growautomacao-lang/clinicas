@@ -1,7 +1,9 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { ChevronRight, Check } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
+
+const MENU_MAX_H = 250;
 
 interface Option {
   value: string;
@@ -27,9 +29,29 @@ export function CustomDropdown({
   label 
 }: CustomDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
+  // Posição em coordenadas de viewport: o menu é `fixed`, senão um modal com
+  // corpo rolável (overflow-y-auto) corta a lista.
+  const [pos, setPos] = useState<{ top: number; left: number; width: number; maxH: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   const selectedOption = options.find(opt => opt.value === value);
+
+  const place = useCallback(() => {
+    if (!buttonRef.current) return;
+    const rect = buttonRef.current.getBoundingClientRect();
+    const below = window.innerHeight - rect.bottom - 8;
+    const above = rect.top - 8;
+    // Abre para cima quando não cabe embaixo e há mais espaço acima.
+    const flip = below < Math.min(MENU_MAX_H, 160) && above > below;
+    const maxH = Math.min(MENU_MAX_H, Math.max(flip ? above : below, 120));
+    setPos({
+      top: flip ? rect.top - 8 - maxH : rect.bottom + 8,
+      left: rect.left,
+      width: rect.width,
+      maxH,
+    });
+  }, []);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -41,6 +63,18 @@ export function CustomDropdown({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  // Reposiciona enquanto aberto. `capture` pega o scroll do corpo do modal também.
+  useEffect(() => {
+    if (!isOpen) return;
+    const onScrollOrResize = () => place();
+    window.addEventListener("scroll", onScrollOrResize, true);
+    window.addEventListener("resize", onScrollOrResize);
+    return () => {
+      window.removeEventListener("scroll", onScrollOrResize, true);
+      window.removeEventListener("resize", onScrollOrResize);
+    };
+  }, [isOpen, place]);
+
   return (
     <div className="relative w-full" ref={containerRef}>
       {label && (
@@ -50,8 +84,13 @@ export function CustomDropdown({
       )}
       
       <button
+        ref={buttonRef}
         type="button"
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => {
+          if (isOpen) { setIsOpen(false); return; }
+          place();
+          setIsOpen(true);
+        }}
         className={cn(
           "w-full flex items-center gap-3 px-4 py-3 bg-slate-50 border transition-all duration-300 rounded-xl text-left",
           isOpen 
@@ -80,12 +119,13 @@ export function CustomDropdown({
       </button>
 
       <AnimatePresence>
-        {isOpen && (
+        {isOpen && pos && (
           <motion.div
             initial={{ opacity: 0, y: 5, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 5, scale: 0.98 }}
-            className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-100 rounded-xl shadow-2xl z-[70] py-2 max-h-[250px] overflow-y-auto custom-scrollbar"
+            style={{ top: pos.top, left: pos.left, width: pos.width, maxHeight: pos.maxH }}
+            className="fixed bg-white border border-slate-100 rounded-xl shadow-2xl z-[210] py-2 overflow-y-auto custom-scrollbar"
           >
             {options.map((option) => (
               <button

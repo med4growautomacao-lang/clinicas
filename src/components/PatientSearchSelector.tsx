@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { matchesSearch } from "../lib/search";
 import { Search, X, User, Phone, Fingerprint, Plus, Users } from "lucide-react";
 import { cn } from "@/src/lib/utils";
@@ -26,7 +26,11 @@ export function PatientSearchSelector({
 }: PatientSearchSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  // Lista em coordenadas de viewport (`fixed`): dentro de um modal com corpo
+  // rolável, um menu `absolute` seria cortado pelo overflow do container.
+  const [pos, setPos] = useState<{ top: number; left: number; width: number; maxH: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const anchorRef = useRef<HTMLDivElement>(null);
 
   const allPatients = useMemo(() => {
     const list = [...patients];
@@ -57,6 +61,21 @@ export function PatientSearchSelector({
     ).slice(0, 5);
   }, [leads, allPatients, searchTerm, onSelectLead]);
 
+  const place = useCallback(() => {
+    if (!anchorRef.current) return;
+    const rect = anchorRef.current.getBoundingClientRect();
+    const below = window.innerHeight - rect.bottom - 8;
+    const above = rect.top - 8;
+    const flip = below < 220 && above > below;
+    const maxH = Math.min(360, Math.max(flip ? above : below, 180));
+    setPos({
+      top: flip ? rect.top - 8 - maxH : rect.bottom + 8,
+      left: rect.left,
+      width: rect.width,
+      maxH,
+    });
+  }, []);
+
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
@@ -67,9 +86,27 @@ export function PatientSearchSelector({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    place();
+    const onScrollOrResize = () => place();
+    window.addEventListener("scroll", onScrollOrResize, true);
+    window.addEventListener("resize", onScrollOrResize);
+    return () => {
+      window.removeEventListener("scroll", onScrollOrResize, true);
+      window.removeEventListener("resize", onScrollOrResize);
+    };
+  }, [isOpen, place]);
+
+  // Reposiciona quando a lista muda de tamanho ao filtrar.
+  useEffect(() => {
+    if (isOpen) place();
+  }, [isOpen, place, filteredPatients.length, filteredLeads.length]);
+
   return (
     <div className="relative" ref={containerRef}>
       <div
+        ref={anchorRef}
         className={cn(
           "flex items-center gap-3 px-4 py-2.5 bg-slate-50 border rounded-lg transition-all cursor-text",
           isOpen ? "border-teal-400 ring-2 ring-teal-100 bg-white" : "border-slate-200"
@@ -110,12 +147,13 @@ export function PatientSearchSelector({
       </div>
 
       <AnimatePresence>
-        {isOpen && (
+        {isOpen && pos && (
           <motion.div
             initial={{ opacity: 0, y: 5 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 5 }}
-            className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-100 rounded-xl shadow-2xl z-[60] py-2 flex flex-col max-h-[360px]"
+            style={{ top: pos.top, left: pos.left, width: pos.width, maxHeight: pos.maxH }}
+            className="fixed bg-white border border-slate-100 rounded-xl shadow-2xl z-[210] py-2 flex flex-col"
           >
             <div className="px-3 pb-2 pt-1">
               <button
@@ -130,7 +168,7 @@ export function PatientSearchSelector({
               </button>
             </div>
 
-            <div className="overflow-y-auto flex-1 border-t border-slate-50">
+            <div className="overflow-y-auto flex-1 min-h-0 custom-scrollbar border-t border-slate-50">
               {/* Patients section */}
               {filteredPatients.length > 0 && (
                 <>

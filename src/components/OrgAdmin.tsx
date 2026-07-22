@@ -1366,7 +1366,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md"
+              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md max-h-[90dvh] overflow-y-auto custom-scrollbar"
             >
               <div className="flex items-center justify-between mb-5">
                 <h3 className="text-base font-black text-slate-900">{editClinicTarget ? 'Editar Clínica' : 'Nova Clínica'}</h3>
@@ -1567,7 +1567,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md"
+              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md max-h-[90dvh] overflow-y-auto custom-scrollbar"
             >
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -1644,7 +1644,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm"
+              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm max-h-[90dvh] overflow-y-auto custom-scrollbar"
             >
               <div className="flex items-center justify-between mb-5">
                 <h3 className="text-base font-black text-slate-900">Novo Usuário</h3>
@@ -1697,7 +1697,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm"
+              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm max-h-[90dvh] overflow-y-auto custom-scrollbar"
             >
               <div className="flex items-center justify-between mb-1">
                 <h3 className="text-base font-black text-slate-900">Novo Usuário</h3>
@@ -1849,7 +1849,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm"
+              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm max-h-[90dvh] overflow-y-auto custom-scrollbar"
             >
               <div className="flex items-center justify-between mb-1">
                 <h3 className="text-base font-black text-slate-900">Responsáveis</h3>

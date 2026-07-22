@@ -1078,7 +1078,7 @@ export function Settings() {
             <AnimatePresence>
                 {protocolModal.open && protocolModal.item && (
                     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setProtocolModal({ open: false, item: null })}>
-                        <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4" onClick={e => e.stopPropagation()}>
+                        <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4 max-h-[90dvh] overflow-y-auto custom-scrollbar" onClick={e => e.stopPropagation()}>
                             <div className="flex items-center justify-between">
                                 <h3 className="font-bold text-slate-900 text-base">{protocolModal.item.id ? 'Editar Protocolo' : 'Novo Protocolo'}</h3>
                                 <button onClick={() => setProtocolModal({ open: false, item: null })} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
@@ -1127,8 +1127,8 @@ export function Settings() {
 
             {/* Modal: Link de Conexão WhatsApp */}
             {connectLink && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setConnectLink(null)}>
-                    <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 p-6 space-y-4" onClick={e => e.stopPropagation()}>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setConnectLink(null)}>
+                    <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 p-6 space-y-4 max-h-[90dvh] overflow-y-auto custom-scrollbar" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center justify-between">
                             <h3 className="text-base font-bold text-slate-900">Link de Conexão WhatsApp</h3>
                             <button onClick={() => setConnectLink(null)} className="text-slate-400 hover:text-slate-600">

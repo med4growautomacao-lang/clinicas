@@ -450,9 +450,9 @@ function AddUserModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4">
-        <div className="flex items-center justify-between p-6 border-b border-slate-100">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 max-h-[90dvh] flex flex-col">
+        <div className="flex items-center justify-between p-6 border-b border-slate-100 shrink-0">
           <div>
             <h3 className="text-base font-black text-slate-900">
               {isOrg ? 'Adicionar Membro' : 'Adicionar Usuário'}
@@ -465,7 +465,7 @@ function AddUserModal({
             <X className="w-5 h-5" />
           </button>
         </div>
-        <form onSubmit={handle} className="p-6 space-y-4">
+        <form onSubmit={handle} className="p-6 space-y-4 flex-1 min-h-0 overflow-y-auto custom-scrollbar">
           <div className="relative">
             <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input required type="text" value={form.name} placeholder="Nome completo"
@@ -752,12 +752,12 @@ function EditOrgModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4">
-        <div className="flex items-center justify-between p-6 border-b border-slate-100">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 max-h-[90dvh] flex flex-col">
+        <div className="flex items-center justify-between p-6 border-b border-slate-100 shrink-0">
           <h3 className="text-base font-black text-slate-900">{isEditing ? 'Editar Organização' : 'Nova Organização'}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1"><X className="w-5 h-5" /></button>
         </div>
-        <form onSubmit={handle} className="p-6 space-y-4">
+        <form onSubmit={handle} className="p-6 space-y-4 flex-1 min-h-0 overflow-y-auto custom-scrollbar">
           <div>
             <label className="block text-xs font-bold text-slate-600 mb-1.5">Nome da Organização</label>
             <input required type="text" value={form.name} placeholder="Nome da organização"

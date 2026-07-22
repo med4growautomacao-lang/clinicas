@@ -27,6 +27,32 @@ const corsHeaders = {
 
 const MAX_ATTEMPTS = 3; // tentativas de envio p/ número válido antes de desistir (evita loop)
 
+// Central de Erros — o que não é registrado aqui não existe (não há Sentry).
+async function registrarErro(
+  supabase: ReturnType<typeof createClient>,
+  code: string,
+  title: string,
+  level: string,
+  clinicId: string | null,
+  ctx: unknown,
+): Promise<void> {
+  try {
+    const { error } = await supabase.rpc("log_system_error", {
+      p_scope: "forms-welcome-followup",
+      p_code: code,
+      p_title: title,
+      p_level: level,
+      p_clinic_id: clinicId,
+      p_context: ctx ?? {},
+      p_is_monitor: false,
+    });
+    // supabase-js NÃO lança em erro de RPC — sem esta linha a falha do log é invisível.
+    if (error) console.error("[forms-welcome-followup] log_system_error falhou:", error.message);
+  } catch (e) {
+    console.error("[forms-welcome-followup] falhou ao registrar erro", e);
+  }
+}
+
 // A conta da clínica está fora do ar / punida pelo WhatsApp? Então o problema não é o lead.
 //   503 "session is not reconnectable" → WhatsApp desconectado
 //   463 / reachout_timelock            → WhatsApp restringiu a conta de iniciar conversas
@@ -231,6 +257,34 @@ serve(async (req) => {
   }
   const sendNumber = check.status === "valid" ? check.number : leadNumber; // unknown → tenta o normalizado
 
+  // (3.2) GRAVA O NÚMERO REAL DE VOLTA NO LEAD.
+  // O formulário podia salvar o telefone incompleto ("981214937", sem 55+DDD) e a uazapi devolve
+  // aqui o JID verdadeiro — mas isso era descartado. Consequência: quando a pessoa respondia pelo
+  // WhatsApp (552181214937), nada casava e nascia uma SEGUNDA lead; a original ficava "em silêncio"
+  // e entrava no reengajamento (a Vera Marsano agendou numa e levou "você sumiu" na outra).
+  // Fechar essa janela AQUI, antes da resposta chegar, é o que evita a duplicata.
+  let effectiveNumber = leadNumber;
+  if (check.status === "valid") {
+    const resolved = normalizeBrazilianPhone(check.number);
+    if (resolved && resolved !== leadNumber) {
+      const { error: fixErr } = await supabase.from("leads").update({ phone: resolved }).eq("id", lead_id);
+      if (!fixErr) {
+        effectiveNumber = resolved;
+      } else {
+        // uq_leads_normalized_phone barrou (23505): já EXISTE outra lead da clínica com esse
+        // número — a duplicata é anterior a este envio. Não sobrescreve (o índice é a autoridade);
+        // registra para dar visibilidade, porque as duas leads seguem vivas e só uma recebe as
+        // respostas. Segue enviando pelo número resolvido: o destino está certo.
+        await registrarErro(
+          supabase, "WELCOME_PHONE_DUPLICADO",
+          "Telefone do formulário estava incompleto e o número real já pertence a outra lead",
+          "warning", clinic_id,
+          { lead_id, phone_no_lead: phone, phone_resolvido: resolved, erro: fixErr.message },
+        );
+      }
+    }
+  }
+
   // (4) mensagem (multi-balão por parágrafo)
   const rendered = renderMessage(message_text, firstNameCapitalized(name));
   const bubbles = rendered.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
@@ -256,7 +310,9 @@ serve(async (req) => {
     // limpa flag (caso estivesse marcada) e zera contador
     await supabase.from("leads").update({ whatsapp_invalid: false, welcome_attempts: 0 }).eq("id", lead_id);
     // memória/conversa — mesma escrita que o n8n fazia
-    const session_id = `${clinicNumber ?? ""}${leadNumber}`;
+    // session_id pelo número EFETIVO (corrigido em 3.2): com o telefone incompleto a chave saía
+    // diferente da que o wa-inbound monta quando a pessoa responde, e a memória nascia partida.
+    const session_id = `${clinicNumber ?? ""}${effectiveNumber}`;
     await supabase.from("chat_messages").insert({
       // sender/type 'system': automação não é fala do Agente IA (atribuição + memória + ícone próprio)
       session_id, clinic_id, lead_id, sender: "system", direction: "outbound",

@@ -1,7 +1,8 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { ChevronRight, Check } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
+import { useAnchoredPosition } from "../hooks/useAnchoredPosition";
 
 const MENU_MAX_H = 250;
 
@@ -29,29 +30,18 @@ export function CustomDropdown({
   label 
 }: CustomDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
-  // Posição em coordenadas de viewport: o menu é `fixed`, senão um modal com
-  // corpo rolável (overflow-y-auto) corta a lista.
-  const [pos, setPos] = useState<{ top: number; left: number; width: number; maxH: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
   const selectedOption = options.find(opt => opt.value === value);
 
-  const place = useCallback(() => {
-    if (!buttonRef.current) return;
-    const rect = buttonRef.current.getBoundingClientRect();
-    const below = window.innerHeight - rect.bottom - 8;
-    const above = rect.top - 8;
-    // Abre para cima quando não cabe embaixo e há mais espaço acima.
-    const flip = below < Math.min(MENU_MAX_H, 160) && above > below;
-    const maxH = Math.min(MENU_MAX_H, Math.max(flip ? above : below, 120));
-    setPos({
-      top: flip ? rect.top - 8 - maxH : rect.bottom + 8,
-      left: rect.left,
-      width: rect.width,
-      maxH,
-    });
-  }, []);
+  // Menu `fixed` ancorado no botão: dentro de um modal com corpo rolável, um
+  // menu `absolute` seria cortado pelo overflow do container.
+  const pos = useAnchoredPosition(buttonRef, isOpen, {
+    maxHeight: MENU_MAX_H,
+    flipBelow: 160,
+    deps: [options.length],
+  });
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -62,18 +52,6 @@ export function CustomDropdown({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
-
-  // Reposiciona enquanto aberto. `capture` pega o scroll do corpo do modal também.
-  useEffect(() => {
-    if (!isOpen) return;
-    const onScrollOrResize = () => place();
-    window.addEventListener("scroll", onScrollOrResize, true);
-    window.addEventListener("resize", onScrollOrResize);
-    return () => {
-      window.removeEventListener("scroll", onScrollOrResize, true);
-      window.removeEventListener("resize", onScrollOrResize);
-    };
-  }, [isOpen, place]);
 
   return (
     <div className="relative w-full" ref={containerRef}>
@@ -86,11 +64,7 @@ export function CustomDropdown({
       <button
         ref={buttonRef}
         type="button"
-        onClick={() => {
-          if (isOpen) { setIsOpen(false); return; }
-          place();
-          setIsOpen(true);
-        }}
+        onClick={() => setIsOpen(o => !o)}
         className={cn(
           "w-full flex items-center gap-3 px-4 py-3 bg-slate-50 border transition-all duration-300 rounded-xl text-left",
           isOpen 

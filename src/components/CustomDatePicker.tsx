@@ -1,9 +1,14 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { DayPicker } from "react-day-picker";
 import { ptBR } from "date-fns/locale";
 import { format, parseISO } from "date-fns";
 import { CalendarDays } from "lucide-react";
 import { cn } from "@/src/lib/utils";
+import { useAnchoredPosition } from "../hooks/useAnchoredPosition";
+
+// Dimensões do calendário renderizado pelo DayPicker.
+const CALENDAR_W = 280;
+const CALENDAR_H = 360;
 
 interface CustomDatePickerProps {
   value: string;
@@ -21,19 +26,19 @@ export function CustomDatePicker({
   align = "right",
 }: CustomDatePickerProps) {
   const [open, setOpen] = useState(false);
-  const [popupPos, setPopupPos] = useState<{ top: number; left: number } | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
 
   const selected = value ? parseISO(value) : undefined;
 
-  const openPopup = useCallback(() => {
-    if (!buttonRef.current) return;
-    const rect = buttonRef.current.getBoundingClientRect();
-    const left = align === "left" ? rect.left : rect.right - 280;
-    setPopupPos({ top: rect.bottom + 6, left });
-    setOpen(true);
-  }, [align]);
+  // Mesmo motor de posicionamento dos demais popups: vira para cima quando não
+  // cabe embaixo e acompanha o scroll de containers roláveis.
+  const popupPos = useAnchoredPosition(buttonRef, open, {
+    maxHeight: CALENDAR_H,
+    gap: 6,
+    width: CALENDAR_W,
+    align,
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -61,7 +66,7 @@ export function CustomDatePicker({
         <button
           ref={buttonRef}
           type="button"
-          onClick={() => open ? setOpen(false) : openPopup()}
+          onClick={() => setOpen(o => !o)}
           className={cn(
             "w-full flex items-center gap-3 px-4 py-3 bg-slate-50 border transition-all rounded-xl text-left",
             open
@@ -79,8 +84,8 @@ export function CustomDatePicker({
       {open && popupPos && (
         <div
           ref={popupRef}
-          className="fixed z-[200] bg-white border border-slate-100 rounded-2xl shadow-2xl p-3 rdp-custom"
-          style={{ top: popupPos.top, left: popupPos.left }}
+          className="fixed z-[200] bg-white border border-slate-100 rounded-2xl shadow-2xl p-3 rdp-custom overflow-y-auto custom-scrollbar"
+          style={{ top: popupPos.top, left: popupPos.left, maxHeight: popupPos.maxH }}
         >
           <DayPicker
             mode="single"

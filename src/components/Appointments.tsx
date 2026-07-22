@@ -1067,6 +1067,7 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
 
       {/* Create Appointment Modal */}
       <Modal open={showModal} onClose={() => setShowModal(false)} size="md">
+        {() => (<>
         <ModalHeader
           title={selectedAppointment ? 'Editar Consulta' : 'Nova Consulta'}
           onClose={() => setShowModal(false)}
@@ -1258,6 +1259,7 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
             {selectedAppointment ? 'Atualizar' : 'Agendar'}
           </Button>
         </ModalFooter>
+        </>)}
       </Modal>
 
       {/* Delete Confirmation Modal */}
@@ -1485,10 +1487,17 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
       </AnimatePresence>
 
       {/* Modal de Bloqueio */}
-      <Modal open={!!(showBlockModal && selectedDay)} onClose={() => setShowBlockModal(false)} size="md" zIndexClass="z-[70]">
+      <Modal
+        open={!!(showBlockModal && selectedDay)}
+        onClose={() => setShowBlockModal(false)}
+        size="md"
+        zIndexClass="z-[70]"
+        data={selectedDay}
+      >
+        {(dia) => (<>
         <ModalHeader
           title="Bloquear Horário"
-          subtitle={selectedDay ? <span className="capitalize">{format(parseISO(selectedDay), "EEEE, d 'de' MMMM", { locale: ptBR })}</span> : undefined}
+          subtitle={dia ? <span className="capitalize">{format(parseISO(dia), "EEEE, d 'de' MMMM", { locale: ptBR })}</span> : undefined}
           onClose={() => setShowBlockModal(false)}
         />
 
@@ -1687,6 +1696,7 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
             Bloquear
           </Button>
         </ModalFooter>
+        </>)}
       </Modal>
 
       {/* Status dropdown — rendered outside card to escape overflow-hidden */}

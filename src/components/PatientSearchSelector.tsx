@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
+import { useAnchoredPosition } from "../hooks/useAnchoredPosition";
 import { matchesSearch } from "../lib/search";
 import { Search, X, User, Phone, Fingerprint, Plus, Users } from "lucide-react";
 import { cn } from "@/src/lib/utils";
@@ -26,9 +27,6 @@ export function PatientSearchSelector({
 }: PatientSearchSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
-  // Lista em coordenadas de viewport (`fixed`): dentro de um modal com corpo
-  // rolável, um menu `absolute` seria cortado pelo overflow do container.
-  const [pos, setPos] = useState<{ top: number; left: number; width: number; maxH: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
 
@@ -61,21 +59,6 @@ export function PatientSearchSelector({
     ).slice(0, 5);
   }, [leads, allPatients, searchTerm, onSelectLead]);
 
-  const place = useCallback(() => {
-    if (!anchorRef.current) return;
-    const rect = anchorRef.current.getBoundingClientRect();
-    const below = window.innerHeight - rect.bottom - 8;
-    const above = rect.top - 8;
-    const flip = below < 220 && above > below;
-    const maxH = Math.min(360, Math.max(flip ? above : below, 180));
-    setPos({
-      top: flip ? rect.top - 8 - maxH : rect.bottom + 8,
-      left: rect.left,
-      width: rect.width,
-      maxH,
-    });
-  }, []);
-
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
@@ -86,22 +69,14 @@ export function PatientSearchSelector({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    place();
-    const onScrollOrResize = () => place();
-    window.addEventListener("scroll", onScrollOrResize, true);
-    window.addEventListener("resize", onScrollOrResize);
-    return () => {
-      window.removeEventListener("scroll", onScrollOrResize, true);
-      window.removeEventListener("resize", onScrollOrResize);
-    };
-  }, [isOpen, place]);
-
-  // Reposiciona quando a lista muda de tamanho ao filtrar.
-  useEffect(() => {
-    if (isOpen) place();
-  }, [isOpen, place, filteredPatients.length, filteredLeads.length]);
+  // Lista `fixed` ancorada no campo: dentro de um modal com corpo rolável, uma
+  // lista `absolute` seria cortada pelo overflow do container. As deps
+  // reposicionam quando o filtro muda a altura da lista.
+  const pos = useAnchoredPosition(anchorRef, isOpen, {
+    maxHeight: 360,
+    flipBelow: 220,
+    deps: [filteredPatients.length, filteredLeads.length],
+  });
 
   return (
     <div className="relative" ref={containerRef}>

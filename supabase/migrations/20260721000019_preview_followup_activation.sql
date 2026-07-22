@@ -194,7 +194,12 @@ begin
        and (
             (p_kind = 'finish_ganho'   and t.outcome = 'ganho'   and t.outcome_at >= now() - interval '7 days')
          or (p_kind = 'finish_perdido' and t.outcome = 'perdido' and t.outcome_at >= now() - interval '7 days')
-         or (p_kind = 'finish_service' and t.status  = 'closed'  and t.closed_at  >= now() - interval '7 days')
+         -- 'service' = status virou closed SEM mudar o outcome. finalize_ticket grava outcome e
+         -- fechamento no mesmo statement (outcome_at = closed_at) e dispara ganho/perdido, não
+         -- service. Sem este recorte o histórico contava 92 onde o real eram 11.
+         or (p_kind = 'finish_service' and t.status = 'closed'
+             and t.closed_at >= now() - interval '7 days'
+             and (t.outcome is null or t.outcome_at is distinct from t.closed_at))
        );
 
   else

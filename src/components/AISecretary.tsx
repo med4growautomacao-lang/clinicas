@@ -244,7 +244,9 @@ function ConfirmationsView() {
                 <button
                   onClick={() => {
                     const v = !localConfig.confirm_enabled;
-                    const apply = () => { setLocalConfig({ ...localConfig, confirm_enabled: v }); updateAI({ ...localConfig, confirm_enabled: v }); };
+                    // Grava SÓ a chave que mudou: o apply roda depois da janela de confirmação, e
+                    // mandar o localConfig inteiro regravaria um snapshot velho por cima do servidor.
+                    const apply = () => { setLocalConfig({ ...localConfig, confirm_enabled: v }); updateAI({ confirm_enabled: v }); };
                     if (v) guard("confirmation", apply); else apply();
                   }}
                   className={cn("w-12 h-6 rounded-full relative transition-all shrink-0", localConfig.confirm_enabled ? "bg-teal-600" : "bg-slate-300")}
@@ -595,7 +597,7 @@ function FollowupsView() {
             <button
               onClick={() => {
                 const v = !localConfig.followup_enabled;
-                const apply = () => { setLocalConfig({ ...localConfig, followup_enabled: v }); updateAI({ ...localConfig, followup_enabled: v }); };
+                const apply = () => { setLocalConfig({ ...localConfig, followup_enabled: v }); updateAI({ followup_enabled: v }); };
                 if (v) guard("reengagement", apply); else apply();
               }}
               className={cn(
@@ -760,7 +762,7 @@ function WelcomeFollowupView() {
             <button
               onClick={() => {
                 const v = !localConfig.welcome_message_enabled;
-                const apply = () => { setLocalConfig({ ...localConfig, welcome_message_enabled: v }); updateAI({ ...localConfig, welcome_message_enabled: v }); };
+                const apply = () => { setLocalConfig({ ...localConfig, welcome_message_enabled: v }); updateAI({ welcome_message_enabled: v }); };
                 if (v) guard("welcome", apply); else apply();
               }}
               className={cn("w-12 h-6 rounded-full relative transition-all", localConfig.welcome_message_enabled ? "bg-teal-600" : "bg-slate-300")}
@@ -968,7 +970,7 @@ function PosFollowupView() {
               <button
                 onClick={() => {
                   const v = !localConfig[keys.enabled];
-                  const apply = () => { setLocalConfig({ ...localConfig, [keys.enabled]: v }); updateAI({ ...localConfig, [keys.enabled]: v }); };
+                  const apply = () => { setLocalConfig({ ...localConfig, [keys.enabled]: v }); updateAI({ [keys.enabled]: v }); };
                   if (v) guard(outcomeTab === "ganho" ? "pos_ganho" : "pos_perdido", apply); else apply();
                 }}
                 className={cn(
@@ -1330,8 +1332,15 @@ function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
   };
 
   const guard = React.useCallback((k: FollowupKind, activate: () => void) => {
-    if (!activeClinicId) { activate(); return; }
     pending.current = activate;
+    // Sem clínica resolvida a trava NÃO some em silêncio: abre a janela avisando que o impacto
+    // não pôde ser medido, e o usuário decide conscientemente em vez de ligar sem ver nada.
+    if (!activeClinicId) {
+      reqId.current++;
+      setKind(k); setData(null); setLoading(false);
+      setError("Clínica ativa não identificada.");
+      return;
+    }
     const myReq = ++reqId.current;
     setKind(k); setData(null); setError(null); setLoading(true);
     (async () => {
@@ -1423,7 +1432,8 @@ function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
                 <>
                   <div className="grid grid-cols-3 gap-3">
                     {[
-                      { label: "Agora", value: data.agora, tone: "rose" },
+                      // Com WhatsApp fora, nada sai: o rótulo não pode dizer "agora".
+                      { label: data.whatsapp_ok ? "Agora" : "Na fila (parado)", value: data.agora, tone: "rose" },
                       { label: "Próximas horas", value: data.proximas_horas, tone: "amber" },
                       { label: "Próximos dias", value: data.proximos_dias, tone: "slate" },
                     ].map((s) => (
@@ -1448,7 +1458,7 @@ function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
                     ))}
                   </div>
 
-                  {data.agora > 0 && data.cap_por_rodada && (
+                  {data.agora > 0 && data.cap_por_rodada && data.whatsapp_ok && (
                     <div className="p-4 rounded-xl bg-slate-50 border border-slate-100 space-y-1">
                       <p className="text-xs font-bold text-slate-700 flex items-center gap-2">
                         <Clock className="w-3.5 h-3.5" /> Como a fila escoa
@@ -1539,7 +1549,9 @@ function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
                 disabled={loading}
                 className="px-5 py-2.5 rounded-lg text-xs font-bold text-white bg-teal-600 hover:bg-teal-700 disabled:opacity-50 transition-all shadow-sm"
               >
-                {data && !data.is_trigger && data.agora > 0 ? "Ativar mesmo assim" : "Ativar"}
+                {error ? "Ativar sem conferir"
+                  : data && !data.is_trigger && data.agora > 0 ? "Ativar mesmo assim"
+                  : "Ativar"}
               </button>
             </div>
           </div>
@@ -2031,7 +2043,7 @@ function FinishServiceView() {
                     <button
                       onClick={() => {
                         const v = !localConfig[keys.enabled];
-                        const apply = () => { setLocalConfig({ ...localConfig, [keys.enabled]: v }); updateAI({ ...localConfig, [keys.enabled]: v }); };
+                        const apply = () => { setLocalConfig({ ...localConfig, [keys.enabled]: v }); updateAI({ [keys.enabled]: v }); };
                         if (v) guard(
                           outcomeTab === "ganho" ? "finish_ganho"
                             : outcomeTab === "perdido" ? "finish_perdido" : "finish_service",

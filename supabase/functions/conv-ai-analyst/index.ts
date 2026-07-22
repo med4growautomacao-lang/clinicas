@@ -259,24 +259,51 @@ Analise e responda no formato JSON pedido.`;
 
 // Devolve o rótulo do que fez. Em dry-run com ?debug=1 devolve também o JSON cru
 // do modelo: é assim que se confere a calibragem antes de ligar uma clínica.
-async function analisarTicket(item: any, cfg: any, dry: boolean, debug = false): Promise<any> {
+async function analisarTicket(item: any, cfg: any, dry: boolean, debug = false, bench = false): Promise<any> {
   const { data: ctx, error: ctxErr } = await admin.rpc("conv_ai_get_context", {
     p_ticket_id: item.ticket_id,
     p_max_messages: cfg.max_messages,
   });
   if (ctxErr) throw new Error(`contexto: ${ctxErr.message}`);
   if (!ctx?.found) {
-    await admin.rpc("conv_ai_finish_ticket", { p_ticket_id: item.ticket_id, p_analyzed_seq: item.last_message_seq, p_error: null });
+    if (!dry) await admin.rpc("conv_ai_finish_ticket", { p_ticket_id: item.ticket_id, p_analyzed_seq: item.last_message_seq, p_error: null });
     return "ticket_not_found";
   }
 
-  // Ticket já resolvido não se analisa: a venda está fechada, mexer nela é proibido.
-  if (ctx.ticket?.outcome) {
-    await admin.rpc("conv_ai_finish_ticket", { p_ticket_id: item.ticket_id, p_analyzed_seq: ctx.last_seq, p_error: null });
+  // Bancada de comparação de modelos (dry + 1 ticket + bench=1): analisa ticket JÁ
+  // decidido pelo humano, que é o único com gabarito confiável. Para o teste valer,
+  // rebobina o ticket para a etapa em que ele estava ANTES do movimento final —
+  // senão o prompt entrega a resposta ("Etapa atual: Ganho") e o modelo só copia.
+  if (bench) {
+    const { data: h } = await admin
+      .from("lead_stage_history")
+      .select("old_stage_id")
+      .eq("ticket_id", item.ticket_id)
+      .not("old_stage_id", "is", null)
+      .order("changed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const stages: any[] = ctx.stages ?? [];
+    const antes = h?.old_stage_id
+      ? stages.find((s) => s.id === h.old_stage_id)
+      : null;
+    const entrada = antes
+      ?? stages.find((s) => norm(s.slug) === "whatsapp")
+      ?? stages.find((s) => !s.is_conversion);
+    if (entrada) {
+      ctx.ticket = { ...ctx.ticket, stage_id: entrada.id, stage_name: entrada.name, stage_slug: entrada.slug };
+    }
+    // O gatilho recente vira precedência lá embaixo; num ticket histórico isso só
+    // adicionaria ruído que não tem nada a ver com a qualidade do modelo.
+    ctx.last_trigger_stage_id = null;
+    ctx.last_trigger_minutes = null;
+  } else if (ctx.ticket?.outcome) {
+    // Ticket já resolvido não se analisa: a venda está fechada, mexer nela é proibido.
+    if (!dry) await admin.rpc("conv_ai_finish_ticket", { p_ticket_id: item.ticket_id, p_analyzed_seq: ctx.last_seq, p_error: null });
     return "resolved";
   }
   if ((ctx.messages ?? []).length < 2) {
-    await admin.rpc("conv_ai_finish_ticket", { p_ticket_id: item.ticket_id, p_analyzed_seq: ctx.last_seq, p_error: null });
+    if (!dry) await admin.rpc("conv_ai_finish_ticket", { p_ticket_id: item.ticket_id, p_analyzed_seq: ctx.last_seq, p_error: null });
     return "too_short";
   }
 
@@ -288,8 +315,8 @@ async function analisarTicket(item: any, cfg: any, dry: boolean, debug = false):
   if (!parsed) {
     await registrarErro("resposta_nao_json", "O analista devolveu resposta fora do formato JSON", "warning",
       item.clinic_id, { ticket_id: item.ticket_id, resposta: out.text.slice(0, 500) });
-    await admin.rpc("conv_ai_finish_ticket", { p_ticket_id: item.ticket_id, p_analyzed_seq: ctx.last_seq, p_error: "resposta_nao_json" });
-    return "bad_json";
+    if (!dry) await admin.rpc("conv_ai_finish_ticket", { p_ticket_id: item.ticket_id, p_analyzed_seq: ctx.last_seq, p_error: "resposta_nao_json" });
+    return debug ? { resultado: "bad_json", bruto: out.text.slice(0, 400), tokens: { entrada: out.tokens_in, saida: out.tokens_out } } : "bad_json";
   }
 
   const stages: any[] = ctx.stages ?? [];
@@ -448,6 +475,7 @@ async function analisarTicket(item: any, cfg: any, dry: boolean, debug = false):
   return debug
     ? {
         resultado, parsed,
+        ticket_id: item.ticket_id,
         etapa_atual: ctx.ticket?.stage_name,
         tem_manual: !!ctx.clinic_prompt,
         mensagens: (ctx.messages ?? []).length,
@@ -468,6 +496,9 @@ serve(async (req) => {
   // Nunca afeta a config salva nem uma rodada real: é bancada de teste.
   const provOverride = dry && oneTicket ? url.searchParams.get("provider") : null;
   const modelOverride = dry && oneTicket ? url.searchParams.get("model") : null;
+  // Bancada: reanalisa ticket já decidido, rebobinado para a etapa anterior.
+  // Só existe para medir modelo contra gabarito humano; nunca em rodada real.
+  const bench = !!(dry && oneTicket) && url.searchParams.get("bench") === "1";
 
   try {
     const { data: row } = await admin
@@ -529,7 +560,7 @@ serve(async (req) => {
         sale_mode: cc.sale_mode ?? "suggest",
       };
       try {
-        const r = await analisarTicket(enriched, cfg, dry, debug);
+        const r = await analisarTicket(enriched, cfg, dry, debug, bench);
         if (debug) detalhes.push(r);
         const label = typeof r === "string" ? r : r.resultado;
         results[label] = (results[label] ?? 0) + 1;

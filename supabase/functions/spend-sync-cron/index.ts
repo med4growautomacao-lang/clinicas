@@ -86,7 +86,9 @@ serve(async (req) => {
   const cfg = { ...DEFAULT_CONFIG, ...(await readJson("ad_spend_sync_config", {})) };
   if (!cfg.enabled) return json({ ok: true, skipped: "disabled" });
 
-  const state = await readJson("ad_spend_sync_state", { last_run_at: null, cursor: 0 }) as { last_run_at: string | null; cursor: number };
+  // since/until ficam no state enquanto um sweep está em andamento (ver a janela, mais abaixo).
+  const state = await readJson("ad_spend_sync_state", { last_run_at: null, cursor: 0 }) as
+    { last_run_at: string | null; cursor: number; since?: string; until?: string };
   const now = Date.now();
   const sweeping = (Number(state.cursor) || 0) > 0;
   const everyHours = Math.max(1, Number(cfg.every_hours) || 24);
@@ -122,14 +124,22 @@ serve(async (req) => {
   //
   // A sobreposição vem de lookback_days >= 2 (ver DEFAULT_CONFIG): a janela precisa cobrir mais de
   // um dia fechado para que a rodada de amanhã repesque o dia que a de hoje eventualmente perdeu.
+  //
+  // A janela é CONGELADA no state no início do sweep e reusada pelos lotes seguintes. Derivar de
+  // todaySP a cada tick parece equivalente e não é: um sweep multi-lote que atravesse a meia-noite
+  // calcularia uma janela para as clínicas do primeiro lote e outra para as do segundo, gravando
+  // dias diferentes na mesma rodada, sem erro nenhum aparecendo. Com poucas clínicas o sweep cabe
+  // num tick só e isso fica dormente, mas acorda sozinho quando a base crescer.
   const lookback = Math.max(1, Number(cfg.lookback_days) || 1);
   const dayOffset = (base: string, days: number) => {
     const d = new Date(base + "T00:00:00Z");
     d.setUTCDate(d.getUTCDate() - days);
     return d.toISOString().slice(0, 10);
   };
-  const since = dayOffset(todaySP, lookback);
-  const until = dayOffset(todaySP, cfg.include_today === true ? 0 : 1);
+  // Sweep herdado de antes deste código (ou state corrompido) não tem janela: recalcula.
+  const retomando = sweeping && !!state.since && !!state.until;
+  const since = retomando ? state.since! : dayOffset(todaySP, lookback);
+  const until = retomando ? state.until! : dayOffset(todaySP, cfg.include_today === true ? 0 : 1);
 
   const platforms: string[] = Array.isArray(cfg.platforms) ? cfg.platforms : DEFAULT_CONFIG.platforms;
   const wantMeta = platforms.includes("meta_ads");
@@ -239,7 +249,13 @@ serve(async (req) => {
   // Avança cursor; fim do sweep quando o lote veio menor que batchSize.
   const done = list.length < batchSize;
   const newCursor = done ? 0 : cursor + list.length;
-  await writeState({ last_run_at: done ? new Date(now).toISOString() : state.last_run_at, cursor: newCursor });
+  // Sweep continuando: guarda a janela para o próximo lote usar a MESMA (ver acima). Terminou:
+  // solta, para a rodada seguinte calcular a dela e não herdar uma janela velha.
+  await writeState({
+    last_run_at: done ? new Date(now).toISOString() : state.last_run_at,
+    cursor: newCursor,
+    ...(done ? {} : { since, until }),
+  });
 
   return json({ ok: true, since, until, processed: list.length, cursor: newCursor, sweep_complete: done, metaOk, googleOk, errors });
 });

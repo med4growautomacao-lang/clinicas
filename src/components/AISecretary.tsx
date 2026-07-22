@@ -47,7 +47,8 @@ import { LeadKanban } from "./LeadKanban";
 import { ComercialDashboard } from "./ComercialDashboard";
 import { ChatThread } from "./ChatThread";
 import { ChatComposer } from "./ChatComposer";
-import { useLeads, useNotLeads, useChatMessages, useSettings, useFunnelStages, usePromptTemplates, FunnelStage, useFollowupSteps, FollowupStep, useConvAiInsights } from "../hooks/useSupabase";
+import { useLeads, useNotLeads, useChatMessages, useSettings, useFunnelStages, usePromptTemplates, FunnelStage, useFollowupSteps, FollowupStep, useConvAiInsights, Lead } from "../hooks/useSupabase";
+import { LeadChat } from "./LeadChat";
 import { ConvAIReview } from "./ConvAIReview";
 import { NotLeadPanel, NotLeadButton } from "./NotLeadPanel";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
@@ -1294,7 +1295,7 @@ interface FollowupPreview {
   primeiro_disparo: number;
   escoamento_min: number;
   historico_7d: number | null;
-  amostra: { nome: string; telefone: string; detalhe: string; quando: string; balde: string }[];
+  amostra: { lead_id: string | null; nome: string; telefone: string; detalhe: string; quando: string; balde: string }[];
 }
 
 const ActivationGuardCtx = React.createContext<(kind: FollowupKind, activate: () => void) => void>(
@@ -1315,7 +1316,14 @@ function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
   const [data, setData] = useState<FollowupPreview | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [chatLead, setChatLead] = useState<Lead | null>(null);
   const pending = useRef<(() => void) | null>(null);
+
+  // Abre a MESMA conversa que o Kanban abre (carrega o lead completo p/ o LeadChat).
+  const openLeadChat = async (leadId: string) => {
+    const { data, error: e } = await supabase.from("leads").select("*").eq("id", leadId).single();
+    if (!e && data) setChatLead(data as Lead);
+  };
 
   const guard = React.useCallback((k: FollowupKind, activate: () => void) => {
     if (!activeClinicId) { activate(); return; }
@@ -1471,7 +1479,7 @@ function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
                       </p>
                       <div className="border border-slate-100 rounded-xl divide-y divide-slate-50 max-h-64 overflow-y-auto custom-scrollbar">
                         {data.amostra.map((p, i) => (
-                          <div key={i} className="px-3 py-2 flex items-center gap-3 text-xs">
+                          <div key={i} className="px-3 py-2 flex items-center gap-3 text-xs group">
                             <span className={cn(
                               "px-1.5 py-0.5 rounded text-[9px] font-bold uppercase shrink-0",
                               badge(p.balde)
@@ -1480,6 +1488,15 @@ function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
                             </span>
                             <span className="font-bold text-slate-800 truncate flex-1">{p.nome}</span>
                             <span className="text-slate-400 font-medium shrink-0">{p.telefone}</span>
+                            {p.lead_id && (
+                              <button
+                                onClick={() => openLeadChat(p.lead_id!)}
+                                title="Abrir a conversa deste lead"
+                                className="shrink-0 p-1 rounded-md text-slate-400 hover:text-teal-700 hover:bg-teal-50 transition-all"
+                              >
+                                <MessageSquare className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -1516,6 +1533,9 @@ function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       )}
+
+      {/* Conversa do lead: mesmo drawer do Kanban. z-[70] > z-50 do modal, abre por cima. */}
+      {chatLead && <LeadChat lead={chatLead} onClose={() => setChatLead(null)} />}
     </ActivationGuardCtx.Provider>
   );
 }

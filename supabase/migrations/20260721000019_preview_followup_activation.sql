@@ -68,7 +68,7 @@ begin
              and (v_wa.send_blocked_until is null or v_wa.send_blocked_until <= now());
 
   create temp table if not exists _fu_prev (
-    nome text, telefone text, quando timestamp, detalhe text
+    lead_id uuid, nome text, telefone text, quando timestamp, detalhe text
   ) on commit drop;
   -- TRUNCATE e não DELETE: na sessão do PostgREST o safe-updates recusa DELETE sem WHERE.
   truncate table _fu_prev;
@@ -81,7 +81,7 @@ begin
     v_in_window := v_hour >= v_win_start and v_hour < v_win_end;
 
     insert into _fu_prev
-    select l.name, l.phone,
+    select l.id, l.name, l.phone,
            (l.created_at + (coalesce(v_ac.welcome_message_delay, 5) || ' minutes')::interval)::timestamp,
            'lead de formulário'
       from leads l
@@ -101,7 +101,7 @@ begin
     v_in_window := v_hour >= v_win_start and v_hour < v_win_end;
 
     insert into _fu_prev
-    select l.name, l.phone,
+    select l.id, l.name, l.phone,
            greatest(lm.last_at, coalesce(l.followup_sent_at, lm.last_at))
              + (s.delay_minutes || ' minutes')::interval,
            'passo ' || s.step_no || case when s.is_closing then ' (encerra o atendimento)' else '' end
@@ -135,7 +135,7 @@ begin
     v_in_window := v_hour >= v_win_start and v_hour < v_win_end;
 
     insert into _fu_prev
-    select p.name, p.phone,
+    select t.lead_id, p.name, p.phone,
            ((a.date + a.time) - (coalesce(v_ac.confirm_lead_time, 1440) || ' minutes')::interval)::timestamp,
            'consulta ' || to_char(a.date, 'DD/MM') || ' às ' || to_char(a.time, 'HH24:MI')
       from appointments a
@@ -160,7 +160,7 @@ begin
     v_grace := coalesce(v_ac.pos_followup_grace_days, 2);
 
     insert into _fu_prev
-    select l.name, l.phone,
+    select l.id, l.name, l.phone,
            ((t.outcome_at at time zone 'America/Sao_Paulo') + (v_days || ' days')::interval),
            'ticket ' || t.outcome || ' em ' || to_char(t.outcome_at at time zone 'America/Sao_Paulo', 'DD/MM')
       from tickets t
@@ -214,6 +214,7 @@ begin
       from _fu_prev;
 
     select coalesce(jsonb_agg(jsonb_build_object(
+             'lead_id',  lead_id,
              'nome',     coalesce(nullif(btrim(nome), ''), 'Sem nome'),
              'telefone', telefone,
              'detalhe',  detalhe,

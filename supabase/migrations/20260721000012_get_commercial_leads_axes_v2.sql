@@ -52,16 +52,11 @@ BEGIN
       AND (p_origin = 'todos'
         OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ',')))
       AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
-      -- Agente: mensagens são atividade operacional — eixo Agendado (mesmo eixo
-      -- de get_commercial_dashboard), não Conversão.
-      AND (p_agent = 'todos' OR EXISTS (
-        SELECT 1 FROM chat_messages cm
-        WHERE cm.lead_id = l.id AND cm.clinic_id = p_clinic_id
-          AND (p_agenda_from IS NULL OR cm.created_at::date >= p_agenda_from)
-          AND (p_agenda_to   IS NULL OR cm.created_at::date <= p_agenda_to)
-          AND ((p_agent = 'ia'     AND cm.sender = 'ai')
-            OR (p_agent = 'humano' AND cm.sender = 'human' AND cm.direction = 'outbound'))
-      ))
+      -- Agente: mesma régua canônica de get_commercial_dashboard (lead como um
+      -- todo, via vw_lead_agent_class) — era EXISTS em chat_messages dentro da
+      -- janela Agendado, que divergia da régua do dashboard e da lista mesmo
+      -- depois do card "Gerados" já estar corrigido (achado ao validar 22/07).
+      AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
       -- Toggle Ganho/Perdido/Ambos — eixo Conversão (outcome_at). Seletor de
       -- motivo (só ativo com p_outcome='perdido') recorta ainda mais.
       AND (p_outcome = 'ambos' OR EXISTS (
@@ -91,7 +86,8 @@ BEGIN
             AND (p_conv_to     IS NULL OR a.date <= p_conv_to)
             AND (p_agenda_from IS NULL OR a.created_at::date >= p_agenda_from)
             AND (p_agenda_to   IS NULL OR a.created_at::date <= p_agenda_to)
-            AND (p_agent = 'todos' OR (p_agent = 'ia' AND a.source = 'ia') OR (p_agent = 'humano' AND a.source = 'manual'))
+            -- Agente já filtrado pela CTE base (fn_lead_matches_agent acima) —
+            -- não repete aqui.
             AND (p_metric = 'gerados'
               OR (p_metric = 'realizadas' AND a.status IN ('realizado','compareceu'))
               OR (p_metric = 'marcados'   AND a.status IN ('pendente','confirmado')))
@@ -162,14 +158,7 @@ BEGIN
       AND (p_origin = 'todos'
         OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ',')))
       AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
-      AND (p_agent = 'todos' OR EXISTS (
-        SELECT 1 FROM chat_messages cm
-        WHERE cm.lead_id = l.id AND cm.clinic_id = p_clinic_id
-          AND (p_agenda_from IS NULL OR cm.created_at::date >= p_agenda_from)
-          AND (p_agenda_to   IS NULL OR cm.created_at::date <= p_agenda_to)
-          AND ((p_agent = 'ia'     AND cm.sender = 'ai')
-            OR (p_agent = 'humano' AND cm.sender = 'human' AND cm.direction = 'outbound'))
-      ))
+      AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
       AND (p_conv_from IS NULL OR COALESCE(t4.outcome_at, t4.closed_at)::date >= p_conv_from)
       AND (p_conv_to   IS NULL OR COALESCE(t4.outcome_at, t4.closed_at)::date <= p_conv_to)
       AND (p_loss_reasons IS NULL OR btrim(p_loss_reasons) = ''
@@ -188,19 +177,11 @@ BEGIN
       AND (p_origin = 'todos'
         OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ',')))
       AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
-      AND (p_agent = 'todos' OR EXISTS (
-        SELECT 1 FROM chat_messages cm
-        WHERE cm.lead_id = l.id AND cm.clinic_id = p_clinic_id
-          AND (p_agenda_from IS NULL OR cm.created_at::date >= p_agenda_from)
-          AND (p_agenda_to   IS NULL OR cm.created_at::date <= p_agenda_to)
-          AND ((p_agent = 'ia'     AND cm.sender = 'ai')
-            OR (p_agent = 'humano' AND cm.sender = 'human' AND cm.direction = 'outbound'))
-      ))
+      AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
       AND (p_conv_from   IS NULL OR a.date >= p_conv_from)
       AND (p_conv_to     IS NULL OR a.date <= p_conv_to)
       AND (p_agenda_from IS NULL OR a.created_at::date >= p_agenda_from)
       AND (p_agenda_to   IS NULL OR a.created_at::date <= p_agenda_to)
-      AND (p_agent = 'todos' OR (p_agent = 'ia' AND a.source = 'ia') OR (p_agent = 'humano' AND a.source = 'manual'))
       AND (p_metric = 'gerados'
         OR (p_metric = 'realizadas' AND a.status IN ('realizado','compareceu'))
         OR (p_metric = 'marcados'   AND a.status IN ('pendente','confirmado')));

@@ -184,18 +184,28 @@ BEGIN
 
   v_leads_not_attended := GREATEST(COALESCE(v_new_leads,0) - COALESCE(v_ia_leads_touched,0) - COALESCE(v_human_leads_touched,0), 0);
 
-  -- Quem MARCOU o agendamento (booking attribution) — eixo Agendado (a.created_at).
+  -- Quem MARCOU o agendamento (booking attribution) — a.source é uma métrica
+  -- DIFERENTE de propósito (quem literalmente marcou ESSA consulta), mantida
+  -- assim de propósito: v_appt_ia/v_appt_manual continuam por a.source e NÃO
+  -- são afetados pelo filtro p_agent (mostram o split real IA×Humano sempre).
+  -- v_appt_total, por outro lado, alimenta o MESMO denominador que byStatus
+  -- (cancelRate, faturamentoProjetado no frontend) — por isso agora usa a
+  -- MESMA régua de lead (fn_lead_matches_agent) e o MESMO eixo Conversão que
+  -- v_appt_generated, pra não virar numerador/denominador de populações
+  -- diferentes sob filtro de Agente (achado de code-review 21/07).
   SELECT
     COUNT(*) FILTER (WHERE a.source = 'ia'),
     COUNT(*) FILTER (WHERE a.source = 'manual'),
-    COUNT(*) FILTER (WHERE p_agent = 'todos' OR (p_agent = 'ia' AND a.source = 'ia') OR (p_agent = 'humano' AND a.source = 'manual'))
+    COUNT(*) FILTER (WHERE public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent))
   INTO v_appt_ia, v_appt_manual, v_appt_total
   FROM appointments a
-  LEFT JOIN tickets t ON t.id = a.ticket_id
-  LEFT JOIN leads l ON l.id = t.lead_id
+  JOIN tickets t ON t.id = a.ticket_id
+  JOIN leads l ON l.id = t.lead_id
   WHERE a.clinic_id = p_clinic_id
     AND (p_agenda_from IS NULL OR a.created_at::date >= p_agenda_from)
     AND (p_agenda_to   IS NULL OR a.created_at::date <= p_agenda_to)
+    AND (p_conv_from IS NULL OR a.date >= p_conv_from)
+    AND (p_conv_to   IS NULL OR a.date <= p_conv_to)
     AND (p_entry_from IS NULL OR l.created_at::date >= p_entry_from)
     AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
     AND COALESCE(l.is_not_lead, false) = false
@@ -207,10 +217,14 @@ BEGIN
   -- lead entrou dentro de Entrada. Por isso lê direto de appointments (não
   -- v_kpi_scheduled, que não guarda a.date) — perde os casos "só etapa, sem
   -- agendamento real" (raro), ganha bater exato com "Consultas" (byStatus) logo abaixo.
+  -- JOIN (não LEFT JOIN): agendamento sem ticket/lead resolvido (FK ON DELETE
+  -- SET NULL) não deve contar em métrica comercial nenhuma — a view antiga
+  -- v_kpi_scheduled exigia isso via INNER JOIN; a leitura direta de
+  -- appointments tinha perdido essa exclusão (achado de code-review 21/07).
   SELECT COUNT(*) INTO v_appt_generated
   FROM appointments a
-  LEFT JOIN tickets t ON t.id = a.ticket_id
-  LEFT JOIN leads l ON l.id = t.lead_id
+  JOIN tickets t ON t.id = a.ticket_id
+  JOIN leads l ON l.id = t.lead_id
   WHERE a.clinic_id = p_clinic_id
     AND (p_agenda_from IS NULL OR a.created_at::date >= p_agenda_from)
     AND (p_agenda_to   IS NULL OR a.created_at::date <= p_agenda_to)
@@ -219,7 +233,7 @@ BEGIN
     AND (p_entry_from IS NULL OR l.created_at::date >= p_entry_from)
     AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
     AND COALESCE(l.is_not_lead, false) = false
-    AND (p_agent = 'todos' OR EXISTS (SELECT 1 FROM public.vw_lead_agent_class v WHERE v.lead_id = l.id AND v.clinic_id = p_clinic_id AND v.agent = p_agent))
+    AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
     AND (p_origin = 'todos' OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ',')))
     AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
 
@@ -293,6 +307,9 @@ BEGIN
     -- Seletor de motivo (só aparece na tela com toggle=Perdido): não afeta Ganho.
     AND (p_loss_reasons IS NULL OR btrim(p_loss_reasons) = '' OR t.outcome <> 'perdido'
       OR COALESCE(NULLIF(t.loss_reason, ''), '(sem motivo registrado)') = ANY(string_to_array(p_loss_reasons, ',')))
+    -- Faltava filtro de Agente aqui (achado de code-review 21/07) — Ganho/
+    -- Perdido não respeitavam o filtro enquanto revenueScoped ao lado sim.
+    AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
     AND (p_origin = 'todos'
       OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
 
@@ -310,6 +327,7 @@ BEGIN
         AND (p_conv_to   IS NULL OR o.day <= p_conv_to)
         AND (p_entry_from IS NULL OR l.created_at::date >= p_entry_from)
         AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
+        AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
         AND (p_origin = 'todos'
           OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
       GROUP BY 1
@@ -342,7 +360,7 @@ BEGIN
     AND (p_entry_from IS NULL OR l.created_at::date >= p_entry_from)
     AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
     AND (l.id IS NULL OR COALESCE(l.is_not_lead, false) = false)
-    AND (p_agent = 'todos' OR EXISTS (SELECT 1 FROM public.vw_lead_agent_class v WHERE v.lead_id = l.id AND v.clinic_id = p_clinic_id AND v.agent = p_agent))
+    AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
     AND (p_origin = 'todos'
       OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
 
@@ -357,15 +375,21 @@ BEGIN
     AND COALESCE(l.is_not_lead, false) = false
     AND (p_loss_reasons IS NULL OR btrim(p_loss_reasons) = '' OR t.outcome <> 'perdido'
       OR COALESCE(NULLIF(t.loss_reason, ''), '(sem motivo registrado)') = ANY(string_to_array(p_loss_reasons, ',')))
+    -- Faltava filtro de Agente aqui tambem (achado de code-review 21/07).
+    AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
     AND (p_origin = 'todos'
       OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
 
   -- Consultas realizadas: mesma regra de "casamento" dos 3 calendários do bloco
-  -- acima (Agendado + Conversão + Entrada, todos ao mesmo tempo).
+  -- acima (Agendado + Conversão + Entrada, todos ao mesmo tempo) + mesmos
+  -- filtros de Agente/Origem/Canal do bloco irmão byStatus logo abaixo — antes
+  -- não tinha NENHUM dos 3, então finance.attendedConsults divergia de
+  -- byStatus.realizado sob qualquer filtro ativo (achado de code-review 21/07).
+  -- JOIN (não LEFT JOIN): mesmo motivo do bloco "Agendamento GERADO" acima.
   SELECT COUNT(*) INTO v_attended_consults
   FROM appointments a
-  LEFT JOIN tickets t ON t.id = a.ticket_id
-  LEFT JOIN leads l ON l.id = t.lead_id
+  JOIN tickets t ON t.id = a.ticket_id
+  JOIN leads l ON l.id = t.lead_id
   WHERE a.clinic_id = p_clinic_id AND a.status IN ('realizado', 'compareceu')
     AND (p_conv_from IS NULL OR a.date >= p_conv_from)
     AND (p_conv_to   IS NULL OR a.date <= p_conv_to)
@@ -373,14 +397,17 @@ BEGIN
     AND (p_agenda_to   IS NULL OR a.created_at::date <= p_agenda_to)
     AND (p_entry_from IS NULL OR l.created_at::date >= p_entry_from)
     AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
-    AND COALESCE(l.is_not_lead, false) = false;
+    AND COALESCE(l.is_not_lead, false) = false
+    AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
+    AND (p_origin = 'todos'
+      OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
 
   SELECT COALESCE(jsonb_object_agg(status, cnt), '{}'::jsonb) INTO v_appt_status
   FROM (
     SELECT COALESCE(a.status, 'indefinido') AS status, COUNT(*) AS cnt
     FROM appointments a
-    LEFT JOIN tickets t ON t.id = a.ticket_id
-    LEFT JOIN leads l ON l.id = t.lead_id
+    JOIN tickets t ON t.id = a.ticket_id
+    JOIN leads l ON l.id = t.lead_id
     WHERE a.clinic_id = p_clinic_id
       AND (p_conv_from IS NULL OR a.date >= p_conv_from)
       AND (p_conv_to   IS NULL OR a.date <= p_conv_to)
@@ -392,7 +419,7 @@ BEGIN
       -- Mesma régua canônica de "Agendamentos Gerados" (lead como um todo, via
       -- vw_lead_agent_class) — era por a.source (quem marcou ESSA consulta),
       -- que divergia de "Gerados" quando o lead é da IA mas um humano marcou.
-      AND (p_agent = 'todos' OR EXISTS (SELECT 1 FROM public.vw_lead_agent_class v WHERE v.lead_id = l.id AND v.clinic_id = p_clinic_id AND v.agent = p_agent))
+      AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
       AND (p_origin = 'todos'
         OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     GROUP BY 1
@@ -410,6 +437,10 @@ BEGIN
       AND (p_origin = 'todos'
         OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
     v_appt_ia := 0; v_appt_manual := v_appt_total;
+    -- appointments.generated ficava hard-travado em 0 pra clínicas com
+    -- agenda_via_funil=true, já que o bloco padrão (acima) lê de `appointments`,
+    -- tabela que essas clínicas não usam pra agendar (achado de code-review 21/07).
+    v_appt_generated := v_appt_total;
 
     SELECT
       COUNT(DISTINCT h.ticket_id) FILTER (WHERE h.new_stage_id = v_ganho_stage_id),
@@ -428,6 +459,9 @@ BEGIN
     v_appt_status := jsonb_build_object('realizado', COALESCE(v_attended_consults, 0), 'faltou', COALESCE(v_falta_cnt, 0));
   END IF;
 
+  -- Faltavam Agente/Origem/Canal aqui (achado de code-review 21/07) — sob
+  -- qualquer um desses filtros, convertedValue continuava mostrando o total
+  -- da clínica inteira enquanto o resto do financeiro encolhia pro recorte.
   SELECT COALESCE(SUM(c.value::numeric), 0) INTO v_converted_value
   FROM conversions c
   LEFT JOIN leads l ON l.id = c.lead_id
@@ -438,7 +472,10 @@ BEGIN
     AND (p_conv_to   IS NULL OR c.converted_at::date <= p_conv_to)
     AND (p_entry_from IS NULL OR l.created_at::date >= p_entry_from)
     AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
-    AND COALESCE(l.is_not_lead, false) = false;
+    AND COALESCE(l.is_not_lead, false) = false
+    AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
+    AND (p_origin = 'todos'
+      OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
 
   -- ===== Funil por etapa — eixo Entrada (sem mudança) =====
   WITH entries AS (
@@ -485,28 +522,35 @@ BEGIN
     GROUP BY 1
   ),
   ap AS (
+    -- Mesma régua de agente do card "Agendamentos Gerados" (fn_lead_matches_agent,
+    -- não a.source) + eixo Conversão também, pra série diária somar com o card
+    -- agregado (achados de code-review 21/07).
     SELECT a.created_at::date AS d,
       COUNT(*) AS appts,
       COUNT(*) FILTER (WHERE COALESCE(a.status, '') NOT IN ('cancelado', 'faltou')) AS valid_appts
     FROM appointments a
-    LEFT JOIN tickets t ON t.id = a.ticket_id LEFT JOIN leads l ON l.id = t.lead_id
+    JOIN tickets t ON t.id = a.ticket_id JOIN leads l ON l.id = t.lead_id
     WHERE a.clinic_id = p_clinic_id AND a.created_at::date BETWEEN v_d_from AND v_d_to
+      AND (p_conv_from IS NULL OR a.date >= p_conv_from)
+      AND (p_conv_to   IS NULL OR a.date <= p_conv_to)
       AND (p_entry_from IS NULL OR l.created_at::date >= p_entry_from)
       AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
       AND COALESCE(l.is_not_lead, false) = false
-      AND (p_agent = 'todos' OR (p_agent = 'ia' AND a.source = 'ia') OR (p_agent = 'humano' AND a.source = 'manual'))
+      AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
       AND (p_origin = 'todos'
         OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     GROUP BY 1
   ),
   rz AS (
     SELECT a.date AS d, COUNT(*) AS realizadas FROM appointments a
-    LEFT JOIN tickets t ON t.id = a.ticket_id LEFT JOIN leads l ON l.id = t.lead_id
+    JOIN tickets t ON t.id = a.ticket_id JOIN leads l ON l.id = t.lead_id
     WHERE a.clinic_id = p_clinic_id AND a.status IN ('realizado', 'compareceu') AND a.date BETWEEN v_d_from AND v_d_to
+      AND (p_agenda_from IS NULL OR a.created_at::date >= p_agenda_from)
+      AND (p_agenda_to   IS NULL OR a.created_at::date <= p_agenda_to)
       AND (p_entry_from IS NULL OR l.created_at::date >= p_entry_from)
       AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
       AND COALESCE(l.is_not_lead, false) = false
-      AND (p_agent = 'todos' OR (p_agent = 'ia' AND a.source = 'ia') OR (p_agent = 'humano' AND a.source = 'manual'))
+      AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
       AND (p_origin = 'todos'
         OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     GROUP BY 1
@@ -520,7 +564,7 @@ BEGIN
       AND (p_entry_from IS NULL OR l.created_at::date >= p_entry_from)
       AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
       AND COALESCE(l.is_not_lead, false) = false
-      AND (p_agent = 'todos' OR EXISTS (SELECT 1 FROM public.vw_lead_agent_class v WHERE v.lead_id = l.id AND v.clinic_id = p_clinic_id AND v.agent = p_agent))
+      AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
       AND (p_origin = 'todos'
         OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ','))) GROUP BY 1
   ),
@@ -556,6 +600,7 @@ BEGIN
       AND (p_entry_from IS NULL OR l.created_at::date >= p_entry_from)
       AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
       AND COALESCE(l.is_not_lead, false) = false
+      AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
       AND (p_origin = 'todos'
         OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     GROUP BY 1

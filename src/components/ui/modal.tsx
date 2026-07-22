@@ -105,14 +105,19 @@ export function Modal<T = undefined>({
 
   // Foco entra no painel ao abrir e volta ao gatilho ao fechar, senão o Tab
   // continua percorrendo a página atrás do overlay.
+  //
+  // Mira o primeiro CAMPO, nunca um botão: o primeiro focável costuma ser o "X"
+  // do cabeçalho, e aí um Enter (reflexo natural em formulário) fecharia o modal
+  // e descartaria o preenchimento. Sem campo, foca o próprio painel, que também
+  // evita deixar Enter armado sobre uma ação destrutiva num modal de confirmação.
   React.useEffect(() => {
     if (!open) return;
     restoreFocusRef.current = document.activeElement as HTMLElement | null;
     const panel = panelRef.current;
-    const first = panel?.querySelector<HTMLElement>(
-      'input, select, textarea, button, [href], [tabindex]:not([tabindex="-1"])',
+    const field = panel?.querySelector<HTMLElement>(
+      "input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled])",
     );
-    (first ?? panel)?.focus();
+    (field ?? panel)?.focus();
     return () => restoreFocusRef.current?.focus?.();
   }, [open]);
 

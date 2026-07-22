@@ -3435,8 +3435,10 @@ export function LeadKanban() {
                             className="w-full px-3 py-2.5 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 font-medium transition-all"
                           >
                             <option value="">Selecione...</option>
+                            {/* Etapa oculta segue selecionável (pode ser destino legítimo), mas vai
+                                marcada: o card cai numa coluna que só reaparece por ter lead. */}
                             {stages.map(s => (
-                              <option key={s.id} value={s.id}>{s.name}</option>
+                              <option key={s.id} value={s.id}>{s.name}{s.is_hidden ? ' (oculta)' : ''}</option>
                             ))}
                           </select>
                         </div>
@@ -3861,10 +3863,13 @@ export function LeadKanban() {
 
       <div className="flex-1 min-h-0">
         <KanbanScrollContainer>
-          {/* 'sincronizacao' oculta temporariamente: virou lixeira de leads sem etapa (fallback
-              corrigido em 21/07 para nunca mais cair aqui). Etapa continua existindo no banco
-              (is_system, não pode ser excluída) — só sai da visualização do Kanban. */}
-          {stages.filter(s => s.slug !== 'sincronizacao').map((stage) => {
+          {/* Etapa oculta some do quadro SÓ ENQUANTO ESTIVER VAZIA. Se um card cair nela por
+              qualquer caminho (regra de gatilho, agendamento via fn_auto_move_lead_to_agendado,
+              mover manual), a coluna reaparece marcada como "oculta".
+              Esta é a guarda central contra lead invisível: em vez de ensinar cada mover a evitar
+              etapa oculta (e esquecer o próximo que for criado), o quadro passa a garantir que
+              nenhum ticket existe fora de uma coluna. Vazia de novo, ela volta a sumir sozinha. */}
+          {stages.filter(s => !s.is_hidden || filteredTickets.some(t => t.stage_id === s.id)).map((stage) => {
             const stageTickets = filteredTickets
               .filter(t => t.stage_id === stage.id)
               .sort((a, b) => {
@@ -3887,6 +3892,16 @@ export function LeadKanban() {
                 <div className="flex items-center gap-2 px-2" draggable={false} onDragStart={e => e.preventDefault()}>
                   <div className={cn("w-2 h-2 shrink-0 rounded-full", stageColors[stage.color || 'bg-slate-500'] || 'bg-slate-500')} />
                   <h3 className="font-bold text-slate-700 text-xs uppercase tracking-wider truncate flex-1">{stage.name}</h3>
+                  {/* Só aparece quando a etapa está oculta E mesmo assim tem card: a coluna voltou
+                      porque senão esses leads ficariam invisíveis. */}
+                  {stage.is_hidden && (
+                    <span
+                      title="Etapa oculta que reapareceu por ter lead. Mova os cards para outra etapa e ela some de novo."
+                      className="bg-amber-100 text-amber-700 text-[9px] font-black uppercase tracking-tighter px-1.5 py-0.5 rounded-md shrink-0"
+                    >
+                      Oculta
+                    </span>
+                  )}
                   <span className="bg-slate-200 text-slate-600 text-[10px] font-bold px-1.5 py-0.5 rounded-md shrink-0">{stageTickets.length}</span>
                   <span className="text-[10px] font-bold text-slate-400 shrink-0">
                     {formatBRL(stageTotal)}
@@ -4582,8 +4597,11 @@ export function LeadKanban() {
                           />
                         ) : (
                           <div className="min-w-0">
-                            <p className="text-sm font-bold text-slate-700 truncate">{stage.name}</p>
-                            {stage.slug && <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Sistema</span>}
+                            <p className={cn("text-sm font-bold truncate", stage.is_hidden ? "text-slate-400" : "text-slate-700")}>{stage.name}</p>
+                            <div className="flex items-center gap-1.5">
+                              {stage.slug && <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Sistema</span>}
+                              {stage.is_hidden && <span className="text-[9px] font-bold text-amber-600 uppercase tracking-tighter">Oculta</span>}
+                            </div>
                           </div>
                         )}
                       </div>
@@ -4627,6 +4645,28 @@ export function LeadKanban() {
                             <option value="CompleteRegistration">CompleteRegistration</option>
                           </select>
                         )}
+                        {/* Ocultar não é excluir: a etapa segue existindo e recebendo lead, só para
+                            de desenhar coluna enquanto estiver vazia. Não precisa avisar que "os
+                            cards vão sumir" porque não somem: o quadro devolve a coluna sozinho se
+                            cair lead nela. Grava na hora (não espera o "Salvar Ordem"). */}
+                        <button
+                          title={stage.is_hidden
+                            ? 'Etapa oculta. Clique para exibir sempre.'
+                            : 'Ocultar do quadro enquanto estiver vazia (continua existindo e recebendo leads)'}
+                          onClick={async () => {
+                            const novo = !stage.is_hidden;
+                            const ok = await updateStage(stage.id, { is_hidden: novo });
+                            if (ok) setLocalStages(p => p.map(s => s.id === stage.id ? { ...s, is_hidden: novo } : s));
+                          }}
+                          className={cn(
+                            "p-1.5 rounded-md transition-all",
+                            stage.is_hidden
+                              ? "text-amber-600 bg-amber-50 hover:bg-amber-100"
+                              : "text-slate-400 hover:text-teal-600 hover:bg-teal-50"
+                          )}
+                        >
+                          {stage.is_hidden ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
                         <button
                           disabled={idx === 0}
                           onClick={() => {

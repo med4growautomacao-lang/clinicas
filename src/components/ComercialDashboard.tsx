@@ -111,6 +111,31 @@ type ChannelFilter = "todos" | "forms" | "whatsapp" | "balcao";
 type ChartMetric = "humanMessages" | "aiMessages" | "leads" | "appointments" | "realizadas" | "ganhos" | "faturamento" | "faturamentoProjetado" | "handoffs" | "followups" | "convAgend" | "convConsulta" | "custoAgend" | "cac" | "roasReal" | "roasProj" | "ticketMedio";
 
 // ==========================================
+// Persistência de filtros (sessionStorage — dura a sessão do navegador; fecha
+// a aba/navegador e a próxima sessão volta pros defaults documentados abaixo).
+// ==========================================
+const FILTERS_SESSION_KEY = "comercialFiltros_v1";
+type SavedRange = { start: string; end: string } | null;
+type SavedFilters = {
+  entryRange: SavedRange; entryLabel: string;
+  apptRange: SavedRange; apptLabel: string;
+  convRange: SavedRange; convLabel: string;
+  agent: AgentFilter; origin: OriginFilter[]; channel: ChannelFilter[];
+  outcomeFilter: "ambos" | "ganho" | "perdido"; lossReasonFilter: string[];
+};
+function loadSavedFilters(): SavedFilters | null {
+  try {
+    const raw = sessionStorage.getItem(FILTERS_SESSION_KEY);
+    return raw ? (JSON.parse(raw) as SavedFilters) : null;
+  } catch {
+    return null;
+  }
+}
+function toDateRange(r: SavedRange): { start: Date; end: Date } | null {
+  return r ? { start: new Date(r.start), end: new Date(r.end) } : null;
+}
+
+// ==========================================
 // Helpers
 // ==========================================
 // Catálogo de métricas do topo (id -> label) para o botão "Métricas"
@@ -313,40 +338,46 @@ export function ComercialDashboard() {
   const [clinicName, setClinicName] = useState("");
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<Period>("dia");
-  // Estado inicial padrão do Resultados: ESTE MÊS nos 2 calendários (Entrada e
-  // Conversão) e "Todos" em agente/origem/canal (sempre abre nesse baseline).
+  // Filtros ficam salvos durante a SESSÃO do navegador (sessionStorage) — sair
+  // e voltar pro Comercial mantém o recorte. Sessão nova (aba/navegador
+  // fechado e reaberto) volta pro baseline: Entrada=Todos, Agendado=Todos,
+  // Conversão=Este mês, agente/origem/canal/toggle="todos"/"ambos".
   const initMonth = computeRange("month");
+  const savedFilters = loadSavedFilters();
   // Conversão = quando o negócio teve desfecho (COALESCE(outcome_at,closed_at))
   // E quando a consulta foi realizada (appointments.date) — mesma janela, cada
   // métrica lê sua própria coluna. Alimenta p_conv no backend. Toggle
   // outcomeFilter (abaixo) escolhe Ganho/Perdido/Ambos dentro dessa janela.
-  const [convRange, setConvRange] = useState<{ start: Date; end: Date } | null>(() => ({ start: initMonth.start, end: initMonth.end }));
-  const [convLabel, setConvLabel] = useState(initMonth.label);
+  const [convRange, setConvRange] = useState<{ start: Date; end: Date } | null>(() =>
+    savedFilters ? toDateRange(savedFilters.convRange) : { start: initMonth.start, end: initMonth.end });
+  const [convLabel, setConvLabel] = useState(() => savedFilters ? savedFilters.convLabel : initMonth.label);
   const [isConvOpen, setIsConvOpen] = useState(false);
-  const [convCal1, setConvCal1] = useState<Date>(() => initMonth.start);
-  const [convCal2, setConvCal2] = useState<Date>(() => addMonths(initMonth.start, 1));
-  // Entrada (coorte) — também começa em ESTE MÊS
-  const [entryRange, setEntryRange] = useState<{ start: Date; end: Date } | null>(() => ({ start: initMonth.start, end: initMonth.end }));
-  const [entryLabel, setEntryLabel] = useState(initMonth.label);
+  const [convCal1, setConvCal1] = useState<Date>(() => toDateRange(savedFilters?.convRange ?? null)?.start ?? initMonth.start);
+  const [convCal2, setConvCal2] = useState<Date>(() => addMonths(toDateRange(savedFilters?.convRange ?? null)?.start ?? initMonth.start, 1));
+  // Entrada (coorte) — baseline "Todos" (sem recorte) numa sessão nova.
+  const [entryRange, setEntryRange] = useState<{ start: Date; end: Date } | null>(() =>
+    savedFilters ? toDateRange(savedFilters.entryRange) : null);
+  const [entryLabel, setEntryLabel] = useState(() => savedFilters ? savedFilters.entryLabel : "TODOS");
   const [isEntryOpen, setIsEntryOpen] = useState(false);
-  const [entryCal1, setEntryCal1] = useState<Date>(() => initMonth.start);
-  const [entryCal2, setEntryCal2] = useState<Date>(() => addMonths(initMonth.start, 1));
+  const [entryCal1, setEntryCal1] = useState<Date>(() => toDateRange(savedFilters?.entryRange ?? null)?.start ?? initMonth.start);
+  const [entryCal2, setEntryCal2] = useState<Date>(() => addMonths(toDateRange(savedFilters?.entryRange ?? null)?.start ?? initMonth.start, 1));
   // Agendado = atividade operacional (mensagens/SLA/handoffs/automações/CSAT/
   // investimento) + quando a consulta foi MARCADA (appointments.created_at).
-  // Alimenta p_agenda no backend. Começa em ESTE MÊS; aceita "Todos" (null).
-  const [apptRange, setApptRange] = useState<{ start: Date; end: Date } | null>(() => ({ start: initMonth.start, end: initMonth.end }));
-  const [apptLabel, setApptLabel] = useState(initMonth.label);
+  // Alimenta p_agenda no backend. Baseline "Todos" (sem recorte) numa sessão nova.
+  const [apptRange, setApptRange] = useState<{ start: Date; end: Date } | null>(() =>
+    savedFilters ? toDateRange(savedFilters.apptRange) : null);
+  const [apptLabel, setApptLabel] = useState(() => savedFilters ? savedFilters.apptLabel : "TODOS");
   const [isApptOpen, setIsApptOpen] = useState(false);
-  const [apptCal1, setApptCal1] = useState<Date>(() => initMonth.start);
-  const [apptCal2, setApptCal2] = useState<Date>(() => addMonths(initMonth.start, 1));
+  const [apptCal1, setApptCal1] = useState<Date>(() => toDateRange(savedFilters?.apptRange ?? null)?.start ?? initMonth.start);
+  const [apptCal2, setApptCal2] = useState<Date>(() => addMonths(toDateRange(savedFilters?.apptRange ?? null)?.start ?? initMonth.start, 1));
   // Toggle Ganho/Perdido/Ambos — recorta o eixo Conversão por desfecho.
-  const [outcomeFilter, setOutcomeFilter] = useState<"ambos" | "ganho" | "perdido">("ambos");
+  const [outcomeFilter, setOutcomeFilter] = useState<"ambos" | "ganho" | "perdido">(() => savedFilters?.outcomeFilter ?? "ambos");
   // Seletor de motivo (só aparece com outcomeFilter="perdido"); vazio = todos os motivos.
-  const [lossReasonFilter, setLossReasonFilter] = useState<string[]>([]);
-  const [agent, setAgent] = useState<AgentFilter>("todos");
+  const [lossReasonFilter, setLossReasonFilter] = useState<string[]>(() => savedFilters?.lossReasonFilter ?? []);
+  const [agent, setAgent] = useState<AgentFilter>(() => savedFilters?.agent ?? "todos");
   // Origem e Canal são multi-seleção: array vazio = "Todos". Agente segue único.
-  const [origin, setOrigin] = useState<OriginFilter[]>([]);
-  const [channel, setChannel] = useState<ChannelFilter[]>([]);
+  const [origin, setOrigin] = useState<OriginFilter[]>(() => savedFilters?.origin ?? []);
+  const [channel, setChannel] = useState<ChannelFilter[]>(() => savedFilters?.channel ?? []);
   const [chartMetric, setChartMetric] = useState<ChartMetric>("humanMessages");
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [visibleMetrics, setVisibleMetrics] = useState<string[]>(() => {
@@ -365,6 +396,19 @@ export function ComercialDashboard() {
     return [...parsed, ...DEFAULT_METRIC_IDS.filter((id) => !parsed.includes(id))];
   });
   const dropdownRef = React.useRef<HTMLDivElement>(null);
+
+  // Persiste o recorte a cada mudança — dura a sessão do navegador (sessionStorage).
+  useEffect(() => {
+    const toSaved = (r: { start: Date; end: Date } | null): SavedRange =>
+      r ? { start: r.start.toISOString(), end: r.end.toISOString() } : null;
+    const toSave: SavedFilters = {
+      entryRange: toSaved(entryRange), entryLabel,
+      apptRange: toSaved(apptRange), apptLabel,
+      convRange: toSaved(convRange), convLabel,
+      agent, origin, channel, outcomeFilter, lossReasonFilter,
+    };
+    try { sessionStorage.setItem(FILTERS_SESSION_KEY, JSON.stringify(toSave)); } catch { /* sessionStorage indisponível — segue sem persistir */ }
+  }, [entryRange, entryLabel, apptRange, apptLabel, convRange, convLabel, agent, origin, channel, outcomeFilter, lossReasonFilter]);
 
   const setConvById = (id: string) => {
     if (id === "todos") { setConvRange(null); setConvLabel("TODOS"); setIsConvOpen(false); return; }
@@ -562,7 +606,7 @@ export function ComercialDashboard() {
 
   useEffect(() => { fetchLeads(); }, [fetchLeads]);
 
-  // Filtros não são persistidos: o Resultados sempre inicia em "Todos".
+  // Persistência de verdade é o useEffect de sessionStorage acima — estes só repassam.
   const setAgentPersist = (v: AgentFilter) => setAgent(v);
   const setOriginPersist = (v: OriginFilter[]) => setOrigin(v);
   const setChannelPersist = (v: ChannelFilter[]) => setChannel(v);

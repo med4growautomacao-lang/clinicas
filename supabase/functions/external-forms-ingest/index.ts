@@ -258,13 +258,18 @@ serve(async (req) => {
     }
 
     if (res?.error) {
-      // Submissão sem identidade mínima: registrada no ledger, mas não virou lead.
-      await registrarErro(
-        'submissao_sem_identidade',
-        'Formulário externo sem telefone nem e-mail — não virou lead',
-        'warning', clinicId,
-        { motivo: res.error, campos_recebidos: Object.keys(body) },
-      );
+      // Telefone sem DDD/DDI: o próprio RPC já registra (FORM_PHONE_SEM_DDD) e recusa o lead —
+      // número de 8-9 dígitos fica fora do índice de unicidade e vira lead duplicada quando a
+      // pessoa manda WhatsApp. Não registrar de novo aqui para não duplicar na Central.
+      if (res.error !== 'telefone_sem_ddd') {
+        // Submissão sem identidade mínima: registrada no ledger, mas não virou lead.
+        await registrarErro(
+          'submissao_sem_identidade',
+          'Formulário externo sem telefone nem e-mail — não virou lead',
+          'warning', clinicId,
+          { motivo: res.error, campos_recebidos: Object.keys(body) },
+        );
+      }
       return json({ ok: false, error: res.error }, 200);
     }
 

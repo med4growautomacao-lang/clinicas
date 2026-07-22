@@ -96,6 +96,11 @@ export interface ConsultationType {
   slug: string;
   name: string;
   modality: 'presencial' | 'online';
+  // Natureza do modelo. null = serve para qualquer natureza (não classificado).
+  // 'retorno' é a cortesia gratuita (ver return_window_days); 'seguimento' é consulta nova paga.
+  nature: 'primeira' | 'retorno' | 'seguimento' | null;
+  // Prazo do retorno de cortesia, em dias. Só se aplica quando nature === 'retorno' (o banco barra o resto).
+  return_window_days: number | null;
   description: string | null;
   is_active: boolean;
   consultation_duration: number;
@@ -1418,7 +1423,26 @@ export function useTickets() {
     // trg_ticket_finish_message ao fechar o ticket — sem chamada ao n8n.
   };
 
-  return { tickets, loading, refetch: fetch, moveTicket, reopenTicket, moveTicketKeepOutcome, openTicket, closeTicket, finalizeTicket };
+  // Exclui UM ticket — não o lead. O botão "Excluir" do card chamava o remove() de
+  // useLeads, que apaga a LINHA DO LEAD: como tickets.lead_id é ON DELETE SET NULL,
+  // TODOS os tickets daquele lead viravam órfãos de uma vez (sumiam do board), e o
+  // CASCADE de leads levava junto conversa (chat_messages), conversões e touchpoints.
+  // Aqui o alvo é só o ticket; o lead e o histórico dele ficam intactos.
+  const removeTicket = async (ticketId: string) => {
+    const snapshot = tickets;
+    setTickets(prev => prev.filter(t => t.id !== ticketId));
+    const { error } = await supabase.from('tickets').delete().eq('id', ticketId);
+    if (error) {
+      // Restaura o card e registra na Central — falha silenciosa aqui vira "sumiu o ticket".
+      setTickets(snapshot);
+      logSystemError('TICKET_DELETE_FAIL', `useTickets: falha ao excluir o ticket ${ticketId}`, activeClinicId, { ticket_id: ticketId, error: (error as any)?.message ?? String(error) }, 'error');
+      fetch(true);
+      return false;
+    }
+    return true;
+  };
+
+  return { tickets, loading, refetch: fetch, moveTicket, reopenTicket, moveTicketKeepOutcome, openTicket, closeTicket, finalizeTicket, removeTicket };
 }
 
 // ==========================================

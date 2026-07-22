@@ -2858,9 +2858,11 @@ const APPT_STATUS_LABELS: Record<string, string> = {
 
 export function LeadKanban() {
   const { data: stages, loading: stagesLoading, reorder: reorderStages, update: updateStage, create: createStage, remove: removeStage } = useFunnelStages();
-  const { data: leads, create, createWithTicket, update, remove, markNotLead } = useLeads({ pageSize: 150 });
+  // Sem o remove() de useLeads de propósito: no Kanban só se exclui TICKET (removeTicket).
+  // Apagar o lead daqui desvincula todos os tickets dele e cascateia conversa/conversões.
+  const { data: leads, create, createWithTicket, update, markNotLead } = useLeads({ pageSize: 150 });
   const { data: notLeads, restore: restoreNotLead } = useNotLeads();
-  const { tickets, loading: ticketsLoading, refetch: refetchTickets, moveTicket, reopenTicket, moveTicketKeepOutcome, openTicket, closeTicket, finalizeTicket } = useTickets();
+  const { tickets, loading: ticketsLoading, refetch: refetchTickets, moveTicket, reopenTicket, moveTicketKeepOutcome, openTicket, closeTicket, finalizeTicket, removeTicket } = useTickets();
   const { byLead: conversionsByLead, create: createConversion, update: updateConversion } = useConversions();
   const { aiConfig, updateAI } = useSettings();
   const { data: orcamentos, save: saveOrcamento } = useOrcamentos();
@@ -3160,10 +3162,15 @@ export function LeadKanban() {
     }
   };
 
+  // Exclui SÓ o ticket do card. Antes chamava remove(selectedLead.id), que apaga o LEAD:
+  // como tickets.lead_id é ON DELETE SET NULL, isso desvinculava TODOS os tickets daquele
+  // lead de uma vez (o board perdia todos os cards da pessoa) e o CASCADE do lead levava
+  // junto a conversa, as conversões e os touchpoints. O modal sempre disse "Excluir Ticket".
   const handleDelete = async () => {
-    if (!selectedLead) return;
+    const ticketId = selectedLead?._ticketId;
+    if (!ticketId) return;
     setSubmitting(true);
-    await remove(selectedLead.id);
+    await removeTicket(ticketId);
     setShowDeleteConfirm(false);
     setSelectedLead(null);
     setSubmitting(false);
@@ -4493,20 +4500,36 @@ export function LeadKanban() {
                 <div className="w-12 h-12 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-4"><AlertCircle className="w-6 h-6 text-rose-600" /></div>
                 <h3 className="text-xl font-bold text-slate-900 mb-2">Excluir Ticket</h3>
                 <p className="text-slate-500">Tem certeza que deseja excluir este ticket? Esta ação não pode ser desfeita.</p>
-                {selectedLead && (
-                  <div className="mt-4 p-3 bg-slate-50 rounded-lg text-sm text-left border border-slate-100">
-                    <p className="font-semibold text-slate-700">{selectedLead.name}</p>
-                    <p className="text-slate-500 text-xs">
-                      Valor do orçamento: {
-                        formatBRL(
-                          conversionsByLead[selectedLead.id]?.[conversionsByLead[selectedLead.id].length - 1]?.value ?? 
-                          selectedLead.estimated_value ?? 
-                          0
-                        )
-                      }
-                    </p>
-                  </div>
-                )}
+                {selectedLead && (() => {
+                  // Identifica o CARD exato: com duplicatas (mesma pessoa em 2 leads) o nome
+                  // sozinho não distingue qual está sendo excluído. Mostra a etapa e, quando o
+                  // lead tem mais de um ticket, avisa que os outros permanecem.
+                  const delTicket = tickets.find(t => t.id === selectedLead._ticketId);
+                  const outros = tickets.filter(t => t.lead_id === selectedLead.id && t.id !== selectedLead._ticketId).length;
+                  const etapa = stages.find(s => s.id === delTicket?.stage_id)?.name;
+                  return (
+                    <>
+                      <div className="mt-4 p-3 bg-slate-50 rounded-lg text-sm text-left border border-slate-100">
+                        <p className="font-semibold text-slate-700">{selectedLead.name}</p>
+                        {etapa && <p className="text-slate-500 text-xs">Etapa: {etapa}</p>}
+                        <p className="text-slate-500 text-xs">
+                          Valor do orçamento: {
+                            formatBRL(
+                              conversionsByLead[selectedLead.id]?.[conversionsByLead[selectedLead.id].length - 1]?.value ??
+                              selectedLead.estimated_value ??
+                              0
+                            )
+                          }
+                        </p>
+                      </div>
+                      <p className="mt-3 text-xs text-slate-400">
+                        {outros > 0
+                          ? `O contato e os outros ${outros} ticket${outros > 1 ? 's' : ''} desta pessoa continuam no funil.`
+                          : 'O contato e a conversa continuam salvos — só este ticket sai do funil.'}
+                      </p>
+                    </>
+                  );
+                })()}
               </div>
               <div className="flex gap-3 p-6 border-t border-slate-100 bg-slate-50">
                 <Button variant="outline" className="flex-1" onClick={() => setShowDeleteConfirm(false)}>Cancelar</Button>
@@ -4970,11 +4993,17 @@ export function LeadKanban() {
       </AnimatePresence>
 
       {/* Quick Schedule Modal */}
-      {scheduleLead && (
-        <Modal open onClose={() => setScheduleLead(null)} size="sm" zIndexClass="z-[70]">
+      <Modal
+        open={!!scheduleLead}
+        onClose={() => setScheduleLead(null)}
+        size="sm"
+        zIndexClass="z-[70]"
+        data={scheduleLead}
+      >
+        {(alvo) => alvo && (<>
           <ModalHeader
             title="Agendar Consulta"
-            subtitle={scheduleLead.lead.name}
+            subtitle={alvo.lead.name}
             onClose={() => setScheduleLead(null)}
             className="p-5"
           />
@@ -5053,7 +5082,7 @@ export function LeadKanban() {
                   onClick={async () => {
                     setScheduleSubmitting(true);
                     setScheduleError(null);
-                    const sl = scheduleLead.lead;
+                    const sl = alvo.lead;
                     // RPC atômica: resolve paciente + vincula lead + cria appointment com proteção a sobreposição
                     const { data, error } = await supabase.rpc('convert_lead_to_appointment', {
                       p_clinic_id: sl.clinic_id,
@@ -5063,7 +5092,7 @@ export function LeadKanban() {
                       p_time: scheduleForm.time,
                       p_consultation_type_id: scheduleForm.consultation_type_id || null,
                       p_notes: scheduleForm.notes || null,
-                      p_ticket_id: scheduleLead.ticketId || null,
+                      p_ticket_id: alvo.ticketId || null,
                       p_request_id: globalThis.crypto?.randomUUID?.() ?? null,
                     });
                     setScheduleSubmitting(false);
@@ -5097,7 +5126,7 @@ export function LeadKanban() {
                     // mesmo enriquecimento de atribuição usado nos demais fluxos.
                     const agendadoStage = stages.find(s => s.slug === 'agendado');
                     if (agendadoStage?.is_conversion && sl.ctwa_clid && !sl.email) {
-                      setAttribLead({ id: sl.id, name: sl.name, phone: sl.phone ?? null, ctwaClid: sl.ctwa_clid ?? null, ticketId: scheduleLead.ticketId, prevStageId: scheduleLead.prevStageId ?? null, appointmentId: result.appointment_id ?? null });
+                      setAttribLead({ id: sl.id, name: sl.name, phone: sl.phone ?? null, ctwaClid: sl.ctwa_clid ?? null, ticketId: alvo.ticketId, prevStageId: alvo.prevStageId ?? null, appointmentId: result.appointment_id ?? null });
                     }
                     setScheduleLead(null);
                   }}
@@ -5106,8 +5135,8 @@ export function LeadKanban() {
               Agendar
             </Button>
           </ModalFooter>
-        </Modal>
-      )}
+        </>)}
+      </Modal>
     </div>
   );
 }

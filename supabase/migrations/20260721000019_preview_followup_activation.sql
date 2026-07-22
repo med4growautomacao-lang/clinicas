@@ -70,7 +70,8 @@ begin
   create temp table if not exists _fu_prev (
     nome text, telefone text, quando timestamp, detalhe text
   ) on commit drop;
-  delete from _fu_prev;
+  -- TRUNCATE e não DELETE: na sessão do PostgREST o safe-updates recusa DELETE sem WHERE.
+  truncate table _fu_prev;
 
   -- ---------------------------------------------------------------- BOAS-VINDAS
   if p_kind = 'welcome' then

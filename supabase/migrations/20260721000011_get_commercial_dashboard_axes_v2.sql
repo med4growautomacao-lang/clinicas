@@ -202,13 +202,20 @@ BEGIN
     AND (p_origin = 'todos'
       OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
 
-  -- Agendamento GERADO (v_kpi_scheduled: união agendamento∪etapa) — eixo Agendado.
+  -- Agendamento GERADO — precisa bater os 3 calendários AO MESMO TEMPO (E, não
+  -- OU): criado dentro de Agendado, consulta marcada pra dentro de Conversão,
+  -- lead entrou dentro de Entrada. Por isso lê direto de appointments (não
+  -- v_kpi_scheduled, que não guarda a.date) — perde os casos "só etapa, sem
+  -- agendamento real" (raro), ganha bater exato com "Consultas" (byStatus) logo abaixo.
   SELECT COUNT(*) INTO v_appt_generated
-  FROM v_kpi_scheduled sc
-  JOIN leads l ON l.id = sc.lead_id
-  WHERE sc.clinic_id = p_clinic_id
-    AND (p_agenda_from IS NULL OR sc.day >= p_agenda_from)
-    AND (p_agenda_to   IS NULL OR sc.day <= p_agenda_to)
+  FROM appointments a
+  LEFT JOIN tickets t ON t.id = a.ticket_id
+  LEFT JOIN leads l ON l.id = t.lead_id
+  WHERE a.clinic_id = p_clinic_id
+    AND (p_agenda_from IS NULL OR a.created_at::date >= p_agenda_from)
+    AND (p_agenda_to   IS NULL OR a.created_at::date <= p_agenda_to)
+    AND (p_conv_from IS NULL OR a.date >= p_conv_from)
+    AND (p_conv_to   IS NULL OR a.date <= p_conv_to)
     AND (p_entry_from IS NULL OR l.created_at::date >= p_entry_from)
     AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
     AND COALESCE(l.is_not_lead, false) = false
@@ -264,9 +271,13 @@ BEGIN
     AND (p_origin = 'todos' OR origin = ANY(string_to_array(p_origin, ',')))
     AND COALESCE(p_channel, 'todos') = 'todos' AND COALESCE(p_agent, 'todos') = 'todos';
 
-  -- ===== Eixo CONVERSÃO (COALESCE(outcome_at,closed_at) + appointments.date —
-  -- mesma janela, cada métrica lê sua própria coluna) — era o antigo p_appt +
-  -- metade do antigo p_conv. Toggle p_outcome ('ganho'|'perdido'|'ambos'). =====
+  -- ===== Eixo CONVERSÃO (COALESCE(outcome_at,closed_at) + appointments.date) —
+  -- era o antigo p_appt + metade do antigo p_conv. Toggle p_outcome
+  -- ('ganho'|'perdido'|'ambos'). Ganho/Perdido/Faturamento usam SÓ Conversão+
+  -- Entrada (não têm "quando foi criado" pra exigir Agendado). Já os blocos de
+  -- CONSULTA (gerado/byStatus/realizadas, mais abaixo) exigem os 3 calendários
+  -- AO MESMO TEMPO — Agendado (criação) E Conversão (data da consulta) E
+  -- Entrada (coorte) — por pedido explícito do Pedro: "a condição é AND". =====
   SELECT
     COUNT(*) FILTER (WHERE t.outcome = 'ganho'),
     COUNT(*) FILTER (WHERE t.outcome = 'perdido')
@@ -349,6 +360,8 @@ BEGIN
     AND (p_origin = 'todos'
       OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
 
+  -- Consultas realizadas: mesma regra de "casamento" dos 3 calendários do bloco
+  -- acima (Agendado + Conversão + Entrada, todos ao mesmo tempo).
   SELECT COUNT(*) INTO v_attended_consults
   FROM appointments a
   LEFT JOIN tickets t ON t.id = a.ticket_id
@@ -356,6 +369,8 @@ BEGIN
   WHERE a.clinic_id = p_clinic_id AND a.status IN ('realizado', 'compareceu')
     AND (p_conv_from IS NULL OR a.date >= p_conv_from)
     AND (p_conv_to   IS NULL OR a.date <= p_conv_to)
+    AND (p_agenda_from IS NULL OR a.created_at::date >= p_agenda_from)
+    AND (p_agenda_to   IS NULL OR a.created_at::date <= p_agenda_to)
     AND (p_entry_from IS NULL OR l.created_at::date >= p_entry_from)
     AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
     AND COALESCE(l.is_not_lead, false) = false;
@@ -369,10 +384,15 @@ BEGIN
     WHERE a.clinic_id = p_clinic_id
       AND (p_conv_from IS NULL OR a.date >= p_conv_from)
       AND (p_conv_to   IS NULL OR a.date <= p_conv_to)
+      AND (p_agenda_from IS NULL OR a.created_at::date >= p_agenda_from)
+      AND (p_agenda_to   IS NULL OR a.created_at::date <= p_agenda_to)
       AND (p_entry_from IS NULL OR l.created_at::date >= p_entry_from)
       AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
       AND COALESCE(l.is_not_lead, false) = false
-      AND (p_agent = 'todos' OR (p_agent = 'ia' AND a.source = 'ia') OR (p_agent = 'humano' AND a.source = 'manual'))
+      -- Mesma régua canônica de "Agendamentos Gerados" (lead como um todo, via
+      -- vw_lead_agent_class) — era por a.source (quem marcou ESSA consulta),
+      -- que divergia de "Gerados" quando o lead é da IA mas um humano marcou.
+      AND (p_agent = 'todos' OR EXISTS (SELECT 1 FROM public.vw_lead_agent_class v WHERE v.lead_id = l.id AND v.clinic_id = p_clinic_id AND v.agent = p_agent))
       AND (p_origin = 'todos'
         OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     GROUP BY 1

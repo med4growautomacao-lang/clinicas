@@ -23,10 +23,19 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// breakdown_enabled: OFF por padrão. O detalhamento por campanha dobra as chamadas ao Google Ads
-// (teto de quota diária) e ao Meta em TODAS as clínicas a cada tick — só liga aqui depois que o
-// front que consome marketing_spend_breakdown estiver no ar (o botão manual já captura, sem esperar).
-const DEFAULT_CONFIG = { enabled: false, every_hours: 24, run_hour_sp: 5, lookback_days: 1, platforms: ["meta_ads", "google_ads"], batch_size: 300, breakdown_enabled: false };
+// breakdown_enabled: o detalhamento por campanha dobra as chamadas ao Google Ads (teto de quota
+// diária) e ao Meta em TODAS as clínicas a cada tick. A condição para ligar era o front que
+// consome marketing_spend_breakdown estar no ar, e ela foi cumprida em 21/07 (useCampaignInvestment
+// e useCampaignPlatformSplit, usados no MarketingAnalytics), então em produção está LIGADO via
+// system_settings. Segue false aqui só como padrão conservador de ambiente novo.
+//
+// include_today: OFF por padrão, o agendado grava só dia fechado (ver a janela, mais abaixo).
+//
+// lookback_days: 2, não 1, DE PROPÓSITO. Com until=ontem, lookback=1 daria a janela [ontem, ontem]
+// e cada dia teria UMA só chance de ser capturado: bastava a rodada das 05:00 falhar uma vez para
+// aquele dia ficar sem investimento para sempre, já que no dia seguinte a janela anda junto. Com 2
+// há um dia de sobreposição, e a rodada seguinte repesca o que a anterior perdeu.
+const DEFAULT_CONFIG = { enabled: false, every_hours: 24, run_hour_sp: 5, lookback_days: 2, platforms: ["meta_ads", "google_ads"], batch_size: 300, breakdown_enabled: false, include_today: false };
 const CONCURRENCY = 8; // contas processadas em paralelo por lote
 
 interface ClinicRow {
@@ -102,14 +111,25 @@ serve(async (req) => {
   }
   const cursor = Number(state.cursor) || 0;
 
-  // Janela: de (hoje - lookback_days) até hoje (SP). lookback_days=1 → ONTEM + hoje — garante que
-  // o total FINAL de ontem entra (rodando de manhã, ontem já fechou). Rodada agendada nunca perde
-  // o fechamento do dia (era o furo com since=hoje).
+  // Janela: de (hoje - lookback_days) até ONTEM (SP), inclusive.
+  //
+  // O agendado grava só dia FECHADO, de propósito. O dia corrente é sempre parcial e, rodando às
+  // 05:00, entraria quase zerado e ficaria congelado assim até a manhã seguinte: em 21/07 isso
+  // escondia R$ 2.700 de gasto real (uma clínica marcava 1.148 quando já eram 2.982), e o número
+  // errado ainda contaminava ROAS e custo por lead do dia, sempre para menos.
+  // Quem quiser o número de hoje usa o botão do Marketing, que manda a janela explícita.
+  // include_today: true volta ao comportamento antigo (ontem + hoje) sem precisar de deploy.
+  //
+  // A sobreposição vem de lookback_days >= 2 (ver DEFAULT_CONFIG): a janela precisa cobrir mais de
+  // um dia fechado para que a rodada de amanhã repesque o dia que a de hoje eventualmente perdeu.
   const lookback = Math.max(1, Number(cfg.lookback_days) || 1);
-  const sinceDate = new Date(todaySP + "T00:00:00Z");
-  sinceDate.setUTCDate(sinceDate.getUTCDate() - lookback);
-  const since = sinceDate.toISOString().slice(0, 10);
-  const until = todaySP;
+  const dayOffset = (base: string, days: number) => {
+    const d = new Date(base + "T00:00:00Z");
+    d.setUTCDate(d.getUTCDate() - days);
+    return d.toISOString().slice(0, 10);
+  };
+  const since = dayOffset(todaySP, lookback);
+  const until = dayOffset(todaySP, cfg.include_today === true ? 0 : 1);
 
   const platforms: string[] = Array.isArray(cfg.platforms) ? cfg.platforms : DEFAULT_CONFIG.platforms;
   const wantMeta = platforms.includes("meta_ads");

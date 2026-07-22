@@ -253,6 +253,17 @@ begin
     'historico_7d',    v_hist,
     'amostra',         v_sample
   );
+exception when others then
+  -- CLAUDE.md: RPC que importa registra na Central. O bug do "DELETE sem WHERE" derrubou esta
+  -- janela para o usuário final sem deixar UM rastro; só apareceu porque o dono mandou print.
+  -- P0001 = os raise deliberados daqui (permissão / p_kind inválido), que não são falha do sistema.
+  -- NÃO engole: re-levanta para o modal continuar mostrando o motivo ao usuário.
+  if sqlstate <> 'P0001' then
+    perform log_system_error('followup-preview','preview_failed',
+      'Falha ao calcular o preview de ativação de follow-up','error', p_clinic_id,
+      jsonb_build_object('kind', p_kind, 'sqlstate', sqlstate, 'detail', sqlerrm), false);
+  end if;
+  raise;
 end;
 $function$;
 

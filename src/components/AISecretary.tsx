@@ -1318,6 +1318,10 @@ function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [chatLead, setChatLead] = useState<Lead | null>(null);
   const pending = useRef<(() => void) | null>(null);
+  // Sequência da requisição em voo. Sem isto, uma resposta lenta de um follow-up chega DEPOIS
+  // de o usuário já ter aberto outro e preenche o modal errado (ex.: título "Pós (Perdido)"
+  // com os números do "Ganho"), fazendo ele confirmar em cima de um número que não é o dele.
+  const reqId = useRef(0);
 
   // Abre a MESMA conversa que o Kanban abre (carrega o lead completo p/ o LeadChat).
   const openLeadChat = async (leadId: string) => {
@@ -1328,20 +1332,28 @@ function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
   const guard = React.useCallback((k: FollowupKind, activate: () => void) => {
     if (!activeClinicId) { activate(); return; }
     pending.current = activate;
+    const myReq = ++reqId.current;
     setKind(k); setData(null); setError(null); setLoading(true);
     (async () => {
       const { data: d, error: e } = await supabase
         .rpc("preview_followup_activation", { p_clinic_id: activeClinicId, p_kind: k });
+      if (myReq !== reqId.current) return; // resposta de um pedido já superado: descarta
       if (e) setError(e.message);
       else setData(d as unknown as FollowupPreview);
       setLoading(false);
     })();
   }, [activeClinicId]);
 
-  const close = () => { pending.current = null; setKind(null); setData(null); setError(null); };
+  // Fechar/confirmar também invalida o que estiver em voo.
+  const reset = () => {
+    reqId.current++;
+    pending.current = null;
+    setKind(null); setData(null); setError(null); setLoading(false);
+  };
+  const close = () => reset();
   const confirm = () => {
     const fn = pending.current;
-    pending.current = null; setKind(null); setData(null); setError(null);
+    reset();
     fn?.();
   };
 

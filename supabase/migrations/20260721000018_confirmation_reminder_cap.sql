@@ -39,6 +39,11 @@ begin
         and (wa.send_blocked_until is null or wa.send_blocked_until <= now())
         and nullif(btrim(ai.confirm_message), '') is not null
         and coalesce(l.followup_enabled, true) = true
+        -- Linha NÃO enviável não pode ocupar slot do cap. O loop abaixo pula essas com `continue`
+        -- sem marcar reminder_sent_at, então com o cap elas voltariam a ser escolhidas toda rodada
+        -- e travariam os lembretes válidos da clínica até a consulta passar do horário.
+        and normalize_br_phone(p.phone) is not null
+        and wa.api_token is not null and btrim(wa.api_token) <> ''
         and ((a.date + a.time) at time zone 'America/Sao_Paulo') <= now() + (coalesce(ai.confirm_lead_time,1440) || ' minutes')::interval
         and ((a.date + a.time) at time zone 'America/Sao_Paulo') > now()
         and extract(hour from now() at time zone 'America/Sao_Paulo') >= coalesce(ai.confirm_window_start, 6)

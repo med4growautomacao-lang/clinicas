@@ -1011,11 +1011,23 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
                             })()}
                           </td>
                           <td className="px-6 py-4">
-                            {apt.source === "ia" ? (
-                              <span className="inline-flex items-center text-[10px] font-semibold tracking-wider uppercase text-teal-700 bg-teal-50 px-2 py-1 rounded-md border border-teal-100"><Bot className="w-3 h-3 mr-1" /> IA</span>
-                            ) : (
-                              <span className="inline-flex items-center text-[10px] font-semibold tracking-wider uppercase text-slate-500 bg-slate-50 px-2 py-1 rounded-md border border-slate-100"><Phone className="w-3 h-3 mr-1" /> Manual</span>
-                            )}
+                            <div className="flex flex-col items-start gap-1">
+                              {apt.source === "ia" ? (
+                                <span className="inline-flex items-center text-[10px] font-semibold tracking-wider uppercase text-teal-700 bg-teal-50 px-2 py-1 rounded-md border border-teal-100"><Bot className="w-3 h-3 mr-1" /> IA</span>
+                              ) : (
+                                <span className="inline-flex items-center text-[10px] font-semibold tracking-wider uppercase text-slate-500 bg-slate-50 px-2 py-1 rounded-md border border-slate-100"><Phone className="w-3 h-3 mr-1" /> Manual</span>
+                              )}
+                              {/* Quando o agendamento foi GERADO (≠ data da consulta, que está na coluna Data).
+                                  created_at é timestamp SEM tz (já em SP) — parseISO/format sem conversão. */}
+                              {apt.created_at && (
+                                <span
+                                  title={`Agendamento gerado em ${format(parseISO(apt.created_at), "dd/MM/yyyy 'às' HH:mm")}`}
+                                  className="text-[10px] text-slate-400 font-medium whitespace-nowrap"
+                                >
+                                  gerado {format(parseISO(apt.created_at), 'dd/MM/yy')}
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="px-6 py-4">
                             <div>

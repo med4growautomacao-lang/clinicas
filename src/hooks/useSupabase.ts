@@ -1836,6 +1836,8 @@ export interface AIConfig {
   welcome_message_delay: number;
   welcome_window_start?: number;
   welcome_window_end?: number;
+  pos_followup_window_start?: number;
+  pos_followup_window_end?: number;
   test_mode_enabled: boolean;
   test_numbers: string[];
   test_reset_phrase: string;

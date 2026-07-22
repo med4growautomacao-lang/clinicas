@@ -125,8 +125,20 @@ function ValidationModal({ isOpen, onClose, missingTags }: { isOpen: boolean, on
   );
 }
 
+/**
+ * Sempre o valor MAIS RECENTE, mesmo dentro de um callback criado num render antigo.
+ * Os toggles de follow-up rodam o `apply` só depois da janela de confirmação: sem isto o
+ * callback decide com base no aiConfig de quando o botão foi clicado, e não no de agora.
+ */
+function useLatest<T>(value: T) {
+  const ref = useRef(value);
+  useEffect(() => { ref.current = value; }, [value]);
+  return ref;
+}
+
 function ConfirmationsView() {
   const { aiConfig, updateAI, loading } = useSettings();
+  const aiRef = useLatest(aiConfig);
   const guard = useActivationGuard();
   const [saving, setSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
@@ -248,7 +260,7 @@ function ConfirmationsView() {
                     // mandar o localConfig inteiro regravaria um snapshot velho por cima do servidor.
                     // Sem linha em ai_config ainda, manda o objeto semeado (senão o INSERT criaria
                     // um registro só com esta coluna e o resto viria do default da tabela).
-                    const apply = () => { setLocalConfig({ ...localConfig, confirm_enabled: v }); updateAI(aiConfig ? { confirm_enabled: v } : { ...localConfig, confirm_enabled: v }); };
+                    const apply = () => { setLocalConfig({ ...localConfig, confirm_enabled: v }); updateAI(aiRef.current ? { confirm_enabled: v } : { ...localConfig, confirm_enabled: v }); };
                     if (v) guard("confirmation", apply); else apply();
                   }}
                   className={cn("w-12 h-6 rounded-full relative transition-all shrink-0", localConfig.confirm_enabled ? "bg-teal-600" : "bg-slate-300")}
@@ -557,6 +569,7 @@ function FollowupStepEditor({ step, index, onUpdate, onRemove, onSetClosing }: {
 
 function FollowupsView() {
   const { aiConfig, updateAI, loading } = useSettings();
+  const aiRef = useLatest(aiConfig);
   const guard = useActivationGuard();
   const [localConfig, setLocalConfig] = useState<any>(null);
   const { steps, loading: stepsLoading, addStep, updateStep, removeStep, setClosing } = useFollowupSteps();
@@ -599,7 +612,7 @@ function FollowupsView() {
             <button
               onClick={() => {
                 const v = !localConfig.followup_enabled;
-                const apply = () => { setLocalConfig({ ...localConfig, followup_enabled: v }); updateAI(aiConfig ? { followup_enabled: v } : { ...localConfig, followup_enabled: v }); };
+                const apply = () => { setLocalConfig({ ...localConfig, followup_enabled: v }); updateAI(aiRef.current ? { followup_enabled: v } : { ...localConfig, followup_enabled: v }); };
                 if (v) guard("reengagement", apply); else apply();
               }}
               className={cn(
@@ -715,6 +728,7 @@ function FollowupsView() {
 
 function WelcomeFollowupView() {
   const { aiConfig, updateAI, loading } = useSettings();
+  const aiRef = useLatest(aiConfig);
   const guard = useActivationGuard();
   const [saving, setSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
@@ -764,7 +778,7 @@ function WelcomeFollowupView() {
             <button
               onClick={() => {
                 const v = !localConfig.welcome_message_enabled;
-                const apply = () => { setLocalConfig({ ...localConfig, welcome_message_enabled: v }); updateAI(aiConfig ? { welcome_message_enabled: v } : { ...localConfig, welcome_message_enabled: v }); };
+                const apply = () => { setLocalConfig({ ...localConfig, welcome_message_enabled: v }); updateAI(aiRef.current ? { welcome_message_enabled: v } : { ...localConfig, welcome_message_enabled: v }); };
                 if (v) guard("welcome", apply); else apply();
               }}
               className={cn("w-12 h-6 rounded-full relative transition-all", localConfig.welcome_message_enabled ? "bg-teal-600" : "bg-slate-300")}
@@ -883,6 +897,7 @@ function WelcomeFollowupView() {
 
 function PosFollowupView() {
   const { aiConfig, updateAI, loading } = useSettings();
+  const aiRef = useLatest(aiConfig);
   const guard = useActivationGuard();
   const [saving, setSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
@@ -972,7 +987,7 @@ function PosFollowupView() {
               <button
                 onClick={() => {
                   const v = !localConfig[keys.enabled];
-                  const apply = () => { setLocalConfig({ ...localConfig, [keys.enabled]: v }); updateAI(aiConfig ? { [keys.enabled]: v } : { ...localConfig, [keys.enabled]: v }); };
+                  const apply = () => { setLocalConfig({ ...localConfig, [keys.enabled]: v }); updateAI(aiRef.current ? { [keys.enabled]: v } : { ...localConfig, [keys.enabled]: v }); };
                   if (v) guard(outcomeTab === "ganho" ? "pos_ganho" : "pos_perdido", apply); else apply();
                 }}
                 className={cn(
@@ -1006,6 +1021,33 @@ function PosFollowupView() {
                   {days} dia{days !== 1 ? "s" : ""} após o encerramento do ticket
                 </div>
               </div>
+            </div>
+
+            {/* Janela de envio do pós (vale para Ganho e Perdido, é a mesma no motor) */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1 flex items-center gap-2 font-sans">
+                <Clock className="w-3 h-3" /> Janela de envio
+              </label>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold text-slate-400 uppercase">Das</span>
+                <input
+                  type="number" min={0} max={23}
+                  value={localConfig.pos_followup_window_start ?? 8}
+                  onChange={(e) => setConfig({ pos_followup_window_start: Math.min(23, Math.max(0, parseInt(e.target.value) || 0)) })}
+                  className="w-16 px-3 py-2 border border-slate-200 rounded-lg font-bold text-teal-700 text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all"
+                />
+                <span className="text-[11px] font-bold text-slate-400 uppercase">às</span>
+                <input
+                  type="number" min={1} max={24}
+                  value={localConfig.pos_followup_window_end ?? 20}
+                  onChange={(e) => setConfig({ pos_followup_window_end: Math.min(24, Math.max(1, parseInt(e.target.value) || 0)) })}
+                  className="w-16 px-3 py-2 border border-slate-200 rounded-lg font-bold text-teal-700 text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all"
+                />
+                <span className="text-[11px] font-bold text-slate-400 uppercase">h (Brasília)</span>
+              </div>
+              <p className="text-[11px] text-slate-400 font-medium pl-1">
+                Vale para os dois desfechos. Fora desse horário, o pós espera a próxima janela.
+              </p>
             </div>
 
             <div className="space-y-2">
@@ -1953,6 +1995,7 @@ function HandoffView() {
 
 function FinishServiceView() {
   const { aiConfig, updateAI, loading } = useSettings();
+  const aiRef = useLatest(aiConfig);
   const guard = useActivationGuard();
   const [saving, setSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
@@ -2045,7 +2088,7 @@ function FinishServiceView() {
                     <button
                       onClick={() => {
                         const v = !localConfig[keys.enabled];
-                        const apply = () => { setLocalConfig({ ...localConfig, [keys.enabled]: v }); updateAI(aiConfig ? { [keys.enabled]: v } : { ...localConfig, [keys.enabled]: v }); };
+                        const apply = () => { setLocalConfig({ ...localConfig, [keys.enabled]: v }); updateAI(aiRef.current ? { [keys.enabled]: v } : { ...localConfig, [keys.enabled]: v }); };
                         if (v) guard(
                           outcomeTab === "ganho" ? "finish_ganho"
                             : outcomeTab === "perdido" ? "finish_perdido" : "finish_service",

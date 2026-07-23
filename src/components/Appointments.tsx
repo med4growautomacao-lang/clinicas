@@ -1024,7 +1024,7 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
                                   title={`Agendamento gerado em ${format(parseISO(apt.created_at), "dd/MM/yyyy 'às' HH:mm")}`}
                                   className="text-[10px] text-slate-400 font-medium whitespace-nowrap"
                                 >
-                                  gerado {format(parseISO(apt.created_at), 'dd/MM/yy')}
+                                  Gerado em {format(parseISO(apt.created_at), 'dd/MM/yy')}
                                 </span>
                               )}
                             </div>

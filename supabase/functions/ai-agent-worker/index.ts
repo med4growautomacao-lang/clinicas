@@ -12,6 +12,7 @@ import { agentToolSpecs, executeToolCall, type SessionCtx } from "../_shared/age
 import { assembleSystemPrompt, fetchAgentContext } from "../_shared/agent/prompt.ts";
 import { splitIntoBubbles } from "../_shared/agent/split.ts";
 import { loadConversation, saveAiResponse } from "../_shared/agent/memory.ts";
+import { looksTechnical, REPAIR_INSTRUCTION, sanitizeForPatient } from "../_shared/agent/guard.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -198,6 +199,31 @@ async function processTurn(supabase: any, turn: { session_id: string; clinic_id:
     if (!finalText) {
       await registrarErro(supabase, "resposta_vazia", "O agente terminou o turno sem texto para enviar ao paciente", "warning", clinicId, { session_id: turn.session_id });
       return;
+    }
+
+    // TRAVA DE SAIDA — o paciente NUNCA pode receber conteudo tecnico. Se o modelo escreveu a
+    // chamada de tool como texto (em vez de executa-la), limpa; se ainda sobrar coisa tecnica,
+    // da UMA chance de reescrever em linguagem natural; se falhar de novo, NAO ENVIA NADA.
+    // Silencio + alerta na Central e preferivel a mandar JSON pro paciente (e pro TTS, e pro painel).
+    const limpo = sanitizeForPatient(finalText);
+    if (limpo !== finalText) {
+      await registrarErro(supabase, "artefato_tecnico_removido", "A resposta do agente vinha com conteudo tecnico; o trecho foi removido antes do envio", "warning", clinicId, { session_id: turn.session_id, original: finalText.slice(0, 300) });
+    }
+    if (looksTechnical(limpo)) {
+      let reparado = "";
+      try {
+        const rep = await modelTurn(supabase, cfg, system, [...messages, { role: "assistant", text: finalText }, { role: "user", text: REPAIR_INSTRUCTION }], []);
+        reparado = sanitizeForPatient((rep.text || "").trim());
+      } catch { /* reparo falhou: cai no bloqueio abaixo */ }
+
+      if (looksTechnical(reparado)) {
+        await registrarErro(supabase, "resposta_tecnica_bloqueada", "O agente tentou responder ao paciente com conteudo tecnico (JSON/ferramenta); o ENVIO FOI BLOQUEADO", "critical", clinicId, { session_id: turn.session_id, tentativa_1: finalText.slice(0, 300), tentativa_2: reparado.slice(0, 300) });
+        return;
+      }
+      await registrarErro(supabase, "resposta_tecnica_reparada", "O agente respondeu em formato tecnico e foi obrigado a reescrever antes de enviar", "warning", clinicId, { session_id: turn.session_id, original: finalText.slice(0, 300) });
+      finalText = reparado;
+    } else {
+      finalText = limpo;
     }
 
     // Fan-out: se o paciente mandou AUDIO e o ElevenLabs esta ligado, responde em VOZ; qualquer

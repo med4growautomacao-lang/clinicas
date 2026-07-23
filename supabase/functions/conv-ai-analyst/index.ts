@@ -96,36 +96,46 @@ type LlmOut = { text: string; tokens_in: number; tokens_out: number };
 const ANTHROPIC_NO_SAMPLING = /^claude-(opus-4-[78]|sonnet-5|fable-5|mythos-5)/;
 const ANTHROPIC_THINKING_ALWAYS_ON = /^claude-(fable-5|mythos-5)/;
 
-function anthropicBody(model: string, temperature: number, maxTokens: number, system: string, user: string) {
-  const body: Record<string, unknown> = {
-    model, max_tokens: maxTokens, system,
-    messages: [{ role: "user", content: user }],
-  };
+// `prefill`: começa a resposta do modelo com "{" para ele ser OBRIGADO a continuar de dentro do
+// JSON. A Anthropic não tem modo JSON; esta é a forma nativa de garantir o envelope, e mata na
+// origem a cerca de markdown e a prosa antes do objeto (o prompt já pedia isso e não bastava).
+// Incompatível com extended thinking, então fica de fora nos modelos que pensam sempre.
+function anthropicBody(model: string, temperature: number, maxTokens: number, system: string, user: string, jsonMode: boolean) {
+  const prefill = jsonMode && !ANTHROPIC_THINKING_ALWAYS_ON.test(model);
+  const messages: Record<string, unknown>[] = [{ role: "user", content: user }];
+  if (prefill) messages.push({ role: "assistant", content: "{" });
+  const body: Record<string, unknown> = { model, max_tokens: maxTokens, system, messages };
   if (ANTHROPIC_NO_SAMPLING.test(model)) {
     if (!ANTHROPIC_THINKING_ALWAYS_ON.test(model)) body.thinking = { type: "disabled" };
   } else {
     body.temperature = temperature;
   }
-  return body;
+  return { body, prefill };
 }
 
+// `jsonMode` liga o modo JSON NATIVO do provedor: em vez de pedir o formato no prompt (que o modelo
+// às vezes ignora, embrulhando em ```json ou soltando aspas), o envelope passa a ser garantido pela
+// API. Opt-in por chamada porque nem todo uso quer JSON (o manual do 'learn' é texto puro).
 async function callLlm(
   provider: string, model: string, temperature: number, maxTokens: number,
-  system: string, user: string,
+  system: string, user: string, jsonMode = false,
 ): Promise<LlmOut> {
   const key = await llmKey(provider);
   if (!key) throw new Error(`sem chave de API para ${provider}`);
 
   if (provider === "anthropic") {
+    const { body, prefill } = anthropicBody(model, temperature, maxTokens, system, user, jsonMode);
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       signal: AbortSignal.timeout(60000),
       headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify(anthropicBody(model, temperature, maxTokens, system, user)),
+      body: JSON.stringify(body),
     });
     if (!r.ok) throw new Error(`anthropic ${r.status}: ${(await r.text().catch(() => "")).slice(0, 300)}`);
     const j = await r.json();
-    const text = (j?.content ?? []).map((c: any) => c?.text).filter(Boolean).join("\n").trim();
+    let text = (j?.content ?? []).map((c: any) => c?.text).filter(Boolean).join("\n").trim();
+    // Com prefill a resposta VEM SEM a "{" que abrimos por ela; devolve o objeto inteiro.
+    if (prefill && text && !text.startsWith("{")) text = `{${text}`;
     return { text, tokens_in: j?.usage?.input_tokens ?? 0, tokens_out: j?.usage?.output_tokens ?? 0 };
   }
 
@@ -149,6 +159,7 @@ async function callLlm(
       body.max_tokens = maxTokens;
       body.temperature = temperature;
     }
+    if (jsonMode) body.response_format = { type: "json_object" };
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       signal: AbortSignal.timeout(90000),
@@ -174,7 +185,11 @@ async function callLlm(
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: system }] },
         contents: [{ parts: [{ text: user }] }],
-        generationConfig: { temperature, maxOutputTokens: maxTokens },
+        generationConfig: {
+          temperature,
+          maxOutputTokens: maxTokens,
+          ...(jsonMode ? { responseMimeType: "application/json" } : {}),
+        },
       }),
     },
   );
@@ -319,7 +334,7 @@ async function analisarTicket(item: any, cfg: any, dry: boolean, debug = false, 
 
   const out = await callLlm(
     cfg.provider, cfg.model, cfg.temperature, cfg.max_output_tokens,
-    cfg.system_prompt, buildUserPrompt(ctx),
+    cfg.system_prompt, buildUserPrompt(ctx), true,
   );
   const parsed = extractJson(out.text);
   if (!parsed) {

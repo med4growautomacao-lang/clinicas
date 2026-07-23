@@ -39,6 +39,43 @@ async function registrarErro(supabase: any, code: string, title: string, level: 
   } catch (e) { console.error("[ai-agent-worker] log falhou:", e); }
 }
 
+// ---- Emissor (opt-in por clinica). Opcao A: o AGENTE sintetiza o audio e enfileira o base64 pronto;
+// o Emissor so entrega (gate de token, confirmacao, retry) e roteia simulacao p/ o sandbox. ----
+async function emissorAtivo(supabase: any, clinicId: string | null): Promise<boolean> {
+  if (!clinicId) return false;
+  try {
+    const { data } = await supabase.rpc("fn_emissor_ativo", { p_clinic_id: clinicId });
+    return data === true;
+  } catch { return false; }
+}
+
+function hash32(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+
+async function enqueueEmissor(supabase: any, p: {
+  clinicId: string; toAddr: string; leadId: string | null; producer: string;
+  kind?: string; body?: string | null; mediaBase64?: string | null; mediaKind?: string | null;
+  delayMs?: number; dedupKey?: string;
+}): Promise<void> {
+  await supabase.rpc("emit_message", {
+    p_clinic_id: p.clinicId, p_to_addr: p.toAddr, p_producer: p.producer,
+    p_body: p.body ?? null, p_kind: p.kind ?? "text", p_lead_id: p.leadId,
+    p_media_base64: p.mediaBase64 ?? null, p_media_kind: p.mediaKind ?? null,
+    p_delay_ms: p.delayMs ?? 0, p_dedup_key: p.dedupKey ?? null,
+  });
+}
+
+function kickEmissor(supabase: any, clinicId: string | null): void {
+  try {
+    const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/emissor-worker`;
+    const kick = fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "kick", clinic_id: clinicId }) }).catch(() => {});
+    (globalThis as any).EdgeRuntime?.waitUntil?.(kick);
+  } catch { /* cron backstop cobre */ }
+}
+
 async function loadModelConfig(supabase: any): Promise<ModelConfig> {
   try {
     const { data } = await supabase.from("system_settings").select("value").eq("id", "agent_ai_config").maybeSingle();
@@ -247,9 +284,13 @@ async function processTurn(supabase: any, turn: { session_id: string; clinic_id:
 
     // Fan-out: se o paciente mandou AUDIO e o ElevenLabs esta ligado, responde em VOZ; qualquer
     // falha (desligado, sem chave, sem credito, erro de TTS) cai para TEXTO e registra na Central.
+    // O AGENTE sempre sintetiza aqui (Opcao A); quem entrega e o Emissor (se a chave estiver ligada)
+    // ou o envio inline (chave desligada).
+    const viaEmissor = await emissorAtivo(supabase, clinicId);
     let sentAudio = false;
+    let audioB64: string | null = null;
     const audioWanted = String(ctx.midia_type || "").toLowerCase().includes("audio");
-    if (audioWanted && token && number) {
+    if (audioWanted && number) {
       const el = await loadElevenLabs(supabase);
       if (el.enabled && el.voice_id && el.key) {
         try {
@@ -262,13 +303,34 @@ async function processTurn(supabase: any, turn: { session_id: string; clinic_id:
             speakText = finalText;
             await registrarErro(supabase, "ssml_tecnico_descartado", "O formatador de voz devolveu conteudo tecnico; o audio foi gerado do texto ja aprovado", "warning", clinicId, { session_id: turn.session_id, ssml: ssml.slice(0, 300) });
           }
-          const b64 = await ttsElevenLabs(el.key, el.voice_id, el.model_id, speakText);
-          if (b64) sentAudio = await sendAudio(token, number, b64);
-        } catch { sentAudio = false; }
-        if (!sentAudio) await registrarErro(supabase, "audio_fallback_texto", "TTS ElevenLabs falhou; a resposta saiu em texto (fallback)", "warning", clinicId, { session_id: turn.session_id });
+          audioB64 = await ttsElevenLabs(el.key, el.voice_id, el.model_id, speakText);
+          // Caminho antigo (chave desligada): entrega o audio aqui mesmo.
+          if (audioB64 && !viaEmissor && token) sentAudio = await sendAudio(token, number, audioB64);
+        } catch { audioB64 = null; }
+        if (!audioB64) await registrarErro(supabase, "audio_fallback_texto", "TTS ElevenLabs falhou; a resposta saiu em texto (fallback)", "warning", clinicId, { session_id: turn.session_id });
       }
     }
-    if (!sentAudio) {
+
+    // dedup_key estavel por turno: reprocessamento (worker caiu no meio) nao duplica a resposta.
+    const dedupBase = `agent:${turn.session_id}:${hash32(finalText)}:${new Date().toISOString().slice(0, 16)}`;
+
+    if (viaEmissor) {
+      // Enfileira: audio pronto (base64) OU bolhas de texto. O worker resolve o token pelo gate,
+      // entrega em ordem, e (lead de simulacao) roteia p/ o sandbox sem tocar a uazapi.
+      if (audioB64 && number) {
+        await enqueueEmissor(supabase, { clinicId, toAddr: number, leadId: ctx.lead_id ?? null, producer: "ai_agent", kind: "audio", mediaBase64: audioB64, mediaKind: "audio", delayMs: 8000, dedupKey: `${dedupBase}:audio` });
+        sentAudio = true;
+      } else if (number) {
+        const bubbles = splitIntoBubbles(finalText);
+        for (let i = 0; i < bubbles.length; i++) {
+          await enqueueEmissor(supabase, { clinicId, toAddr: number, leadId: ctx.lead_id ?? null, producer: "ai_agent", body: bubbles[i], delayMs: 6000, dedupKey: `${dedupBase}:${i}` });
+        }
+      } else {
+        await registrarErro(supabase, "envio_sem_credenciais", "Resposta pronta mas sem numero para enfileirar", "error", clinicId, { session_id: turn.session_id, tem_numero: false });
+      }
+      kickEmissor(supabase, clinicId);
+    } else if (!sentAudio) {
+      // Caminho antigo (chave desligada) e sem audio: envio inline de texto.
       const bubbles = splitIntoBubbles(finalText);
       if (token && number && bubbles.length) await sendBubbles(token, number, bubbles);
       else await registrarErro(supabase, "envio_sem_credenciais", "Resposta pronta mas sem token/numero para enviar", "error", clinicId, { session_id: turn.session_id, tem_token: !!token, tem_numero: !!number });

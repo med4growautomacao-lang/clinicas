@@ -345,6 +345,44 @@ async function sendWhatsAppText(
   }
 }
 
+// ---- Emissor (opt-in por clinica). O handoff do agente (despedida ao lead + aviso ao grupo) passa
+// a enfileirar quando a chave esta ligada: ganha gate/retry e roteia lead de SIMULACAO p/ o sandbox
+// (sem isto, a despedida de um teste iria para um WhatsApp real). Chave desligada = envio inline. ----
+async function emissorAtivo(supabase: any, clinicId: string | null): Promise<boolean> {
+  if (!clinicId) return false;
+  try {
+    const { data } = await supabase.rpc("fn_emissor_ativo", { p_clinic_id: clinicId });
+    return data === true;
+  } catch { return false; }
+}
+
+function kickEmissor(supabase: any, clinicId: string | null): void {
+  try {
+    const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/emissor-worker`;
+    const kick = fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "kick", clinic_id: clinicId }) }).catch(() => {});
+    (globalThis as any).EdgeRuntime?.waitUntil?.(kick);
+  } catch { /* cron backstop cobre */ }
+}
+
+// Enfileira via Emissor; se a fila falhar, cai para o envio inline (sendWhatsAppText). Devolve true
+// se enfileirou/enviou. toKind='group' nao normaliza nem entra na conversa do paciente.
+async function enviarOuEnfileirar(
+  supabase: any, token: string, number: string, text: string, clinicId: string | null,
+  oQue: string, viaEmissor: boolean, toKind: "lead" | "group", leadId: string | null,
+): Promise<boolean> {
+  if (viaEmissor && clinicId) {
+    try {
+      await supabase.rpc("emit_message", {
+        p_clinic_id: clinicId, p_to_addr: number, p_producer: "ai_scheduler_" + oQue,
+        p_body: text, p_to_kind: toKind, p_lead_id: leadId,
+      });
+      kickEmissor(supabase, clinicId);
+      return true;
+    } catch { /* cai para inline */ }
+  }
+  return await sendWhatsAppText(token, number, text, clinicId, oQue);
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -1103,6 +1141,7 @@ serve(async (req) => {
           .select("api_token").eq("clinic_id", clinic_id).maybeSingle();
         uazapiToken = instance?.api_token || null;
       }
+      const viaEmissor = await emissorAtivo(supabaseClient, clinic_id);
 
       // 4. Notifica grupo
       let notified = false;
@@ -1110,21 +1149,24 @@ serve(async (req) => {
         const { data: clinic } = await supabaseClient.from("clinics")
           .select("notification_group_id").eq("id", clinic_id).maybeSingle();
         const groupId = clinic?.notification_group_id;
-        if (groupId && matched.notification_message && uazapiToken) {
+        // Com o Emissor, o worker resolve o token; sem ele, exige uazapiToken (comportamento antigo).
+        if (groupId && matched.notification_message && (viaEmissor || uazapiToken)) {
           const rendered = String(matched.notification_message)
             .replace(/\{lead_name\}/g, lead.name || "")
             .replace(/\{lead_phone\}/g, lead.phone || "")
             .replace(/\{trigger_keyword\}/g, tk);
-          notified = await sendWhatsAppText(uazapiToken, groupId, rendered, clinic_id, "aviso_ao_grupo");
+          notified = await enviarOuEnfileirar(supabaseClient, uazapiToken || "", groupId, rendered, clinic_id, "aviso_ao_grupo", viaEmissor, "group", null);
           if (notified) actionsTaken.push("group_notified");
         }
       }
 
       // 5. Despedida (só em transfer)
       let farewell_sent = false;
-      if (willFarewell && uazapiToken) {
-        const contactNum = lead_phone.includes("@") ? lead_phone : `${lead_phone}@s.whatsapp.net`;
-        farewell_sent = await sendWhatsAppText(uazapiToken, contactNum, matched.farewell_message, clinic_id, "despedida");
+      if (willFarewell && (viaEmissor || uazapiToken)) {
+        // Emissor normaliza o telefone (to_kind='lead'); o inline usa o JID com @s.whatsapp.net.
+        const bareNum = lead_phone.replace(/@.*/, "");
+        const contactNum = viaEmissor ? bareNum : (lead_phone.includes("@") ? lead_phone : `${lead_phone}@s.whatsapp.net`);
+        farewell_sent = await enviarOuEnfileirar(supabaseClient, uazapiToken || "", contactNum, matched.farewell_message, clinic_id, "despedida", viaEmissor, "lead", lead?.id ?? null);
         if (farewell_sent) actionsTaken.push("farewell_sent");
       }
 

@@ -19,6 +19,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { candidatosDaClinica, comFallback, lembrarCamada } from "../_shared/meta-token.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -93,19 +94,34 @@ serve(async (req) => {
   for (const [clinicId, linhas] of porClinica) {
     const { data: clinic } = await supabase
       .from("clinics")
-      .select("id, name, meta_token")
+      .select("id, name, meta_token, organization_id, meta_token_source")
       .eq("id", clinicId)
       .maybeSingle();
 
-    if (!clinic?.meta_token) {
-      resultado.push({ clinica: clinic?.name ?? clinicId, pulou: "sem_token", pendentes: linhas.length });
+    if (!clinic) {
+      resultado.push({ clinica: clinicId, pulou: "clinica_nao_encontrada", pendentes: linhas.length });
       continue;
     }
 
-    if (!(await tokenFunciona(clinic.meta_token))) {
-      resultado.push({ clinica: clinic.name, pulou: "token_bloqueado", pendentes: linhas.length });
+    // TRÊS camadas (cliente → organização → plataforma). Antes, token da clínica bloqueado =
+    // clínica inteira pulada, mesmo havendo um token bom na organização ao lado.
+    const candidatos = await candidatosDaClinica(supabase, clinic);
+    if (candidatos.length === 0) {
+      resultado.push({ clinica: clinic.name, pulou: "sem_token", pendentes: linhas.length });
       continue;
     }
+
+    // Reusa a checagem de saúde que já existia: a primeira camada que passar é a que vale.
+    const escolha = await comFallback(candidatos, async (token) => ({
+      dados: token,
+      erro: (await tokenFunciona(token)) ? null : { message: "token nao autorizado", code: 190 },
+    }));
+    if (!escolha.camada) {
+      resultado.push({ clinica: clinic.name, pulou: "token_bloqueado", pendentes: linhas.length, tentativas: escolha.tentativas });
+      continue;
+    }
+    const metaToken = escolha.dados!;
+    await lembrarCamada(supabase, clinicId, clinic.meta_token_source, escolha.camada);
 
     // O mesmo anúncio costuma trazer vários cliques — uma chamada por anúncio, não por clique.
     const cache = new Map<string, Awaited<ReturnType<typeof buscarAnuncio>>>();
@@ -115,7 +131,7 @@ serve(async (req) => {
       const sourceId = String(linha.raw.source_id);
 
       if (!cache.has(sourceId)) {
-        cache.set(sourceId, await buscarAnuncio(clinic.meta_token, sourceId));
+        cache.set(sourceId, await buscarAnuncio(metaToken, sourceId));
       }
       const anuncio = cache.get(sourceId);
 

@@ -19,6 +19,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { type CamadaToken, type CandidatoToken, ehErroDeToken } from "../_shared/meta-token.ts";
 
 const GRAPH_VERSION = "v22.0";
 const GRAPH = "https://graph.facebook.com";
@@ -274,8 +275,8 @@ serve(async (req) => {
     const { data: orgs } = await service.from("organizations").select("id, meta_ad_token").in("id", orgIds);
     for (const o of orgs ?? []) if (o.meta_ad_token) orgTokenById.set(o.id, String(o.meta_ad_token).trim());
   }
-  const offlineToken = (c: any): string =>
-    (c?.meta_token ?? "").trim() || (c?.organization_id ? (orgTokenById.get(c.organization_id) ?? "") : "") || platformToken;
+  // (a escolha do token offline virou lista de camadas montada no laço, com listarCamadas abaixo:
+  //  mesma ordem clínica → org → plataforma, mas agora as seguintes são TENTADAS, não só default)
 
   // Auto-provisiona o dataset a partir da WABA quando faltar (1×/clínica; cacheia em clinics). POST
   // /{waba}/dataset é IDEMPOTENTE: cria se não existe, senão devolve o id atual (precisa do escopo
@@ -310,8 +311,26 @@ serve(async (req) => {
 
   // Envia 1 evento (para um dataset da WABA OU um pixel) e trata a resposta: sucesso, ou retry/erro
   // na Central. Reusado pelos dois caminhos (CTWA e offline), com o MESMO contrato de status/tentativas.
+  // Ordem das camadas = a MESMA de antes (pickToken / offlineToken). A novidade é que as camadas
+  // seguintes agora são TENTADAS quando a Meta recusa por token, em vez de servirem só de default.
+  // ⚠️ Aqui NÃO gravamos clinics.meta_token_source: essa memória é por CLÍNICA, e o CAPI fala com
+  // dataset da WABA / pixel, que são recursos diferentes da conta de anúncios e do formulário. Um
+  // token bom para o pixel pode não servir para o gasto, e apontar a memória para ele estragaria a
+  // escolha das outras funções.
+  const listarCamadas = (...pares: Array<[CamadaToken, string]>): CandidatoToken[] => {
+    const vistos = new Set<string>();
+    const out: CandidatoToken[] = [];
+    for (const [camada, t] of pares) {
+      const v = (t ?? "").trim();
+      if (!v || vistos.has(v)) continue;
+      vistos.add(v);
+      out.push({ camada, token: v });
+    }
+    return out;
+  };
+
   const deliverAndRecord = async (
-    evId: string, clinicId: string, ticketId: string, targetId: string, token: string, payload: unknown, kind: string,
+    evId: string, clinicId: string, ticketId: string, targetId: string, candidatos: CandidatoToken[], payload: unknown, kind: string,
   ): Promise<"sent" | "error"> => {
     const bumpFail = async (errMsg: string, jResp: unknown, status: number | null) => {
       const { data: cur } = await service.from("meta_capi_events").select("attempts").eq("id", evId).maybeSingle();
@@ -325,20 +344,37 @@ serve(async (req) => {
         giveUp ? "error" : "warn", clinicId, { ticket_id: ticketId, kind, tentativa: attemptsNow, erro: errMsg });
     };
     try {
-      const resp = await fetch(`${GRAPH}/${GRAPH_VERSION}/${targetId}/events`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ data: [payload] }),
-      });
-      const j = await resp.json().catch(() => ({}));
-      if (!resp.ok || j?.error) {
-        await bumpFail(j?.error?.error_user_msg || j?.error?.message || `HTTP ${resp.status}`, j, resp.status);
-        return "error";
+      // deno-lint-ignore no-explicit-any
+      let ultimo: { msg: string; corpo: any; status: number | null } | null = null;
+
+      for (const cand of candidatos) {
+        const resp = await fetch(`${GRAPH}/${GRAPH_VERSION}/${targetId}/events`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${cand.token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ data: [payload] }),
+        });
+        // deno-lint-ignore no-explicit-any
+        const j: any = await resp.json().catch(() => ({}));
+
+        if (resp.ok && !j?.error) {
+          await service.from("meta_capi_events").update({
+            status: "sent", sent_at: new Date().toISOString(), meta_response: j ?? null, last_error: null,
+          }).eq("id", evId);
+          return "sent";
+        }
+
+        ultimo = {
+          msg: j?.error?.error_user_msg || j?.error?.message || `HTTP ${resp.status}`,
+          corpo: j, status: resp.status,
+        };
+        // Recusa que não é de token (evento inválido, pixel errado): trocar de camada não resolve.
+        if (!ehErroDeToken(j?.error)) break;
       }
-      await service.from("meta_capi_events").update({
-        status: "sent", sent_at: new Date().toISOString(), meta_response: j ?? null, last_error: null,
-      }).eq("id", evId);
-      return "sent";
+
+      // Só conta tentativa e alerta quando NENHUMA camada passou — bumpFail marca o evento e a
+      // Central; fazer isso a cada camada inflaria attempts e daria alarme já coberto pelo fallback.
+      await bumpFail(ultimo?.msg ?? "sem token que funcione", ultimo?.corpo ?? null, ultimo?.status ?? null);
+      return "error";
     } catch (e) {
       await bumpFail(String(e), null, null);
       return "error";
@@ -363,10 +399,15 @@ serve(async (req) => {
     const clid = (lead?.ctwa_clid ?? "").trim();
     const dataset = (clinic?.meta_capi_dataset_id ?? "").trim();
     const waba = (clinic?.meta_waba_id ?? "").trim();
-    const ctwaToken = pickToken((clinic?.meta_token ?? "").trim());
+    // Mesma ordem do pickToken: em provider_mode a plataforma vem primeiro (acessa as WABAs dos
+    // clientes); fora dele, a clinica primeiro. A diferenca e que agora a segunda e TENTADA.
+    const clinicTok = (clinic?.meta_token ?? "").trim();
+    const ctwaCands = providerMode
+      ? listarCamadas(["platform", platformToken], ["clinic", clinicTok])
+      : listarCamadas(["clinic", clinicTok], ["platform", platformToken]);
 
     // ── Caminho 1: CTWA (lead de anúncio COM WABA/dataset) → dataset da WABA, business_messaging ──
-    if (clid && dataset && waba && ctwaToken) {
+    if (clid && dataset && waba && ctwaCands.length > 0) {
       const userData: Record<string, unknown> = { whatsapp_business_account_id: waba, ctwa_clid: clid };
       const ph = phoneDigits(lead?.phone);
       if (ph) userData.ph = await sha256(ph);
@@ -390,7 +431,7 @@ serve(async (req) => {
         user_data: userData,
       };
       if (value != null) payload.custom_data = { currency: "BRL", value, order_id: ev.ticket_id };
-      const r = await deliverAndRecord(ev.id, ev.clinic_id, ev.ticket_id, dataset, ctwaToken, payload, "ctwa");
+      const r = await deliverAndRecord(ev.id, ev.clinic_id, ev.ticket_id, dataset, ctwaCands, payload, "ctwa");
       if (r === "sent") sent++; else errored++;
       continue;
     }
@@ -408,17 +449,21 @@ serve(async (req) => {
       continue;
     }
     const pixel = (clinic?.meta_pixel_id ?? "").trim();
-    const offTok = offlineToken(clinic);
+    const offCands = listarCamadas(
+      ["clinic", (clinic?.meta_token ?? "").trim()],
+      ["org", clinic?.organization_id ? (orgTokenById.get(clinic.organization_id) ?? "") : ""],
+      ["platform", platformToken],
+    );
     const ph = phoneDigits(lead?.phone);
     const hasMatch = !!ph || !!lead?.email;
-    if (!pixel || !offTok || !hasMatch) {
+    if (!pixel || offCands.length === 0 || !hasMatch) {
       await service.from("meta_capi_events").update({
         status: "skipped", last_error: "offline sem pixel/token/chave de match (telefone ou e-mail)",
       }).eq("id", ev.id);
       if (!loggedMissingConfig.has(ev.clinic_id + ":off")) {
         loggedMissingConfig.add(ev.clinic_id + ":off");
         await registrar("offline_sem_config", "Conversão offline pronta mas falta pixel/token/chave de match",
-          "warn", ev.clinic_id, { tem_pixel: !!pixel, tem_token: !!offTok, tem_match: hasMatch });
+          "warn", ev.clinic_id, { tem_pixel: !!pixel, tem_token: offCands.length > 0, tem_match: hasMatch });
       }
       skipped++;
       continue;
@@ -446,7 +491,7 @@ serve(async (req) => {
     // Evento de CRM (guia oficial da Meta): action_source=system_generated exige custom_data com
     // event_source='crm' + lead_event_source (nome do CRM). physical_store é evento de loja, sem isso.
     payload.custom_data = buildOfflineCustomData(offlineActionSource, value, ev.ticket_id);
-    const r = await deliverAndRecord(ev.id, ev.clinic_id, ev.ticket_id, pixel, offTok, payload, "offline");
+    const r = await deliverAndRecord(ev.id, ev.clinic_id, ev.ticket_id, pixel, offCands, payload, "offline");
     if (r === "sent") sent++; else errored++;
   }
 

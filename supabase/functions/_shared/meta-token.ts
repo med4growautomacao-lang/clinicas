@@ -66,6 +66,60 @@ export function ordenarCandidatos(
   return lista.filter((c) => (vistos.has(c.token) ? false : (vistos.add(c.token), true)));
 }
 
+/**
+ * Executa `tentar` com cada camada ate uma funcionar. E O LACO — existe aqui e nao copiado em
+ * cada funcao, senao as regras (quando trocar, quando parar) divergem entre elas com o tempo.
+ * Para no primeiro erro que NAO for de token: em rate limit, insistir com outra camada so
+ * espalharia o bloqueio.
+ */
+export async function comFallback<T>(
+  candidatos: CandidatoToken[],
+  tentar: (token: string) => Promise<{ dados: T; erro: ErroGraph | null }>,
+): Promise<{ dados: T | null; camada: CamadaToken | null; erro: ErroGraph | null; tentativas: string[] }> {
+  let erro: ErroGraph | null = null;
+  const tentativas: string[] = [];
+  for (const c of candidatos) {
+    const r = await tentar(c.token);
+    if (!r.erro) return { dados: r.dados, camada: c.camada, erro: null, tentativas };
+    erro = r.erro;
+    tentativas.push(`${c.camada}=${r.erro.code ?? "?"}`);
+    if (!ehErroDeToken(r.erro)) break;
+  }
+  return { dados: null, camada: null, erro, tentativas };
+}
+
+/** Candidatos prontos para UMA clinica. Em lote, use ordenarCandidatos + tokensDasOrgs direto. */
+// deno-lint-ignore no-explicit-any
+export async function candidatosDaClinica(supabase: any, clinica: {
+  meta_token?: string | null;
+  organization_id?: string | null;
+  meta_token_source?: CamadaToken | null;
+}): Promise<CandidatoToken[]> {
+  const [plataforma, orgs] = await Promise.all([
+    tokenDaPlataforma(supabase),
+    tokensDasOrgs(supabase, clinica.organization_id ? [clinica.organization_id] : []),
+  ]);
+  return ordenarCandidatos(clinica.meta_token_source ?? null, {
+    clinic: clinica.meta_token,
+    org: clinica.organization_id ? orgs.get(clinica.organization_id) : null,
+    platform: plataforma,
+  });
+}
+
+/** Memoria: grava a camada vencedora se ela mudou. Nunca lanca — memoria e otimizacao, nao pode
+ *  derrubar o fluxo que ACABOU de dar certo. */
+// deno-lint-ignore no-explicit-any
+export async function lembrarCamada(
+  supabase: any, clinicId: string, atual: CamadaToken | null | undefined, nova: CamadaToken | null,
+): Promise<void> {
+  if (!nova || nova === atual) return;
+  try {
+    await supabase.from("clinics").update({ meta_token_source: nova }).eq("id", clinicId);
+  } catch (e) {
+    console.error("[meta-token] nao consegui lembrar a camada:", e);
+  }
+}
+
 /** Token da plataforma (Vault). Devolve "" quando nao houver — nunca lanca. */
 // deno-lint-ignore no-explicit-any
 export async function tokenDaPlataforma(supabase: any): Promise<string> {

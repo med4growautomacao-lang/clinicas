@@ -12,7 +12,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 type Supa = ReturnType<typeof createClient>;
 
 export type SpendRow = { date: string; spend: number };
-export type SpendResult = { rows: SpendRow[]; error?: string };
+// errorCode = o `code` da Graph quando o erro veio dela. Sem ele, quem chama só recebe texto e não
+// consegue distinguir "este token não serve" (vale tentar outra camada) de limite de requisições
+// (trocar de camada só espalharia o bloqueio). Ver _shared/meta-token.ts.
+export type SpendResult = { rows: SpendRow[]; error?: string; errorCode?: number };
 
 // Investimento por CAMPANHA → CONJUNTO → ANÚNCIO × dia (Fase 2 do detalhamento — grava em
 // marketing_spend_breakdown, tabela PARALELA à marketing_data; não substitui o total por conta,
@@ -34,7 +37,7 @@ export type SpendBreakdownRow = {
 // truncated=true = bateu o teto de páginas de algum bloco de data — dado PARCIAL (investimento
 // subestimado nesse período). Contas grandes (ex.: milhares de anúncios) podem estourar; o
 // chamador deve logar isso na Central em vez de gravar em silêncio como se fosse completo.
-export type SpendBreakdownResult = { rows: SpendBreakdownRow[]; error?: string; truncated?: boolean };
+export type SpendBreakdownResult = { rows: SpendBreakdownRow[]; error?: string; truncated?: boolean; errorCode?: number };
 
 // moeda → 2 casas (centavos), round half-up.
 export const roundCents = (n: number) => Math.round(n * 100) / 100;
@@ -74,7 +77,7 @@ export async function fetchMetaDaily(
     while (url) {
       const resp = await fetchWithBackoff(url);
       const j = await resp.json();
-      if (j.error) return { rows, error: `meta: ${j.error?.message ?? "graph error"}` };
+      if (j.error) return { rows, error: `meta: ${j.error?.message ?? "graph error"}`, errorCode: Number(j.error?.code) || undefined };
       for (const d of (j.data ?? [])) {
         if (d?.date_start && d?.spend != null) rows.push({ date: String(d.date_start), spend: roundCents(Number(d.spend) || 0) });
       }
@@ -108,7 +111,7 @@ export async function fetchMetaAdBreakdown(
       pages++;
       const resp = await fetchWithBackoff(url);
       const j = await resp.json();
-      if (j.error) return { rows, error: `meta: ${j.error?.message ?? "graph error"}` };
+      if (j.error) return { rows, error: `meta: ${j.error?.message ?? "graph error"}`, errorCode: Number(j.error?.code) || undefined };
       for (const d of (j.data ?? [])) {
         if (d?.date_start && d?.spend != null) {
           rows.push({

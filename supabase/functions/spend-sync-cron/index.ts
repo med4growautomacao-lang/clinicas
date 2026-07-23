@@ -17,6 +17,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { fetchMetaDaily, fetchGoogleDaily, getGoogleAccessToken, upsertSpend, applyAdStatus, fetchMetaAdBreakdown, fetchGoogleAdGroupBreakdown, upsertSpendBreakdown } from "../_shared/spend.ts";
+import { type CamadaToken, comFallback, lembrarCamada, ordenarCandidatos, tokenDaPlataforma } from "../_shared/meta-token.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -42,6 +43,7 @@ interface ClinicRow {
   id: string;
   organization_id: string | null;
   meta_token: string | null;
+  meta_token_source: CamadaToken | null;
   meta_ad_account_id: string | null;
   google_ad_account_id: string | null;
   google_ad_mcc_id: string | null;
@@ -171,19 +173,22 @@ serve(async (req) => {
       token: (o?.mccToken && String(o.mccToken).trim() ? o.mccToken : null) ?? c.google_ad_mcc_token,
     };
   };
-  // Token do Meta: o da clínica (override) OU o da org (compartilhado, cadastrado 1× em Gestão Org).
-  const resolveMetaToken = (c: ClinicRow): string | null => {
-    const own = (c.meta_token && String(c.meta_token).trim()) ? c.meta_token : null;
-    const org = c.organization_id ? orgAds.get(c.organization_id)?.metaToken : null;
-    return own ?? ((org && String(org).trim()) ? org : null);
-  };
+  // Token do Meta em TRÊS camadas (cliente → organização → plataforma), com a que funcionou por
+  // último na frente. Antes daqui a resolução era só clínica-ou-org e SEM tentar outra em caso de
+  // erro: token vencido = investimento do dia perdido, mesmo havendo token bom ao lado.
+  const platformToken = await tokenDaPlataforma(service);
+  const candidatosMeta = (c: ClinicRow) => ordenarCandidatos(c.meta_token_source ?? null, {
+    clinic: c.meta_token,
+    org: c.organization_id ? orgAds.get(c.organization_id)?.metaToken : null,
+    platform: platformToken,
+  });
 
   // Próximo lote de clínicas ativas com Meta OU Google configurado.
   // O gate exige só o id por-clínica (meta_ad_account_id / google customer_id); o token pode vir
   // da org — por isso NÃO filtramos por meta_token aqui (a resolução token clínica→org é em código).
   const { data: clinics, error: clinicsErr } = await service
     .from("clinics")
-    .select("id, organization_id, meta_token, meta_ad_account_id, google_ad_account_id, google_ad_mcc_id, google_ad_mcc_token, meta_status, google_status")
+    .select("id, organization_id, meta_token, meta_token_source, meta_ad_account_id, google_ad_account_id, google_ad_mcc_id, google_ad_mcc_token, meta_status, google_status")
     .eq("is_active", true)
     .or("meta_ad_account_id.not.is.null,google_ad_account_id.not.is.null")
     .order("id", { ascending: true })
@@ -199,13 +204,22 @@ serve(async (req) => {
   const breakdownEnabled = cfg.breakdown_enabled === true;
 
   await mapPool(list, CONCURRENCY, async (c) => {
-    const metaTok = resolveMetaToken(c);
-    if (wantMeta && metaTok && c.meta_ad_account_id) {
-      const { rows, error } = await fetchMetaDaily(metaTok, c.meta_ad_account_id, since, until);
+    const cands = candidatosMeta(c);
+    if (wantMeta && cands.length > 0 && c.meta_ad_account_id) {
+      const conta = c.meta_ad_account_id;
+      const r = await comFallback(cands, async (token) => {
+        const res = await fetchMetaDaily(token, conta, since, until);
+        return { dados: res, erro: res.error ? { message: res.error, code: res.errorCode } : null };
+      });
+      const rows = r.dados?.rows ?? [];
+      // Só é falha depois que TODAS as camadas recusaram; antes disso o fallback cobriu.
+      const error = r.camada ? undefined : (r.erro?.message ?? "nenhuma camada de token funcionou");
+      const metaTok = cands.find((x) => x.camada === r.camada)?.token ?? "";
       // Status reflete a BUSCA na API (não a gravação): erro de API → inativa; ok → reativa (se estava inativa).
       await applyAdStatus(service, c.id, "meta", c.meta_status, !error);
-      if (error) { errors++; await registrar("meta_falhou", "Sincronização de investimento (Meta) falhou nesta clínica", "error", c.id, { error, since, until }); }
+      if (error) { errors++; await registrar("meta_falhou", "Sincronização de investimento (Meta) falhou nesta clínica em TODAS as camadas de token", "error", c.id, { error, tentativas: r.tentativas, since, until }); }
       else {
+        await lembrarCamada(service, c.id, c.meta_token_source, r.camada);
         const up = await upsertSpend(service, c.id, "meta_ads", rows);
         if (up.error) { errors++; await registrar("meta_upsert_falhou", "Gravação do investimento (Meta) falhou", "error", c.id, { error: up.error }); }
         else metaOk++;

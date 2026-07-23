@@ -20,6 +20,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { candidatosDaClinica, comFallback, type ErroGraph, lembrarCamada } from "../_shared/meta-token.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -123,7 +124,7 @@ serve(async (req) => {
 
   const { data: clinic } = await supabase
     .from("clinics")
-    .select("id, meta_token")
+    .select("id, meta_token, organization_id, meta_token_source")
     .eq("phone", clinicPhone)
     .maybeSingle();
 
@@ -152,27 +153,42 @@ serve(async (req) => {
   // é ruim, perder a atribuição do lead é pior. A inbox já reconhece source='meta_ads' pelo clid.
   let campaign: string | null = null, adset: string | null = null, ad: string | null = null;
 
-  if (sourceId && clinic.meta_token) {
+  if (sourceId) {
     try {
-      const url = new URL(`https://graph.facebook.com/${GRAPH_VERSION}/${sourceId}`);
-      url.searchParams.set("access_token", clinic.meta_token);
-      url.searchParams.set("fields", "name,adset{id,name},campaign{id,name}");
-      const resp = await fetch(url.toString());
-      if (resp.ok) {
-        const d = await resp.json();
-        ad = d?.name ?? null;
-        adset = d?.adset?.name ?? null;
-        campaign = d?.campaign?.name ?? null;
-      } else {
-        const corpo = (await resp.text()).slice(0, 300);
-        console.error("[ctwa-tracking] graph falhou:", resp.status, corpo);
+      // TRÊS camadas de token (cliente → organização → plataforma), a lembrada na frente. Antes
+      // isto usava só clinics.meta_token: token vencido = clique sem campanha, mesmo havendo um
+      // token bom na organização ao lado.
+      const candidatos = await candidatosDaClinica(supabase, clinic);
+
+      const r = await comFallback(candidatos, async (token) => {
+        const url = new URL(`https://graph.facebook.com/${GRAPH_VERSION}/${sourceId}`);
+        url.searchParams.set("access_token", token);
+        url.searchParams.set("fields", "name,adset{id,name},campaign{id,name}");
+        const resp = await fetch(url.toString());
+        // deno-lint-ignore no-explicit-any
+        const d: any = await resp.json().catch(() => null);
+        if (!resp.ok || d?.error) {
+          return { dados: null, erro: (d?.error ?? { message: `HTTP ${resp.status}` }) as ErroGraph };
+        }
+        return { dados: d, erro: null };
+      });
+
+      if (r.camada) {
+        ad = r.dados?.name ?? null;
+        adset = r.dados?.adset?.name ?? null;
+        campaign = r.dados?.campaign?.name ?? null;
+        await lembrarCamada(supabase, clinic.id, clinic.meta_token_source, r.camada);
+      } else if (candidatos.length > 0) {
+        console.error("[ctwa-tracking] graph falhou:", r.erro?.message);
         // O monitor `campanha_nao_resolvida` já acusa o SINTOMA (cliques sem campanha). Aqui
         // registramos a CAUSA, com a mensagem da própria Meta — é a diferença entre "o token está
         // ruim" e "o app foi deletado" / "acesso bloqueado", que exigem ações diferentes.
+        // Só registra quando TODAS as camadas falharam: avisar de uma que o fallback cobriu é ruído.
         await registrar(
           "graph_api_recusou",
-          "A Meta recusou a consulta do anúncio (" + resp.status + ") — o clique foi gravado, mas sem campanha",
-          "warn", clinic.id, { status: resp.status, resposta: corpo, source_id: sourceId },
+          "A Meta recusou a consulta do anúncio em TODAS as camadas de token — o clique foi gravado, mas sem campanha",
+          "warn", clinic.id,
+          { erro: r.erro?.message, codigo: r.erro?.code, tentativas: r.tentativas, source_id: sourceId },
         );
       }
     } catch (e) {

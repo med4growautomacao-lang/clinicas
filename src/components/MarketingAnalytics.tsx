@@ -1114,7 +1114,7 @@ function SyncInvestmentButton({ clinicId, onDone }: { clinicId: string | null; o
                 className="mt-3 w-full rounded-xl bg-teal-600 hover:bg-teal-700 text-white h-9 text-[10px] font-black uppercase shadow-lg shadow-teal-100 transition-all active:scale-[0.98] disabled:opacity-60"
               >
                 {syncing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                {syncing ? 'Sincronizando…' : 'Sincronizar'}
+                {syncing ? 'Sincronizando…' : 'Sincronizar manualmente'}
               </Button>
             </motion.div>
           </>

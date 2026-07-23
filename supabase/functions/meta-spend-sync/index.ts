@@ -19,6 +19,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { applyAdStatus, fetchMetaAdBreakdown, upsertSpendBreakdown } from "../_shared/spend.ts";
+import { candidatosDaClinica, comFallback, type ErroGraph, lembrarCamada } from "../_shared/meta-token.ts";
 
 const GRAPH_VERSION = "v24.0";
 const CHUNK_DAYS = 90;              // a insights diária tem teto de janela; fatiar em blocos ≤90d
@@ -97,58 +98,70 @@ serve(async (req) => {
   // (3) Token + conta de anúncios da clínica (service role — segredo nunca vai ao browser).
   const { data: clinic, error: clinicErr } = await service
     .from("clinics")
-    .select("meta_token, meta_ad_account_id, meta_status, organization_id")
+    .select("meta_token, meta_token_source, meta_ad_account_id, meta_status, organization_id")
     .eq("id", clinicId)
     .single();
   if (clinicErr) {
     await registrarErro("clinica_nao_encontrada", "Falha ao ler credenciais Meta da clínica", "error", { detail: clinicErr.message });
     return json({ ok: false, error: "clinic_read_failed", detail: clinicErr.message }, 500);
   }
-  // Token: o da clínica (override) OU o token da ORG (compartilhado, cadastrado 1× em Gestão Org ›
-  // Meta Ads). Assim a agência não precisa duplicar o mesmo token em cada clínica.
-  let metaToken = (clinic?.meta_token ?? "").trim();
-  if (!metaToken && clinic?.organization_id) {
-    const { data: org } = await service.from("organizations").select("meta_ad_token").eq("id", clinic.organization_id).maybeSingle();
-    metaToken = (org?.meta_ad_token ?? "").trim();
+  // Token em TRÊS camadas (cliente → organização → plataforma), com a que funcionou por último na
+  // frente. Antes era só clínica-ou-org e SEM trocar em caso de erro — bem nesta função, que é o
+  // botão que alguém aperta justamente QUANDO o investimento não apareceu.
+  const candidatos = await candidatosDaClinica(service, clinic);
+  if (candidatos.length === 0 || !clinic?.meta_ad_account_id) {
+    return json({ ok: false, error: "meta_not_configured", detail: "Sem token do Meta (nem da clínica, nem da organização, nem da plataforma) ou sem conta de anúncios configurada." }, 200);
   }
-  if (!metaToken || !clinic?.meta_ad_account_id) {
-    return json({ ok: false, error: "meta_not_configured", detail: "Sem token do Meta (nem da clínica nem da org) ou sem conta de anúncios configurada." }, 200);
-  }
+  let metaToken = "";   // camada vencedora; o detalhamento por anúncio (mais abaixo) reusa
 
   const account = String(clinic.meta_ad_account_id).replace(/^act_/, "");
 
   // (4) Busca o gasto DIÁRIO (time_increment=1) por blocos ≤90d, paginando se preciso.
-  const rows: Array<{ date: string; spend: number }> = [];
-  try {
+  //     Roda inteira com UM token e não grava nada: se a camada for recusada, refazer do zero com
+  //     a próxima é seguro (nenhum dado teria sido gravado pela metade).
+  const buscarGasto = async (token: string): Promise<{ dados: Array<{ date: string; spend: number }>; erro: ErroGraph | null }> => {
+    const linhas: Array<{ date: string; spend: number }> = [];
     for (const chunk of dateChunks(since, until)) {
       const timeRange = encodeURIComponent(JSON.stringify({ since: chunk.since, until: chunk.until }));
       let url: string | null =
         `https://graph.facebook.com/${GRAPH_VERSION}/act_${account}/insights` +
         `?fields=spend&level=account&time_increment=1&limit=500` +
-        `&time_range=${timeRange}&access_token=${encodeURIComponent(metaToken)}`;
+        `&time_range=${timeRange}&access_token=${encodeURIComponent(token)}`;
 
       while (url) {
-        const resp = await fetch(url);
-        const j = await resp.json();
-        if (j.error) {
-          await registrarErro(
-            "graph_api_recusou",
-            "A Meta recusou a busca do investimento — o gasto do período pode ficar desatualizado",
-            "critical",
-            { erro: j.error?.message, codigo: j.error?.code, chunk, account },
-          );
-          await applyAdStatus(service, clinicId, "meta", clinic.meta_status, false);
-          return json({ ok: false, error: "graph_error", detail: j.error?.message ?? "erro da Graph API" }, 502);
-        }
+        const resp: Response = await fetch(url);
+        // deno-lint-ignore no-explicit-any
+        const j: any = await resp.json();
+        if (j.error) return { dados: linhas, erro: j.error as ErroGraph };
         for (const d of (j.data ?? [])) {
           if (d?.date_start && d?.spend != null) {
             // arredonda a 2 casas (centavos) — o Meta já manda em moeda, mas com casas extras às vezes.
-            rows.push({ date: String(d.date_start), spend: Math.round((Number(d.spend) || 0) * 100) / 100 });
+            linhas.push({ date: String(d.date_start), spend: Math.round((Number(d.spend) || 0) * 100) / 100 });
           }
         }
         url = j.paging?.next ?? null;
       }
     }
+    return { dados: linhas, erro: null };
+  };
+
+  let rows: Array<{ date: string; spend: number }> = [];
+  try {
+    const r = await comFallback(candidatos, buscarGasto);
+    if (!r.camada) {
+      // Só agora é falha: nenhuma das camadas serviu.
+      await registrarErro(
+        "graph_api_recusou",
+        "A Meta recusou a busca do investimento em TODAS as camadas de token — o gasto do período pode ficar desatualizado",
+        "critical",
+        { erro: r.erro?.message, codigo: r.erro?.code, tentativas: r.tentativas, account },
+      );
+      await applyAdStatus(service, clinicId, "meta", clinic.meta_status, false);
+      return json({ ok: false, error: "graph_error", detail: r.erro?.message ?? "erro da Graph API" }, 502);
+    }
+    rows = r.dados ?? [];
+    metaToken = candidatos.find((x) => x.camada === r.camada)?.token ?? "";
+    await lembrarCamada(service, clinicId, clinic.meta_token_source, r.camada);
   } catch (e) {
     await registrarErro("ciclo_falhou", "A sincronização de investimento do Meta quebrou", "critical",
       { erro: e instanceof Error ? e.message : String(e) });

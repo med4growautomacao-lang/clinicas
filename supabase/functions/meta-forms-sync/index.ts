@@ -17,7 +17,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
-  type CamadaToken, ehErroDeToken, type ErroGraph,
+  type CamadaToken, comFallback, type ErroGraph, lembrarCamada,
   ordenarCandidatos, tokenDaPlataforma, tokensDasOrgs,
 } from '../_shared/meta-token.ts'
 
@@ -153,20 +153,16 @@ serve(async (req) => {
           'critical', c.id, { forms_id: c.meta_forms_id },
         )
       } else {
-        // deno-lint-ignore no-explicit-any
-        let leads: any[] = []
-        let ultimoErro: ErroGraph | null = null
-        const tentativas: string[] = []
-
-        for (const cand of candidatos) {
-          const r = await buscarLeads(c.meta_forms_id, cand.token, filtering)
-          if (!r.erro) { leads = r.leads; camadaUsada = cand.camada; break }
-          ultimoErro = r.erro
-          tentativas.push(`${cand.camada}=${r.erro.code ?? '?'}`)
-          // Erro que NÃO é de token (rate limit, instabilidade da Meta): trocar de camada não
-          // ajuda e ainda queimaria as outras. Para aqui e tenta tudo de novo no próximo minuto.
-          if (!ehErroDeToken(r.erro)) break
-        }
+        // O laço de fallback vive em _shared/meta-token.ts: quando trocar de camada e quando
+        // parar (rate limit não troca) é regra única, igual aqui, no ctwa e no investimento.
+        const res = await comFallback(candidatos, async (token) => {
+          const b = await buscarLeads(c.meta_forms_id, token, filtering)
+          return { dados: b.leads, erro: b.erro }
+        })
+        const leads = res.dados ?? []
+        const ultimoErro = res.erro
+        const tentativas = res.tentativas
+        camadaUsada = res.camada
 
         if (camadaUsada === null) {
           // Só AGORA é falha de verdade: nenhuma das camadas funcionou. Registrar antes disso
@@ -181,11 +177,7 @@ serve(async (req) => {
           )
         } else {
           // Memória: a camada boa passa a ser a primeira tentativa das próximas rodadas.
-          if (camadaUsada !== c.meta_token_source) {
-            const { error: srcErr } = await supabase
-              .from('clinics').update({ meta_token_source: camadaUsada }).eq('id', c.id)
-            if (srcErr) console.error(`[meta-forms-sync] meta_token_source clinic ${c.id}:`, srcErr.message)
-          }
+          await lembrarCamada(supabase, c.id, c.meta_token_source, camadaUsada)
 
         for (const lead of leads) {
           fetched++

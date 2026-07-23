@@ -862,7 +862,7 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
                         const dayBlocks = dayItems.filter(t => t.kind === 'blocked').length;
                         const dayHeader = showDayHeader ? (
                           <tr ref={i === todayAnchorIndex ? todayRowRef : undefined} className="bg-slate-50/80">
-                            <td colSpan={6} className="px-6 py-2">
+                            <td colSpan={7} className="px-6 py-2">
                               <div className="flex items-center gap-3">
                                 <span className={cn(
                                   "text-[11px] font-bold uppercase tracking-widest capitalize",
@@ -915,6 +915,9 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
                                     )}
                                   </div>
                                 </td>
+                                <td className="px-6 py-4" />
+                                {/* Origem: bloqueio nao tem origem, mas a celula precisa existir para
+                                    o "Bloqueado" cair sob Status e a lixeira sob Ações (7 colunas). */}
                                 <td className="px-6 py-4" />
                                 <td className="px-6 py-4">
                                   <span className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold border bg-rose-100 text-rose-600 border-rose-200">

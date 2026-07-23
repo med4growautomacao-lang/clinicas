@@ -3,6 +3,7 @@ import { matchesSearch, leadSearchOrFilter } from "../lib/search";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "./ui/toast";
+import { SandboxPanel } from "./SandboxPanel";
 import {
   Card,
   CardContent,
@@ -2307,7 +2308,7 @@ function FinishServiceView() {
 }
 
 export function AISecretary() {
-  const [activeTab, setActiveTab] = useState<"chats" | "leads" | "dashboard" | "config" | "followups" | "sugestoes">(
+  const [activeTab, setActiveTab] = useState<"chats" | "leads" | "dashboard" | "config" | "sandbox" | "followups" | "sugestoes">(
     () => (localStorage.getItem('aiSecretaryTab') as any) || "chats"
   );
   const { aiConfig, updateAI, clinic } = useSettings();
@@ -2376,6 +2377,7 @@ export function AISecretary() {
             { id: "sugestoes", label: convAiPending.length ? `Sugestões IA (${convAiPending.length})` : "Sugestões IA", show: hasConvAi },
             { id: "followups", label: "Follow-up", show: hasFollowup },
             { id: "config", label: "Configurações IA", show: hasIA },
+            { id: "sandbox", label: "Testar o Agente", show: hasIA },
           ].filter(t => t.show).map((tab) => (
             <button
               key={tab.id}
@@ -2409,6 +2411,7 @@ export function AISecretary() {
           {activeTab === "followups" && <AllFollowupsView />}
 
           {activeTab === "config" && <ConfigView />}
+          {activeTab === "sandbox" && <SandboxPanel clinicId={clinic?.id} />}
         </motion.div>
       </AnimatePresence>
     </div>

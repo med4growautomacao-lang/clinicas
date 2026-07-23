@@ -31,8 +31,6 @@ Deno.serve(async (req) => {
   const { data: ures } = await userClient.auth.getUser();
   const uid = ures?.user?.id;
   if (!uid) return json({ ok: false, error: "unauthorized" }, 401);
-  const { data: isSuper } = await userClient.rpc("is_super_admin");
-  if (isSuper !== true) return json({ ok: false, error: "forbidden" }, 403);
 
   let body: any;
   try { body = await req.json(); } catch { body = {}; }
@@ -41,6 +39,23 @@ Deno.serve(async (req) => {
   if (!clinic_id) return json({ ok: false, error: "missing_clinic_id" }, 400);
 
   const svc = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "");
+
+  // Acesso: super admin OU membro da clinica (clinic_user) OU da org dela. Mesmo padrao do chat-send,
+  // pra o proprio gestor testar o agente da sua clinica na aba "Testar o Agente" (Configuracoes IA).
+  const { data: isSuper } = await userClient.rpc("is_super_admin");
+  let allowed = isSuper === true;
+  if (!allowed) {
+    const { data: cu } = await svc.from("clinic_users").select("id").eq("id", uid).eq("clinic_id", clinic_id).maybeSingle();
+    allowed = !!cu;
+    if (!allowed) {
+      const { data: clinic } = await svc.from("clinics").select("organization_id").eq("id", clinic_id).maybeSingle();
+      if (clinic?.organization_id) {
+        const { data: ou } = await svc.from("org_users").select("user_id").eq("user_id", uid).eq("organization_id", clinic.organization_id).maybeSingle();
+        allowed = !!ou;
+      }
+    }
+  }
+  if (!allowed) return json({ ok: false, error: "forbidden" }, 403);
 
   // (2) RESET: limpa a sessao de simulacao.
   if (action === "reset") {

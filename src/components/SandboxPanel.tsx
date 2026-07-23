@@ -24,10 +24,14 @@ const contentOf = (m: any): string => {
   return '';
 };
 
-export function SandboxPanel() {
+// clinicId por prop = escopo fixo (Configurações IA da clínica, sem seletor). Sem prop = mostra o
+// seletor (uso cross-clínica no Super Admin).
+export function SandboxPanel({ clinicId: fixedClinicId }: { clinicId?: string } = {}) {
   const { data: clinics } = useClinics();
   const showToast = useToast();
-  const [clinicId, setClinicId] = useState<string>('');
+  const [pickedClinic, setPickedClinic] = useState<string>('');
+  const clinicId = fixedClinicId ?? pickedClinic;
+  const showSelector = !fixedClinicId;
   // Chave da conversa = session_id (NAO lead_id): a resposta do agente (saveAiResponse) grava por
   // session_id e nem sempre tem lead_id preenchido; o inbound e o ai compartilham o session_id.
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -132,17 +136,19 @@ export function SandboxPanel() {
           <FlaskConical className="w-5 h-5" />
           <h3 className="font-black">Testar o Agente</h3>
         </div>
-        <div className="relative">
-          <select
-            value={clinicId}
-            onChange={(e) => setClinicId(e.target.value)}
-            className="appearance-none bg-white border border-slate-200 rounded-xl pl-3 pr-9 py-2 text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-300"
-          >
-            <option value="">Escolha a clínica…</option>
-            {sortedClinics.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-        </div>
+        {showSelector && (
+          <div className="relative">
+            <select
+              value={pickedClinic}
+              onChange={(e) => setPickedClinic(e.target.value)}
+              className="appearance-none bg-white border border-slate-200 rounded-xl pl-3 pr-9 py-2 text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-300"
+            >
+              <option value="">Escolha a clínica…</option>
+              {sortedClinics.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+          </div>
+        )}
         {clinicId && (
           <button onClick={reset}
             className="ml-auto flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-rose-600 transition-colors">
@@ -161,7 +167,7 @@ export function SandboxPanel() {
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {!clinicId ? (
             <div className="h-full flex items-center justify-center text-slate-400 text-sm">
-              Escolha uma clínica para começar.
+              {showSelector ? 'Escolha uma clínica para começar.' : 'Carregando…'}
             </div>
           ) : messages.length === 0 && !waiting ? (
             <div className="h-full flex flex-col items-center justify-center text-slate-400 text-sm gap-2">

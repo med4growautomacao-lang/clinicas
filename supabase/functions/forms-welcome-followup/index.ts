@@ -29,7 +29,9 @@ const MAX_ATTEMPTS = 3; // tentativas de envio p/ número válido antes de desis
 
 // Central de Erros — o que não é registrado aqui não existe (não há Sentry).
 async function registrarErro(
-  supabase: ReturnType<typeof createClient>,
+  // deno-lint-ignore no-explicit-any -- ReturnType<typeof createClient> colide com o generic de
+  // versao do supabase-js e quebra o deno check; o uso aqui e so .rpc(). Type-only, sem runtime.
+  supabase: any,
   code: string,
   title: string,
   level: string,
@@ -290,7 +292,44 @@ serve(async (req) => {
   const bubbles = rendered.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
   if (bubbles.length === 0) { await logFail("welcome_message_text vazio", { reason: "empty_message" }); return json({ ok: false, error: "empty_message" }); }
 
-  // (5) envio sequencial (cada balão com delay de digitação da uazapi)
+  const joined = bubbles.join(" | ");
+
+  // (5-EMISSOR) Se a chave está ligada, enfileira cada balão e ENCERRA aqui. O worker resolve o
+  //   token pelo gate, entrega em ordem, e o tratamento de falha (infra->bloqueia instância, retry
+  //   com backoff, DLQ) fica no Emissor — substitui os passos 6a/6b inline abaixo, que existiam
+  //   justamente para isso. O check de número (3.1) e o write-back (3.2) já rodaram e continuam.
+  const { data: viaEmissor } = await supabase.rpc("fn_emissor_ativo", { p_clinic_id: clinic_id });
+  if (viaEmissor === true) {
+    for (let i = 0; i < bubbles.length; i++) {
+      const isLast = i === bubbles.length - 1;
+      const session_id = `${clinicNumber ?? ""}${effectiveNumber}`;
+      await supabase.rpc("emit_message", {
+        p_clinic_id: clinic_id,
+        p_to_addr: sendNumber,
+        p_producer: "forms_welcome",
+        p_body: bubbles[i],
+        p_lead_id: lead_id,
+        p_delay_ms: TYPING_DELAY_MS,
+        p_dedup_key: `welcome:${lead_id}:${i}`,
+        p_chat_payload: isLast
+          ? { session_id, sender: "system", message: { type: "system", content: joined, additional_kwargs: {}, response_metadata: {} } }
+          : null,
+      });
+    }
+    await supabase.from("automation_logs").insert({
+      clinic_id, lead_id, type: "forms_welcome", status: "sent",
+      message_sent: joined, triggered_at: nowSP(), metadata: { number: sendNumber, via: "emissor" },
+    });
+    await supabase.from("leads").update({ whatsapp_invalid: false, welcome_attempts: 0 }).eq("id", lead_id);
+    try {
+      const workerUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/emissor-worker`;
+      const kick = fetch(workerUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "kick", clinic_id }) }).catch(() => {});
+      (globalThis as any).EdgeRuntime?.waitUntil?.(kick);
+    } catch { /* backstop cobre */ }
+    return json({ ok: true, sent: true, queued: true, bubbles: bubbles.length, lead_id });
+  }
+
+  // (5) envio sequencial (cada balão com delay de digitação da uazapi) — caminho antigo (chave off)
   let anySent = false;
   let lastErr: { status: number; body: string } | null = null;
   for (const bubble of bubbles) {
@@ -298,8 +337,6 @@ serve(async (req) => {
     if (r.ok) anySent = true;
     else lastErr = { status: r.status, body: r.body };
   }
-
-  const joined = bubbles.join(" | ");
 
   if (anySent) {
     // sucesso

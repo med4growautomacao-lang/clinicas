@@ -113,6 +113,27 @@ function ehPermanente(status: number) {
   return status >= 400 && status < 500 && ![401, 403, 408, 429].includes(status);
 }
 
+// A CONTA da clinica esta fora do ar / punida pelo WhatsApp? Entao o problema nao e a mensagem.
+//   503 "session is not reconnectable" -> WhatsApp desconectado
+//   463 / reachout_timelock            -> WhatsApp restringiu a conta de iniciar conversas
+//   status 0                           -> a propria uazapi nao respondeu
+// (mesma deteccao que a forms-welcome fazia inline, agora centralizada no Emissor).
+function ehFalhaInfra(status: number, corpo: string): boolean {
+  if (status === 0 || status === 503) return true;
+  const b = (corpo || "").toLowerCase();
+  return b.includes("463") || b.includes("reachout_timelock") || b.includes("temporary restr")
+    || b.includes("disconnected") || b.includes("not reconnectable");
+}
+
+// A uazapi informa ate quando a restricao vale; usamos para nao martelar a API antes disso.
+function bloqueadoAte(corpo: string): string | null {
+  try {
+    const m = (corpo || "").match(/"until"\s*:\s*"([^"]+)"/);
+    if (m && !Number.isNaN(Date.parse(m[1]))) return new Date(m[1]).toISOString();
+  } catch { /* corpo nao-JSON */ }
+  return null;
+}
+
 async function processar(supa: Supa, m: Mensagem, cache: Map<string, string | null>) {
   // --- Transporte SANDBOX: nunca toca a uazapi. E o que faz o ambiente de teste interno existir
   // sem um `if (simulacao)` espalhado por 13 produtores.
@@ -165,6 +186,16 @@ async function processar(supa: Supa, m: Mensagem, cache: Map<string, string | nu
   }
 
   if (!r.ok) {
+    // Falha de INFRA (conta fora do ar / restrita): bloqueia a instancia e devolve a mensagem a
+    // fila SEM contar a tentativa. O gate faz os outros produtores pararem de martelar a conta.
+    if (ehFalhaInfra(r.status, r.texto)) {
+      await supa.rpc("mark_outbound_infra_blocked", {
+        p_id: m.id, p_clinic_id: m.clinic_id,
+        p_until: bloqueadoAte(r.texto),
+        p_error: `uazapi ${r.status}: ${r.texto}`,
+      });
+      return;
+    }
     await supa.rpc("mark_outbound_failed", {
       p_id: m.id,
       p_error: `uazapi ${r.status}: ${r.texto}`,

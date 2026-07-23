@@ -16,6 +16,7 @@ import { ErrorCenter } from './ErrorCenter';
 import { MediaAIPanel } from './MediaAIPanel';
 import { ConvAIPanel } from './ConvAIPanel';
 import { AgentAIPanel } from './AgentAIPanel';
+import { VoicePanel } from './VoicePanel';
 import { GoogleAdsSecretsPanel } from './GoogleAdsSecretsPanel';
 import { MetaCloudSecretsPanel } from './MetaCloudSecretsPanel';
 import { SpendSyncConfigPanel } from './SpendSyncConfigPanel';
@@ -1125,7 +1126,7 @@ function PromptTemplatesManager() {
 
 // ─── SystemSettingsTab (wrapper com sub-abas) ─────────────────────────────────
 function SystemSettingsTab() {
-  const [subTab, setSubTab] = useState<'prompts' | 'assistant' | 'media' | 'conv_ai' | 'agent_model' | 'google_ads' | 'meta_api' | 'hub' | 'vars'>('prompts');
+  const [subTab, setSubTab] = useState<'prompts' | 'assistant' | 'media' | 'conv_ai' | 'agent_model' | 'voice' | 'google_ads' | 'meta_api' | 'hub' | 'vars'>('prompts');
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl w-fit">
@@ -1135,6 +1136,7 @@ function SystemSettingsTab() {
           { id: 'media', label: 'IA de Mídia' },
           { id: 'conv_ai', label: 'IA de Conversas' },
           { id: 'agent_model', label: 'Modelo do Agente' },
+          { id: 'voice', label: 'Voz do Agente' },
           { id: 'google_ads', label: 'Investimento (Ads)' },
           { id: 'meta_api', label: 'API Meta' },
           { id: 'hub', label: 'Migração Hub' },
@@ -1152,6 +1154,7 @@ function SystemSettingsTab() {
         : subTab === 'media' ? <MediaAIPanel />
         : subTab === 'conv_ai' ? <ConvAIPanel />
         : subTab === 'agent_model' ? <AgentAIPanel />
+        : subTab === 'voice' ? <VoicePanel />
         : subTab === 'google_ads' ? <div className="space-y-6"><GoogleAdsSecretsPanel /><SpendSyncConfigPanel /></div>
         : subTab === 'meta_api' ? <MetaCloudSecretsPanel />
         : subTab === 'hub' ? <HubMigrationPanel />

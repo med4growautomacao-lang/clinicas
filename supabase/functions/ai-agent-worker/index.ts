@@ -69,6 +69,48 @@ async function sendBubbles(token: string, number: string, bubbles: string[]): Pr
   }
 }
 
+// ── Voz (ElevenLabs) ─────────────────────────────────────────────────────────
+// Config em system_settings.elevenlabs_config (enabled+voice_id+model_id); chave no Vault.
+async function loadElevenLabs(supabase: any): Promise<{ enabled: boolean; voice_id: string; model_id: string; key: string | null }> {
+  try {
+    const { data } = await supabase.from("system_settings").select("value").eq("id", "elevenlabs_config").maybeSingle();
+    const c = data?.value ? JSON.parse(data.value) : {};
+    if (!c.enabled || !c.voice_id) return { enabled: false, voice_id: "", model_id: "", key: null };
+    const { data: k } = await supabase.rpc("get_llm_secret", { p_name: "ELEVENLABS_API_KEY" });
+    return { enabled: true, voice_id: String(c.voice_id), model_id: c.model_id || "eleven_multilingual_v2", key: (k && String(k).trim()) ? String(k) : null };
+  } catch { return { enabled: false, voice_id: "", model_id: "", key: null }; }
+}
+
+function toBase64(bytes: Uint8Array): string {
+  let bin = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  return btoa(bin);
+}
+
+async function ttsElevenLabs(key: string, voiceId: string, modelId: string, text: string): Promise<string | null> {
+  const resp = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+    method: "POST",
+    signal: AbortSignal.timeout(30000),
+    headers: { "xi-api-key": key, "Content-Type": "application/json", "Accept": "audio/mpeg" },
+    body: JSON.stringify({ text, model_id: modelId || "eleven_multilingual_v2" }),
+  });
+  if (!resp.ok) return null;
+  return toBase64(new Uint8Array(await resp.arrayBuffer()));
+}
+
+async function sendAudio(token: string, number: string, base64: string): Promise<boolean> {
+  try {
+    const r = await fetch(`${UAZAPI_BASE}/send/media`, {
+      method: "POST",
+      signal: AbortSignal.timeout(30000),
+      headers: { "Content-Type": "application/json", "Accept": "application/json", "token": token },
+      body: JSON.stringify({ number, type: "audio", file: base64, delay: 0 }),
+    });
+    return r.ok;
+  } catch { return false; }
+}
+
 // Transicao de etapa por IA — reescrita CERTA (via ticket, nao leads.stage_id cru).
 async function applyStageTransition(supabase: any, clinicId: string, leadId: string | null, text: string): Promise<void> {
   if (!leadId || !text) return;
@@ -140,10 +182,25 @@ async function processTurn(supabase: any, turn: { session_id: string; clinic_id:
       return;
     }
 
-    // Fan-out + memoria + etapa
-    const bubbles = splitIntoBubbles(finalText);
-    if (token && number && bubbles.length) await sendBubbles(token, number, bubbles);
-    else await registrarErro(supabase, "envio_sem_credenciais", "Resposta pronta mas sem token/numero para enviar", "error", clinicId, { session_id: turn.session_id, tem_token: !!token, tem_numero: !!number });
+    // Fan-out: se o paciente mandou AUDIO e o ElevenLabs esta ligado, responde em VOZ; qualquer
+    // falha (desligado, sem chave, sem credito, erro de TTS) cai para TEXTO e registra na Central.
+    let sentAudio = false;
+    const audioWanted = String(ctx.midia_type || "").toLowerCase().includes("audio");
+    if (audioWanted && token && number) {
+      const el = await loadElevenLabs(supabase);
+      if (el.enabled && el.voice_id && el.key) {
+        try {
+          const b64 = await ttsElevenLabs(el.key, el.voice_id, el.model_id, finalText);
+          if (b64) sentAudio = await sendAudio(token, number, b64);
+        } catch { sentAudio = false; }
+        if (!sentAudio) await registrarErro(supabase, "audio_fallback_texto", "TTS ElevenLabs falhou; a resposta saiu em texto (fallback)", "warning", clinicId, { session_id: turn.session_id });
+      }
+    }
+    if (!sentAudio) {
+      const bubbles = splitIntoBubbles(finalText);
+      if (token && number && bubbles.length) await sendBubbles(token, number, bubbles);
+      else await registrarErro(supabase, "envio_sem_credenciais", "Resposta pronta mas sem token/numero para enviar", "error", clinicId, { session_id: turn.session_id, tem_token: !!token, tem_numero: !!number });
+    }
 
     await saveAiResponse(supabase, turn.session_id, finalText);
     await applyStageTransition(supabase, clinicId, ctx.lead_id ?? null, finalText);

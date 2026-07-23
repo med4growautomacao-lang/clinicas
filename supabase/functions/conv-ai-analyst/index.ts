@@ -228,6 +228,9 @@ function buildUserPrompt(ctx: any): string {
     `- ${s.slug ?? s.name}: "${s.name}"${s.is_conversion ? " (ETAPA DE CONVERSÃO / VENDA FECHADA)" : ""}`
   ).join("\n");
   const conversa = (ctx.messages ?? []).map((m: any) => `[${m.at}] ${m.who}: ${m.text}`).join("\n");
+  const memoria = ctx.lead_summary
+    ? `\n## Memória atual do contato (consolide o campo "summary" a partir dela)\n${ctx.lead_summary}\n`
+    : "";
   const manual = ctx.clinic_prompt
     ? `\n## Manual desta empresa (o que a experiência dela já ensinou)\n${ctx.clinic_prompt}\n`
     : "";
@@ -253,7 +256,7 @@ Contato: ${ctx.lead?.name ?? "-"}
 
 ## Conversa (mais antiga primeiro)
 ${conversa || "(sem mensagens)"}
-
+${memoria}
 Analise e responda no formato JSON pedido.`;
 }
 
@@ -307,6 +310,13 @@ async function analisarTicket(item: any, cfg: any, dry: boolean, debug = false, 
     return "too_short";
   }
 
+  // Memória longa (Opção A): lê o resumo atual do lead para o modelo CONSOLIDAR (não recriar).
+  const leadIdMem: string | null = item.lead_id ?? ctx.lead?.id ?? null;
+  if (leadIdMem) {
+    const { data: Lm } = await admin.from("leads").select("ai_summary").eq("id", leadIdMem).maybeSingle();
+    ctx.lead_summary = Lm?.ai_summary ?? "";
+  }
+
   const out = await callLlm(
     cfg.provider, cfg.model, cfg.temperature, cfg.max_output_tokens,
     cfg.system_prompt, buildUserPrompt(ctx),
@@ -349,6 +359,12 @@ async function analisarTicket(item: any, cfg: any, dry: boolean, debug = false, 
   const stageMode: string = item.stage_mode ?? "auto";
   const saleMode: string = item.sale_mode ?? "suggest";
   const aplicando = cfg.mode === "active" && !dry;
+
+  // Memória longa (Opção A): grava o resumo consolidado na MESMA passada do analista.
+  const memNova = String(parsed?.summary ?? "").trim();
+  if (aplicando && leadIdMem && memNova) {
+    await admin.from("leads").update({ ai_summary: memNova }).eq("id", leadIdMem);
+  }
 
   // 1 registro em aberto por ticket (índice único). Reanálise ATUALIZA o que
   // existe em vez de empilhar (vale também para 'shadow', senão o modo de teste

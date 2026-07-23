@@ -12,7 +12,7 @@ import { agentToolSpecs, executeToolCall, type SessionCtx } from "../_shared/age
 import { assembleSystemPrompt, fetchAgentContext } from "../_shared/agent/prompt.ts";
 import { splitIntoBubbles } from "../_shared/agent/split.ts";
 import { loadConversation, saveAiResponse } from "../_shared/agent/memory.ts";
-import { looksTechnical, REPAIR_INSTRUCTION, sanitizeForPatient } from "../_shared/agent/guard.ts";
+import { looksTechnical, REPAIR_INSTRUCTION, sanitizeForPatient, stripCodeFences } from "../_shared/agent/guard.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -118,16 +118,20 @@ async function sendAudio(token: string, number: string, base64: string): Promise
 // Formata a resposta em SSML (respiros/pausas, datas/horas/telefones por extenso, sem emoji) antes
 // do TTS, pra voz soar natural. Prompt em system_settings.agent_ssml_prompt (editavel no Super Admin).
 // Se vazio ou se der erro, manda o texto cru pro TTS (nao perde o audio).
-async function formatForVoice(supabase: any, cfg: ModelConfig, text: string): Promise<string> {
+async function formatForVoice(supabase: any, cfg: ModelConfig, clinicId: string | null, text: string): Promise<string> {
   try {
     const { data } = await supabase.from("system_settings").select("value").eq("id", "agent_ssml_prompt").maybeSingle();
     const prompt = (data?.value || "").trim();
     if (!prompt) return text;
     const out = await runAgentTurn(supabase, cfg, prompt, [{ role: "user", text }], []);
-    let ssml = (out.text || "").trim();
-    ssml = ssml.replace(/^```[a-z]*\s*/i, "").replace(/\s*```$/, "").trim();
+    const ssml = stripCodeFences((out.text || "").trim());
     return ssml || text;
-  } catch { return text; }
+  } catch (e) {
+    // Sem registrar, o formatador pode ficar quebrado para SEMPRE e o unico sintoma seria a voz
+    // robotica (lendo data e telefone digito a digito): degradacao que so o paciente percebe.
+    await registrarErro(supabase, "ssml_falhou", "O formatador de voz (SSML) falhou; o audio saiu do texto cru", "warning", clinicId, { erro: String((e as Error)?.message ?? e).slice(0, 200) });
+    return text;
+  }
 }
 
 // Transicao de etapa por IA — reescrita CERTA (via ticket, nao leads.stage_id cru).
@@ -177,8 +181,12 @@ async function processTurn(supabase: any, turn: { session_id: string; clinic_id:
 
     const messages = await loadConversation(supabase, turn.session_id, MEMORY_WINDOW, buffer);
 
-    // Loop de tool-calling
+    // Loop de tool-calling. toolsExecutadas guarda o que JA teve efeito colateral no banco
+    // (MARCAR_HORARIO grava consulta de verdade): se a trava de saida bloquear o envio depois
+    // disso, o alerta precisa dizer o que ja aconteceu, senao o operador nao sabe que existe
+    // agendamento criado sem o paciente ter sido avisado.
     let finalText = "";
+    const toolsExecutadas: string[] = [];
     for (let iter = 0; iter < MAX_TOOL_ITERS; iter++) {
       const out = await modelTurn(supabase, cfg, system, messages, tools);
       if (out.toolCalls.length === 0) { finalText = out.text; break; }
@@ -186,7 +194,10 @@ async function processTurn(supabase: any, turn: { session_id: string; clinic_id:
       // registra o passo do assistente (texto + tool_calls) e executa as tools em paralelo
       messages.push({ role: "assistant", text: out.text || undefined, toolCalls: out.toolCalls });
       const results = await Promise.all(out.toolCalls.map((c) => executeToolCall(c, session)));
-      out.toolCalls.forEach((c, i) => messages.push({ role: "tool", callId: c.id, name: c.name, result: results[i] }));
+      out.toolCalls.forEach((c, i) => {
+        toolsExecutadas.push(c.name);
+        messages.push({ role: "tool", callId: c.id, name: c.name, result: results[i] });
+      });
 
       if (iter === MAX_TOOL_ITERS - 1) {
         // ultimo passo: forca uma resposta textual sem mais tools
@@ -205,30 +216,33 @@ async function processTurn(supabase: any, turn: { session_id: string; clinic_id:
     // chamada de tool como texto (em vez de executa-la), limpa; se ainda sobrar coisa tecnica,
     // da UMA chance de reescrever em linguagem natural; se falhar de novo, NAO ENVIA NADA.
     // Silencio + alerta na Central e preferivel a mandar JSON pro paciente (e pro TTS, e pro painel).
-    // eraTecnico e o gatilho do log, NAO "o texto mudou": a limpeza tambem normaliza espaco em
-    // branco, entao comparar limpo!==finalText acusaria QUALQUER mensagem normal com espaco duplo
-    // ou tab. Central de Erros com alerta falso soterra o alerta de verdade.
-    const eraTecnico = looksTechnical(finalText);
-    const limpo = sanitizeForPatient(finalText);
-    if (looksTechnical(limpo)) {
-      let reparado = "";
-      try {
-        const rep = await modelTurn(supabase, cfg, system, [...messages, { role: "assistant", text: finalText }, { role: "user", text: REPAIR_INSTRUCTION }], []);
-        reparado = sanitizeForPatient((rep.text || "").trim());
-      } catch { /* reparo falhou: cai no bloqueio abaixo */ }
+    // A trava so ENTRA quando ha motivo. Mensagem limpa segue INTACTA: sanitizeForPatient tambem
+    // normaliza espaco em branco, entao aplica-la sempre mutilaria a formatacao de 100% das
+    // respostas (e foi comparar "o texto mudou" que gerou alerta falso na Central antes).
+    if (looksTechnical(finalText)) {
+      const limpo = sanitizeForPatient(finalText);
+      if (looksTechnical(limpo)) {
+        let reparado = "";
+        let erroReparo: string | null = null;
+        try {
+          const rep = await modelTurn(supabase, cfg, system, [...messages, { role: "assistant", text: finalText }, { role: "user", text: REPAIR_INSTRUCTION }], []);
+          reparado = sanitizeForPatient((rep.text || "").trim());
+        } catch (e) {
+          // Sem isso o operador nao distingue "o modelo insistiu no formato tecnico" de "a chamada
+          // de LLM caiu", que pedem acoes opostas. Vai no contexto do critical abaixo.
+          erroReparo = String((e as Error)?.message ?? e).slice(0, 200);
+        }
 
-      if (looksTechnical(reparado)) {
-        await registrarErro(supabase, "resposta_tecnica_bloqueada", "O agente tentou responder ao paciente com conteudo tecnico (JSON/ferramenta); o ENVIO FOI BLOQUEADO", "critical", clinicId, { session_id: turn.session_id, tentativa_1: finalText.slice(0, 300), tentativa_2: reparado.slice(0, 300) });
-        return;
-      }
-      await registrarErro(supabase, "resposta_tecnica_reparada", "O agente respondeu em formato tecnico e foi obrigado a reescrever antes de enviar", "warning", clinicId, { session_id: turn.session_id, original: finalText.slice(0, 300) });
-      finalText = reparado;
-    } else {
-      // Sobrou mensagem boa: se a original era tecnica, houve resgate parcial (vale registrar).
-      if (eraTecnico) {
+        if (looksTechnical(reparado)) {
+          await registrarErro(supabase, "resposta_tecnica_bloqueada", "O agente tentou responder ao paciente com conteudo tecnico (JSON/ferramenta); o ENVIO FOI BLOQUEADO", "critical", clinicId, { session_id: turn.session_id, tentativa_1: finalText.slice(0, 300), tentativa_2: reparado.slice(0, 300), erro_reparo: erroReparo, tools_executadas: toolsExecutadas, atencao: toolsExecutadas.length ? "as ferramentas acima JA rodaram: pode existir agendamento criado sem o paciente ter sido avisado" : null });
+          return;
+        }
+        await registrarErro(supabase, "resposta_tecnica_reparada", "O agente respondeu em formato tecnico e foi obrigado a reescrever antes de enviar", "warning", clinicId, { session_id: turn.session_id, original: finalText.slice(0, 300) });
+        finalText = reparado;
+      } else {
         await registrarErro(supabase, "artefato_tecnico_removido", "A resposta do agente vinha com conteudo tecnico; o trecho foi removido e o resto seguiu ao paciente", "warning", clinicId, { session_id: turn.session_id, original: finalText.slice(0, 300) });
+        finalText = limpo;
       }
-      finalText = limpo;
     }
 
     // Fan-out: se o paciente mandou AUDIO e o ElevenLabs esta ligado, responde em VOZ; qualquer
@@ -239,7 +253,15 @@ async function processTurn(supabase: any, turn: { session_id: string; clinic_id:
       const el = await loadElevenLabs(supabase);
       if (el.enabled && el.voice_id && el.key) {
         try {
-          const speakText = await formatForVoice(supabase, cfg, finalText);
+          // O SSML sai de OUTRA chamada de LLM, DEPOIS da trava de saida. Sem revalidar aqui, um
+          // artefato tecnico do formatador seria FALADO pro paciente. Se reprovar, sintetiza o
+          // texto que ja passou pela trava (degrada a naturalidade, nao perde o audio).
+          const ssml = await formatForVoice(supabase, cfg, clinicId, finalText);
+          let speakText = ssml;
+          if (looksTechnical(sanitizeForPatient(ssml))) {
+            speakText = finalText;
+            await registrarErro(supabase, "ssml_tecnico_descartado", "O formatador de voz devolveu conteudo tecnico; o audio foi gerado do texto ja aprovado", "warning", clinicId, { session_id: turn.session_id, ssml: ssml.slice(0, 300) });
+          }
           const b64 = await ttsElevenLabs(el.key, el.voice_id, el.model_id, speakText);
           if (b64) sentAudio = await sendAudio(token, number, b64);
         } catch { sentAudio = false; }

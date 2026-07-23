@@ -135,7 +135,13 @@ async function callLlm(
     const j = await r.json();
     let text = (j?.content ?? []).map((c: any) => c?.text).filter(Boolean).join("\n").trim();
     // Com prefill a resposta VEM SEM a "{" que abrimos por ela; devolve o objeto inteiro.
-    if (prefill && text && !text.startsWith("{")) text = `{${text}`;
+    if (prefill && text) {
+      // Continuação degenerada (ex.: só "}", por parada imediata ou filtro do provedor) viraria
+      // "{}": JSON VÁLIDO e vazio, que passa no extractJson e some da Central em vez de cair no
+      // alerta resposta_nao_json. Sem nenhuma aspas não há chave nenhuma, então zera de propósito.
+      if (!text.includes('"')) text = "";
+      else if (!text.startsWith("{")) text = `{${text}`;
+    }
     return { text, tokens_in: j?.usage?.input_tokens ?? 0, tokens_out: j?.usage?.output_tokens ?? 0 };
   }
 
@@ -279,7 +285,10 @@ Analise e responda no formato JSON pedido.`;
 
 // Devolve o rótulo do que fez. Em dry-run com ?debug=1 devolve também o JSON cru
 // do modelo: é assim que se confere a calibragem antes de ligar uma clínica.
-async function analisarTicket(item: any, cfg: any, dry: boolean, debug = false, bench = false): Promise<any> {
+// `jsonMode` é PARÂMETRO, não campo de cfg: cfg nasce de { ...DEFAULTS, ...conv_ai_config }, então
+// um "json_mode": false gravado no banco desligaria a garantia de envelope na rodada real do cron,
+// silenciosamente. Desligar isso é privilégio da bancada, que passa o argumento na mão.
+async function analisarTicket(item: any, cfg: any, dry: boolean, debug = false, bench = false, jsonMode = true): Promise<any> {
   const { data: ctx, error: ctxErr } = await admin.rpc("conv_ai_get_context", {
     p_ticket_id: item.ticket_id,
     p_max_messages: cfg.max_messages,
@@ -336,7 +345,7 @@ async function analisarTicket(item: any, cfg: any, dry: boolean, debug = false, 
 
   const out = await callLlm(
     cfg.provider, cfg.model, cfg.temperature, cfg.max_output_tokens,
-    cfg.system_prompt, buildUserPrompt(ctx), true,
+    cfg.system_prompt, buildUserPrompt(ctx), jsonMode,
   );
   const parsed = extractJson(out.text);
   if (!parsed) {
@@ -529,6 +538,10 @@ serve(async (req) => {
   // Nunca afeta a config salva nem uma rodada real: é bancada de teste.
   const provOverride = dry && oneTicket ? url.searchParams.get("provider") : null;
   const modelOverride = dry && oneTicket ? url.searchParams.get("model") : null;
+  // Bancada: provedor/modelo trocado no dry-run pode não suportar modo JSON nativo e devolver 400,
+  // fazendo a comparação falhar por configuração e não por qualidade. ?json=0 desliga SÓ na
+  // bancada (exige dry+ticket); a rodada real do cron nunca chega aqui.
+  const jsonOff = !!(dry && oneTicket) && url.searchParams.get("json") === "0";
   // Bancada: reanalisa ticket já decidido, rebobinado para a etapa anterior.
   // Só existe para medir modelo contra gabarito humano; nunca em rodada real.
   const bench = !!(dry && oneTicket) && url.searchParams.get("bench") === "1";
@@ -593,7 +606,7 @@ serve(async (req) => {
         sale_mode: cc.sale_mode ?? "suggest",
       };
       try {
-        const r = await analisarTicket(enriched, cfg, dry, debug, bench);
+        const r = await analisarTicket(enriched, cfg, dry, debug, bench, !jsonOff);
         if (debug) detalhes.push(r);
         const label = typeof r === "string" ? r : r.resultado;
         results[label] = (results[label] ?? 0) + 1;

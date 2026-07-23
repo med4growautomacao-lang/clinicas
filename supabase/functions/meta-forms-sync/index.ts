@@ -16,6 +16,10 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import {
+  type CamadaToken, ehErroDeToken, type ErroGraph,
+  ordenarCandidatos, tokenDaPlataforma, tokensDasOrgs,
+} from '../_shared/meta-token.ts'
 
 const GRAPH_VERSION = 'v24.0'
 const OVERLAP_MINUTES = 5           // re-leitura de segurança a partir do cursor (dedup absorve)
@@ -29,7 +33,9 @@ const corsHeaders = {
 interface ClinicRow {
   id: string
   meta_forms_id: string
-  meta_token: string
+  meta_token: string | null          // pode ser nulo: a clinica pode usar o token da org ou da plataforma
+  organization_id: string | null
+  meta_token_source: CamadaToken | null
   meta_forms_last_synced_at: string | null
 }
 interface MetaField { name?: string; values?: string[] }
@@ -40,6 +46,34 @@ function pickField(fieldData: MetaField[] | undefined, names: string[]): string 
     if (f && Array.isArray(f.values) && f.values.length > 0 && f.values[0]) return String(f.values[0])
   }
   return null
+}
+
+// Busca TODAS as paginas com UM token, sem gravar nada. Separar busca de gravacao e o que permite
+// trocar de camada e refazer a busca do zero: se gravassemos durante a paginacao, um token que
+// morre na pagina 2 deixaria metade dos leads gravados por um token e metade por outro.
+async function buscarLeads(
+  formsId: string, token: string, filtering: string,
+// deno-lint-ignore no-explicit-any
+): Promise<{ leads: any[]; erro: ErroGraph | null }> {
+  // deno-lint-ignore no-explicit-any
+  const leads: any[] = []
+  let url: string | null =
+    `https://graph.facebook.com/${GRAPH_VERSION}/${formsId}/leads` +
+    `?fields=id,created_time,field_data,campaign_name,adset_name,ad_name` +
+    `&limit=100&filtering=${filtering}` +
+    `&access_token=${encodeURIComponent(token)}`
+
+  while (url) {
+    // Anotacoes explicitas: url e reatribuida a partir de json.paging, entao sem elas o TS entra
+    // em inferencia circular (url -> resp -> json -> url) e reclama de TS7022.
+    const resp: Response = await fetch(url)
+    // deno-lint-ignore no-explicit-any
+    const json: any = await resp.json()
+    if (json.error) return { leads, erro: json.error as ErroGraph }
+    for (const l of (json.data ?? [])) leads.push(l)
+    url = json.paging?.next ?? null
+  }
+  return { leads, erro: null }
 }
 
 serve(async (req) => {
@@ -60,11 +94,12 @@ serve(async (req) => {
       p_level: level, p_clinic_id: clinicId, p_context: ctx,
     }).then(() => {}, (e) => console.error('[meta-forms-sync] log falhou:', e))
 
+  // Sem filtrar por meta_token: a clinica pode nao ter token proprio e depender do da organizacao
+  // ou do da plataforma. Filtrar aqui (como era antes) fazia essas clinicas NUNCA serem varridas.
   const { data: clinics, error } = await supabase
     .from('clinics')
-    .select('id, meta_forms_id, meta_token, meta_forms_last_synced_at')
+    .select('id, meta_forms_id, meta_token, organization_id, meta_token_source, meta_forms_last_synced_at')
     .not('meta_forms_id', 'is', null)
-    .not('meta_token', 'is', null)
     .eq('is_active', true)
 
   if (error) {
@@ -73,15 +108,23 @@ serve(async (req) => {
     })
   }
 
+  // As outras duas camadas de token, carregadas UMA vez (nao por clinica).
+  const listaClinicas = (clinics ?? []) as ClinicRow[]
+  const [platformToken, orgTokens] = await Promise.all([
+    tokenDaPlataforma(supabase),
+    tokensDasOrgs(supabase, listaClinicas.map((c) => c.organization_id ?? '')),
+  ])
+
   let totalFetched = 0
   let totalIngested = 0
   const perClinic: Array<Record<string, unknown>> = []
 
-  for (const c of (clinics ?? []) as ClinicRow[]) {
+  for (const c of listaClinicas) {
     let fetched = 0
     let ingested = 0
     let ok = true                 // ciclo 100% sem erro? (controla o avanço do cursor)
     let maxCreatedMs = 0          // created_time mais recente visto neste ciclo
+    let camadaUsada: CamadaToken | null = null   // qual token deu certo nesta rodada
 
     // Limite inferior do time_created: cursor − overlap, ou lookback inicial se cursor nulo.
     const cursorMs = c.meta_forms_last_synced_at ? Date.parse(c.meta_forms_last_synced_at) : null
@@ -94,30 +137,57 @@ serve(async (req) => {
     ))
 
     try {
-      let url: string | null =
-        `https://graph.facebook.com/${GRAPH_VERSION}/${c.meta_forms_id}/leads` +
-        `?fields=id,created_time,field_data,campaign_name,adset_name,ad_name` +
-        `&limit=100&filtering=${filtering}` +
-        `&access_token=${encodeURIComponent(c.meta_token)}`
+      // TRÊS camadas de token, na ordem: a que funcionou por último vem primeiro. Se a Meta
+      // recusar POR CAUSA DO TOKEN, tenta a próxima; a que funcionar vira a principal da clínica.
+      const candidatos = ordenarCandidatos(c.meta_token_source, {
+        clinic: c.meta_token,
+        org: c.organization_id ? orgTokens.get(c.organization_id) : null,
+        platform: platformToken,
+      })
 
-      while (url) {
-        const resp = await fetch(url)
-        const json = await resp.json()
+      if (candidatos.length === 0) {
+        ok = false
+        await registrar(
+          'sem_token_meta',
+          'Formulário do Meta configurado, mas não há token em NENHUMA camada (cliente, organização ou plataforma)',
+          'critical', c.id, { forms_id: c.meta_forms_id },
+        )
+      } else {
+        // deno-lint-ignore no-explicit-any
+        let leads: any[] = []
+        let ultimoErro: ErroGraph | null = null
+        const tentativas: string[] = []
 
-        if (json.error) {
-          // Token expirado / form inválido / rate limit: marca o ciclo como falho p/ NÃO avançar o cursor.
-          ok = false
-          console.error(`[meta-forms-sync] clinic ${c.id} graph error:`, json.error?.message)
-          await registrar(
-            'graph_api_recusou',
-            'A Meta recusou a busca dos leads do formulário — leads pagos podem estar não entrando',
-            'critical', c.id,
-            { erro: json.error?.message, codigo: json.error?.code, forms_id: c.meta_forms_id },
-          )
-          break
+        for (const cand of candidatos) {
+          const r = await buscarLeads(c.meta_forms_id, cand.token, filtering)
+          if (!r.erro) { leads = r.leads; camadaUsada = cand.camada; break }
+          ultimoErro = r.erro
+          tentativas.push(`${cand.camada}=${r.erro.code ?? '?'}`)
+          // Erro que NÃO é de token (rate limit, instabilidade da Meta): trocar de camada não
+          // ajuda e ainda queimaria as outras. Para aqui e tenta tudo de novo no próximo minuto.
+          if (!ehErroDeToken(r.erro)) break
         }
 
-        for (const lead of (json.data ?? [])) {
+        if (camadaUsada === null) {
+          // Só AGORA é falha de verdade: nenhuma das camadas funcionou. Registrar antes disso
+          // seria alarme sobre algo que o fallback cobriu, e alarme falso soterra o de verdade.
+          ok = false
+          console.error(`[meta-forms-sync] clinic ${c.id} graph error:`, ultimoErro?.message)
+          await registrar(
+            'graph_api_recusou',
+            'A Meta recusou a busca dos leads do formulário em TODAS as camadas de token — leads pagos podem estar não entrando',
+            'critical', c.id,
+            { erro: ultimoErro?.message, codigo: ultimoErro?.code, forms_id: c.meta_forms_id, tentativas },
+          )
+        } else {
+          // Memória: a camada boa passa a ser a primeira tentativa das próximas rodadas.
+          if (camadaUsada !== c.meta_token_source) {
+            const { error: srcErr } = await supabase
+              .from('clinics').update({ meta_token_source: camadaUsada }).eq('id', c.id)
+            if (srcErr) console.error(`[meta-forms-sync] meta_token_source clinic ${c.id}:`, srcErr.message)
+          }
+
+        for (const lead of leads) {
           fetched++
           const createdMs = lead.created_time ? Date.parse(lead.created_time) : 0
           if (createdMs > maxCreatedMs) maxCreatedMs = createdMs
@@ -158,9 +228,8 @@ serve(async (req) => {
           }
           if (res?.created) ingested++
         }
-
-        url = json.paging?.next ?? null
-      }
+        } // fim do ramo "achou uma camada de token que funciona"
+      }   // fim do ramo "existe pelo menos um candidato"
     } catch (e) {
       // 1 token ruim de uma clínica não derruba as demais; cursor não avança.
       ok = false
@@ -187,13 +256,14 @@ serve(async (req) => {
     totalIngested += ingested
     perClinic.push({
       clinic_id: c.id, fetched, ingested, ok,
+      camada_token: camadaUsada,   // qual das 3 camadas respondeu (null = nenhuma funcionou)
       since: new Date(sinceMs).toISOString(),
       new_cursor: ok && maxCreatedMs > 0 ? new Date(maxCreatedMs).toISOString() : (c.meta_forms_last_synced_at ?? null),
     })
   }
 
   return new Response(
-    JSON.stringify({ ok: true, clinics: (clinics ?? []).length, fetched: totalFetched, ingested: totalIngested, perClinic }),
+    JSON.stringify({ ok: true, clinics: listaClinicas.length, fetched: totalFetched, ingested: totalIngested, perClinic }),
     { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
   )
 })

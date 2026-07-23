@@ -159,6 +159,8 @@ async function callLlm(
       body.max_tokens = maxTokens;
       body.temperature = temperature;
     }
+    // A OpenAI devolve 400 se pedir json_object sem a palavra "json" no prompt. O system_prompt do
+    // analista traz, mas quem for editar o prompt precisa manter.
     if (jsonMode) body.response_format = { type: "json_object" };
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",

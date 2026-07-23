@@ -205,10 +205,11 @@ async function processTurn(supabase: any, turn: { session_id: string; clinic_id:
     // chamada de tool como texto (em vez de executa-la), limpa; se ainda sobrar coisa tecnica,
     // da UMA chance de reescrever em linguagem natural; se falhar de novo, NAO ENVIA NADA.
     // Silencio + alerta na Central e preferivel a mandar JSON pro paciente (e pro TTS, e pro painel).
+    // eraTecnico e o gatilho do log, NAO "o texto mudou": a limpeza tambem normaliza espaco em
+    // branco, entao comparar limpo!==finalText acusaria QUALQUER mensagem normal com espaco duplo
+    // ou tab. Central de Erros com alerta falso soterra o alerta de verdade.
+    const eraTecnico = looksTechnical(finalText);
     const limpo = sanitizeForPatient(finalText);
-    if (limpo !== finalText) {
-      await registrarErro(supabase, "artefato_tecnico_removido", "A resposta do agente vinha com conteudo tecnico; o trecho foi removido antes do envio", "warning", clinicId, { session_id: turn.session_id, original: finalText.slice(0, 300) });
-    }
     if (looksTechnical(limpo)) {
       let reparado = "";
       try {
@@ -223,6 +224,10 @@ async function processTurn(supabase: any, turn: { session_id: string; clinic_id:
       await registrarErro(supabase, "resposta_tecnica_reparada", "O agente respondeu em formato tecnico e foi obrigado a reescrever antes de enviar", "warning", clinicId, { session_id: turn.session_id, original: finalText.slice(0, 300) });
       finalText = reparado;
     } else {
+      // Sobrou mensagem boa: se a original era tecnica, houve resgate parcial (vale registrar).
+      if (eraTecnico) {
+        await registrarErro(supabase, "artefato_tecnico_removido", "A resposta do agente vinha com conteudo tecnico; o trecho foi removido e o resto seguiu ao paciente", "warning", clinicId, { session_id: turn.session_id, original: finalText.slice(0, 300) });
+      }
       finalText = limpo;
     }
 

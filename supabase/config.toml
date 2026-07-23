@@ -51,3 +51,18 @@ enabled = true
 # Disparada pelo pg_cron via system_http_post (sem JWT).
 verify_jwt = false
 entrypoint = "./functions/conv-ai-learn/index.ts"
+
+[functions.chat-send]
+enabled = true
+# Chamada pelo frontend (functions.invoke manda o JWT do usuário) e a função ainda valida o uid
+# por dentro. Estava fora deste arquivo e o valor real em produção era true — registrado aqui para
+# um deploy futuro não derrubar o envio manual sem querer.
+verify_jwt = true
+entrypoint = "./functions/chat-send/index.ts"
+
+[functions.emissor-worker]
+enabled = true
+# Disparada pelo pg_cron via system_http_post (sem JWT), igual ao ai-agent-worker. So drena a fila
+# outbound_messages, que apenas service_role popula.
+verify_jwt = false
+entrypoint = "./functions/emissor-worker/index.ts"

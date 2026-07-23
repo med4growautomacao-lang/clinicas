@@ -103,6 +103,70 @@ serve(async (req) => {
     return json({ ok: false, error: "envio_desativado" }, 403);
   }
 
+  // (3) EMISSOR (opt-in por clinica, `fn_emissor_ativo`). Com a chave LIGADA a mensagem vai para
+  //     a fila de saida e quem envia e o emissor-worker: ele resolve o token pelo gate canonico
+  //     (`fn_clinic_send_token` — instancia conectada, token valido, envio nao bloqueado), LE a
+  //     resposta da uazapi e so entao grava a conversa.
+  //     A UI nao muda: ela ja nao faz insercao otimista e mostra a mensagem pelo realtime do
+  //     INSERT em chat_messages (ver comentario em useSupabase.ts). A diferenca e que a linha
+  //     passa a aparecer quando a mensagem SAIU DE VERDADE, com ~1s de kick, em vez de aparecer
+  //     mesmo quando a uazapi recusou.
+  //     Com a chave DESLIGADA (default) cai no caminho antigo, byte por byte.
+  const { data: viaEmissor } = await supabase.rpc("fn_emissor_ativo", { p_clinic_id: clinic_id });
+
+  if (viaEmissor === true) {
+    const numeroFila = normalizeBrazilianPhone(String(phone));
+    if (!numeroFila) return json({ ok: false, error: "telefone_invalido" }, 400);
+
+    // Duplo clique do operador nao vira mensagem dobrada. A janela de minuto deixa o reenvio
+    // deliberado (mandar o mesmo texto de novo mais tarde) continuar funcionando.
+    let h = 5381;
+    for (let i = 0; i < cleanText.length; i++) h = ((h << 5) + h + cleanText.charCodeAt(i)) | 0;
+    const janela = new Date().toISOString().slice(0, 16);
+    const dedupKey = `chat:${clinic_id}:${lead_id ?? numeroFila}:${(h >>> 0).toString(36)}:${janela}`;
+
+    const { data: outboundId, error: filaErr } = await supabase.rpc("emit_message", {
+      p_clinic_id: clinic_id,
+      p_to_addr: numeroFila,
+      p_producer: "chat_manual",
+      p_body: cleanText,
+      p_kind: "text",
+      p_lead_id: lead_id ?? null,
+      p_dedup_key: dedupKey,
+      p_chat_payload: {
+        sender: "human",
+        user_id: messageUserId,
+        phone: numeroFila,
+        // Mantem o formato exato que a conversa ja usa: sender='human' + direction='outbound'
+        // preserva a atribuicao comercial IA x Humano e dispara os gatilhos de etapa por keyword.
+        message: { type: "human", content: cleanText, additional_kwargs: {}, response_metadata: {} },
+      },
+    });
+
+    if (filaErr) {
+      await registrarErro("fila_falhou", "Nao deu para enfileirar a mensagem do chat no Emissor",
+        { detail: filaErr.message, lead_id, number: numeroFila });
+      return json({ ok: false, error: "fila_falhou", detail: filaErr.message }, 502);
+    }
+
+    // Kick DIRETO do worker (background, best-effort). No chat manual ha um humano esperando a
+    // bolha aparecer; sem isto o envio so sairia no proximo ciclo do pg_net/cron (~7s medidos).
+    // Um fetch direto derruba isso para ~1s. O worker e idempotente (claim atomico) e o trigger
+    // pg_net + cron de 1 min continuam como backstop se este kick falhar.
+    try {
+      const workerUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/emissor-worker`;
+      const kick = fetch(workerUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "kick", clinic_id }),
+      }).catch(() => { /* backstop: pg_net/cron drenam */ });
+      (globalThis as any).EdgeRuntime?.waitUntil?.(kick);
+    } catch { /* sem EdgeRuntime: o backstop cobre */ }
+
+    return json({ ok: true, queued: true, outbound_id: outboundId });
+  }
+
+  // ---- Caminho antigo (chave desligada): envio inline, como sempre foi. ----
   // (3) Token da instancia uazapi da clinica.
   const { data: instance } = await supabase
     .from("whatsapp_instances").select("api_token").eq("clinic_id", clinic_id).maybeSingle();

@@ -28,7 +28,9 @@ export function SandboxPanel() {
   const { data: clinics } = useClinics();
   const showToast = useToast();
   const [clinicId, setClinicId] = useState<string>('');
-  const [leadId, setLeadId] = useState<string | null>(null);
+  // Chave da conversa = session_id (NAO lead_id): a resposta do agente (saveAiResponse) grava por
+  // session_id e nem sempre tem lead_id preenchido; o inbound e o ai compartilham o session_id.
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -52,18 +54,18 @@ export function SandboxPanel() {
   }, [waiting]);
 
   // Troca de clínica: zera a tela (a sessão é por clínica; carrega ao enviar/assinar).
-  useEffect(() => { setLeadId(null); setMessages([]); }, [clinicId]);
+  useEffect(() => { setSessionId(null); setMessages([]); }, [clinicId]);
 
-  // Realtime: assina a conversa do lead de simulação assim que o id é conhecido.
+  // Realtime: assina a conversa de simulação (por session_id) assim que ele é conhecido.
   useEffect(() => {
-    if (!leadId) return;
+    if (!sessionId) return;
     let cancelled = false;
 
     (async () => {
       const { data } = await supabase
         .from('chat_messages')
         .select('id, sender, direction, message, created_at')
-        .eq('lead_id', leadId)
+        .eq('session_id', sessionId)
         .order('created_at', { ascending: true });
       if (!cancelled && data) {
         setMessages(data.map((m: any) => ({
@@ -73,8 +75,8 @@ export function SandboxPanel() {
     })();
 
     const channel = supabase
-      .channel(`sandbox_${leadId}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `lead_id=eq.${leadId}` },
+      .channel(`sandbox_${sessionId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `session_id=eq.${sessionId}` },
         (payload) => {
           const m = payload.new as any;
           setMessages(prev => {
@@ -86,7 +88,7 @@ export function SandboxPanel() {
       .subscribe();
 
     return () => { cancelled = true; supabase.removeChannel(channel); };
-  }, [leadId]);
+  }, [sessionId]);
 
   const send = async () => {
     const text = input.trim();
@@ -98,8 +100,7 @@ export function SandboxPanel() {
         body: { action: 'send', clinic_id: clinicId, mensagem: text },
       });
       if (error || !(data as any)?.ok) throw new Error((data as any)?.error || error?.message || 'falha');
-      const newLead = (data as any).lead_id as string;
-      setLeadId(newLead);
+      setSessionId((data as any).session_id as string);
       setWaiting(true);
     } catch (e: any) {
       showToast(`Não deu para enviar: ${String(e?.message ?? e)}`, 'error');
@@ -116,7 +117,7 @@ export function SandboxPanel() {
         body: { action: 'reset', clinic_id: clinicId, delete_lead: true },
       });
       if (error || !(data as any)?.ok) throw new Error((data as any)?.error || error?.message || 'falha');
-      setLeadId(null); setMessages([]); setWaiting(false);
+      setSessionId(null); setMessages([]); setWaiting(false);
       showToast('Sessão de teste reiniciada.', 'success');
     } catch (e: any) {
       showToast(`Não deu para reiniciar: ${String(e?.message ?? e)}`, 'error');

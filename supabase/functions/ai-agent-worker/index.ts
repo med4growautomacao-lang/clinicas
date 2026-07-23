@@ -41,10 +41,12 @@ async function registrarErro(supabase: any, code: string, title: string, level: 
 
 // ---- Emissor (opt-in por clinica). Opcao A: o AGENTE sintetiza o audio e enfileira o base64 pronto;
 // o Emissor so entrega (gate de token, confirmacao, retry) e roteia simulacao p/ o sandbox. ----
-async function emissorAtivo(supabase: any, clinicId: string | null): Promise<boolean> {
+// Passa o lead ao gate: um lead de SIMULACAO (sandbox) sempre roteia pela fila, mesmo com a chave
+// da clinica desligada -> a resposta do agente vai p/ transport='sandbox' em vez de tentar a uazapi.
+async function emissorAtivo(supabase: any, clinicId: string | null, leadId: string | null): Promise<boolean> {
   if (!clinicId) return false;
   try {
-    const { data } = await supabase.rpc("fn_emissor_ativo", { p_clinic_id: clinicId });
+    const { data } = await supabase.rpc("fn_emissor_ativo", { p_clinic_id: clinicId, p_lead_id: leadId ?? null });
     return data === true;
   } catch { return false; }
 }
@@ -288,7 +290,7 @@ async function processTurn(supabase: any, turn: { session_id: string; clinic_id:
     // falha (desligado, sem chave, sem credito, erro de TTS) cai para TEXTO e registra na Central.
     // O AGENTE sempre sintetiza aqui (Opcao A); quem entrega e o Emissor (se a chave estiver ligada)
     // ou o envio inline (chave desligada).
-    const viaEmissor = await emissorAtivo(supabase, clinicId);
+    const viaEmissor = await emissorAtivo(supabase, clinicId, ctx.lead_id ?? null);
     let sentAudio = false;
     let audioB64: string | null = null;
     const audioWanted = String(ctx.midia_type || "").toLowerCase().includes("audio");

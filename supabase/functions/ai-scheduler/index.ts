@@ -348,10 +348,11 @@ async function sendWhatsAppText(
 // ---- Emissor (opt-in por clinica). O handoff do agente (despedida ao lead + aviso ao grupo) passa
 // a enfileirar quando a chave esta ligada: ganha gate/retry e roteia lead de SIMULACAO p/ o sandbox
 // (sem isto, a despedida de um teste iria para um WhatsApp real). Chave desligada = envio inline. ----
-async function emissorAtivo(supabase: any, clinicId: string | null): Promise<boolean> {
+async function emissorAtivo(supabase: any, clinicId: string | null, leadId: string | null = null): Promise<boolean> {
   if (!clinicId) return false;
   try {
-    const { data } = await supabase.rpc("fn_emissor_ativo", { p_clinic_id: clinicId });
+    // Com leadId, um lead de simulacao (sandbox) sempre roteia pela fila (mesmo com a chave off).
+    const { data } = await supabase.rpc("fn_emissor_ativo", { p_clinic_id: clinicId, p_lead_id: leadId });
     return data === true;
   } catch { return false; }
 }
@@ -1089,7 +1090,7 @@ serve(async (req) => {
       const { data: hLookup } = await supabaseClient.rpc("find_patient_by_phone", { p_clinic_id: clinic_id, p_phone: lead_phone });
       const canonicalLeadPhone = (hLookup as any)?.canonical_phone || lead_phone;
       const { data: lead } = await supabaseClient.from("leads")
-        .select("id, name, phone, stage_id").eq("clinic_id", clinic_id).eq("phone", canonicalLeadPhone).maybeSingle();
+        .select("id, name, phone, stage_id, is_simulation").eq("clinic_id", clinic_id).eq("phone", canonicalLeadPhone).maybeSingle();
       if (!lead) {
         return new Response(JSON.stringify({ success: false, error_code: "lead_not_found", error: "Lead não encontrado para esse telefone" }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
@@ -1148,11 +1149,14 @@ serve(async (req) => {
           .select("api_token").eq("clinic_id", clinic_id).maybeSingle();
         uazapiToken = instance?.api_token || null;
       }
-      const viaEmissor = await emissorAtivo(supabaseClient, clinic_id);
+      // Lead de simulacao (sandbox) sempre roteia pela fila (mesmo com a chave off).
+      const viaEmissor = await emissorAtivo(supabaseClient, clinic_id, lead?.id ?? null);
+      const leadIsSim = !!(lead as any)?.is_simulation;
 
-      // 4. Notifica grupo
+      // 4. Notifica grupo. Pulado p/ lead de SIMULACAO: o aviso ao grupo nao tem lead_id, entao nao
+      //    passa pelo roteamento de sandbox e vazaria para o grupo real da clinica.
       let notified = false;
-      if (willNotify) {
+      if (willNotify && !leadIsSim) {
         const { data: clinic } = await supabaseClient.from("clinics")
           .select("notification_group_id").eq("id", clinic_id).maybeSingle();
         const groupId = clinic?.notification_group_id;

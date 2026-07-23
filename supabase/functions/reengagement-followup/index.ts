@@ -134,50 +134,80 @@ serve(async (req) => {
     });
   };
 
-  // (2) token uazapi
-  const { data: instance } = await supabase
-    .from("whatsapp_instances").select("api_token").eq("clinic_id", clinic_id).maybeSingle();
-  const token = instance?.api_token;
-  if (!token) { await logFail("sem api_token (WhatsApp não conectado)"); return json({ ok: false, error: "no_token" }); }
-
-  // (3) telefones
+  // (2) telefones (necessário nos dois caminhos)
   const leadNumber = normalizeBrazilianPhone(phone);
   const clinicNumber = normalizeBrazilianPhone(clinic_phone);
   if (!leadNumber) { await logFail("telefone do lead inválido"); return json({ ok: false, error: "invalid_phone" }); }
 
-  // (4) mensagem do passo (multi-balão por parágrafo)
+  // (3) mensagem do passo (multi-balão por parágrafo)
   const rendered = renderMessage(message_text, firstNameCapitalized(name));
   const bubbles = rendered.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
   if (bubbles.length === 0) { await logFail("mensagem do passo vazia"); return json({ ok: false, error: "empty_message" }); }
-
-  // (5) envio sequencial
-  let anySent = false;
-  for (const bubble of bubbles) {
-    const ok = await sendText(token, leadNumber, bubble, TYPING_DELAY_MS);
-    anySent = anySent || ok;
-  }
-
   const joined = bubbles.join(" | ");
 
-  // (6) log
-  await supabase.from("automation_logs").insert({
-    clinic_id, lead_id, type: "followup",
-    status: anySent ? "sent" : "failed",
-    message_sent: joined, triggered_at: nowSP(), metadata: { step_no: step_no ?? null },
-  });
+  // (4) EMISSOR (opt-in por clínica). Enfileira cada balão como uma mensagem; o worker resolve o
+  //     token pelo gate canônico, entrega EM ORDEM e só então grava a conversa (chat_payload no
+  //     último balão, com o conteúdo unido — mesmo formato de hoje). automation_logs marca 'sent'
+  //     no enfileiramento: a entrega com retry é garantida pelo Emissor, que grita na Central se
+  //     esgotar. Com a chave DESLIGADA (default) cai no envio inline de sempre.
+  const { data: viaEmissor } = await supabase.rpc("fn_emissor_ativo", { p_clinic_id: clinic_id });
 
-  // (7) memória/conversa (só se algo saiu)
-  if (anySent) {
-    const session_id = `${clinicNumber ?? ""}${leadNumber}`;
-    await supabase.from("chat_messages").insert({
-      session_id,
-      clinic_id,
-      lead_id,
-      // sender/type 'system': automação não é fala do Agente IA (atribuição + memória + ícone próprio)
-      sender: "system",
-      direction: "outbound",
-      message: { type: "system", content: joined, additional_kwargs: {}, response_metadata: {} },
+  let sent = false;
+  if (viaEmissor === true) {
+    sent = true; // enfileirado; entrega garantida (com retry) pelo Emissor
+    for (let i = 0; i < bubbles.length; i++) {
+      const isLast = i === bubbles.length - 1;
+      await supabase.rpc("emit_message", {
+        p_clinic_id: clinic_id,
+        p_to_addr: leadNumber,
+        p_producer: "reengagement",
+        p_body: bubbles[i],
+        p_lead_id: lead_id,
+        p_delay_ms: TYPING_DELAY_MS,
+        p_dedup_key: `reeng:${lead_id}:${step_no ?? 0}:${i}`,
+        // conversa gravada uma vez, no último balão, com o conteúdo unido (igual ao inline de hoje)
+        p_chat_payload: isLast
+          ? { sender: "system", message: { type: "system", content: joined, additional_kwargs: {}, response_metadata: {} } }
+          : null,
+      });
+    }
+    await supabase.from("automation_logs").insert({
+      clinic_id, lead_id, type: "followup", status: "sent",
+      message_sent: joined, triggered_at: nowSP(), metadata: { step_no: step_no ?? null, via: "emissor" },
     });
+    // kick imediato do worker (best-effort; o cron de 1 min é o backstop)
+    try {
+      const workerUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/emissor-worker`;
+      const kick = fetch(workerUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "kick", clinic_id }) }).catch(() => {});
+      (globalThis as any).EdgeRuntime?.waitUntil?.(kick);
+    } catch { /* backstop cobre */ }
+  } else {
+    // ---- Caminho antigo (chave desligada): token + envio inline sequencial. ----
+    const { data: instance } = await supabase
+      .from("whatsapp_instances").select("api_token").eq("clinic_id", clinic_id).maybeSingle();
+    const token = instance?.api_token;
+    if (!token) { await logFail("sem api_token (WhatsApp não conectado)"); return json({ ok: false, error: "no_token" }); }
+
+    let anySent = false;
+    for (const bubble of bubbles) {
+      const ok = await sendText(token, leadNumber, bubble, TYPING_DELAY_MS);
+      anySent = anySent || ok;
+    }
+    sent = anySent;
+    await supabase.from("automation_logs").insert({
+      clinic_id, lead_id, type: "followup",
+      status: anySent ? "sent" : "failed",
+      message_sent: joined, triggered_at: nowSP(), metadata: { step_no: step_no ?? null },
+    });
+    if (anySent) {
+      const session_id = `${clinicNumber ?? ""}${leadNumber}`;
+      await supabase.from("chat_messages").insert({
+        session_id, clinic_id, lead_id,
+        // sender/type 'system': automação não é fala do Agente IA (atribuição + memória + ícone próprio)
+        sender: "system", direction: "outbound",
+        message: { type: "system", content: joined, additional_kwargs: {}, response_metadata: {} },
+      });
+    }
   }
 
   // (8) ENCERRAMENTO: passo is_closing FECHA o ticket como Perdido via finalize_ticket (RPC canônica
@@ -202,5 +232,5 @@ serve(async (req) => {
     }
   }
 
-  return json({ ok: true, sent: anySent, step_no: step_no ?? null, bubbles: bubbles.length, closed, lead_id });
+  return json({ ok: true, sent, step_no: step_no ?? null, bubbles: bubbles.length, closed, lead_id });
 });

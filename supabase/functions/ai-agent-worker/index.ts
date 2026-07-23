@@ -49,24 +49,27 @@ async function loadModelConfig(supabase: any): Promise<ModelConfig> {
   return DEFAULT_CFG;
 }
 
+// delay 6000 = uazapi mostra "digitando..." antes de entregar (igual n8n). Retry 1x apos 5s.
 async function sendText(token: string, number: string, text: string): Promise<boolean> {
-  try {
-    const r = await fetch(`${UAZAPI_BASE}/send/text`, {
-      method: "POST",
-      signal: AbortSignal.timeout(20000),
-      headers: { "Content-Type": "application/json", "Accept": "application/json", "token": token },
-      body: JSON.stringify({ number, text, delay: 0 }),
-    });
-    return r.ok;
-  } catch { return false; }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const r = await fetch(`${UAZAPI_BASE}/send/text`, {
+        method: "POST",
+        signal: AbortSignal.timeout(20000),
+        headers: { "Content-Type": "application/json", "Accept": "application/json", "token": token },
+        body: JSON.stringify({ number, text, delay: 6000 }),
+      });
+      if (r.ok) return true;
+    } catch { /* tenta de novo */ }
+    if (attempt === 0) await sleep(5000);
+  }
+  return false;
 }
 
-// Fan-out: manda as bolhas em ordem, com pausa natural entre elas (typing).
+// Fan-out: manda as bolhas em ordem. O delay do uazapi (6s de "digitando") ja da a pausa
+// natural entre bolhas, entao nao precisa de sleep extra (mesma logica do loop sequencial do n8n).
 async function sendBubbles(token: string, number: string, bubbles: string[]): Promise<void> {
-  for (let i = 0; i < bubbles.length; i++) {
-    await sendText(token, number, bubbles[i]);
-    if (i < bubbles.length - 1) await sleep(Math.min(600 + bubbles[i].length * 20, 3000));
-  }
+  for (const b of bubbles) await sendText(token, number, b);
 }
 
 // ── Voz (ElevenLabs) ─────────────────────────────────────────────────────────
@@ -105,7 +108,7 @@ async function sendAudio(token: string, number: string, base64: string): Promise
       method: "POST",
       signal: AbortSignal.timeout(30000),
       headers: { "Content-Type": "application/json", "Accept": "application/json", "token": token },
-      body: JSON.stringify({ number, type: "audio", file: base64, delay: 0 }),
+      body: JSON.stringify({ number, type: "audio", file: base64, delay: 8000 }),
     });
     return r.ok;
   } catch { return false; }

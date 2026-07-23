@@ -300,10 +300,12 @@ serve(async (req) => {
   //   justamente para isso. O check de número (3.1) e o write-back (3.2) já rodaram e continuam.
   const { data: viaEmissor } = await supabase.rpc("fn_emissor_ativo", { p_clinic_id: clinic_id });
   if (viaEmissor === true) {
+    let emitErr: string | null = null;
     for (let i = 0; i < bubbles.length; i++) {
       const isLast = i === bubbles.length - 1;
       const session_id = `${clinicNumber ?? ""}${effectiveNumber}`;
-      await supabase.rpc("emit_message", {
+      // Erro de emit NAO pode virar 'sent' fantasma: rastreia e reflete no automation_logs.
+      const { error } = await supabase.rpc("emit_message", {
         p_clinic_id: clinic_id,
         p_to_addr: sendNumber,
         p_producer: "forms_welcome",
@@ -315,6 +317,14 @@ serve(async (req) => {
           ? { session_id, sender: "system", message: { type: "system", content: joined, additional_kwargs: {}, response_metadata: {} } }
           : null,
       });
+      if (error) emitErr = error.message;
+    }
+    if (emitErr) {
+      // Nao consumiu o envio: reverte o claim (welcome_sent=false) p/ o cron tentar de novo, como no
+      // caminho inline quando o envio falha de forma transitoria.
+      await logFail("falha ao enfileirar no Emissor", { reason: "emit_failed", detail: emitErr });
+      await supabase.from("leads").update({ welcome_sent: false }).eq("id", lead_id);
+      return json({ ok: false, sent: false, error: "emit_failed", lead_id });
     }
     await supabase.from("automation_logs").insert({
       clinic_id, lead_id, type: "forms_welcome", status: "sent",

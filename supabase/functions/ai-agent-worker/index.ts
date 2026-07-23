@@ -49,23 +49,25 @@ async function emissorAtivo(supabase: any, clinicId: string | null): Promise<boo
   } catch { return false; }
 }
 
-function hash32(s: string): string {
-  let h = 5381;
-  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
-  return (h >>> 0).toString(36);
-}
-
-async function enqueueEmissor(supabase: any, p: {
-  clinicId: string; toAddr: string; leadId: string | null; producer: string;
+// Sem dedup_key: claim_due_ai_turns DELETA o buffer no claim (turno processado UMA vez), entao nao
+// ha reprocessamento a deduplicar; e dedup por conteudo descartaria respostas iguais legitimas
+// (ex.: "nao entendi" duas vezes no mesmo minuto). Erro de emit e PERDA SILENCIOSA (a conversa
+// mostraria a resposta que o paciente nunca recebeu) -> registra e propaga.
+async function enqueueEmissor(supabase: any, clinicId: string, sessionId: string, p: {
+  toAddr: string; leadId: string | null; producer: string;
   kind?: string; body?: string | null; mediaBase64?: string | null; mediaKind?: string | null;
-  delayMs?: number; dedupKey?: string;
+  delayMs?: number;
 }): Promise<void> {
-  await supabase.rpc("emit_message", {
-    p_clinic_id: p.clinicId, p_to_addr: p.toAddr, p_producer: p.producer,
+  const { error } = await supabase.rpc("emit_message", {
+    p_clinic_id: clinicId, p_to_addr: p.toAddr, p_producer: p.producer,
     p_body: p.body ?? null, p_kind: p.kind ?? "text", p_lead_id: p.leadId,
     p_media_base64: p.mediaBase64 ?? null, p_media_kind: p.mediaKind ?? null,
-    p_delay_ms: p.delayMs ?? 0, p_dedup_key: p.dedupKey ?? null,
+    p_delay_ms: p.delayMs ?? 0,
   });
+  if (error) {
+    await registrarErro(supabase, "enfileirar_falhou", "A resposta do agente NAO entrou na fila de saida (paciente pode ficar sem resposta)", "critical", clinicId, { session_id: sessionId, erro: error.message, producer: p.producer });
+    throw new Error(`emit_message falhou: ${error.message}`);
+  }
 }
 
 function kickEmissor(supabase: any, clinicId: string | null): void {
@@ -311,19 +313,16 @@ async function processTurn(supabase: any, turn: { session_id: string; clinic_id:
       }
     }
 
-    // dedup_key estavel por turno: reprocessamento (worker caiu no meio) nao duplica a resposta.
-    const dedupBase = `agent:${turn.session_id}:${hash32(finalText)}:${new Date().toISOString().slice(0, 16)}`;
-
     if (viaEmissor) {
       // Enfileira: audio pronto (base64) OU bolhas de texto. O worker resolve o token pelo gate,
       // entrega em ordem, e (lead de simulacao) roteia p/ o sandbox sem tocar a uazapi.
       if (audioB64 && number) {
-        await enqueueEmissor(supabase, { clinicId, toAddr: number, leadId: ctx.lead_id ?? null, producer: "ai_agent", kind: "audio", mediaBase64: audioB64, mediaKind: "audio", delayMs: 8000, dedupKey: `${dedupBase}:audio` });
+        await enqueueEmissor(supabase, clinicId, turn.session_id, { toAddr: number, leadId: ctx.lead_id ?? null, producer: "ai_agent", kind: "audio", mediaBase64: audioB64, mediaKind: "audio", delayMs: 8000 });
         sentAudio = true;
       } else if (number) {
         const bubbles = splitIntoBubbles(finalText);
         for (let i = 0; i < bubbles.length; i++) {
-          await enqueueEmissor(supabase, { clinicId, toAddr: number, leadId: ctx.lead_id ?? null, producer: "ai_agent", body: bubbles[i], delayMs: 6000, dedupKey: `${dedupBase}:${i}` });
+          await enqueueEmissor(supabase, clinicId, turn.session_id, { toAddr: number, leadId: ctx.lead_id ?? null, producer: "ai_agent", body: bubbles[i], delayMs: 6000 });
         }
       } else {
         await registrarErro(supabase, "envio_sem_credenciais", "Resposta pronta mas sem numero para enfileirar", "error", clinicId, { session_id: turn.session_id, tem_numero: false });

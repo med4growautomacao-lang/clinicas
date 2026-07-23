@@ -39,6 +39,18 @@ export function SandboxPanel() {
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, waiting]);
 
+  // Rede de seguranca: se o agente terminar SEM gravar resposta (resposta vazia ou bloqueada por
+  // conteudo tecnico, ambas com early-return no worker antes do saveAiResponse), nenhum evento
+  // Realtime chega e o spinner ficaria girando p/ sempre. Limpa apos 45s e avisa.
+  useEffect(() => {
+    if (!waiting) return;
+    const t = setTimeout(() => {
+      setWaiting(false);
+      showToast('O agente não respondeu (resposta vazia ou bloqueada). Veja a Central de Erros.', 'error');
+    }, 45000);
+    return () => clearTimeout(t);
+  }, [waiting]);
+
   // Troca de clínica: zera a tela (a sessão é por clínica; carrega ao enviar/assinar).
   useEffect(() => { setLeadId(null); setMessages([]); }, [clinicId]);
 

@@ -371,14 +371,21 @@ async function enviarOuEnfileirar(
   oQue: string, viaEmissor: boolean, toKind: "lead" | "group", leadId: string | null,
 ): Promise<boolean> {
   if (viaEmissor && clinicId) {
+    // supabase.rpc NAO lanca em erro de RPC (devolve {error}); checar o campo, senao um emit falho
+    // retornaria "enviado" sem enfileirar nem cair no inline. Em erro, cai para o envio inline.
+    let emitErr: unknown = null;
     try {
-      await supabase.rpc("emit_message", {
+      const { error } = await supabase.rpc("emit_message", {
         p_clinic_id: clinicId, p_to_addr: number, p_producer: "ai_scheduler_" + oQue,
         p_body: text, p_to_kind: toKind, p_lead_id: leadId,
       });
+      emitErr = error;
+    } catch (e) { emitErr = e; }
+    if (!emitErr) {
       kickEmissor(supabase, clinicId);
       return true;
-    } catch { /* cai para inline */ }
+    }
+    // falhou o enfileiramento: tenta o inline como fallback
   }
   return await sendWhatsAppText(token, number, text, clinicId, oQue);
 }

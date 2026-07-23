@@ -209,9 +209,10 @@ async function processar(supa: Supa, m: Mensagem, cache: Map<string, string | nu
     return;
   }
 
-  // Entregue. AGORA (e so agora) a conversa recebe a linha.
-  const providerId =
-    (r.json?.id as string) ?? (r.json?.messageid as string) ?? (r.json?.messageId as string) ?? null;
+  // Entregue. AGORA (e so agora) a conversa recebe a linha. String() converte um id NUMERICO da
+  // uazapi em texto (o cast `as string` mentia: nao converte em runtime, e wa_message_id e texto).
+  const rawId = r.json?.id ?? r.json?.messageid ?? r.json?.messageId ?? null;
+  const providerId = rawId == null ? null : String(rawId);
 
   const { data: chatId } = await supa.rpc("outbound_register_chat", {
     p_id: m.id, p_provider_message_id: providerId,

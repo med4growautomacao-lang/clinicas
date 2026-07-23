@@ -154,10 +154,11 @@ serve(async (req) => {
 
   let sent = false;
   if (viaEmissor === true) {
-    sent = true; // enfileirado; entrega garantida (com retry) pelo Emissor
+    let emitErr: string | null = null;
     for (let i = 0; i < bubbles.length; i++) {
       const isLast = i === bubbles.length - 1;
-      await supabase.rpc("emit_message", {
+      // Erro de emit NAO pode virar 'sent' fantasma: rastreia e reflete no automation_logs.
+      const { error } = await supabase.rpc("emit_message", {
         p_clinic_id: clinic_id,
         p_to_addr: leadNumber,
         p_producer: "reengagement",
@@ -170,10 +171,13 @@ serve(async (req) => {
           ? { sender: "system", message: { type: "system", content: joined, additional_kwargs: {}, response_metadata: {} } }
           : null,
       });
+      if (error) emitErr = error.message;
     }
+    sent = !emitErr; // enfileirado com sucesso => entrega garantida (com retry) pelo Emissor
     await supabase.from("automation_logs").insert({
-      clinic_id, lead_id, type: "followup", status: "sent",
-      message_sent: joined, triggered_at: nowSP(), metadata: { step_no: step_no ?? null, via: "emissor" },
+      clinic_id, lead_id, type: "followup", status: sent ? "sent" : "failed",
+      message_sent: sent ? joined : `falha ao enfileirar: ${emitErr}`,
+      triggered_at: nowSP(), metadata: { step_no: step_no ?? null, via: "emissor" },
     });
     // kick imediato do worker (best-effort; o cron de 1 min é o backstop)
     try {

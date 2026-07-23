@@ -81,21 +81,61 @@ serve(async (req) => {
   }
   if (!allowed) return json({ ok: false, error: "forbidden" }, 403);
 
-  // (2) Token da instancia uazapi da clinica.
+  // (2) Telefone do lead normalizado (necessário nos dois caminhos).
+  const number = normalizeBrazilianPhone(String(phone));
+  if (!number) return json({ ok: false, error: "telefone_invalido" }, 400);
+
+  const uaDelay = Math.max(0, Math.min(60000, Number(delay) || 0));
+  // Conteúdo que aparece na conversa (mesma forma das mensagens humanas outbound de hoje).
+  const logContent = hasMedia
+    ? `${hasText ? String(text).trim() + "\n\n" : ""}📎 Orçamento (${media_type === "document" ? "PDF" : "imagem"}): ${media_url}`
+    : String(text);
+  const chatPayload = {
+    sender: "human",
+    user_id: messageUserId,
+    phone: number,
+    message: { type: "human", content: logContent, additional_kwargs: {}, response_metadata: {} },
+  };
+
+  // (3) EMISSOR (opt-in por clínica). Enfileira; o worker resolve o token pelo gate canônico,
+  //     entrega (texto ou mídia, preservando docName) e só então grava a conversa. Com a chave
+  //     DESLIGADA (default) cai no envio inline de sempre.
+  const { data: viaEmissor } = await supabase.rpc("fn_emissor_ativo", { p_clinic_id: clinic_id });
+
+  if (viaEmissor === true) {
+    const { data: outboundId, error: filaErr } = await supabase.rpc("emit_message", {
+      p_clinic_id: clinic_id,
+      p_to_addr: number,
+      p_producer: "send_quote",
+      p_body: hasText ? String(text) : null,
+      p_kind: hasMedia ? "media" : "text",
+      p_lead_id: lead_id ?? null,
+      p_media_url: hasMedia ? String(media_url) : null,
+      p_media_kind: hasMedia ? (media_type === "document" ? "document" : "image") : null,
+      p_media_filename: hasMedia ? (filename ? String(filename) : "orcamento") : null,
+      p_delay_ms: uaDelay,
+      p_chat_payload: chatPayload,
+    });
+    if (filaErr) return json({ ok: false, error: "fila_falhou", detail: filaErr.message }, 502);
+
+    // kick imediato do worker (best-effort; cron de 1 min é o backstop)
+    try {
+      const workerUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/emissor-worker`;
+      const kick = fetch(workerUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "kick", clinic_id }) }).catch(() => {});
+      (globalThis as any).EdgeRuntime?.waitUntil?.(kick);
+    } catch { /* backstop cobre */ }
+    return json({ ok: true, queued: true, outbound_id: outboundId });
+  }
+
+  // ---- Caminho antigo (chave desligada): envio inline. ----
   const { data: instance } = await supabase
     .from("whatsapp_instances").select("api_token").eq("clinic_id", clinic_id).maybeSingle();
   const token = instance?.api_token;
   if (!token) return json({ ok: false, error: "whatsapp_nao_conectado" }, 409);
 
-  // (3) Telefone do lead normalizado.
-  const number = normalizeBrazilianPhone(String(phone));
-  if (!number) return json({ ok: false, error: "telefone_invalido" }, 400);
-
-  // (4) Envio via uazapi. Texto -> /send/text; imagem/PDF -> /send/media (file = URL publica).
-  //     `delay` (ms) e o mecanismo NATIVO da uazapi: espera no servidor E mostra presenca
-  //     ("digitando/enviando") antes de disparar. Awaited + sequencial => serializa os envios
-  //     (evita rajada que o WhatsApp rejeita). Mesma abordagem do forms-welcome-followup.
-  const uaDelay = Math.max(0, Math.min(60000, Number(delay) || 0));
+  // Envio via uazapi. Texto -> /send/text; imagem/PDF -> /send/media (file = URL publica).
+  //   `delay` (ms) e o mecanismo NATIVO da uazapi: espera no servidor E mostra presenca
+  //   ("digitando/enviando") antes de disparar. Mesma abordagem do forms-welcome-followup.
   const endpoint = hasMedia ? "/send/media" : "/send/text";
   const payload = hasMedia
     ? {
@@ -121,11 +161,8 @@ serve(async (req) => {
     return json({ ok: false, error: "send_failed", detail: String(e) }, 502);
   }
 
-  // (5) Registra na conversa do lead (mesma forma das mensagens humanas outbound).
-  //     Nao falha o envio se o log falhar. session_id/clinic_name/seq vem por trigger.
-  const logContent = hasMedia
-    ? `${hasText ? String(text).trim() + "\n\n" : ""}📎 Orçamento (${media_type === "document" ? "PDF" : "imagem"}): ${media_url}`
-    : String(text);
+  // Registra na conversa do lead. Nao falha o envio se o log falhar. session_id/clinic_name/seq
+  // vem por trigger.
   try {
     await supabase.from("chat_messages").insert({
       clinic_id,

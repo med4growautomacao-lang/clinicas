@@ -47,6 +47,7 @@ interface Mensagem {
   media_base64: string | null;
   media_mime: string | null;
   media_kind: string | null;
+  media_filename: string | null;
   delay_ms: number;
   transport: string;
   producer: string;
@@ -145,6 +146,8 @@ async function processar(supa: Supa, m: Mensagem, cache: Map<string, string | nu
         type: m.media_kind ?? (m.kind === "audio" ? "audio" : "document"),
         file: m.media_base64 ?? m.media_url,
         text: m.body ?? undefined,
+        // docName: nome do arquivo que o destinatario ve (ex.: orcamento em PDF do send-quote).
+        docName: m.media_filename ?? undefined,
         delay: m.delay_ms ?? 0,
       };
 

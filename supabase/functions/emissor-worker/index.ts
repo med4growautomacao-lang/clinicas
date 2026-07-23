@@ -51,6 +51,7 @@ interface Mensagem {
   delay_ms: number;
   transport: string;
   producer: string;
+  send_as: string;
   attempts: number;
 }
 
@@ -78,11 +79,13 @@ async function registrarErro(
 // Cache de token por invocacao: um lote costuma ter varias mensagens da mesma clinica e nao ha
 // motivo para ir ao banco a cada uma. Curto de proposito — se a instancia cair no meio da rodada,
 // a proxima invocacao ja pega o estado novo.
-async function resolverToken(supa: Supa, cache: Map<string, string | null>, clinicId: string) {
-  if (cache.has(clinicId)) return cache.get(clinicId) ?? null;
-  const { data, error } = await supa.rpc("fn_clinic_send_token", { p_clinic_id: clinicId });
+async function resolverToken(supa: Supa, cache: Map<string, string | null>, clinicId: string, sendAs: string) {
+  // 'org' resolve o token da instancia da ORG; 'clinic' o gate canonico da clinica. Cacheia por par.
+  const key = `${clinicId}:${sendAs}`;
+  if (cache.has(key)) return cache.get(key) ?? null;
+  const { data, error } = await supa.rpc("fn_outbound_token", { p_clinic_id: clinicId, p_send_as: sendAs });
   const token = error ? null : (data as string | null);
-  cache.set(clinicId, token);
+  cache.set(key, token);
   return token;
 }
 
@@ -146,7 +149,7 @@ async function processar(supa: Supa, m: Mensagem, cache: Map<string, string | nu
     return;
   }
 
-  const token = await resolverToken(supa, cache, m.clinic_id);
+  const token = await resolverToken(supa, cache, m.clinic_id, m.send_as ?? "clinic");
   if (!token) {
     // Sem token = WhatsApp desconectado, bloqueado ou sem instancia. Transitorio: a clinica pode
     // reconectar. Ao esgotar as tentativas vira critico na Central COM a clinica.

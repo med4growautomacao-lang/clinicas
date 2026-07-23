@@ -219,7 +219,9 @@ async function openaiTranscribe(model: string, key: string, bytes: Uint8Array, m
   const mapped = extFromMime(base);
   const ext = mapped !== "bin" ? mapped : (base.split("/")[1] || "ogg");
   const form = new FormData();
-  form.append("file", new Blob([bytes], { type: base }), `audio.${ext}`);
+  // deno-lint-ignore no-explicit-any -- bytes e Uint8Array; o generic de ArrayBuffer/SharedArrayBuffer
+  // do lib TS quebra o deno check aqui. Cast type-only, sem runtime. (Pre-existente, nao do Emissor.)
+  form.append("file", new Blob([bytes as any], { type: base }), `audio.${ext}`);
   form.append("model", model);
   const resp = await fetch("https://api.openai.com/v1/audio/transcriptions", {
     method: "POST",
@@ -409,11 +411,27 @@ serve(async (req) => {
                           const pg = await clinicPaymentGroup(supabase, clinicId);
                           if (pg.enabled && pg.group) {
                             const caption = `*PAGAMENTO REALIZADO*\n\nPaciente: ${leadName || leadPhone}\nTelefone: ${leadPhone}\n\n_Verifique se o pagamento foi realizado._`;
-                            await fetch(`${UAZAPI_BASE}/send/media`, {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json", "token": String(body.token || "") },
-                              body: JSON.stringify({ number: pg.group, type: mediaKind, file: toBase64(bytes), text: caption }),
-                            });
+                            // EMISSOR (opt-in): enfileira p/ o grupo (worker resolve token, retry, e
+                            // solta o base64 apos enviar). Chave desligada = envio inline de sempre.
+                            const { data: viaEmissor } = await supabase.rpc("fn_emissor_ativo", { p_clinic_id: clinicId });
+                            if (viaEmissor === true) {
+                              await supabase.rpc("emit_message", {
+                                p_clinic_id: clinicId, p_to_addr: pg.group, p_producer: "comprovante_grupo",
+                                p_body: caption, p_kind: "media", p_to_kind: "group",
+                                p_media_base64: toBase64(bytes), p_media_kind: mediaKind,
+                              });
+                              try {
+                                const workerUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/emissor-worker`;
+                                const kick = fetch(workerUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "kick", clinic_id: clinicId }) }).catch(() => {});
+                                (globalThis as any).EdgeRuntime?.waitUntil?.(kick);
+                              } catch { /* cron backstop cobre */ }
+                            } else {
+                              await fetch(`${UAZAPI_BASE}/send/media`, {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json", "token": String(body.token || "") },
+                                body: JSON.stringify({ number: pg.group, type: mediaKind, file: toBase64(bytes), text: caption }),
+                              });
+                            }
                           }
                         } catch (e) {
                           await registrarErro("comprovante_forward_failed", "Falha ao encaminhar comprovante ao grupo",

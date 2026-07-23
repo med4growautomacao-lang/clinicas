@@ -23,6 +23,9 @@ export interface ToolCall {
   id: string;
   name: string;
   args: Record<string, unknown>;
+  // Gemini 3.x: assinatura opaca ("thought signature") que veio junto do functionCall na resposta
+  // e PRECISA ser reenviada ao ecoar o turno do assistente, senao a proxima chamada da 400.
+  signature?: string;
 }
 
 export type AgentMsg =
@@ -78,7 +81,11 @@ function geminiContents(messages: AgentMsg[]): unknown[] {
     } else if (m.role === "assistant") {
       const parts: unknown[] = [];
       if (m.text) parts.push({ text: m.text });
-      for (const tc of m.toolCalls || []) parts.push({ functionCall: { name: tc.name, args: tc.args } });
+      for (const tc of m.toolCalls || []) {
+        const part: Record<string, unknown> = { functionCall: { name: tc.name, args: tc.args } };
+        if (tc.signature) part.thoughtSignature = tc.signature; // Gemini 3.x exige reenviar
+        parts.push(part);
+      }
       if (parts.length) contents.push({ role: "model", parts });
     } else {
       // tool_result -> functionResponse (role "function" no v1beta)
@@ -130,6 +137,7 @@ async function geminiTurn(
         id: `call_${i++}`,
         name: p.functionCall.name,
         args: (p.functionCall.args ?? {}) as Record<string, unknown>,
+        signature: p.thoughtSignature, // preserva a assinatura p/ reenviar no proximo turno
       });
     }
   }

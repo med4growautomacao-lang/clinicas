@@ -706,12 +706,12 @@ serve(async (req) => {
       );
     } else if (action === "reschedule_appointment") {
       // Reagenda uma consulta DO PROPRIO paciente da conversa (titularidade validada na RPC
-      // via p_requester_phone). appointment_id vem de CONSULTAR_AGENDAMENTOS ou do erro
+      // via p_requester_phone). appointment_id vem de VER_AGENDAMENTOS_PACIENTE ou do erro
       // ticket_has_active_appointment de MARCAR_HORARIO.
       const { appointment_id, patient_phone, doctor_id, date, time, consultation_type_id } = payload;
       if (!appointment_id || !patient_phone || !date || !time) {
         return new Response(
-          JSON.stringify({ success: false, error_code: "missing_fields", error: "Campos obrigatórios: appointment_id, patient_phone, date, time.", next_step: "Obtenha o appointment_id em CONSULTAR_AGENDAMENTOS e tente novamente." }),
+          JSON.stringify({ success: false, error_code: "missing_fields", error: "Campos obrigatórios: appointment_id, patient_phone, date, time.", next_step: "Obtenha o appointment_id em VER_AGENDAMENTOS_PACIENTE e tente novamente." }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
         );
       }
@@ -719,7 +719,7 @@ serve(async (req) => {
         .select("doctor_id, consultation_type_id, consultation_type_slug, modality").eq("id", appointment_id).maybeSingle();
       if (!curApt) {
         return new Response(
-          JSON.stringify({ success: false, error_code: "appointment_not_found", error: "Agendamento não encontrado.", next_step: "Use CONSULTAR_AGENDAMENTOS para obter um appointment_id válido deste paciente." }),
+          JSON.stringify({ success: false, error_code: "appointment_not_found", error: "Agendamento não encontrado.", next_step: "Use VER_AGENDAMENTOS_PACIENTE para obter um appointment_id válido deste paciente." }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
         );
       }
@@ -744,7 +744,7 @@ serve(async (req) => {
         const extra: Record<string, unknown> = {};
         if (code === "not_your_appointment") {
           errorMsg = "Este agendamento não pertence ao paciente desta conversa.";
-          next_step = "Use CONSULTAR_AGENDAMENTOS com o telefone da sessão e escolha um appointment_id que pertença a este paciente.";
+          next_step = "Use VER_AGENDAMENTOS_PACIENTE com o telefone da sessão e escolha um appointment_id que pertença a este paciente.";
         } else if (code === "appointment_not_reschedulable") {
           errorMsg = "Esta consulta não pode mais ser alterada (já aconteceu ou foi cancelada).";
           next_step = "Se o paciente quer uma NOVA consulta, use MARCAR_HORARIO normalmente.";
@@ -784,7 +784,7 @@ serve(async (req) => {
       const { appointment_id, patient_phone, reason } = payload;
       if (!appointment_id || !patient_phone) {
         return new Response(
-          JSON.stringify({ success: false, error_code: "missing_fields", error: "Campos obrigatórios: appointment_id, patient_phone.", next_step: "Obtenha o appointment_id em CONSULTAR_AGENDAMENTOS e confirme o cancelamento com o paciente antes de chamar esta tool." }),
+          JSON.stringify({ success: false, error_code: "missing_fields", error: "Campos obrigatórios: appointment_id, patient_phone.", next_step: "Obtenha o appointment_id em VER_AGENDAMENTOS_PACIENTE e confirme o cancelamento com o paciente antes de chamar esta tool." }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
         );
       }
@@ -802,13 +802,13 @@ serve(async (req) => {
         let next_step = "Acione o atendimento humano (ACIONAR_HANDOFF) para resolver com a recepção.";
         if (code === "not_your_appointment") {
           errorMsg = "Este agendamento não pertence ao paciente desta conversa.";
-          next_step = "Use CONSULTAR_AGENDAMENTOS com o telefone da sessão e escolha um appointment_id que pertença a este paciente.";
+          next_step = "Use VER_AGENDAMENTOS_PACIENTE com o telefone da sessão e escolha um appointment_id que pertença a este paciente.";
         } else if (code === "appointment_not_cancellable") {
           errorMsg = "Esta consulta não pode ser cancelada pelo WhatsApp (já foi realizada ou finalizada).";
           next_step = "Explique ao paciente e, se necessário, acione o atendimento humano (ACIONAR_HANDOFF).";
         } else if (code === "appointment_not_found") {
           errorMsg = "Agendamento não encontrado.";
-          next_step = "Use CONSULTAR_AGENDAMENTOS para obter um appointment_id válido.";
+          next_step = "Use VER_AGENDAMENTOS_PACIENTE para obter um appointment_id válido.";
         }
         return new Response(
           JSON.stringify({ success: false, error_code: code, error: errorMsg, next_step }),

@@ -66,3 +66,9 @@ enabled = true
 # outbound_messages, que apenas service_role popula.
 verify_jwt = false
 entrypoint = "./functions/emissor-worker/index.ts"
+
+[functions.ai-sandbox]
+enabled = true
+# Chamada pelo frontend (Super Admin) com o JWT do usuario; a funcao valida is_super_admin por dentro.
+verify_jwt = true
+entrypoint = "./functions/ai-sandbox/index.ts"

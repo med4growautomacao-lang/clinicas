@@ -96,21 +96,65 @@ type LlmOut = { text: string; tokens_in: number; tokens_out: number };
 const ANTHROPIC_NO_SAMPLING = /^claude-(opus-4-[78]|sonnet-5|fable-5|mythos-5)/;
 const ANTHROPIC_THINKING_ALWAYS_ON = /^claude-(fable-5|mythos-5)/;
 
-// `prefill`: começa a resposta do modelo com "{" para ele ser OBRIGADO a continuar de dentro do
-// JSON. A Anthropic não tem modo JSON; esta é a forma nativa de garantir o envelope, e mata na
-// origem a cerca de markdown e a prosa antes do objeto (o prompt já pedia isso e não bastava).
-// Incompatível com extended thinking, então fica de fora nos modelos que pensam sempre.
+// Estrutura da análise. Com `tool_choice` forçado, a API da Anthropic VALIDA a resposta contra
+// este schema antes de devolver, então a saída é um objeto pronto em vez de texto para parsear.
+//
+// Por que não bastou o prefill (abrir a resposta com "{"): ele garante só o COMEÇO. O modelo
+// continuava livre para escrever aspa solta no meio de uma citação ("DADOS PARA AGENDAMENTO" foi
+// enviado...), e isso ainda quebrava o parse — visto em produção com o prefill já ativo. O prefill
+// matou a cerca de markdown; o schema é o que fecha o resto.
+const TOOL_ANALISE = "registrar_analise";
+const SCHEMA_ANALISE = {
+  type: "object",
+  properties: {
+    stage: {
+      type: "object",
+      properties: {
+        slug: { type: ["string", "null"], description: "Slug de UMA das etapas listadas, ou null se não souber." },
+        confidence: { type: "number", description: "0 a 1, refletindo a incerteza real." },
+        evidence: { type: "array", items: { type: "string" }, description: "Trechos literais da conversa." },
+        rationale: { type: "string", description: "Uma frase curta." },
+      },
+      required: ["slug", "confidence", "evidence", "rationale"],
+    },
+    sale: {
+      type: "object",
+      properties: {
+        detected: { type: "boolean" },
+        value: { type: ["number", "null"] },
+        confidence: { type: "number" },
+        evidence: { type: "array", items: { type: "string" } },
+        rationale: { type: "string" },
+      },
+      required: ["detected", "value", "confidence", "evidence", "rationale"],
+    },
+    summary: { type: "string", description: "Resumo do Contato consolidado, em markdown." },
+  },
+  required: ["stage", "sale", "summary"],
+};
+
+// `toolJson`: força a resposta pelo schema acima. Fica de fora nos modelos que pensam sempre,
+// porque extended thinking exige tool_choice em 'auto'; lá o extractJson tolerante segue de rede.
 function anthropicBody(model: string, temperature: number, maxTokens: number, system: string, user: string, jsonMode: boolean) {
-  const prefill = jsonMode && !ANTHROPIC_THINKING_ALWAYS_ON.test(model);
-  const messages: Record<string, unknown>[] = [{ role: "user", content: user }];
-  if (prefill) messages.push({ role: "assistant", content: "{" });
-  const body: Record<string, unknown> = { model, max_tokens: maxTokens, system, messages };
+  const toolJson = jsonMode && !ANTHROPIC_THINKING_ALWAYS_ON.test(model);
+  const body: Record<string, unknown> = {
+    model, max_tokens: maxTokens, system,
+    messages: [{ role: "user", content: user }],
+  };
+  if (toolJson) {
+    body.tools = [{
+      name: TOOL_ANALISE,
+      description: "Registra a análise da conversa (etapa, venda e memória do contato).",
+      input_schema: SCHEMA_ANALISE,
+    }];
+    body.tool_choice = { type: "tool", name: TOOL_ANALISE };
+  }
   if (ANTHROPIC_NO_SAMPLING.test(model)) {
     if (!ANTHROPIC_THINKING_ALWAYS_ON.test(model)) body.thinking = { type: "disabled" };
   } else {
     body.temperature = temperature;
   }
-  return { body, prefill };
+  return { body, toolJson };
 }
 
 // `jsonMode` liga o modo JSON NATIVO do provedor: em vez de pedir o formato no prompt (que o modelo
@@ -124,7 +168,7 @@ async function callLlm(
   if (!key) throw new Error(`sem chave de API para ${provider}`);
 
   if (provider === "anthropic") {
-    const { body, prefill } = anthropicBody(model, temperature, maxTokens, system, user, jsonMode);
+    const { body, toolJson } = anthropicBody(model, temperature, maxTokens, system, user, jsonMode);
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       signal: AbortSignal.timeout(60000),
@@ -133,16 +177,17 @@ async function callLlm(
     });
     if (!r.ok) throw new Error(`anthropic ${r.status}: ${(await r.text().catch(() => "")).slice(0, 300)}`);
     const j = await r.json();
-    let text = (j?.content ?? []).map((c: any) => c?.text).filter(Boolean).join("\n").trim();
-    // Com prefill a resposta VEM SEM a "{" que abrimos por ela; devolve o objeto inteiro.
-    if (prefill && text) {
-      // Continuação degenerada (ex.: só "}", por parada imediata ou filtro do provedor) viraria
-      // "{}": JSON VÁLIDO e vazio, que passa no extractJson e some da Central em vez de cair no
-      // alerta resposta_nao_json. Sem nenhuma aspas não há chave nenhuma, então zera de propósito.
-      if (!text.includes('"')) text = "";
-      else if (!text.startsWith("{")) text = `{${text}`;
+    const uso = { tokens_in: j?.usage?.input_tokens ?? 0, tokens_out: j?.usage?.output_tokens ?? 0 };
+    if (toolJson) {
+      // Vem como bloco tool_use com o objeto JÁ validado contra o schema. Serializa só para manter
+      // a interface (o chamador segue passando pelo extractJson, que aqui vira trivial). Sem o
+      // bloco (recusa do modelo, corte por max_tokens) devolve vazio, caindo em resposta_nao_json:
+      // é o alerta certo, e some da Central seria pior do que aparecer.
+      const bloco = (j?.content ?? []).find((c: any) => c?.type === "tool_use" && c?.name === TOOL_ANALISE);
+      return { text: bloco?.input ? JSON.stringify(bloco.input) : "", ...uso };
     }
-    return { text, tokens_in: j?.usage?.input_tokens ?? 0, tokens_out: j?.usage?.output_tokens ?? 0 };
+    const text = (j?.content ?? []).map((c: any) => c?.text).filter(Boolean).join("\n").trim();
+    return { text, ...uso };
   }
 
   if (provider === "openai") {

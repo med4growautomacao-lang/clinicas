@@ -111,6 +111,21 @@ async function sendAudio(token: string, number: string, base64: string): Promise
   } catch { return false; }
 }
 
+// Formata a resposta em SSML (respiros/pausas, datas/horas/telefones por extenso, sem emoji) antes
+// do TTS, pra voz soar natural. Prompt em system_settings.agent_ssml_prompt (editavel no Super Admin).
+// Se vazio ou se der erro, manda o texto cru pro TTS (nao perde o audio).
+async function formatForVoice(supabase: any, cfg: ModelConfig, text: string): Promise<string> {
+  try {
+    const { data } = await supabase.from("system_settings").select("value").eq("id", "agent_ssml_prompt").maybeSingle();
+    const prompt = (data?.value || "").trim();
+    if (!prompt) return text;
+    const out = await runAgentTurn(supabase, cfg, prompt, [{ role: "user", text }], []);
+    let ssml = (out.text || "").trim();
+    ssml = ssml.replace(/^```[a-z]*\s*/i, "").replace(/\s*```$/, "").trim();
+    return ssml || text;
+  } catch { return text; }
+}
+
 // Transicao de etapa por IA — reescrita CERTA (via ticket, nao leads.stage_id cru).
 async function applyStageTransition(supabase: any, clinicId: string, leadId: string | null, text: string): Promise<void> {
   if (!leadId || !text) return;
@@ -190,7 +205,8 @@ async function processTurn(supabase: any, turn: { session_id: string; clinic_id:
       const el = await loadElevenLabs(supabase);
       if (el.enabled && el.voice_id && el.key) {
         try {
-          const b64 = await ttsElevenLabs(el.key, el.voice_id, el.model_id, finalText);
+          const speakText = await formatForVoice(supabase, cfg, finalText);
+          const b64 = await ttsElevenLabs(el.key, el.voice_id, el.model_id, speakText);
           if (b64) sentAudio = await sendAudio(token, number, b64);
         } catch { sentAudio = false; }
         if (!sentAudio) await registrarErro(supabase, "audio_fallback_texto", "TTS ElevenLabs falhou; a resposta saiu em texto (fallback)", "warning", clinicId, { session_id: turn.session_id });

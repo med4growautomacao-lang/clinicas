@@ -52,14 +52,15 @@ async function setAvatar(leadId: string, url: string | null, clinicId: string | 
 }
 
 type Lead = { id: string; clinic_id: string; avatar_url: string };
-type Outcome = "rehosted" | "nulled" | "skipped";
+type Outcome = "rehosted" | "nulled";
 
+// NUNCA lança: qualquer falha vira "nulled" (com log quando for inesperado), para não derrubar o lote.
 async function processLead(lead: Lead): Promise<Outcome> {
-  if (!isWhatsappUrl(lead.avatar_url)) {
-    await setAvatar(lead.id, null, lead.clinic_id);
-    return "nulled";
-  }
   try {
+    if (!isWhatsappUrl(lead.avatar_url)) {
+      await setAvatar(lead.id, null, lead.clinic_id);
+      return "nulled";
+    }
     const res = await fetch(lead.avatar_url, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) {
       await setAvatar(lead.id, null, lead.clinic_id);
@@ -79,15 +80,21 @@ async function processLead(lead: Lead): Promise<Outcome> {
     const path = `${lead.clinic_id}/${lead.id}.jpg`;
     const up = await supabase.storage.from(BUCKET).upload(path, blob, { contentType, upsert: true });
     if (up.error) {
+      // desiste (zera) em vez de deixar a pps e re-tentar pra sempre a cada rodada.
       await registrarErro("upload_failed", "Falha ao subir avatar no storage", lead.clinic_id, { lead: lead.id, detail: up.error.message });
-      return "skipped";
+      await setAvatar(lead.id, null, lead.clinic_id);
+      return "nulled";
     }
     const pub = supabase.storage.from(BUCKET).getPublicUrl(path);
     await setAvatar(lead.id, pub.data.publicUrl, lead.clinic_id);
     return "rehosted";
   } catch (_) {
-    // fetch falhou (URL morta / timeout) -> zera para cair no fallback de iniciais.
-    await setAvatar(lead.id, null, lead.clinic_id);
+    // erro inesperado (inclui supabase/setAvatar lançando) -> isola o lead, não o lote.
+    try {
+      await setAvatar(lead.id, null, lead.clinic_id);
+    } catch (_) {
+      // nada a fazer; segue para o próximo.
+    }
     return "nulled";
   }
 }
@@ -109,16 +116,15 @@ Deno.serve(async () => {
     }
 
     const items = (leads ?? []) as Lead[];
-    let rehosted = 0, nulled = 0, skipped = 0;
+    let rehosted = 0, nulled = 0;
     for (let i = 0; i < items.length; i += CONCURRENCY) {
       const results = await Promise.all(items.slice(i, i + CONCURRENCY).map(processLead));
       for (const r of results) {
         if (r === "rehosted") rehosted++;
-        else if (r === "nulled") nulled++;
-        else skipped++;
+        else nulled++;
       }
     }
-    return json({ ok: true, scanned: items.length, rehosted, nulled, skipped });
+    return json({ ok: true, scanned: items.length, rehosted, nulled });
   } catch (e) {
     await registrarErro("unexpected", "Erro inesperado no re-host de avatares", null, { detail: String(e) });
     return json({ ok: false }, 500);

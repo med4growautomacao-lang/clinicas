@@ -276,7 +276,7 @@ function DeepSyncProgress({ clinicId }: { clinicId: string }) {
     setSt(data);
   }, [clinicId]);
 
-  useEffect(() => { poll(); return () => { if (timer.current) clearInterval(timer.current); }; }, [poll]);
+  useEffect(() => { poll(); return () => { if (timer.current) { clearInterval(timer.current); timer.current = null; } }; }, [poll]);
   useEffect(() => {
     const running = st?.exists && (st.status === 'pending' || st.status === 'running');
     if (running && !timer.current) timer.current = setInterval(poll, 5000);

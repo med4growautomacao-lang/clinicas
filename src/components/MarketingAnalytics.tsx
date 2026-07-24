@@ -1870,6 +1870,25 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
   const hasAnyInvestment = (rows || []).some((r: any) => r.investment != null);
   const fmtMoney = (v: number | null) => v == null ? '—' : `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+  // Totais da tabela: somam as linhas de CAMPANHA exatamente como exibidas — mesma regra dos
+  // níveis (soma investment/leads/wins primeiro; CPL/CAC dividem DEPOIS, nunca somam as razões).
+  const totals = useMemo(
+    () => sumRatioAgg(campaignTree.map(c => ({ investment: c.investment, leads: c.leads, wins: c.wins, losses: c.losses }))),
+    [campaignTree],
+  );
+  // % Instagram total: ponderado pelo GASTO em todas as campanhas Meta (ig ÷ total).
+  const igTotalPct = useMemo(() => {
+    let ig = 0, total = 0;
+    (platformSplit || []).forEach((r: any) => { total += r.investment || 0; if (r.ad_platform === 'instagram') ig += r.investment || 0; });
+    return total > 0 ? (ig / total) * 100 : null;
+  }, [platformSplit]);
+  // Criativos ATIVOS distintos no total (dedup global por asset); a célula do rodapé abre todos.
+  const allCreativesDeduped = useMemo(() => {
+    const seen = new Set<string>(); const out: CreativeItem[] = [];
+    for (const c of creatives || []) if (!seen.has(c.dedup_key)) { seen.add(c.dedup_key); out.push(c); }
+    return out;
+  }, [creatives]);
+
   if (!rows || rows.length === 0) return null;
 
   return (
@@ -2005,11 +2024,24 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
               );
             })}
           </tbody>
+          <tfoot>
+            <tr className="border-t-2 border-slate-200 bg-slate-50/70">
+              <td className="px-2 py-3 text-[11px] font-black text-slate-500 uppercase tracking-wider">Total</td>
+              <td className="px-2 py-3" />
+              <td className="px-2 py-3 text-center">
+                {allCreativesDeduped.length > 0 ? renderCreativesCell(allCreativesDeduped, 'Todos os criativos ativos') : <span className="text-slate-300">—</span>}
+              </td>
+              <td className="px-2 py-3 text-right font-black text-slate-800">{fmtMoney(totals.investment)}</td>
+              <td className="px-2 py-3 text-right font-bold text-slate-500">{igTotalPct != null ? `${igTotalPct.toFixed(0)}%` : '—'}</td>
+              <td className="px-2 py-3 text-right font-black text-slate-800">{totals.leads}</td>
+              <td className="px-2 py-3 text-right font-black text-emerald-600">{totals.wins}</td>
+              <td className="px-2 py-3 text-right font-black text-rose-500">{totals.losses}</td>
+              <td className="px-2 py-3 text-right font-bold text-slate-600">{fmtMoney(campaignRatio(totals.investment, totals.leads))}</td>
+              <td className="px-2 py-3 text-right font-black text-indigo-600">{fmtMoney(campaignRatio(totals.investment, totals.wins))}</td>
+            </tr>
+          </tfoot>
         </table>
       </div>
-      <p className="text-[10px] text-slate-400 mt-4">
-        Ganho/Perdido aqui são do <b>coorte de entrada</b> (leads que ENTRARAM nesta janela e o desfecho atual do ticket) — por isso costumam vir <b>menores</b> que o "Ganho" do Funil de Vendas acima, que conta pela <b>data da conversão</b> (pode incluir leads que entraram bem antes). Os dois estão certos: são perguntas diferentes. Aqui a pergunta é "dos leads que este investimento gerou, quantos já compraram" — a única forma de o CAC ficar ligado ao gasto real do período. Em janelas recentes, o coorte ainda está maturando (leads podem converter depois) — o CAC tende a cair conforme os dias passam. Cada nível (campanha/conjunto/anúncio) soma investimento e leads primeiro, e SÓ DEPOIS calcula CPL/CAC — nunca é a soma dos CPL/CAC dos itens abaixo. "—" = sem investimento sincronizado para esse item no período (não é gasto zero); campanhas com sincronização parcial (alguns anúncios ainda sem dado) mostram a soma do que já foi sincronizado.
-      </p>
 
       <CreativesModal data={creativeModal} onClose={() => setCreativeModal(null)} />
     </Card>

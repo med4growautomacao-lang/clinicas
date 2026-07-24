@@ -33,6 +33,7 @@ export function SandboxPanel({ clinicId }: { clinicId: string }) {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [waiting, setWaiting] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, waiting]);
@@ -122,7 +123,8 @@ export function SandboxPanel({ clinicId }: { clinicId: string }) {
   };
 
   const reset = async () => {
-    if (!clinicId) return;
+    if (!clinicId || resetting) return;
+    setResetting(true);
     try {
       const { data, error } = await supabase.functions.invoke('ai-sandbox', {
         body: { action: 'reset', clinic_id: clinicId, delete_lead: true },
@@ -132,6 +134,8 @@ export function SandboxPanel({ clinicId }: { clinicId: string }) {
       showToast('Sessão de teste reiniciada.', 'success');
     } catch (e: any) {
       showToast(`Não deu para reiniciar: ${String(e?.message ?? e)}`, 'error');
+    } finally {
+      setResetting(false);
     }
   };
 
@@ -143,9 +147,11 @@ export function SandboxPanel({ clinicId }: { clinicId: string }) {
           <FlaskConical className="w-5 h-5" />
           <h3 className="font-black">Testar o Agente</h3>
         </div>
-        <button onClick={reset}
-          className="ml-auto flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-rose-600 transition-colors">
-          <RotateCcw className="w-3.5 h-3.5" /> Reiniciar
+        <button onClick={reset} disabled={resetting}
+          className="ml-auto flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-rose-600 transition-colors disabled:opacity-70 disabled:hover:text-slate-500">
+          {resetting
+            ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Reiniciando…</>
+            : <><RotateCcw className="w-3.5 h-3.5" /> Reiniciar</>}
         </button>
       </div>
 

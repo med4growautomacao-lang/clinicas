@@ -174,6 +174,11 @@ serve(async (req) => {
       if (error) emitErr = error.message;
     }
     sent = !emitErr; // enfileirado com sucesso => entrega garantida (com retry) pelo Emissor
+    if (emitErr) {
+      // Reverte o claim (followup_count volta ao valor anterior) p/ o cron reentrar o passo — senao o
+      // passo do drip seria consumido sem ter sido enviado e nunca reenviado. Espelha o forms-welcome.
+      await supabase.from("leads").update({ followup_count: v_expected }).eq("id", lead_id);
+    }
     await supabase.from("automation_logs").insert({
       clinic_id, lead_id, type: "followup", status: sent ? "sent" : "failed",
       message_sent: sent ? joined : `falha ao enfileirar: ${emitErr}`,

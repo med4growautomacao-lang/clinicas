@@ -370,10 +370,11 @@ function kickEmissor(supabase: any, clinicId: string | null): void {
 async function enviarOuEnfileirar(
   supabase: any, token: string, number: string, text: string, clinicId: string | null,
   oQue: string, viaEmissor: boolean, toKind: "lead" | "group", leadId: string | null,
+  isSim = false,
 ): Promise<boolean> {
   if (viaEmissor && clinicId) {
     // supabase.rpc NAO lanca em erro de RPC (devolve {error}); checar o campo, senao um emit falho
-    // retornaria "enviado" sem enfileirar nem cair no inline. Em erro, cai para o envio inline.
+    // retornaria "enviado" sem enfileirar nem cair no inline.
     let emitErr: unknown = null;
     try {
       const { error } = await supabase.rpc("emit_message", {
@@ -386,6 +387,9 @@ async function enviarOuEnfileirar(
       kickEmissor(supabase, clinicId);
       return true;
     }
+    // Lead de SIMULACAO: NAO cai no inline (mandaria ao numero ficticio pela uazapi real, quebrando
+    // o isolamento). Falha silenciosa e aceitavel num teste.
+    if (isSim) return false;
     // falhou o enfileiramento: tenta o inline como fallback
   }
   return await sendWhatsAppText(token, number, text, clinicId, oQue);
@@ -1177,7 +1181,7 @@ serve(async (req) => {
         // Emissor normaliza o telefone (to_kind='lead'); o inline usa o JID com @s.whatsapp.net.
         const bareNum = lead_phone.replace(/@.*/, "");
         const contactNum = viaEmissor ? bareNum : (lead_phone.includes("@") ? lead_phone : `${lead_phone}@s.whatsapp.net`);
-        farewell_sent = await enviarOuEnfileirar(supabaseClient, uazapiToken || "", contactNum, matched.farewell_message, clinic_id, "despedida", viaEmissor, "lead", lead?.id ?? null);
+        farewell_sent = await enviarOuEnfileirar(supabaseClient, uazapiToken || "", contactNum, matched.farewell_message, clinic_id, "despedida", viaEmissor, "lead", lead?.id ?? null, leadIsSim);
         if (farewell_sent) actionsTaken.push("farewell_sent");
       }
 

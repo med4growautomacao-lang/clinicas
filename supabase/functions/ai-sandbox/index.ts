@@ -23,12 +23,14 @@ Deno.serve(async (req) => {
 
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 
-  // (1) Super admin? Valida com o JWT do usuario.
+  // (1) Valida o usuario. getUser(jwt) valida o TOKEN passado (o client recem-criado nao tem sessao;
+  // getUser() sem arg procuraria uma sessao inexistente e falharia sempre -> era a causa do 401).
   const authHeader = req.headers.get("Authorization") ?? "";
+  const jwt = authHeader.replace(/^Bearer\s+/i, "");
   const userClient = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_ANON_KEY") ?? "", {
     global: { headers: { Authorization: authHeader } },
   });
-  const { data: ures } = await userClient.auth.getUser();
+  const { data: ures } = await userClient.auth.getUser(jwt);
   const uid = ures?.user?.id;
   if (!uid) return json({ ok: false, error: "unauthorized" }, 401);
 

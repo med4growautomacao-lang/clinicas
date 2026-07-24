@@ -2327,7 +2327,13 @@ export function AISecretary() {
       setActiveTab("chats");
       localStorage.setItem('aiSecretaryTab', 'chats');
     }
-  }, [activeTab, hasConvAi]);
+    // As abas de IA (config/sandbox) somem quando a IA e desligada; sem isto a area de conteudo
+    // ficaria em branco com a aba salva no localStorage.
+    if ((activeTab === "sandbox" || activeTab === "config") && !hasIA) {
+      setActiveTab("chats");
+      localStorage.setItem('aiSecretaryTab', 'chats');
+    }
+  }, [activeTab, hasConvAi, hasIA]);
 
   return (
     <div className="space-y-8 h-full flex flex-col">
@@ -2411,7 +2417,11 @@ export function AISecretary() {
           {activeTab === "followups" && <AllFollowupsView />}
 
           {activeTab === "config" && <ConfigView />}
-          {activeTab === "sandbox" && <SandboxPanel clinicId={clinic?.id} />}
+          {/* Gate em clinic?.id: sem ele, o SandboxPanel receberia undefined e mostraria o seletor
+              cross-clinica dentro da tela escopada a uma clinica. */}
+          {activeTab === "sandbox" && (clinic?.id
+            ? <SandboxPanel clinicId={clinic.id} />
+            : <div className="text-sm text-slate-400 p-6">Carregando…</div>)}
         </motion.div>
       </AnimatePresence>
     </div>

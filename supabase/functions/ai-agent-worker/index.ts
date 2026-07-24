@@ -67,8 +67,10 @@ async function enqueueEmissor(supabase: any, clinicId: string, sessionId: string
     p_delay_ms: p.delayMs ?? 0,
   });
   if (error) {
-    await registrarErro(supabase, "enfileirar_falhou", "A resposta do agente NAO entrou na fila de saida (paciente pode ficar sem resposta)", "critical", clinicId, { session_id: sessionId, erro: error.message, producer: p.producer });
-    throw new Error(`emit_message falhou: ${error.message}`);
+    // NAO lanca: lancar abortaria o loop de baloes e pularia o saveAiResponse (a conversa e a tela
+    // do sandbox ficariam sem a resposta). Registra critical e segue; o alerta cobre a falha de
+    // entrega, e a conversa fica coerente com o que o agente produziu.
+    await registrarErro(supabase, "enfileirar_falhou", "Um balao da resposta do agente NAO entrou na fila de saida (paciente pode ter ficado sem parte da resposta)", "critical", clinicId, { session_id: sessionId, erro: error.message, producer: p.producer });
   }
 }
 

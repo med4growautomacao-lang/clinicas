@@ -59,6 +59,13 @@ Deno.serve(async (req) => {
   }
   if (!allowed) return json({ ok: false, error: "forbidden" }, 403);
 
+  // (2a) PEEK: devolve o session_id (sem criar nada) p/ a tela recarregar a conversa ao (re)montar.
+  if (action === "peek") {
+    const { data, error } = await svc.rpc("sandbox_session", { p_clinic_id: clinic_id, p_user_id: uid });
+    if (error) return json({ ok: false, error: error.message }, 500);
+    return json({ ok: true, session_id: data });
+  }
+
   // (2) RESET: limpa a sessao de simulacao.
   if (action === "reset") {
     const { data, error } = await svc.rpc("sandbox_reset", {

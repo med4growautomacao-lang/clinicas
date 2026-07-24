@@ -49,8 +49,23 @@ export function SandboxPanel({ clinicId }: { clinicId: string }) {
     return () => clearTimeout(t);
   }, [waiting]);
 
-  // Troca de clínica: zera a tela (a sessão é por clínica; carrega ao enviar/assinar).
-  useEffect(() => { setSessionId(null); setMessages([]); }, [clinicId]);
+  // Mont/troca de clínica: descobre o session_id (derivado no servidor) e recarrega a conversa.
+  // Sem isto, trocar de aba (desmonta o painel) zerava o estado e a conversa "sumia" até enviar
+  // outra mensagem. O peek NÃO cria nada; o Realtime effect abaixo carrega as mensagens.
+  useEffect(() => {
+    setSessionId(null); setMessages([]);
+    if (!clinicId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.functions.invoke('ai-sandbox', {
+        body: { action: 'peek', clinic_id: clinicId },
+      });
+      if (!cancelled && (data as any)?.ok && (data as any).session_id) {
+        setSessionId((data as any).session_id as string);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [clinicId]);
 
   // Realtime: assina a conversa de simulação (por session_id) assim que ele é conhecido.
   useEffect(() => {

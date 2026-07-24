@@ -137,6 +137,15 @@ function useLatest<T>(value: T) {
   return ref;
 }
 
+// Insere `tag` na posição do cursor de um textarea; devolve o novo valor e onde reposicionar o caret.
+// Compartilhado entre a Confirmação e o Lembrete (evita reimplementar a lógica de seleção em cada um).
+function insertTagAtCursor(ta: HTMLTextAreaElement | null, cur: string, tag: string) {
+  if (!ta) return { value: cur + tag, caret: (cur + tag).length };
+  const start = ta.selectionStart ?? cur.length;
+  const end = ta.selectionEnd ?? cur.length;
+  return { value: cur.slice(0, start) + tag + cur.slice(end), caret: start + tag.length };
+}
+
 function ConfirmationsView() {
   const { aiConfig, updateAI, loading } = useSettings();
   const aiRef = useLatest(aiConfig);
@@ -146,9 +155,8 @@ function ConfirmationsView() {
   const [localConfig, setLocalConfig] = useState<any>(null);
   const [showValidation, setShowValidation] = useState(false);
   const [missingTags, setMissingTags] = useState<string[]>([]);
-  const [tab, setTab] = useState<'before' | 'reminder' | 'after'>('before');
+  const [tab, setTab] = useState<'before' | 'after'>('before');
   const beforeMsgRef = useRef<HTMLTextAreaElement>(null);
-  const reminderMsgRef = useRef<HTMLTextAreaElement>(null);
 
   const setConfig = (updates: any) => { setLocalConfig((p: any) => ({ ...p, ...updates })); setIsDirty(true); };
 
@@ -166,13 +174,6 @@ function ConfirmationsView() {
         confirm_window_end: 22,
         confirm_post_enabled: false,
         confirm_post_message: "Perfeito, {paciente}! Sua consulta no dia {data} às {hora} está confirmada. Te aguardamos!",
-        appt_reminder_enabled: false,
-        appt_reminder_message: "Olá {paciente}! Passando para lembrar da sua consulta hoje às {hora}. Te esperamos! 😊",
-        appt_reminder_lead_time: 120,
-        appt_reminder_window_start: 8,
-        appt_reminder_window_end: 20,
-        appt_reminder_grace_minutes: 60,
-        appt_reminder_only_confirmed: false,
         response_style: 'cordial',
         response_speed: 'instantanea',
         tone: 3
@@ -189,16 +190,12 @@ function ConfirmationsView() {
   }
 
   const handleSave = async () => {
-    // Valida as variáveis da mensagem da ABA ativa — antes validava sempre a da confirmação, o que
-    // deixava o lembrete sem checagem e podia abrir o aviso falando da confirmação na aba errada.
+    // Só valida na aba de Confirmação (a de Resposta condicional não tem tags obrigatórias).
     // Checagem CASE-SENSITIVE de propósito: o motor substitui com replace() exato em minúsculas
     // ('{paciente}' etc.), então '{Paciente}' NÃO é trocado e chegaria cru ao paciente. Assim o
     // aviso dispara quando a variável está com a caixa errada, em vez de passar batido.
-    const target =
-      tab === 'reminder' ? { msg: localConfig.appt_reminder_message || '', tags: ['{paciente}', '{hora}'] }
-      : tab === 'before' ? { msg: localConfig.confirm_message || '', tags: ['{paciente}', '{data}', '{hora}'] }
-      : { msg: '', tags: [] as string[] };
-    const missing = target.tags.filter(t => !target.msg.includes(t));
+    const requiredTags = tab === 'before' ? ['{paciente}', '{data}', '{hora}'] : [];
+    const missing = requiredTags.filter(t => !(localConfig.confirm_message || '').includes(t));
 
     // Salva sempre; o aviso de variáveis é apenas informativo (não bloqueia).
     setSaving(true);
@@ -212,15 +209,11 @@ function ConfirmationsView() {
     }
   };
 
-  // Insere uma variável ({paciente}, etc.) no textarea de `field`, na posição do cursor.
-  const insertVar = (field: 'confirm_message' | 'appt_reminder_message', ref: React.RefObject<HTMLTextAreaElement>, tag: string) => {
-    const ta = ref.current;
-    const cur = localConfig[field] || '';
-    if (!ta) { setConfig({ [field]: cur + tag }); return; }
-    const start = ta.selectionStart ?? cur.length;
-    const end = ta.selectionEnd ?? cur.length;
-    setConfig({ [field]: cur.slice(0, start) + tag + cur.slice(end) });
-    requestAnimationFrame(() => { ta.focus(); const pos = start + tag.length; ta.setSelectionRange(pos, pos); });
+  const insertVar = (tag: string) => {
+    const ta = beforeMsgRef.current;
+    const { value, caret } = insertTagAtCursor(ta, localConfig.confirm_message || '', tag);
+    setConfig({ confirm_message: value });
+    requestAnimationFrame(() => { ta?.focus(); ta?.setSelectionRange(caret, caret); });
   };
 
   return (
@@ -249,17 +242,7 @@ function ConfirmationsView() {
                 tab === 'before' ? "bg-white text-teal-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
               )}
             >
-              Confirmação
-            </button>
-            <button
-              type="button"
-              onClick={() => setTab('reminder')}
-              className={cn(
-                "flex-1 px-3 py-2 text-xs font-bold rounded-md transition-all",
-                tab === 'reminder' ? "bg-white text-teal-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
-              )}
-            >
-              Lembrete
+              Antes da Consulta
             </button>
             <button
               type="button"
@@ -349,7 +332,7 @@ function ConfirmationsView() {
                     <button
                       key={tag}
                       type="button"
-                      onClick={() => insertVar('confirm_message', beforeMsgRef, tag)}
+                      onClick={() => insertVar(tag)}
                       className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-teal-50 text-teal-700 border border-teal-100 hover:bg-teal-100 transition-colors"
                     >
                       + {tag}
@@ -383,166 +366,6 @@ function ConfirmationsView() {
                 <p className="text-[11px] text-slate-400 font-medium pl-1">
                   Fora desse horário, o lembrete espera a próxima janela pra enviar.
                 </p>
-              </div>
-            </div>
-          ) : tab === 'reminder' ? (
-            <div className="space-y-6 animate-in fade-in duration-200">
-              <div className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-100">
-                <div>
-                  <p className="text-sm font-bold text-slate-900">Disparar Lembrete</p>
-                  <p className="text-[10px] font-semibold text-slate-500 uppercase pt-0.5">1 mensagem de texto, pouco antes da consulta</p>
-                </div>
-                <button
-                  onClick={() => {
-                    const v = !localConfig.appt_reminder_enabled;
-                    // Grava SÓ a chave que mudou (o apply roda depois da janela de confirmação da trava).
-                    const apply = () => { setLocalConfig({ ...localConfig, appt_reminder_enabled: v }); updateAI(aiRef.current ? { appt_reminder_enabled: v } : { ...localConfig, appt_reminder_enabled: v }); };
-                    if (v) guard("appt_reminder", apply); else apply();
-                  }}
-                  className={cn("w-12 h-6 rounded-full relative transition-all shrink-0", localConfig.appt_reminder_enabled ? "bg-teal-600" : "bg-slate-300")}
-                >
-                  <div className={cn("w-4 h-4 bg-white rounded-full absolute top-1 transition-all shadow-sm", localConfig.appt_reminder_enabled ? "right-1" : "left-1")}></div>
-                </button>
-              </div>
-
-              {/* Aviso não-bloqueante: lembrete não pode chegar antes (ou junto) da confirmação */}
-              {localConfig.confirm_enabled && localConfig.appt_reminder_enabled
-                && (localConfig.appt_reminder_lead_time ?? 0) >= (localConfig.confirm_lead_time ?? 0) && (
-                <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 border border-amber-100">
-                  <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
-                  <p className="text-[11px] text-amber-700 font-medium leading-relaxed">
-                    A antecedência do lembrete é maior ou igual à da confirmação. Com os dois ligados, o lembrete chegaria antes (ou junto) da confirmação. Deixe o lembrete mais perto da consulta.
-                  </p>
-                </div>
-              )}
-
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1 flex items-center gap-2">
-                  <Clock className="w-3 h-3" />
-                  Antecedência do Lembrete
-                </label>
-                <div className="flex items-center gap-4">
-                  <input
-                    type="number" min={1}
-                    value={localConfig.appt_reminder_lead_time ?? 120}
-                    onChange={(e) => setConfig({ appt_reminder_lead_time: Math.max(1, parseInt(e.target.value) || 1) })}
-                    className="w-28 px-4 py-2 border border-slate-200 rounded-lg font-bold text-teal-700 focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all"
-                    placeholder="120"
-                  />
-                  <span className="text-[10px] font-bold text-slate-400 uppercase">
-                    {localConfig.appt_reminder_lead_time >= 60
-                      ? `${Math.floor(localConfig.appt_reminder_lead_time / 60)}h ${localConfig.appt_reminder_lead_time % 60}min antes`
-                      : `${localConfig.appt_reminder_lead_time} min antes`}
-                  </span>
-                  <div className="flex gap-1 ml-auto">
-                    {[{ val: 120, label: '2h' }, { val: 60, label: '1h' }, { val: 30, label: '30m' }].map(s => (
-                      <button
-                        key={s.val}
-                        type="button"
-                        onClick={() => setConfig({ appt_reminder_lead_time: s.val })}
-                        className={cn(
-                          "px-2.5 py-1 rounded-md text-[10px] font-bold transition-colors",
-                          localConfig.appt_reminder_lead_time === s.val ? "bg-teal-600 text-white" : "bg-slate-50 text-slate-500 hover:bg-slate-100"
-                        )}
-                      >
-                        {s.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Template da Mensagem</label>
-                <textarea
-                  ref={reminderMsgRef}
-                  rows={5}
-                  value={localConfig.appt_reminder_message || ""}
-                  onChange={(e) => setConfig({ appt_reminder_message: e.target.value })}
-                  className="w-full p-4 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all resize-none text-sm leading-relaxed"
-                  placeholder="Use {paciente}, {data}, {hora} e {medico} para personalizar..."
-                />
-                <div className="flex flex-wrap items-center gap-2 pt-1">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Personalizar:</span>
-                  {['{paciente}', '{data}', '{hora}', '{medico}'].map(tag => (
-                    <button
-                      key={tag}
-                      type="button"
-                      onClick={() => insertVar('appt_reminder_message', reminderMsgRef, tag)}
-                      className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-teal-50 text-teal-700 border border-teal-100 hover:bg-teal-100 transition-colors"
-                    >
-                      + {tag}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Janela de envio (horário permitido, SP) */}
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1 flex items-center gap-2">
-                  <Clock className="w-3 h-3" /> Janela de envio
-                </label>
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-bold text-slate-400 uppercase">Das</span>
-                  <input
-                    type="number" min={0} max={23}
-                    value={localConfig.appt_reminder_window_start ?? 8}
-                    onChange={(e) => setConfig({ appt_reminder_window_start: Math.min(23, Math.max(0, parseInt(e.target.value) || 0)) })}
-                    className="w-16 px-3 py-2 border border-slate-200 rounded-lg font-bold text-teal-700 text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all"
-                  />
-                  <span className="text-[11px] font-bold text-slate-400 uppercase">às</span>
-                  <input
-                    type="number" min={1} max={24}
-                    value={localConfig.appt_reminder_window_end ?? 20}
-                    onChange={(e) => setConfig({ appt_reminder_window_end: Math.min(24, Math.max(1, parseInt(e.target.value) || 0)) })}
-                    className="w-16 px-3 py-2 border border-slate-200 rounded-lg font-bold text-teal-700 text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all"
-                  />
-                  <span className="text-[11px] font-bold text-slate-400 uppercase">h (Brasília)</span>
-                </div>
-                <p className="text-[11px] text-slate-400 font-medium pl-1">
-                  Fora desse horário, o lembrete espera a próxima janela. Se a consulta chegar antes disso, ele é descartado (não envia atrasado).
-                </p>
-                {(localConfig.appt_reminder_window_start ?? 8) >= (localConfig.appt_reminder_window_end ?? 20) && (
-                  <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 border border-amber-100">
-                    <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
-                    <p className="text-[11px] text-amber-700 font-medium leading-relaxed">
-                      O início da janela está igual ou depois do fim, então nenhum lembrete será enviado. O horário inicial precisa ser menor que o final.
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              {/* Tolerância de atraso (grace) */}
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1 flex items-center gap-2">
-                  <Clock className="w-3 h-3" /> Tolerância de atraso
-                </label>
-                <div className="flex items-center gap-3">
-                  <input
-                    type="number" min={1} max={720}
-                    value={localConfig.appt_reminder_grace_minutes ?? 60}
-                    onChange={(e) => setConfig({ appt_reminder_grace_minutes: Math.min(720, Math.max(1, parseInt(e.target.value) || 1)) })}
-                    className="w-24 px-4 py-2 border border-slate-200 rounded-lg font-bold text-teal-700 text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all"
-                  />
-                  <span className="text-[11px] font-bold text-slate-400 uppercase">min</span>
-                </div>
-                <p className="text-[11px] text-slate-400 font-medium pl-1">
-                  Se o lembrete não puder sair no horário (WhatsApp fora, fora da janela) e passar dessa tolerância, ele é descartado em vez de chegar atrasado.
-                </p>
-              </div>
-
-              {/* Só quem já confirmou */}
-              <div className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-100">
-                <div>
-                  <p className="text-sm font-bold text-slate-900">Só para quem confirmou</p>
-                  <p className="text-[10px] font-semibold text-slate-500 uppercase pt-0.5">Envia apenas se o status for "confirmado"</p>
-                </div>
-                <button
-                  onClick={() => { const v = !localConfig.appt_reminder_only_confirmed; setConfig({ appt_reminder_only_confirmed: v }); }}
-                  className={cn("w-12 h-6 rounded-full relative transition-all shrink-0", localConfig.appt_reminder_only_confirmed ? "bg-teal-600" : "bg-slate-300")}
-                >
-                  <div className={cn("w-4 h-4 bg-white rounded-full absolute top-1 transition-all shadow-sm", localConfig.appt_reminder_only_confirmed ? "right-1" : "left-1")}></div>
-                </button>
               </div>
             </div>
           ) : (
@@ -632,13 +455,10 @@ function ConfirmationsView() {
                <div className="space-y-4 pt-4">
                  <div className="bg-white/10 w-2/3 h-8 rounded-lg animate-pulse" />
                  <div className="bg-white text-slate-800 p-3.5 rounded-2xl rounded-tl-none text-sm font-medium shadow-lg whitespace-pre-wrap max-w-[92%]">
-                    {(tab === 'before' ? (localConfig.confirm_message || '')
-                      : tab === 'reminder' ? (localConfig.appt_reminder_message || '')
-                      : (localConfig.confirm_post_message || ''))
+                    {(tab === 'before' ? (localConfig.confirm_message || '') : (localConfig.confirm_post_message || ''))
                       .replace(/\{paciente\}/g, 'João Silva')
                       .replace(/\{data\}/g, '15/05')
-                      .replace(/\{hora\}/g, '14:30')
-                      .replace(/\{medico\}/g, 'Dra. Ana') || (tab === 'after' ? 'Mensagem ainda não configurada.' : 'Escreva a mensagem ao lado para ver o preview…')}
+                      .replace(/\{hora\}/g, '14:30') || (tab === 'before' ? 'Escreva a mensagem ao lado para ver o preview…' : 'Mensagem ainda não configurada.')}
                  </div>
                  {tab === 'before' ? (
                    <div className="space-y-1.5 max-w-[92%]">
@@ -649,8 +469,6 @@ function ConfirmationsView() {
                      ))}
                      <p className="text-[10px] text-white/40 italic px-1 pt-0.5">Por favor, clique em uma das opções abaixo.</p>
                    </div>
-                 ) : tab === 'reminder' ? (
-                   <p className="text-[10px] text-white/40 italic px-1 pt-0.5">Mensagem única, sem botões.</p>
                  ) : (
                    <div className="flex justify-end">
                      <div className="bg-teal-600 text-white px-3 py-1.5 rounded-2xl rounded-br-none text-xs font-medium">
@@ -685,6 +503,296 @@ function ConfirmationsView() {
                   </li>
                 ))}
              </ul>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+// Lembrete de Consulta: seção própria (irmã da Confirmação). Manda 1 mensagem de texto pouco antes
+// da consulta. Complementa a Confirmação (menu de botões ~24h antes), não a substitui.
+function RemindersView() {
+  const { aiConfig, updateAI, loading } = useSettings();
+  const aiRef = useLatest(aiConfig);
+  const guard = useActivationGuard();
+  const [saving, setSaving] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const [localConfig, setLocalConfig] = useState<any>(null);
+  const [showValidation, setShowValidation] = useState(false);
+  const [missingTags, setMissingTags] = useState<string[]>([]);
+  const msgRef = useRef<HTMLTextAreaElement>(null);
+
+  const setConfig = (updates: any) => { setLocalConfig((p: any) => ({ ...p, ...updates })); setIsDirty(true); };
+
+  useEffect(() => {
+    if (aiConfig) {
+      setLocalConfig({ ...aiConfig });
+      setIsDirty(false);
+    } else if (!loading) {
+      setLocalConfig({
+        appt_reminder_enabled: false,
+        appt_reminder_message: "Olá {paciente}! Passando para lembrar da sua consulta hoje às {hora}. Te esperamos! 😊",
+        appt_reminder_lead_time: 120,
+        appt_reminder_window_start: 8,
+        appt_reminder_window_end: 20,
+        appt_reminder_grace_minutes: 60,
+        appt_reminder_only_confirmed: false,
+      });
+    }
+  }, [aiConfig, loading]);
+
+  if (loading || !localConfig) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 text-teal-600 animate-spin" />
+      </div>
+    );
+  }
+
+  const handleSave = async () => {
+    // Case-sensitive: o motor substitui com replace() exato em minúsculas ('{paciente}' etc.).
+    const requiredTags = ['{paciente}', '{hora}'];
+    const missing = requiredTags.filter(t => !(localConfig.appt_reminder_message || '').includes(t));
+    setSaving(true);
+    await updateAI(localConfig);
+    setSaving(false);
+    setIsDirty(false);
+    if (missing.length > 0) { setMissingTags(missing); setShowValidation(true); }
+  };
+
+  const insertVar = (tag: string) => {
+    const ta = msgRef.current;
+    const { value, caret } = insertTagAtCursor(ta, localConfig.appt_reminder_message || '', tag);
+    setConfig({ appt_reminder_message: value });
+    requestAnimationFrame(() => { ta?.focus(); ta?.setSelectionRange(caret, caret); });
+  };
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 h-full">
+      <ValidationModal isOpen={showValidation} onClose={() => setShowValidation(false)} missingTags={missingTags} />
+      <Card className="border border-slate-200 shadow-sm relative overflow-hidden">
+        <div className="h-1.5 bg-teal-600 absolute top-0 left-0 right-0" />
+        <CardHeader className="pb-4">
+          <CardTitle className="text-xl font-bold text-slate-900 flex items-center gap-3">
+            <Clock className="w-6 h-6 text-teal-600" />
+            Lembrete de Consulta
+          </CardTitle>
+          <CardDescription className="text-slate-500 font-medium">
+            Uma mensagem de texto pouco antes da consulta, para reduzir faltas. Complementa a Confirmação.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-100">
+            <div>
+              <p className="text-sm font-bold text-slate-900">Disparar Lembrete</p>
+              <p className="text-[10px] font-semibold text-slate-500 uppercase pt-0.5">1 mensagem de texto, pouco antes da consulta</p>
+            </div>
+            <button
+              onClick={() => {
+                const v = !localConfig.appt_reminder_enabled;
+                const apply = () => { setLocalConfig({ ...localConfig, appt_reminder_enabled: v }); updateAI(aiRef.current ? { appt_reminder_enabled: v } : { ...localConfig, appt_reminder_enabled: v }); };
+                if (v) guard("appt_reminder", apply); else apply();
+              }}
+              className={cn("w-12 h-6 rounded-full relative transition-all shrink-0", localConfig.appt_reminder_enabled ? "bg-teal-600" : "bg-slate-300")}
+            >
+              <div className={cn("w-4 h-4 bg-white rounded-full absolute top-1 transition-all shadow-sm", localConfig.appt_reminder_enabled ? "right-1" : "left-1")}></div>
+            </button>
+          </div>
+
+          {/* Aviso não-bloqueante: lembrete não pode chegar antes (ou junto) da confirmação */}
+          {localConfig.confirm_enabled && localConfig.appt_reminder_enabled
+            && (localConfig.appt_reminder_lead_time ?? 0) >= (localConfig.confirm_lead_time ?? 0) && (
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 border border-amber-100">
+              <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+              <p className="text-[11px] text-amber-700 font-medium leading-relaxed">
+                A antecedência do lembrete é maior ou igual à da confirmação. Com os dois ligados, o lembrete chegaria antes (ou junto) da confirmação. Deixe o lembrete mais perto da consulta.
+              </p>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1 flex items-center gap-2">
+              <Clock className="w-3 h-3" /> Antecedência do Lembrete
+            </label>
+            <div className="flex items-center gap-4">
+              <input
+                type="number" min={1}
+                value={localConfig.appt_reminder_lead_time ?? 120}
+                onChange={(e) => setConfig({ appt_reminder_lead_time: Math.max(1, parseInt(e.target.value) || 1) })}
+                className="w-28 px-4 py-2 border border-slate-200 rounded-lg font-bold text-teal-700 focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all"
+                placeholder="120"
+              />
+              <span className="text-[10px] font-bold text-slate-400 uppercase">
+                {localConfig.appt_reminder_lead_time >= 60
+                  ? `${Math.floor(localConfig.appt_reminder_lead_time / 60)}h ${localConfig.appt_reminder_lead_time % 60}min antes`
+                  : `${localConfig.appt_reminder_lead_time} min antes`}
+              </span>
+              <div className="flex gap-1 ml-auto">
+                {[{ val: 120, label: '2h' }, { val: 60, label: '1h' }, { val: 30, label: '30m' }].map(s => (
+                  <button
+                    key={s.val}
+                    type="button"
+                    onClick={() => setConfig({ appt_reminder_lead_time: s.val })}
+                    className={cn(
+                      "px-2.5 py-1 rounded-md text-[10px] font-bold transition-colors",
+                      localConfig.appt_reminder_lead_time === s.val ? "bg-teal-600 text-white" : "bg-slate-50 text-slate-500 hover:bg-slate-100"
+                    )}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Template da Mensagem</label>
+            <textarea
+              ref={msgRef}
+              rows={5}
+              value={localConfig.appt_reminder_message || ""}
+              onChange={(e) => setConfig({ appt_reminder_message: e.target.value })}
+              className="w-full p-4 border border-slate-200 rounded-lg font-medium focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all resize-none text-sm leading-relaxed"
+              placeholder="Use {paciente}, {data}, {hora} e {medico} para personalizar..."
+            />
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Personalizar:</span>
+              {['{paciente}', '{data}', '{hora}', '{medico}'].map(tag => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => insertVar(tag)}
+                  className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-teal-50 text-teal-700 border border-teal-100 hover:bg-teal-100 transition-colors"
+                >
+                  + {tag}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Janela de envio (horário permitido, SP) */}
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1 flex items-center gap-2">
+              <Clock className="w-3 h-3" /> Janela de envio
+            </label>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-bold text-slate-400 uppercase">Das</span>
+              <input
+                type="number" min={0} max={23}
+                value={localConfig.appt_reminder_window_start ?? 8}
+                onChange={(e) => setConfig({ appt_reminder_window_start: Math.min(23, Math.max(0, parseInt(e.target.value) || 0)) })}
+                className="w-16 px-3 py-2 border border-slate-200 rounded-lg font-bold text-teal-700 text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all"
+              />
+              <span className="text-[11px] font-bold text-slate-400 uppercase">às</span>
+              <input
+                type="number" min={1} max={24}
+                value={localConfig.appt_reminder_window_end ?? 20}
+                onChange={(e) => setConfig({ appt_reminder_window_end: Math.min(24, Math.max(1, parseInt(e.target.value) || 0)) })}
+                className="w-16 px-3 py-2 border border-slate-200 rounded-lg font-bold text-teal-700 text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all"
+              />
+              <span className="text-[11px] font-bold text-slate-400 uppercase">h (Brasília)</span>
+            </div>
+            <p className="text-[11px] text-slate-400 font-medium pl-1">
+              Fora desse horário, o lembrete espera a próxima janela. Se a consulta chegar antes disso, ele é descartado (não envia atrasado).
+            </p>
+            {(localConfig.appt_reminder_window_start ?? 8) >= (localConfig.appt_reminder_window_end ?? 20) && (
+              <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 border border-amber-100">
+                <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                <p className="text-[11px] text-amber-700 font-medium leading-relaxed">
+                  O início da janela está igual ou depois do fim, então nenhum lembrete será enviado. O horário inicial precisa ser menor que o final.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Tolerância de atraso (grace) */}
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1 flex items-center gap-2">
+              <Clock className="w-3 h-3" /> Tolerância de atraso
+            </label>
+            <div className="flex items-center gap-3">
+              <input
+                type="number" min={1} max={720}
+                value={localConfig.appt_reminder_grace_minutes ?? 60}
+                onChange={(e) => setConfig({ appt_reminder_grace_minutes: Math.min(720, Math.max(1, parseInt(e.target.value) || 1)) })}
+                className="w-24 px-4 py-2 border border-slate-200 rounded-lg font-bold text-teal-700 text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all"
+              />
+              <span className="text-[11px] font-bold text-slate-400 uppercase">min</span>
+            </div>
+            <p className="text-[11px] text-slate-400 font-medium pl-1">
+              Se o lembrete não puder sair no horário (WhatsApp fora, fora da janela) e passar dessa tolerância, ele é descartado em vez de chegar atrasado.
+            </p>
+          </div>
+
+          {/* Só quem já confirmou */}
+          <div className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-100">
+            <div>
+              <p className="text-sm font-bold text-slate-900">Só para quem confirmou</p>
+              <p className="text-[10px] font-semibold text-slate-500 uppercase pt-0.5">Envia apenas se o status for "confirmado"</p>
+            </div>
+            <button
+              onClick={() => { const v = !localConfig.appt_reminder_only_confirmed; setConfig({ appt_reminder_only_confirmed: v }); }}
+              className={cn("w-12 h-6 rounded-full relative transition-all shrink-0", localConfig.appt_reminder_only_confirmed ? "bg-teal-600" : "bg-slate-300")}
+            >
+              <div className={cn("w-4 h-4 bg-white rounded-full absolute top-1 transition-all shadow-sm", localConfig.appt_reminder_only_confirmed ? "right-1" : "left-1")}></div>
+            </button>
+          </div>
+
+          <Button
+            onClick={handleSave}
+            disabled={saving || !isDirty}
+            className={cn("w-full py-6 transition-all", isDirty ? "bg-teal-600 hover:bg-teal-700 text-white" : "bg-slate-100 text-slate-400 cursor-default")}
+          >
+            {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : isDirty ? "Salvar Configurações" : "Configuração Salva ✓"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      <div className="space-y-8">
+        <Card className="border border-slate-200 shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <Activity className="w-5 h-5 text-teal-600" />
+              Visualização (Preview)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="p-6 bg-slate-900 rounded-2xl shadow-xl border border-slate-800 relative">
+              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-16 h-1 bg-slate-700 rounded-b-lg" />
+              <div className="space-y-4 pt-4">
+                <div className="bg-white/10 w-2/3 h-8 rounded-lg animate-pulse" />
+                <div className="bg-white text-slate-800 p-3.5 rounded-2xl rounded-tl-none text-sm font-medium shadow-lg whitespace-pre-wrap max-w-[92%]">
+                  {(localConfig.appt_reminder_message || '')
+                    .replace(/\{paciente\}/g, 'João Silva')
+                    .replace(/\{data\}/g, '15/05')
+                    .replace(/\{hora\}/g, '14:30')
+                    .replace(/\{medico\}/g, 'Dra. Ana') || 'Escreva a mensagem ao lado para ver o preview…'}
+                </div>
+                <p className="text-[10px] text-white/40 italic px-1 pt-0.5">Mensagem única, sem botões.</p>
+                <div className="bg-white/5 w-1/2 h-4 rounded-full ml-auto" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border border-slate-200 shadow-sm bg-teal-50/30">
+          <CardContent className="p-6 space-y-4">
+            <div className="flex items-center gap-3 text-teal-700">
+              <Clock className="w-6 h-6" />
+              <h4 className="font-bold text-sm">Como funciona?</h4>
+            </div>
+            <p className="text-xs text-slate-600 leading-relaxed font-medium">
+              O sistema acompanha os agendamentos e dispara o lembrete no tempo de antecedência escolhido, dentro da janela de envio. Se o horário passar sem conseguir enviar, ele é descartado em vez de chegar atrasado.
+            </p>
+            <ul className="space-y-2">
+              {['Reduz faltas de última hora', '1 mensagem, sem botões', 'Independente da Confirmação'].map((item, i) => (
+                <li key={i} className="flex items-center gap-2 text-[10px] font-bold text-teal-600 uppercase">
+                  <div className="w-1 h-1 bg-teal-600 rounded-full" />
+                  {item}
+                </li>
+              ))}
+            </ul>
           </CardContent>
         </Card>
       </div>
@@ -1803,7 +1911,7 @@ function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
 }
 
 function AllFollowupsView() {
-  const [subTab, setSubTab] = useState<"welcome" | "reengagement" | "confirmation" | "finish_service" | "pos">("welcome");
+  const [subTab, setSubTab] = useState<"welcome" | "reengagement" | "confirmation" | "reminder" | "finish_service" | "pos">("welcome");
 
   return (
     <ActivationGuardProvider>
@@ -1813,6 +1921,7 @@ function AllFollowupsView() {
           { id: "welcome", label: "Boas-vindas" },
           { id: "reengagement", label: "Reengajamento" },
           { id: "confirmation", label: "Confirmação" },
+          { id: "reminder", label: "Lembrete" },
           { id: "finish_service", label: "Encerramento" },
           { id: "pos", label: "Pós-Atendimento" },
         ].map((t) => (
@@ -1842,6 +1951,7 @@ function AllFollowupsView() {
           {subTab === "welcome" && <WelcomeFollowupView />}
           {subTab === "reengagement" && <FollowupsView />}
           {subTab === "confirmation" && <ConfirmationsView />}
+          {subTab === "reminder" && <RemindersView />}
           {subTab === "finish_service" && <FinishServiceView />}
           {subTab === "pos" && <PosFollowupView />}
         </motion.div>

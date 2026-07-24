@@ -1752,6 +1752,15 @@ function groupBy<T>(items: T[], keyFn: (t: T) => string): Map<string, T[]> {
   return m;
 }
 
+// Criativos ÚNICOS: colapsa por asset (dedup_key = video_id | image_hash | caminho da thumb).
+// Vários anúncios usam a MESMA arte, então isto responde "quantas artes DIFERENTES" — o número
+// entre parênteses na coluna Criativos e o conteúdo do modal (sem repetição).
+function dedupeCreatives(list: CreativeItem[]): CreativeItem[] {
+  const seen = new Set<string>(); const out: CreativeItem[] = [];
+  for (const c of list) if (!seen.has(c.dedup_key)) { seen.add(c.dedup_key); out.push(c); }
+  return out;
+}
+
 const NO_ADSET = ' __sem_conjunto__';
 
 function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platformSplit: any[] }) {
@@ -1777,13 +1786,8 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
       push(byAdset, `${c.campaign_name}|${c.adset_name}`, c);
       push(byAd, `${c.campaign_name}|${c.adset_name}|${c.ad_name}`, c);
     }
-    // Deduplica cada balde por dedup_key: contagem (= length) e galeria já saem prontas.
-    const dedupe = (list: CreativeItem[]) => {
-      const seen = new Set<string>(); const out: CreativeItem[] = [];
-      for (const c of list) { if (!seen.has(c.dedup_key)) { seen.add(c.dedup_key); out.push(c); } }
-      return out;
-    };
-    for (const m of [byCampaign, byAdset, byAd]) for (const [k, v] of m) m.set(k, dedupe(v));
+    // Baldes CRUS (1 item por anúncio ativo): a célula mostra o total e, entre parênteses, o
+    // nº de artes ÚNICAS (dedupeCreatives na hora de renderizar). Galeria = só as únicas.
     return { byCampaign, byAdset, byAd };
   }, [creatives]);
 
@@ -1791,16 +1795,18 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
   const renderCreativesCell = (items: CreativeItem[] | undefined, title: string) => {
     const list = items ?? [];
     if (list.length === 0) return <span className="text-slate-300">—</span>;
-    const hasVideo = list.some(i => i.media_type === 'video');
+    const unique = dedupeCreatives(list);            // artes DIFERENTES (sem repetição por asset)
+    const hasVideo = unique.some(i => i.media_type === 'video');
     return (
       <button
         type="button"
         onClick={() => setCreativeModal({ title, items: list })}
         className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors font-bold text-[11px]"
-        title="Ver criativos"
+        title={`${list.length} anúncio(s) ativo(s) · ${unique.length} criativo(s) único(s)`}
       >
         {hasVideo ? <Video className="w-3 h-3" /> : <Images className="w-3 h-3" />}
         {list.length}
+        <span className="font-semibold text-indigo-400">({unique.length})</span>
       </button>
     );
   };
@@ -1882,13 +1888,6 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
     (platformSplit || []).forEach((r: any) => { total += r.investment || 0; if (r.ad_platform === 'instagram') ig += r.investment || 0; });
     return total > 0 ? (ig / total) * 100 : null;
   }, [platformSplit]);
-  // Criativos ATIVOS distintos no total (dedup global por asset); a célula do rodapé abre todos.
-  const allCreativesDeduped = useMemo(() => {
-    const seen = new Set<string>(); const out: CreativeItem[] = [];
-    for (const c of creatives || []) if (!seen.has(c.dedup_key)) { seen.add(c.dedup_key); out.push(c); }
-    return out;
-  }, [creatives]);
-
   if (!rows || rows.length === 0) return null;
 
   return (
@@ -2029,7 +2028,7 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
               <td className="px-2 py-3 text-[11px] font-black text-slate-500 uppercase tracking-wider">Total</td>
               <td className="px-2 py-3" />
               <td className="px-2 py-3 text-center">
-                {allCreativesDeduped.length > 0 ? renderCreativesCell(allCreativesDeduped, 'Todos os criativos ativos') : <span className="text-slate-300">—</span>}
+                {(creatives || []).length > 0 ? renderCreativesCell(creatives || [], 'Todos os criativos ativos') : <span className="text-slate-300">—</span>}
               </td>
               <td className="px-2 py-3 text-right font-black text-slate-800">{fmtMoney(totals.investment)}</td>
               <td className="px-2 py-3 text-right font-bold text-slate-500">{igTotalPct != null ? `${igTotalPct.toFixed(0)}%` : '—'}</td>
@@ -2050,35 +2049,65 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
 
 type CreativeModalData = { title: string; items: CreativeItem[] };
 
-// Modal de galeria dos criativos ATIVOS de uma campanha/conjunto/anúncio — já deduplicados por
-// asset (o chamador passa a lista sem repetição). Vídeo = pôster + ▶ que abre o post/reel original
-// (a URL de vídeo da Meta expira; miniatura + link é robusto). Usa o primitivo ui/modal.tsx.
+// Modal de galeria dos criativos ATIVOS. Recebe a lista CRUA (1 item por anúncio) e oferece um
+// filtro Únicos × Total: "Únicos" colapsa por asset (sem repetição); "Total" mostra cada anúncio.
+// Vídeo = pôster + ▶ que abre o post/reel original (a URL de vídeo da Meta expira; link é robusto).
 function CreativesModal({ data, onClose }: { data: CreativeModalData | null; onClose: () => void }) {
   return (
     <Modal<CreativeModalData> open={!!data} onClose={onClose} data={data} size="4xl" ariaLabel="Criativos ativos">
-      {(d) => (
-        <>
-          <ModalHeader
-            title="Criativos ativos"
-            subtitle={d?.title}
-            onClose={onClose}
-            icon={<div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center shrink-0"><Images className="w-5 h-5 text-indigo-600" /></div>}
-          />
-          <ModalBody>
-            {!d?.items || d.items.length === 0 ? (
-              <div className="text-center text-slate-400 text-sm py-10">Nenhum criativo ativo.</div>
-            ) : (
-              <>
-                <p className="text-[11px] text-slate-400 -mt-1">{d.items.length} criativo(s) distinto(s) rodando agora — imagens e vídeos repetidos foram unificados.</p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                  {d.items.map((c) => <CreativeCard key={c.dedup_key} item={c} />)}
-                </div>
-              </>
-            )}
-          </ModalBody>
-        </>
-      )}
+      {(d) => <CreativesModalContent data={d} onClose={onClose} />}
     </Modal>
+  );
+}
+
+// Conteúdo em componente próprio: o estado do filtro precisa de hook, que não pode viver na
+// render-prop do Modal.
+function CreativesModalContent({ data, onClose }: { data: CreativeModalData | null; onClose: () => void }) {
+  const [view, setView] = useState<'unique' | 'total'>('unique');
+  const all = data?.items ?? [];
+  const unique = useMemo(() => dedupeCreatives(all), [all]);
+  const shown = view === 'unique' ? unique : all;
+  return (
+    <>
+      <ModalHeader
+        title="Criativos ativos"
+        subtitle={data?.title}
+        onClose={onClose}
+        icon={<div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center shrink-0"><Images className="w-5 h-5 text-indigo-600" /></div>}
+      />
+      <ModalBody>
+        {all.length === 0 ? (
+          <div className="text-center text-slate-400 text-sm py-10">Nenhum criativo ativo.</div>
+        ) : (
+          <>
+            <div className="flex items-center gap-3 -mt-1 flex-wrap">
+              <div className="inline-flex rounded-xl bg-slate-100 p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setView('unique')}
+                  className={cn("px-3 py-1 rounded-lg text-[11px] font-bold transition-colors", view === 'unique' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}
+                >
+                  Únicos ({unique.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setView('total')}
+                  className={cn("px-3 py-1 rounded-lg text-[11px] font-bold transition-colors", view === 'total' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}
+                >
+                  Total ({all.length})
+                </button>
+              </div>
+              <span className="text-[11px] text-slate-400">
+                {view === 'unique' ? 'artes diferentes (repetidas unificadas)' : 'todos os anúncios ativos (com repetições)'}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              {shown.map((c, i) => <CreativeCard key={view === 'unique' ? c.dedup_key : `${c.ad_id}-${i}`} item={c} />)}
+            </div>
+          </>
+        )}
+      </ModalBody>
+    </>
   );
 }
 

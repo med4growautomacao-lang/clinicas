@@ -1832,6 +1832,13 @@ export interface AIConfig {
   confirm_window_end?: number;
   confirm_post_enabled: boolean;
   confirm_post_message: string | null;
+  appt_reminder_enabled: boolean;
+  appt_reminder_message: string;
+  appt_reminder_lead_time: number;
+  appt_reminder_window_start?: number;
+  appt_reminder_window_end?: number;
+  appt_reminder_grace_minutes?: number;
+  appt_reminder_only_confirmed?: boolean;
   followup_enabled: boolean;
   followup_message: string;
   followup_delay: number;

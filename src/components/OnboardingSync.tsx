@@ -195,8 +195,9 @@ function ActiveAuditCard({ lead, onApplied, onOpenChat }: { lead: PendingLead; o
         ) : (
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-2.5">
             <div className="flex items-center justify-between">
-              <span className="text-teal-200 font-black text-sm flex items-center gap-1.5"><Stethoscope className="w-4 h-4" /> Paciente</span>
-              <button onClick={() => setPatientMode(false)} className="text-xs text-white/50 hover:text-white font-bold">← voltar</button>
+              <span className="text-teal-200 font-black text-sm flex items-center gap-1.5"><Stethoscope className="w-4 h-4" /> {isExisting ? 'Cliente existente' : 'Paciente'}</span>
+              {/* Cliente existente (ganho/agendado) só pode ser confirmado como paciente; sem voltar para as outras categorias. */}
+              {!isExisting && <button onClick={() => setPatientMode(false)} className="text-xs text-white/50 hover:text-white font-bold">← voltar</button>}
             </div>
             {(hasAppt || isExisting) && <p className="text-[11px] text-teal-200/90 font-semibold flex items-center gap-1 -mt-1"><CalendarCheck className="w-3.5 h-3.5" /> {!hasAppt ? 'Cliente com venda registrada — só defina IA e follow-up' : (isExisting ? 'Já na agenda — só defina IA e follow-up' : 'Datas puxadas da agenda')}</p>}
             {(!isExisting || hasAppt) && (
@@ -287,9 +288,12 @@ export function OnboardingModal({ clinicId, onComplete }: { clinicId: string; on
     return () => ro.disconnect();
   }, [phase]);
 
+  const [bulkSaving, setBulkSaving] = useState(false);
+
   const fetchPending = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase.rpc('onboarding_pending_leads', { p_clinic_id: clinicId });
+    const { data, error } = await supabase.rpc('onboarding_pending_leads', { p_clinic_id: clinicId });
+    if (error) { setLoading(false); return null; } // sinaliza falha: quem decide fluxo não confunde com "vazio"
     const rows: PendingLead[] = (data || []).map((r: any) => ({
       ticket_id: r.ticket_id, lead_id: r.lead_id, name: r.name, phone: r.phone,
       avatar_url: r.avatar_url, last_appt: r.last_appt, next_appt: r.next_appt, is_scheduled: r.is_scheduled,
@@ -297,6 +301,7 @@ export function OnboardingModal({ clinicId, onComplete }: { clinicId: string; on
     setLeads(rows);
     if (rows.length > 0) setSynced(true);
     setLoading(false);
+    return rows;
   }, [clinicId]);
 
   useEffect(() => { fetchPending(); }, [fetchPending]);
@@ -325,9 +330,24 @@ export function OnboardingModal({ clinicId, onComplete }: { clinicId: string; on
   };
   const onSkip = () => { if (leads[index]?.is_scheduled) return; goNext(index, applied); };
   const remaining = leads.length - applied.size;
-  // Cliente já existente (ganho/agendado, is_scheduled) NÃO pode ser pulado nem escapado: se sair sem decisão,
-  // some (não vai pra Sincronização, não pisca). Fresco (Sincronização) pode ficar pendente e piscar vermelho.
-  const pendingExistingIdx = () => leads.findIndex(l => l.is_scheduled && !applied.has(l.ticket_id));
+  // Cliente já existente (ganho/agendado, is_scheduled) ainda não decidido nesta sessão.
+  // NÃO pode ser pulado nem escapado: se sair sem decisão, some (não vai pra Sincronização, não pisca).
+  const isPendingExisting = (l: PendingLead) => l.is_scheduled && !applied.has(l.ticket_id);
+  const existingPending = leads.filter(isPendingExisting).length;
+  const pendingExistingIdx = () => leads.findIndex(isPendingExisting);
+  // Confirma TODOS os clientes existentes de uma vez (padrão paciente, IA/follow-up OFF), sem tocar nos tickets.
+  const confirmAllExisting = async () => {
+    setBulkSaving(true);
+    const { data, error } = await supabase.rpc('onboarding_confirm_all_existing', { p_clinic_id: clinicId });
+    setBulkSaving(false);
+    if (error || !data?.success) { showToast('Falha ao confirmar existentes: ' + (error?.message || data?.error_code || 'erro'), 'error'); return; }
+    showToast(data.count > 0 ? `${data.count} cliente(s) existente(s) confirmado(s).` : 'Nenhum cliente existente pendente.', data.count > 0 ? 'success' : 'info');
+    const rows = await fetchPending();
+    if (!rows) return; // refetch falhou: não avança o fluxo às cegas
+    setApplied(new Set());
+    setIndex(0);
+    setPhase(rows.length === 0 ? 'done' : 'audit');
+  };
   const liberate = () => {
     const idx = pendingExistingIdx();
     if (idx >= 0) {
@@ -374,6 +394,12 @@ export function OnboardingModal({ clinicId, onComplete }: { clinicId: string; on
               Começar ({leads.length}) <ArrowRight className="w-4 h-4" />
             </button>
           )}
+          {existingPending > 0 && (
+            <button onClick={confirmAllExisting} disabled={bulkSaving}
+              className="mt-3 w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm transition-all disabled:opacity-60">
+              {bulkSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Confirmar todos os {existingPending} clientes existentes
+            </button>
+          )}
           {!loading && !(synced && leads.length === 0) && (
             <button onClick={liberate} className="mt-3 text-xs text-slate-400 hover:text-slate-600 underline underline-offset-2 transition-colors">
               Liberar Comercial sem organizar agora
@@ -388,18 +414,26 @@ export function OnboardingModal({ clinicId, onComplete }: { clinicId: string; on
             className="absolute top-5 right-5 z-10 flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-white/90 hover:bg-white text-slate-700 text-xs font-bold shadow-md transition-all">
             Liberar Comercial <X className="w-3.5 h-3.5" />
           </button>
-          <div className="flex items-center gap-3 shrink-0">
-            <button onClick={() => setIndex(i => Math.max(0, i - 1))} disabled={index === 0}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/90 hover:bg-white text-slate-700 text-xs font-bold shadow-sm transition-all disabled:opacity-30 disabled:cursor-not-allowed">
-              <ArrowLeft className="w-4 h-4" /> Voltar
-            </button>
-            <span className="text-xs font-black text-slate-600 uppercase tracking-widest">faltam {remaining} de {leads.length}</span>
-            {leads[index]?.is_scheduled ? (
-              <span className="px-3 py-1.5 rounded-full bg-amber-100 text-amber-700 text-xs font-bold shadow-sm">Cliente existente · confirme para prosseguir</span>
-            ) : (
-              <button onClick={onSkip}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/90 hover:bg-white text-slate-700 text-xs font-bold shadow-sm transition-all">
-                Pular <ArrowRight className="w-4 h-4" />
+          <div className="flex flex-col items-center gap-2 shrink-0">
+            <div className="flex items-center gap-3">
+              <button onClick={() => setIndex(i => Math.max(0, i - 1))} disabled={index === 0}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/90 hover:bg-white text-slate-700 text-xs font-bold shadow-sm transition-all disabled:opacity-30 disabled:cursor-not-allowed">
+                <ArrowLeft className="w-4 h-4" /> Voltar
+              </button>
+              <span className="text-xs font-black text-slate-600 uppercase tracking-widest">faltam {remaining} de {leads.length}</span>
+              {leads[index]?.is_scheduled ? (
+                <span className="px-3 py-1.5 rounded-full bg-amber-100 text-amber-700 text-xs font-bold shadow-sm">Cliente existente · confirme para prosseguir</span>
+              ) : (
+                <button onClick={onSkip}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/90 hover:bg-white text-slate-700 text-xs font-bold shadow-sm transition-all">
+                  Pular <ArrowRight className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+            {existingPending > 0 && (
+              <button onClick={confirmAllExisting} disabled={bulkSaving}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition-all disabled:opacity-60">
+                {bulkSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Confirmar todos os {existingPending} existentes
               </button>
             )}
           </div>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
-import { Building2, Users, ArrowRight, LogIn, Loader2, X, Eye, EyeOff, Search, MoreVertical, UserPlus, Wifi, WifiOff, Settings, UserCheck, TrendingUp, UserCog, ChevronDown, Check, Trash2, MessageCircle, Globe, FileText, BarChart3, Search as SearchIcon, LayoutGrid, List as ListIcon, Stethoscope, Briefcase, AlertCircle, Plus, Building, Activity, ListTodo, Megaphone } from "lucide-react";
+import { Building2, Users, ArrowRight, LogIn, Loader2, X, Eye, EyeOff, Search, MoreVertical, UserPlus, Wifi, WifiOff, Settings, UserCheck, TrendingUp, UserCog, ChevronDown, Check, Trash2, MessageCircle, Globe, FileText, BarChart3, Search as SearchIcon, LayoutGrid, List as ListIcon, Stethoscope, Briefcase, AlertCircle, Plus, Building, Activity, ListTodo, Megaphone, RefreshCw } from "lucide-react";
 import { OrgTasks } from "./OrgTasks";
 import { OrgMetrics } from "./OrgMetrics";
 import { OrgWhatsapp } from "./OrgWhatsapp";
@@ -10,6 +10,7 @@ import { ClinicInfoModal } from "./ClinicInfoModal";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { matchesSearch } from "../lib/search";
+import { useToast } from "./ui/toast";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
 import WhatsappLogo from "../assets/logos/Logo Whatsapp.png";
@@ -95,6 +96,7 @@ function roleBadgeClass(role: string) {
 
 export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
   const { profile, userRole, activeClinicId, setActiveClinicId, setActiveClinicName } = useAuth();
+  const showToast = useToast();
   const [clinics, setClinics] = useState<Clinic[]>([]);
   const [clinicMembers, setClinicMembers] = useState<ClinicMember[]>([]);
   const [orgUsers, setOrgUsers] = useState<OrgUser[]>([]);
@@ -1522,6 +1524,28 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                           </div>
                         );
                       })}
+                    </div>
+                  </div>
+                )}
+                {editClinicTarget && (
+                  <div className="pt-1 border-t border-slate-100">
+                    <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-2">
+                      <RefreshCw className="w-3.5 h-3.5 text-teal-600" /> Refazer onboarding
+                    </p>
+                    <p className="text-[10px] text-slate-400 mb-2">Reabre a organização dos contatos que entraram no período. Desliga os follow-ups (reative depois). Nada é apagado.</p>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {[1, 3, 6].map(m => (
+                        <button key={m} type="button"
+                          onClick={async () => {
+                            if (!window.confirm(`Refazer o onboarding de "${editClinicTarget.name}" trazendo os leads que entraram nos últimos ${m} ${m === 1 ? 'mês' : 'meses'}? Nada é apagado.`)) return;
+                            const { data, error } = await supabase.rpc('onboarding_reset', { p_clinic_id: editClinicTarget.id, p_months: m });
+                            if (error || !(data as any)?.success) showToast('Falha ao refazer onboarding: ' + (error?.message || (data as any)?.error_code || 'erro'), 'error');
+                            else showToast(`Onboarding de "${editClinicTarget.name}" reaberto (últimos ${m} ${m === 1 ? 'mês' : 'meses'}). Entre no Comercial da clínica para organizar.`, 'success');
+                          }}
+                          className="py-2 rounded-lg bg-slate-100 hover:bg-teal-50 hover:text-teal-700 text-xs font-bold text-slate-600 transition-colors">
+                          últimos {m} {m === 1 ? 'mês' : 'meses'}
+                        </button>
+                      ))}
                     </div>
                   </div>
                 )}

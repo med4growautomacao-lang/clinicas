@@ -3939,6 +3939,8 @@ export function LeadKanban() {
                     const lead = ticket.lead!;
                     const isClosed = ticket.status === 'closed';
                     const isPerdido = stage.slug === 'perdido';
+                    // Lead ainda na etapa Sincronização = não auditado no onboarding. Pisca vermelho como lembrete.
+                    const isSyncStage = stage.slug === 'sincronizacao' && !isClosed;
                     const semMotivo = isPerdido && !lead.loss_reason && !ticket.loss_reason && !isClosed;
                     const lastContact = lead.last_activity_at ?? lead.created_at;
                     const frozen = isClosed || !!lead.converted_patient_id || isPerdido;
@@ -3984,6 +3986,7 @@ export function LeadKanban() {
                           isClosed && "opacity-50 grayscale-[0.5] hover:opacity-75",
                           draggedLead?.id === ticket.id && "opacity-50",
                           semMotivo && "animate-pulse",
+                          isSyncStage && "animate-pulse ring-2 ring-rose-500/80 !bg-rose-50 !border-rose-300",
                           isClosed ? "bg-slate-50/80 border-slate-200"
                             : ticket.outcome === 'ganho' ? "bg-emerald-50 border-emerald-200"
                               : ticket.outcome === 'perdido' ? "bg-rose-50 border-rose-200"

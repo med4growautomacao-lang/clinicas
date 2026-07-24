@@ -17,6 +17,7 @@ interface PendingLead {
   avatar_url: string | null;
   last_appt: string | null;   // data do último atendimento (agenda)
   next_appt: string | null;   // data do próximo agendamento (agenda)
+  is_scheduled: boolean;      // já tem consulta na agenda (paciente agendado) → não mexe no ticket
 }
 
 type Category = 'contato_geral' | 'lead_potencial' | 'lead_perdido' | 'paciente';
@@ -111,12 +112,15 @@ function CardBackdrop({ lead }: { lead: PendingLead }) {
 function ActiveAuditCard({ lead, onApplied, onOpenChat }: { lead: PendingLead; onApplied: () => void; onOpenChat: () => void }) {
   const showToast = useToast();
   const hasAppt = !!(lead.last_appt || lead.next_appt);
-  const [patientMode, setPatientMode] = useState(hasAppt);        // já abre como paciente se tem agenda
+  const isExisting = lead.is_scheduled; // já é cliente (agendado OU venda ganha) → confirma sem mexer no ticket
+  const [patientMode, setPatientMode] = useState(isExisting || hasAppt);
   const [lastDate, setLastDate] = useState(lead.last_appt || '');
   const [resolvePast, setResolvePast] = useState(true);
   const [nextDate, setNextDate] = useState(lead.next_appt || '');
-  const [ai, setAi] = useState(true);
-  const [followup, setFollowup] = useState(true);
+  // Agendado (tem consulta na agenda): IA e follow-up ambos OFF por padrão (não assumir a conversa
+  // nem re-enviar confirmação/lembrete). Contato novo: ambos ON.
+  const [ai, setAi] = useState(!lead.is_scheduled);
+  const [followup, setFollowup] = useState(!lead.is_scheduled);
   const [saving, setSaving] = useState(false);
 
   const apply = async (category: Category) => {
@@ -127,6 +131,7 @@ function ActiveAuditCard({ lead, onApplied, onOpenChat }: { lead: PendingLead; o
       p_resolve_past: resolvePast,
       p_next_appt_date: category === 'paciente' && nextDate ? nextDate : null,
       p_ai_enabled: ai, p_followup_enabled: followup,
+      p_scheduled: lead.is_scheduled,
     });
     setSaving(false);
     if (error || !data?.success) {
@@ -164,9 +169,9 @@ function ActiveAuditCard({ lead, onApplied, onOpenChat }: { lead: PendingLead; o
         className="absolute top-3 right-3 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/15 hover:bg-white/25 backdrop-blur-md text-white text-xs font-bold transition-all">
         <MessageCircle className="w-3.5 h-3.5" /> Ver conversa
       </button>
-      {hasAppt && (
+      {(hasAppt || isExisting) && (
         <div className="absolute top-3 left-3 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-teal-500/85 backdrop-blur-md text-white text-xs font-bold">
-          <CalendarCheck className="w-3.5 h-3.5" /> Tem agendamento
+          <CalendarCheck className="w-3.5 h-3.5" /> {!hasAppt ? 'Venda ganha' : (isExisting ? 'Já agendado' : 'Tem agendamento')}
         </div>
       )}
 
@@ -193,7 +198,8 @@ function ActiveAuditCard({ lead, onApplied, onOpenChat }: { lead: PendingLead; o
               <span className="text-teal-200 font-black text-sm flex items-center gap-1.5"><Stethoscope className="w-4 h-4" /> Paciente</span>
               <button onClick={() => setPatientMode(false)} className="text-xs text-white/50 hover:text-white font-bold">← voltar</button>
             </div>
-            {hasAppt && <p className="text-[11px] text-teal-200/90 font-semibold flex items-center gap-1 -mt-1"><CalendarCheck className="w-3.5 h-3.5" /> Datas puxadas da agenda</p>}
+            {(hasAppt || isExisting) && <p className="text-[11px] text-teal-200/90 font-semibold flex items-center gap-1 -mt-1"><CalendarCheck className="w-3.5 h-3.5" /> {!hasAppt ? 'Cliente com venda registrada — só defina IA e follow-up' : (isExisting ? 'Já na agenda — só defina IA e follow-up' : 'Datas puxadas da agenda')}</p>}
+            {(!isExisting || hasAppt) && (
             <div className="grid grid-cols-2 gap-2">
               <label className="flex flex-col gap-1">
                 <span className="text-[10px] font-bold text-white/60 uppercase tracking-wide">Último atend.</span>
@@ -206,6 +212,7 @@ function ActiveAuditCard({ lead, onApplied, onOpenChat }: { lead: PendingLead; o
                   className="px-2 py-1.5 text-xs bg-white/90 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300" />
               </label>
             </div>
+            )}
             {lastDate && (
               <label className="flex items-center gap-2 text-[11px] font-semibold text-white/80">
                 <input type="checkbox" checked={resolvePast} onChange={e => setResolvePast(e.target.checked)} className="accent-teal-500 w-4 h-4" />
@@ -285,7 +292,7 @@ export function OnboardingModal({ clinicId, onComplete }: { clinicId: string; on
     const { data } = await supabase.rpc('onboarding_pending_leads', { p_clinic_id: clinicId });
     const rows: PendingLead[] = (data || []).map((r: any) => ({
       ticket_id: r.ticket_id, lead_id: r.lead_id, name: r.name, phone: r.phone,
-      avatar_url: r.avatar_url, last_appt: r.last_appt, next_appt: r.next_appt,
+      avatar_url: r.avatar_url, last_appt: r.last_appt, next_appt: r.next_appt, is_scheduled: r.is_scheduled,
     }));
     setLeads(rows);
     if (rows.length > 0) setSynced(true);
@@ -316,8 +323,22 @@ export function OnboardingModal({ clinicId, onComplete }: { clinicId: string; on
     const nd = new Set(applied); nd.add(leads[index].ticket_id); setApplied(nd);
     goNext(index, nd);
   };
-  const onSkip = () => goNext(index, applied);
+  const onSkip = () => { if (leads[index]?.is_scheduled) return; goNext(index, applied); };
   const remaining = leads.length - applied.size;
+  // Cliente já existente (ganho/agendado, is_scheduled) NÃO pode ser pulado nem escapado: se sair sem decisão,
+  // some (não vai pra Sincronização, não pisca). Fresco (Sincronização) pode ficar pendente e piscar vermelho.
+  const pendingExistingIdx = () => leads.findIndex(l => l.is_scheduled && !applied.has(l.ticket_id));
+  const liberate = () => {
+    const idx = pendingExistingIdx();
+    if (idx >= 0) {
+      showToast('Clientes já existentes (ganho/agendado) precisam ser confirmados antes de liberar.', 'info');
+      setPhase('audit');
+      setIndex(idx);
+      return;
+    }
+    showToast('Comercial liberado. Os follow-ups seguem desligados, reative em Configurações › IA quando quiser.', 'info');
+    onComplete();
+  };
 
   return (
     <div className="absolute inset-0 z-40 flex items-center justify-center bg-slate-900/30 backdrop-blur-lg overflow-hidden">
@@ -332,7 +353,8 @@ export function OnboardingModal({ clinicId, onComplete }: { clinicId: string; on
           <h2 className="text-2xl font-black text-slate-900">Vamos organizar seus contatos</h2>
           <p className="text-slate-500 text-sm mt-2 leading-relaxed">
             Trouxemos suas conversas do WhatsApp. Passe por cada contato e diga o que ele é, um de cada vez.
-            Quem já tem agendamento na sua agenda vem marcado e pré-preenchido. Enquanto não terminar, o Comercial fica bloqueado.
+            Quem já tem agendamento na sua agenda vem marcado e pré-preenchido. Pode liberar o Comercial a qualquer momento:
+            quem ficar pendente aparece piscando em vermelho na coluna Sincronização para organizar depois.
           </p>
           {loading ? (
             <div className="mt-6 flex justify-center text-slate-400"><Loader2 className="w-5 h-5 animate-spin" /></div>
@@ -352,21 +374,34 @@ export function OnboardingModal({ clinicId, onComplete }: { clinicId: string; on
               Começar ({leads.length}) <ArrowRight className="w-4 h-4" />
             </button>
           )}
+          {!loading && !(synced && leads.length === 0) && (
+            <button onClick={liberate} className="mt-3 text-xs text-slate-400 hover:text-slate-600 underline underline-offset-2 transition-colors">
+              Liberar Comercial sem organizar agora
+            </button>
+          )}
         </motion.div>
       )}
 
       {phase === 'audit' && (
         <div className="w-full h-full flex flex-col items-center justify-between py-8">
+          <button onClick={liberate}
+            className="absolute top-5 right-5 z-10 flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-white/90 hover:bg-white text-slate-700 text-xs font-bold shadow-md transition-all">
+            Liberar Comercial <X className="w-3.5 h-3.5" />
+          </button>
           <div className="flex items-center gap-3 shrink-0">
             <button onClick={() => setIndex(i => Math.max(0, i - 1))} disabled={index === 0}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/90 hover:bg-white text-slate-700 text-xs font-bold shadow-sm transition-all disabled:opacity-30 disabled:cursor-not-allowed">
               <ArrowLeft className="w-4 h-4" /> Voltar
             </button>
             <span className="text-xs font-black text-slate-600 uppercase tracking-widest">faltam {remaining} de {leads.length}</span>
-            <button onClick={onSkip}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/90 hover:bg-white text-slate-700 text-xs font-bold shadow-sm transition-all">
-              Pular <ArrowRight className="w-4 h-4" />
-            </button>
+            {leads[index]?.is_scheduled ? (
+              <span className="px-3 py-1.5 rounded-full bg-amber-100 text-amber-700 text-xs font-bold shadow-sm">Cliente existente · confirme para prosseguir</span>
+            ) : (
+              <button onClick={onSkip}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/90 hover:bg-white text-slate-700 text-xs font-bold shadow-sm transition-all">
+                Pular <ArrowRight className="w-4 h-4" />
+              </button>
+            )}
           </div>
           <div ref={stageRef} className="relative flex-1 min-h-0 w-full flex items-center justify-center overflow-hidden">
             <div className="relative w-full h-[640px] flex items-center justify-center" style={{ perspective: 1600, transform: `scale(${scale})` }}>
@@ -399,6 +434,14 @@ export function OnboardingModal({ clinicId, onComplete }: { clinicId: string; on
           <div className="w-16 h-16 mx-auto rounded-2xl bg-emerald-500 flex items-center justify-center text-white mb-4"><PartyPopper className="w-8 h-8" /></div>
           <h2 className="text-2xl font-black text-slate-900">Tudo organizado! 🎉</h2>
           <p className="text-slate-500 text-sm mt-2">Seus contatos foram distribuídos no funil. O Comercial está liberado.</p>
+          <div className="mt-5 text-left rounded-2xl border border-amber-200 bg-amber-50 p-4">
+            <div className="flex items-center gap-2 text-amber-800 font-bold text-sm">
+              <Bell className="w-4 h-4" /> Follow-ups desligados
+            </div>
+            <p className="text-amber-700 text-xs mt-1.5 leading-relaxed">
+              Durante a organização, os disparos automáticos (confirmação, lembrete, reengajamento, pós-atendimento) ficaram <strong>desligados</strong> para não sair mensagem em massa. Reative-os quando quiser em <strong>Configurações › IA</strong>. Na hora de ligar, o sistema mostra quais leads serão afetados antes de disparar.
+            </p>
+          </div>
           <button onClick={onComplete} className="mt-6 w-full py-3 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-black transition-all">Ir para o Comercial</button>
         </motion.div>
       )}
@@ -409,24 +452,42 @@ export function OnboardingModal({ clinicId, onComplete }: { clinicId: string; on
 // ─────────────────────────────────────────────────────────────────────────────
 export function OnboardingGate() {
   const { activeClinicId } = useAuth();
-  const [show, setShow] = useState(false);
+  const [status, setStatus] = useState<{ should: boolean; pending: number } | null>(null);
+  const [forceOpen, setForceOpen] = useState(false);
 
   const check = useCallback(async () => {
-    if (!activeClinicId) { setShow(false); return; }
+    if (!activeClinicId) { setStatus(null); return; }
     const { data } = await supabase.rpc('onboarding_gate_status', { p_clinic_id: activeClinicId });
-    setShow(!!data?.should_onboard);
+    setStatus({ should: !!data?.should_onboard, pending: data?.pending ?? 0 });
   }, [activeClinicId]);
 
   useEffect(() => { check(); }, [check]);
 
-  if (!show || !activeClinicId) return null;
-  return (
-    <OnboardingModal
-      clinicId={activeClinicId}
-      onComplete={async () => {
-        await supabase.rpc('onboarding_mark_done', { p_clinic_id: activeClinicId });
-        setShow(false);
-      }}
-    />
-  );
+  if (!activeClinicId || !status) return null;
+
+  // Trava macia: abre no 1º ciclo (should) ou quando o usuário clica "Organizar" (forceOpen).
+  if (status.should || forceOpen) {
+    return (
+      <OnboardingModal
+        clinicId={activeClinicId}
+        onComplete={async () => {
+          await supabase.rpc('onboarding_mark_done', { p_clinic_id: activeClinicId });
+          setForceOpen(false);
+          await check();
+        }}
+      />
+    );
+  }
+
+  // Já liberado, mas sobraram pendentes na Sincronização → pílula flutuante para retomar.
+  if (status.pending > 0) {
+    return (
+      <button onClick={() => setForceOpen(true)}
+        className="absolute bottom-5 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-4 py-2.5 rounded-full bg-rose-600 hover:bg-rose-700 text-white text-sm font-black shadow-lg animate-pulse transition-all">
+        <Bell className="w-4 h-4" /> Organizar {status.pending} pendente{status.pending > 1 ? 's' : ''}
+      </button>
+    );
+  }
+
+  return null;
 }

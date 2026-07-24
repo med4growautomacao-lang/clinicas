@@ -146,40 +146,60 @@ function insertTagAtCursor(ta: HTMLTextAreaElement | null, cur: string, tag: str
   return { value: cur.slice(0, start) + tag + cur.slice(end), caret: start + tag.length };
 }
 
-function ConfirmationsView() {
+const CONFIRM_DEFAULTS = {
+  confirm_enabled: false,
+  confirm_message: "Olá {paciente}, passando para confirmar sua consulta no dia {data} às {hora}. Podemos confirmar?",
+  confirm_lead_time: 1440,
+  confirm_window_start: 6,
+  confirm_window_end: 22,
+  confirm_post_enabled: false,
+  confirm_post_message: "Perfeito, {paciente}! Sua consulta no dia {data} às {hora} está confirmada. Te aguardamos!",
+  response_style: 'cordial',
+  response_speed: 'instantanea',
+  tone: 3,
+};
+
+const REMINDER_DEFAULTS = {
+  appt_reminder_enabled: false,
+  appt_reminder_message: "Olá {paciente}! Passando para lembrar da sua consulta hoje às {hora}. Te esperamos! 😊",
+  appt_reminder_lead_time: 120,
+  appt_reminder_window_start: 8,
+  appt_reminder_window_end: 20,
+  appt_reminder_grace_minutes: 60,
+  appt_reminder_only_confirmed: false,
+};
+
+// Rascunho editável de ai_config compartilhado pelas seções de follow-up (Confirmação, Lembrete).
+// TRAVA CONTRA PERDA DE EDIÇÃO: o efeito de seed NÃO re-semeia por cima de um rascunho com edições
+// não salvas (isDirty). Sem isso, um updateAI otimista de um toggle muda aiConfig, re-dispara o
+// efeito e descartava em silêncio o que o usuário havia digitado, zerando o isDirty.
+function useFollowupDraft(defaults: Record<string, any>) {
   const { aiConfig, updateAI, loading } = useSettings();
   const aiRef = useLatest(aiConfig);
+  const [localConfig, setLocalConfig] = useState<any>(null);
+  const [isDirty, setIsDirty] = useState(false);
+  const isDirtyRef = useLatest(isDirty);
+
+  useEffect(() => {
+    if (isDirtyRef.current) return;
+    if (aiConfig) { setLocalConfig({ ...aiConfig }); setIsDirty(false); }
+    else if (!loading) { setLocalConfig({ ...defaults }); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiConfig, loading]);
+
+  const setConfig = (updates: any) => { setLocalConfig((p: any) => ({ ...p, ...updates })); setIsDirty(true); };
+
+  return { aiConfig, aiRef, updateAI, loading, localConfig, setLocalConfig, isDirty, setIsDirty, setConfig };
+}
+
+function ConfirmationsView() {
+  const { aiRef, updateAI, loading, localConfig, setLocalConfig, isDirty, setIsDirty, setConfig } = useFollowupDraft(CONFIRM_DEFAULTS);
   const guard = useActivationGuard();
   const [saving, setSaving] = useState(false);
-  const [isDirty, setIsDirty] = useState(false);
-  const [localConfig, setLocalConfig] = useState<any>(null);
   const [showValidation, setShowValidation] = useState(false);
   const [missingTags, setMissingTags] = useState<string[]>([]);
   const [tab, setTab] = useState<'before' | 'after'>('before');
   const beforeMsgRef = useRef<HTMLTextAreaElement>(null);
-
-  const setConfig = (updates: any) => { setLocalConfig((p: any) => ({ ...p, ...updates })); setIsDirty(true); };
-
-  useEffect(() => {
-    if (aiConfig) {
-      setLocalConfig({ ...aiConfig });
-      setIsDirty(false);
-    } else if (!loading) {
-      // Initialize with defaults if config doesn't exist yet
-      setLocalConfig({
-        confirm_enabled: false,
-        confirm_message: "Olá {paciente}, passando para confirmar sua consulta no dia {data} às {hora}. Podemos confirmar?",
-        confirm_lead_time: 1440,
-        confirm_window_start: 6,
-        confirm_window_end: 22,
-        confirm_post_enabled: false,
-        confirm_post_message: "Perfeito, {paciente}! Sua consulta no dia {data} às {hora} está confirmada. Te aguardamos!",
-        response_style: 'cordial',
-        response_speed: 'instantanea',
-        tone: 3
-      });
-    }
-  }, [aiConfig, loading]);
 
   if (loading || !localConfig) {
     return (
@@ -513,34 +533,12 @@ function ConfirmationsView() {
 // Lembrete de Consulta: seção própria (irmã da Confirmação). Manda 1 mensagem de texto pouco antes
 // da consulta. Complementa a Confirmação (menu de botões ~24h antes), não a substitui.
 function RemindersView() {
-  const { aiConfig, updateAI, loading } = useSettings();
-  const aiRef = useLatest(aiConfig);
+  const { aiRef, updateAI, loading, localConfig, setLocalConfig, isDirty, setIsDirty, setConfig } = useFollowupDraft(REMINDER_DEFAULTS);
   const guard = useActivationGuard();
   const [saving, setSaving] = useState(false);
-  const [isDirty, setIsDirty] = useState(false);
-  const [localConfig, setLocalConfig] = useState<any>(null);
   const [showValidation, setShowValidation] = useState(false);
   const [missingTags, setMissingTags] = useState<string[]>([]);
   const msgRef = useRef<HTMLTextAreaElement>(null);
-
-  const setConfig = (updates: any) => { setLocalConfig((p: any) => ({ ...p, ...updates })); setIsDirty(true); };
-
-  useEffect(() => {
-    if (aiConfig) {
-      setLocalConfig({ ...aiConfig });
-      setIsDirty(false);
-    } else if (!loading) {
-      setLocalConfig({
-        appt_reminder_enabled: false,
-        appt_reminder_message: "Olá {paciente}! Passando para lembrar da sua consulta hoje às {hora}. Te esperamos! 😊",
-        appt_reminder_lead_time: 120,
-        appt_reminder_window_start: 8,
-        appt_reminder_window_end: 20,
-        appt_reminder_grace_minutes: 60,
-        appt_reminder_only_confirmed: false,
-      });
-    }
-  }, [aiConfig, loading]);
 
   if (loading || !localConfig) {
     return (
@@ -732,7 +730,13 @@ function RemindersView() {
               <p className="text-[10px] font-semibold text-slate-500 uppercase pt-0.5">Envia apenas se o status for "confirmado"</p>
             </div>
             <button
-              onClick={() => { const v = !localConfig.appt_reminder_only_confirmed; setConfig({ appt_reminder_only_confirmed: v }); }}
+              onClick={() => {
+                // Auto-salva, igual ao toggle principal (grava só a chave que mudou). Antes usava
+                // setConfig e exigia clicar Salvar, o que confundia por parecer idêntico ao principal.
+                const v = !localConfig.appt_reminder_only_confirmed;
+                setLocalConfig({ ...localConfig, appt_reminder_only_confirmed: v });
+                updateAI(aiRef.current ? { appt_reminder_only_confirmed: v } : { ...localConfig, appt_reminder_only_confirmed: v });
+              }}
               className={cn("w-12 h-6 rounded-full relative transition-all shrink-0", localConfig.appt_reminder_only_confirmed ? "bg-teal-600" : "bg-slate-300")}
             >
               <div className={cn("w-4 h-4 bg-white rounded-full absolute top-1 transition-all shadow-sm", localConfig.appt_reminder_only_confirmed ? "right-1" : "left-1")}></div>

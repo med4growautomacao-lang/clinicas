@@ -16,6 +16,7 @@ import { Production } from './components/production/Production';
 import { OrcamentosCentral } from './components/orcamentos/OrcamentosCentral';
 import { MetaOficial } from './components/metaoficial/MetaOficial';
 import { AIAssistant } from './components/AIAssistant';
+import { OnboardingGate } from './components/OnboardingSync';
 
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ToastProvider } from './components/ui/toast';
@@ -102,7 +103,7 @@ function AppContent() {
 
   const tabs = [
     { id: 'dashboard',       el: <Dashboard /> },
-    { id: 'ai-secretary',    el: <AISecretary /> },
+    { id: 'ai-secretary',    el: <div className="relative h-full"><AISecretary /><OnboardingGate /></div> },
     { id: 'finance',         el: <Finance /> },
     { id: 'appointments',    el: <Appointments isActive={activeTab === 'appointments'} /> },
     { id: 'medical-records', el: <MedicalRecords /> },

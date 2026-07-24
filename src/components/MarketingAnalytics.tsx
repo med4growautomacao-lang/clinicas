@@ -2016,6 +2016,78 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
   );
 }
 
+type CreativeModalData = { title: string; items: CreativeItem[] };
+
+// Modal de galeria dos criativos ATIVOS de uma campanha/conjunto/anúncio — já deduplicados por
+// asset (o chamador passa a lista sem repetição). Vídeo = pôster + ▶ que abre o post/reel original
+// (a URL de vídeo da Meta expira; miniatura + link é robusto). Usa o primitivo ui/modal.tsx.
+function CreativesModal({ data, onClose }: { data: CreativeModalData | null; onClose: () => void }) {
+  return (
+    <Modal<CreativeModalData> open={!!data} onClose={onClose} data={data} size="4xl" ariaLabel="Criativos ativos">
+      {(d) => (
+        <>
+          <ModalHeader
+            title="Criativos ativos"
+            subtitle={d?.title}
+            onClose={onClose}
+            icon={<div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center shrink-0"><Images className="w-5 h-5 text-indigo-600" /></div>}
+          />
+          <ModalBody>
+            {!d?.items || d.items.length === 0 ? (
+              <div className="text-center text-slate-400 text-sm py-10">Nenhum criativo ativo.</div>
+            ) : (
+              <>
+                <p className="text-[11px] text-slate-400 -mt-1">{d.items.length} criativo(s) distinto(s) rodando agora — imagens e vídeos repetidos foram unificados.</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                  {d.items.map((c) => <CreativeCard key={c.dedup_key} item={c} />)}
+                </div>
+              </>
+            )}
+          </ModalBody>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+// Um card da galeria. Imagem = <img> com fallback (a URL da Meta expira). Vídeo = pôster + ▶,
+// envolto num link para o post/reel original quando houver permalink.
+function CreativeCard({ item }: { item: CreativeItem }) {
+  const [broken, setBroken] = useState(false);
+  const isVideo = item.media_type === 'video';
+  const media = (
+    <div className="relative rounded-xl overflow-hidden bg-slate-100 aspect-square border border-slate-200 group">
+      {item.image_url && !broken ? (
+        <img src={item.image_url} alt={item.ad_name} loading="lazy" onError={() => setBroken(true)} className="w-full h-full object-cover" />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center text-slate-300">
+          {isVideo ? <Video className="w-8 h-8" /> : <Images className="w-8 h-8" />}
+        </div>
+      )}
+      {isVideo && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="w-11 h-11 rounded-full bg-black/45 backdrop-blur-sm flex items-center justify-center">
+            <Play className="w-5 h-5 text-white fill-white ml-0.5" />
+          </div>
+        </div>
+      )}
+      {item.permalink && (
+        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+          <ExternalLink className="w-4 h-4 text-white drop-shadow-lg" />
+        </div>
+      )}
+    </div>
+  );
+  return (
+    <div className="flex flex-col gap-1.5">
+      {item.permalink ? (
+        <a href={item.permalink} target="_blank" rel="noopener noreferrer" className="block">{media}</a>
+      ) : media}
+      <span className="text-[11px] text-slate-500 truncate" title={item.ad_name}>{item.ad_name || '(sem nome)'}</span>
+    </div>
+  );
+}
+
 // ── Perdas por MOTIVO × campanha ──────────────────────────────────────────────────────────
 // `rows` vem no grão (campanha, motivo). Rankeamos motivo por total (somado entre campanhas)
 // e cada linha expande pra mostrar em quais campanhas aquele motivo mais aparece — o cruzamento

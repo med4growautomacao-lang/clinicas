@@ -191,11 +191,14 @@ function ConfirmationsView() {
   const handleSave = async () => {
     // Valida as variáveis da mensagem da ABA ativa — antes validava sempre a da confirmação, o que
     // deixava o lembrete sem checagem e podia abrir o aviso falando da confirmação na aba errada.
+    // Checagem CASE-SENSITIVE de propósito: o motor substitui com replace() exato em minúsculas
+    // ('{paciente}' etc.), então '{Paciente}' NÃO é trocado e chegaria cru ao paciente. Assim o
+    // aviso dispara quando a variável está com a caixa errada, em vez de passar batido.
     const target =
       tab === 'reminder' ? { msg: localConfig.appt_reminder_message || '', tags: ['{paciente}', '{hora}'] }
       : tab === 'before' ? { msg: localConfig.confirm_message || '', tags: ['{paciente}', '{data}', '{hora}'] }
       : { msg: '', tags: [] as string[] };
-    const missing = target.tags.filter(t => !target.msg.toLowerCase().includes(t));
+    const missing = target.tags.filter(t => !target.msg.includes(t));
 
     // Salva sempre; o aviso de variáveis é apenas informativo (não bloqueia).
     setSaving(true);
@@ -420,9 +423,9 @@ function ConfirmationsView() {
                 </label>
                 <div className="flex items-center gap-4">
                   <input
-                    type="number"
-                    value={localConfig.appt_reminder_lead_time || ""}
-                    onChange={(e) => setConfig({ appt_reminder_lead_time: parseInt(e.target.value) || 0 })}
+                    type="number" min={1}
+                    value={localConfig.appt_reminder_lead_time ?? 120}
+                    onChange={(e) => setConfig({ appt_reminder_lead_time: Math.max(1, parseInt(e.target.value) || 1) })}
                     className="w-28 px-4 py-2 border border-slate-200 rounded-lg font-bold text-teal-700 focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all"
                     placeholder="120"
                   />
@@ -499,6 +502,14 @@ function ConfirmationsView() {
                 <p className="text-[11px] text-slate-400 font-medium pl-1">
                   Fora desse horário, o lembrete espera a próxima janela. Se a consulta chegar antes disso, ele é descartado (não envia atrasado).
                 </p>
+                {(localConfig.appt_reminder_window_start ?? 8) >= (localConfig.appt_reminder_window_end ?? 20) && (
+                  <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 border border-amber-100">
+                    <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                    <p className="text-[11px] text-amber-700 font-medium leading-relaxed">
+                      O início da janela está igual ou depois do fim, então nenhum lembrete será enviado. O horário inicial precisa ser menor que o final.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Tolerância de atraso (grace) */}
@@ -508,9 +519,9 @@ function ConfirmationsView() {
                 </label>
                 <div className="flex items-center gap-3">
                   <input
-                    type="number" min={0} max={720}
+                    type="number" min={1} max={720}
                     value={localConfig.appt_reminder_grace_minutes ?? 60}
-                    onChange={(e) => setConfig({ appt_reminder_grace_minutes: Math.min(720, Math.max(0, parseInt(e.target.value) || 0)) })}
+                    onChange={(e) => setConfig({ appt_reminder_grace_minutes: Math.min(720, Math.max(1, parseInt(e.target.value) || 1)) })}
                     className="w-24 px-4 py-2 border border-slate-200 rounded-lg font-bold text-teal-700 text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all"
                   />
                   <span className="text-[11px] font-bold text-slate-400 uppercase">min</span>

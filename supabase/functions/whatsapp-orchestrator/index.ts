@@ -277,7 +277,9 @@ async function ensureUazapiWebhooks(
   const staleUrl = route === 'org' ? '' : route === 'hub' ? N8N_INBOUND_URL : WA_INBOUND_URL;
 
   const desired = [
-    { url: eventsUrl, events: ['connection'], excludeMessages: [] as string[] },
+    // 'history': ao conectar, a uazapi captura o histórico recente no store dela (base do
+    // onboarding). Cai no uazapi-events, que ignora tudo que não é 'connection' — não vaza.
+    { url: eventsUrl, events: ['connection', 'history'], excludeMessages: [] as string[] },
     ...(messagesUrl                            ? [{ url: messagesUrl,        events: ['messages'], excludeMessages: ['wasSentByApi'] }] : []),
     ...(route !== 'org' && CTWA_TRACKING_URL   ? [{ url: CTWA_TRACKING_URL,  events: ['messages'], excludeMessages: ['wasSentByApi'] }] : []),
   ];
@@ -308,8 +310,9 @@ async function ensureUazapiWebhooks(
       continue;
     }
 
+    // Mantem o primeiro, apaga duplicatas.
+    const kept = matches[0];
     if (matches.length > 1) {
-      // Mantem o primeiro, apaga os outros
       const removedIds: string[] = [];
       for (let i = 1; i < matches.length; i++) {
         const res = await uazapi('/webhook', {
@@ -321,7 +324,20 @@ async function ensureUazapiWebhooks(
       }
       if (removedIds.length > 0) removed_duplicates.push({ url: want.url, ids: removedIds });
     }
-    // matches.length === 1 -> idempotente, nao faz nada
+
+    // Reconcilia eventos: um webhook já existente pode não ter todos os eventos desejados
+    // (ex.: instância antiga, criada antes do 'history'). Se faltar algum, recria com o
+    // conjunto certo — assim toda reconexão passa a capturar histórico, não só as novas.
+    const haveEvents: string[] = Array.isArray(kept.events) ? kept.events : [];
+    if (want.events.some((e) => !haveEvents.includes(e))) {
+      await uazapi('/webhook', { method: 'POST', token: api_token, body: { action: 'delete', id: kept.id } });
+      await uazapi('/webhook', {
+        method: 'POST',
+        token: api_token,
+        body: { action: 'add', enabled: true, url: want.url, events: want.events, excludeMessages: want.excludeMessages },
+      });
+      created.push(`${want.url} (eventos reconciliados)`);
+    }
   }
 
   return { created, removed_duplicates, removed_stale };

@@ -72,3 +72,11 @@ enabled = true
 # Chamada pelo frontend (Super Admin) com o JWT do usuario; a funcao valida is_super_admin por dentro.
 verify_jwt = true
 entrypoint = "./functions/ai-sandbox/index.ts"
+
+[functions.whatsapp-orchestrator]
+enabled = true
+# Máquina de estados da conexão WhatsApp; chamada sem JWT (frontend via whatsapp-bridge/proxy).
+# O valor real em produção é false — fixado aqui para um redeploy NÃO ligar o JWT e derrubar a
+# conexão de todas as clínicas.
+verify_jwt = false
+entrypoint = "./functions/whatsapp-orchestrator/index.ts"

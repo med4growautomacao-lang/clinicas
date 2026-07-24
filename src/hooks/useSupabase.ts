@@ -1103,6 +1103,71 @@ export function useCampaignPlatformSplit(start: string | null, end: string | nul
   );
 }
 
+// Criativos ATIVOS (rodando AGORA) da clínica no Meta Ads — alimenta a coluna "Criativos" + o
+// modal de galeria em Investimento por Campanha. A arte NÃO existe no banco (marketing_spend_breakdown
+// só tem gasto por campanha/conjunto/anúncio); vem AO VIVO da Graph pela edge meta-creatives, e o
+// front deduplica por dedup_key (mesma imagem/vídeo conta 1×). Escopo = AGORA (effective_status
+// ACTIVE), independente do range de datas da tela — por isso o hook não recebe start/end.
+export interface CreativeItem {
+  campaign_id: string;
+  campaign_name: string;
+  adset_id: string;
+  adset_name: string;
+  ad_id: string;
+  ad_name: string;
+  media_type: 'image' | 'video';
+  dedup_key: string;         // video_id | image_hash | caminho da thumb — chave de deduplicação
+  image_url: string | null;  // arte cheia (imagem) ou pôster (vídeo)
+  permalink: string | null;  // post/reel original (abre em nova aba)
+  cta: string | null;
+}
+export function useMetaCreatives(): { creatives: CreativeItem[]; loading: boolean } {
+  const { activeClinicId } = useAuth();
+  const [creatives, setCreatives] = useState<CreativeItem[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!activeClinicId) { setCreatives([]); return; }
+    // SWR: pinta o cache (5min) na hora e revalida em 2º plano — evita chamar a Graph a cada
+    // troca de aba. Cacheia inclusive lista VAZIA (clínica sem Meta), que também não deve rechamar.
+    const cacheKey = `meta_creatives|${activeClinicId}`;
+    const cached = getCached<CreativeItem[]>(cacheKey);
+    if (cached) setCreatives(cached);
+    let cancelled = false;
+    setLoading(!cached);
+
+    (async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke('meta-creatives', {
+          body: { clinic_id: activeClinicId },
+        });
+        if (cancelled) return;
+        if (error) {
+          // status não-2xx: o detalhe vem em error.context (Response), não em error.message.
+          let detail = error.message;
+          try { const b = await (error as any).context?.json?.(); if (b?.detail || b?.error) detail = b.detail || b.error; } catch { /* usa message */ }
+          logSystemError('META_CREATIVES_FETCH_FAIL', `meta-creatives: falha ao buscar criativos — ${detail}`, activeClinicId, { fn: 'meta-creatives', error: detail }, 'error');
+          if (!cached) setCreatives([]);   // erro não apaga o que já estava na tela
+          return;
+        }
+        const rows: CreativeItem[] = Array.isArray(data?.creatives) ? data.creatives : [];
+        setCreatives(rows);
+        setCached(cacheKey, rows);
+      } catch (e: any) {
+        if (cancelled) return;
+        logSystemError('META_CREATIVES_FETCH_FAIL', 'meta-creatives: exceção ao buscar criativos', activeClinicId, { fn: 'meta-creatives', error: e?.message ?? String(e) }, 'error');
+        if (!cached) setCreatives([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [activeClinicId]);
+
+  return { creatives, loading };
+}
+
 // Perdas por MOTIVO × campanha (RPC marketing_loss_reasons). Mesmo coorte de entrada das
 // outras RPCs de investimento. campaign_investment/campaign_leads/campaign_losses vêm
 // REPETIDOS em cada linha de motivo daquela campanha (não são por-motivo) — servem de

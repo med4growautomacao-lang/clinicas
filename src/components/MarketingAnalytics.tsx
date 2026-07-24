@@ -7,6 +7,7 @@ import {
   CardTitle,
 } from "./ui/card";
 import { Button } from "./ui/button";
+import { Modal, ModalHeader, ModalBody } from "./ui/modal";
 import {
   BarChart3,
   TrendingUp,
@@ -34,7 +35,11 @@ import {
   CheckCircle2,
   FileText,
   Store,
-  AlertTriangle
+  AlertTriangle,
+  Images,
+  Video,
+  Play,
+  ExternalLink
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -54,7 +59,7 @@ import {
 import { cn } from "@/src/lib/utils";
 import { TrendBarChart, fmtByType } from "./TrendBarChart";
 import { motion, AnimatePresence } from "framer-motion";
-import { useMarketing, MarketingData, useFunnelStages, useUtmFunnelCohort, useFunnelCohort, useMarketingKpis, MarketingKpiRow, useCampaignInvestment, useCampaignPlatformSplit, useLossReasons } from "../hooks/useSupabase";
+import { useMarketing, MarketingData, useFunnelStages, useUtmFunnelCohort, useFunnelCohort, useMarketingKpis, MarketingKpiRow, useCampaignInvestment, useCampaignPlatformSplit, useLossReasons, useMetaCreatives, type CreativeItem } from "../hooks/useSupabase";
 import { ReportQuick } from "./ReportQuick";
 import {
   format,
@@ -1755,6 +1760,67 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
   const toggleCampaign = (k: string) => setOpenCampaigns(s => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const toggleAdset = (k: string) => setOpenAdsets(s => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
 
+  // Criativos ATIVOS (rodando agora) — coluna "Criativos" + modal de galeria. Deduplicados por
+  // asset (image_hash/video_id, no dedup_key): vários anúncios usam a MESMA arte, e a pergunta é
+  // "quantas artes diferentes", não "quantos anúncios". Casamento com a tabela por NOME (campanha/
+  // conjunto vêm da mesma fonte, a Meta). Só Meta tem criativo nesta fase.
+  const { creatives } = useMetaCreatives();
+  const [creativeModal, setCreativeModal] = useState<{ title: string; items: CreativeItem[] } | null>(null);
+
+  const { byCampaign: creativesByCampaign, byAdset: creativesByAdset, byAd: creativesByAd } = useMemo(() => {
+    const byCampaign = new Map<string, CreativeItem[]>();
+    const byAdset = new Map<string, CreativeItem[]>();
+    const byAd = new Map<string, CreativeItem[]>();
+    const push = (m: Map<string, CreativeItem[]>, k: string, c: CreativeItem) => { const a = m.get(k); if (a) a.push(c); else m.set(k, [c]); };
+    for (const c of creatives || []) {
+      push(byCampaign, c.campaign_name, c);
+      push(byAdset, `${c.campaign_name}|${c.adset_name}`, c);
+      push(byAd, `${c.campaign_name}|${c.adset_name}|${c.ad_name}`, c);
+    }
+    // Deduplica cada balde por dedup_key: contagem (= length) e galeria já saem prontas.
+    const dedupe = (list: CreativeItem[]) => {
+      const seen = new Set<string>(); const out: CreativeItem[] = [];
+      for (const c of list) { if (!seen.has(c.dedup_key)) { seen.add(c.dedup_key); out.push(c); } }
+      return out;
+    };
+    for (const m of [byCampaign, byAdset, byAd]) for (const [k, v] of m) m.set(k, dedupe(v));
+    return { byCampaign, byAdset, byAd };
+  }, [creatives]);
+
+  // Pílula com a contagem de criativos distintos (campanha/conjunto); clique abre o modal.
+  const renderCreativesCell = (items: CreativeItem[] | undefined, title: string) => {
+    const list = items ?? [];
+    if (list.length === 0) return <span className="text-slate-300">—</span>;
+    const hasVideo = list.some(i => i.media_type === 'video');
+    return (
+      <button
+        type="button"
+        onClick={() => setCreativeModal({ title, items: list })}
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors font-bold text-[11px]"
+        title="Ver criativos"
+      >
+        {hasVideo ? <Video className="w-3 h-3" /> : <Images className="w-3 h-3" />}
+        {list.length}
+      </button>
+    );
+  };
+  // Anúncio tem 1 criativo — botão só de ícone (a imagem carrega no modal, não eager na tabela).
+  const renderAdCreativeCell = (items: CreativeItem[] | undefined, title: string) => {
+    const list = items ?? [];
+    if (list.length === 0) return <span className="text-slate-300">—</span>;
+    const hasVideo = list.some(i => i.media_type === 'video');
+    return (
+      <button
+        type="button"
+        onClick={() => setCreativeModal({ title, items: list })}
+        className="inline-flex items-center justify-center w-6 h-6 rounded-md bg-slate-50 text-slate-400 hover:bg-indigo-50 hover:text-indigo-500 transition-colors"
+        title="Ver criativo"
+      >
+        {hasVideo ? <Video className="w-3.5 h-3.5" /> : <Images className="w-3.5 h-3.5" />}
+      </button>
+    );
+  };
+
   // % Instagram é só do lado do GASTO — o Meta não permite saber em qual rede um lead
   // específico clicou (a granularidade existe só no agregado da campanha). Só aparece na
   // linha de campanha, não em conjunto/anúncio.
@@ -1835,6 +1901,7 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
             <tr className="text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
               <th className="text-left px-2 py-2">Campanha / Conjunto / Anúncio</th>
               <th className="text-center px-2 py-2">Origem</th>
+              <th className="text-center px-2 py-2">Criativos</th>
               <th className="text-right px-2 py-2">Investimento</th>
               <th className="text-right px-2 py-2">% Instagram</th>
               <th className="text-right px-2 py-2">Leads</th>
@@ -1868,6 +1935,9 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
                     <td className="px-2 py-2.5 text-center">
                       <img src={camp.platform === 'meta_ads' ? MetaLogo : GoogleLogo} alt={camp.platform} className="w-4 h-4 inline-block object-contain opacity-80" />
                     </td>
+                    <td className="px-2 py-2.5 text-center">
+                      {camp.platform === 'meta_ads' ? renderCreativesCell(creativesByCampaign.get(camp.key), camp.label) : <span className="text-slate-300">—</span>}
+                    </td>
                     <td className="px-2 py-2.5 text-right font-bold text-slate-800">{fmtMoney(camp.investment)}</td>
                     <td className="px-2 py-2.5 text-right text-slate-500">{igShare != null ? `${igShare.toFixed(0)}%` : '—'}</td>
                     <td className="px-2 py-2.5 text-right text-slate-700">{camp.leads}</td>
@@ -1898,6 +1968,9 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
                             </button>
                           </td>
                           <td className="px-2 py-2" />
+                          <td className="px-2 py-2 text-center">
+                            {camp.platform === 'meta_ads' ? renderCreativesCell(creativesByAdset.get(`${camp.key}|${adset.key}`), `${camp.label} › ${adset.label}`) : <span className="text-slate-300">—</span>}
+                          </td>
                           <td className="px-2 py-2 text-right text-slate-700">{fmtMoney(adset.investment)}</td>
                           <td className="px-2 py-2 text-right text-slate-300">—</td>
                           <td className="px-2 py-2 text-right text-slate-600">{adset.leads}</td>
@@ -1913,6 +1986,9 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
                               <span className="truncate text-slate-500 text-[13px]" title={ad.label}>{ad.label}</span>
                             </td>
                             <td className="px-2 py-2" />
+                            <td className="px-2 py-2 text-center">
+                              {camp.platform === 'meta_ads' ? renderAdCreativeCell(creativesByAd.get(`${camp.key}|${adset.key}|${ad.key}`), `${camp.label} › ${adset.label} › ${ad.label}`) : <span className="text-slate-300">—</span>}
+                            </td>
                             <td className="px-2 py-2 text-right text-slate-600 text-[13px]">{fmtMoney(ad.investment)}</td>
                             <td className="px-2 py-2 text-right text-slate-300">—</td>
                             <td className="px-2 py-2 text-right text-slate-500 text-[13px]">{ad.leads}</td>
@@ -1934,6 +2010,8 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
       <p className="text-[10px] text-slate-400 mt-4">
         Ganho/Perdido aqui são do <b>coorte de entrada</b> (leads que ENTRARAM nesta janela e o desfecho atual do ticket) — por isso costumam vir <b>menores</b> que o "Ganho" do Funil de Vendas acima, que conta pela <b>data da conversão</b> (pode incluir leads que entraram bem antes). Os dois estão certos: são perguntas diferentes. Aqui a pergunta é "dos leads que este investimento gerou, quantos já compraram" — a única forma de o CAC ficar ligado ao gasto real do período. Em janelas recentes, o coorte ainda está maturando (leads podem converter depois) — o CAC tende a cair conforme os dias passam. Cada nível (campanha/conjunto/anúncio) soma investimento e leads primeiro, e SÓ DEPOIS calcula CPL/CAC — nunca é a soma dos CPL/CAC dos itens abaixo. "—" = sem investimento sincronizado para esse item no período (não é gasto zero); campanhas com sincronização parcial (alguns anúncios ainda sem dado) mostram a soma do que já foi sincronizado.
       </p>
+
+      <CreativesModal data={creativeModal} onClose={() => setCreativeModal(null)} />
     </Card>
   );
 }

@@ -80,3 +80,9 @@ enabled = true
 # conexão de todas as clínicas.
 verify_jwt = false
 entrypoint = "./functions/whatsapp-orchestrator/index.ts"
+
+[functions.onboarding-rehost-avatars]
+enabled = true
+# Disparada pelo pg_cron (sem JWT) para re-hospedar avatares efêmeros do WhatsApp.
+verify_jwt = false
+entrypoint = "./functions/onboarding-rehost-avatars/index.ts"

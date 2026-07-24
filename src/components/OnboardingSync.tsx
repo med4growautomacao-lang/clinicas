@@ -5,7 +5,7 @@ import { useToast } from './ui/toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Loader2, RefreshCw, UserX, MessageCircle, Stethoscope, HeartCrack,
-  Bot, Bell, Check, MessagesSquare, X, ArrowRight, ArrowLeft, Sparkles, PartyPopper, CalendarCheck,
+  Bot, Bell, Check, MessagesSquare, X, ArrowRight, ArrowLeft, Sparkles, PartyPopper, CalendarCheck, History,
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 
@@ -264,6 +264,66 @@ function positionFor(offset: number) {
   return { x: 710, rotateY: -46, scale: 0.62, opacity: 0.12, zIndex: 10 };
 }
 
+// Puxa 90 dias de histórico em segundo plano (deep-sync) + barrinha de progresso.
+function DeepSyncProgress({ clinicId }: { clinicId: string }) {
+  const showToast = useToast();
+  const [st, setSt] = useState<any>(null);
+  const [starting, setStarting] = useState(false);
+  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const poll = useCallback(async () => {
+    const { data } = await supabase.rpc('onboarding_deep_sync_status', { p_clinic_id: clinicId });
+    setSt(data);
+  }, [clinicId]);
+
+  useEffect(() => { poll(); return () => { if (timer.current) clearInterval(timer.current); }; }, [poll]);
+  useEffect(() => {
+    const running = st?.exists && (st.status === 'pending' || st.status === 'running');
+    if (running && !timer.current) timer.current = setInterval(poll, 5000);
+    else if (!running && timer.current) { clearInterval(timer.current); timer.current = null; }
+  }, [st, poll]);
+
+  const start = async () => {
+    setStarting(true);
+    const { data, error } = await supabase.rpc('onboarding_deep_sync_start', { p_clinic_id: clinicId });
+    setStarting(false);
+    if (error || !data?.success) { showToast('Falha ao iniciar o histórico: ' + (error?.message || data?.error_code || 'erro'), 'error'); return; }
+    showToast('Puxando 90 dias de histórico em segundo plano.', 'success');
+    poll();
+  };
+
+  const running = st?.exists && (st.status === 'pending' || st.status === 'running');
+  const done = st?.exists && st.status === 'done';
+
+  return (
+    <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-3.5 text-left">
+      {running ? (
+        <>
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5"><History className="w-3.5 h-3.5 text-teal-600" /> Puxando histórico de 90 dias…</span>
+            <span className="text-xs font-black text-teal-700">{st.percent}%</span>
+          </div>
+          <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
+            <div className="h-full bg-teal-500 transition-all" style={{ width: `${st.percent}%` }} />
+          </div>
+          <p className="text-[10px] text-slate-400 mt-1.5">Em segundo plano; pode organizar enquanto chega. {st.chats_done}/{st.chats_total} conversas.</p>
+        </>
+      ) : (
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-xs font-bold text-slate-600 flex items-center gap-1.5"><History className="w-3.5 h-3.5 text-teal-600" /> {done ? 'Histórico de 90 dias concluído' : 'Puxar histórico de 90 dias'}</p>
+            <p className="text-[10px] text-slate-400">{done ? 'As conversas antigas já foram trazidas.' : 'Traz conversas mais antigas em segundo plano (depende do celular estar online).'}</p>
+          </div>
+          <button onClick={start} disabled={starting}
+            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold transition-all disabled:opacity-60">
+            {starting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <History className="w-3.5 h-3.5" />} {done ? 'Puxar de novo' : 'Puxar 90 dias'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function OnboardingModal({ clinicId, onComplete }: { clinicId: string; onComplete: () => void }) {
   const showToast = useToast();
   const [phase, setPhase] = useState<'intro' | 'audit' | 'done'>('intro');
@@ -376,6 +436,14 @@ export function OnboardingModal({ clinicId, onComplete }: { clinicId: string; on
             Quem já tem agendamento na sua agenda vem marcado e pré-preenchido. Pode liberar o Comercial a qualquer momento:
             quem ficar pendente aparece piscando em vermelho na coluna Sincronização para organizar depois.
           </p>
+          {synced && (
+            <div className="mt-4 text-left rounded-2xl border border-amber-200 bg-amber-50 p-3.5 flex items-start gap-2">
+              <Bell className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+              <p className="text-amber-800 text-xs leading-relaxed">
+                <strong>Follow-ups desativados.</strong> Os disparos automáticos (confirmação, lembrete, reengajamento, pós-atendimento) foram desligados durante a organização, para não sair mensagem em massa. No final, avisamos para você reativá-los.
+              </p>
+            </div>
+          )}
           {loading ? (
             <div className="mt-6 flex justify-center text-slate-400"><Loader2 className="w-5 h-5 animate-spin" /></div>
           ) : !synced ? (
@@ -394,6 +462,7 @@ export function OnboardingModal({ clinicId, onComplete }: { clinicId: string; on
               Começar ({leads.length}) <ArrowRight className="w-4 h-4" />
             </button>
           )}
+          {synced && <DeepSyncProgress clinicId={clinicId} />}
           {existingPending > 0 && (
             <button onClick={confirmAllExisting} disabled={bulkSaving}
               className="mt-3 w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm transition-all disabled:opacity-60">

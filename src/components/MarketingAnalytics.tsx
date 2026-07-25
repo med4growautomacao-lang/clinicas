@@ -1761,7 +1761,7 @@ function dedupeCreatives(list: CreativeItem[]): CreativeItem[] {
   return out;
 }
 
-const NO_ADSET = ' __sem_conjunto__';
+const NO_ADSET = '__sem_conjunto__';
 
 function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platformSplit: any[] }) {
   const [openCampaigns, setOpenCampaigns] = useState<Set<string>>(new Set());
@@ -1888,6 +1888,18 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
     (platformSplit || []).forEach((r: any) => { total += r.investment || 0; if (r.ad_platform === 'instagram') ig += r.investment || 0; });
     return total > 0 ? (ig / total) * 100 : null;
   }, [platformSplit]);
+  // Criativos do TOTAL: só das campanhas presentes no período (mesmo recorte de investment/leads das
+  // linhas), deduplicados por asset. Sem o filtro, o Total contaria criativos de campanhas ativas AGORA
+  // que não tiveram gasto nem lead na janela — número que não fecha com a soma das pílulas visíveis.
+  const totalCreatives = useMemo(() => {
+    const doPeriodo = new Set((rows || []).map((r: any) => r.campaign_name));
+    const seen = new Set<string>(); const out: CreativeItem[] = [];
+    for (const c of creatives || []) {
+      if (!doPeriodo.has(c.campaign_name) || seen.has(c.dedup_key)) continue;
+      seen.add(c.dedup_key); out.push(c);
+    }
+    return out;
+  }, [creatives, rows]);
   if (!rows || rows.length === 0) return null;
 
   return (
@@ -2028,7 +2040,7 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
               <td className="px-2 py-3 text-[11px] font-black text-slate-500 uppercase tracking-wider">Total</td>
               <td className="px-2 py-3" />
               <td className="px-2 py-3 text-center">
-                {(creatives || []).length > 0 ? renderCreativesCell(creatives || [], 'Todos os criativos ativos') : <span className="text-slate-300">—</span>}
+                {totalCreatives.length > 0 ? renderCreativesCell(totalCreatives, 'Criativos ativos das campanhas do período') : <span className="text-slate-300">—</span>}
               </td>
               <td className="px-2 py-3 text-right font-black text-slate-800">{fmtMoney(totals.investment)}</td>
               <td className="px-2 py-3 text-right font-bold text-slate-500">{igTotalPct != null ? `${igTotalPct.toFixed(0)}%` : '—'}</td>
@@ -2041,6 +2053,9 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
           </tfoot>
         </table>
       </div>
+      <p className="text-[10px] text-slate-400 mt-4">
+        Ganho/Perdido aqui são do <b>coorte de entrada</b> (leads que ENTRARAM nesta janela e o desfecho atual do ticket) — por isso costumam vir <b>menores</b> que o "Ganho" do Funil de Vendas acima, que conta pela <b>data da conversão</b> (pode incluir leads que entraram bem antes). Os dois estão certos: são perguntas diferentes. Aqui a pergunta é "dos leads que este investimento gerou, quantos já compraram" — a única forma de o CAC ficar ligado ao gasto real do período. Em janelas recentes, o coorte ainda está maturando (leads podem converter depois) — o CAC tende a cair conforme os dias passam. Cada nível (campanha/conjunto/anúncio) soma investimento e leads primeiro, e SÓ DEPOIS calcula CPL/CAC — nunca é a soma dos CPL/CAC dos itens abaixo. "—" = sem investimento sincronizado para esse item no período (não é gasto zero); campanhas com sincronização parcial (alguns anúncios ainda sem dado) mostram a soma do que já foi sincronizado.
+      </p>
 
       <CreativesModal data={creativeModal} onClose={() => setCreativeModal(null)} />
     </Card>

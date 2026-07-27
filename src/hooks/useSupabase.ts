@@ -61,6 +61,19 @@ function warnPostgrestClamp(hook: string, rows: number, clinicId?: string | null
   logSystemError('POSTGREST_CLAMP', `${hook}: resposta bateu o max_rows (${rows}) — dados possivelmente truncados`, clinicId, { hook, rows });
 }
 
+// Falha de fetch de painel REPETE muito: cada mount, cada troca de filtro, cada foco de aba e
+// cada refetch por realtime/polling. Sem trava, um usuário legitimamente barrado (clínica inativa,
+// vínculo removido → 42501 do assert_clinic_access) viraria uma linha de log por evento e afogaria
+// a Central. Mesma régua do warnPostgrestClamp acima: 6h por código+clínica.
+const _fetchFailWarned = new Map<string, number>();
+export function logFetchFailThrottled(code: string, title: string, clinicId?: string | null, context?: Record<string, any>) {
+  const key = `${code}|${clinicId ?? ''}`;
+  const last = _fetchFailWarned.get(key) || 0;
+  if (Date.now() - last < 6 * 3600_000) return;
+  _fetchFailWarned.set(key, Date.now());
+  logSystemError(code, title, clinicId, context, 'error');
+}
+
 // ==========================================
 // DOCTORS
 // ==========================================
@@ -1605,8 +1618,24 @@ export function useDashboardStats(dateRange?: { start: string; end: string }, or
       setCached(cacheKey, mapped);   // cache pode gravar mesmo se superada (chave é correta)
       if (gen !== genRef.current) return;   // superada por uma chamada mais nova → não pinta
       setData(mapped);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao carregar estatísticas do dashboard:', error);
+      // console.error sozinho é invisível (CLAUDE.md). O 42501 do assert_clinic_access
+      // (403 no PostgREST) chega aqui e vira "SEM DADOS" na Visão Geral sem deixar rastro —
+      // que é justamente o sintoma que essa instrumentação existe para acabar.
+      // Só registra se ESTA chamada ainda é a corrente: numa rajada de troca de filtro as
+      // anteriores são abandonadas de propósito e não são falha de verdade.
+      if (gen === genRef.current) {
+        const negadoPorGuard = error?.code === '42501' || /42501|acesso negado/i.test(error?.message ?? '');
+        logFetchFailThrottled(
+          negadoPorGuard ? 'DASH_ACCESS_DENIED' : 'DASH_STATS_FETCH_FAIL',
+          negadoPorGuard
+            ? 'get_dashboard_stats: acesso negado pelo guard de tenant — Visão Geral ficou SEM DADOS'
+            : 'get_dashboard_stats: falha ao carregar — Visão Geral manteve o estado anterior',
+          activeClinicId,
+          { fn: 'get_dashboard_stats', code: error?.code ?? null, error: error?.message ?? String(error) },
+        );
+      }
     } finally {
       if (gen === genRef.current && showSpinner) setLoading(false);
     }

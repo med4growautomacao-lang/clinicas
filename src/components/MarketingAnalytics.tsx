@@ -130,26 +130,74 @@ const readCfg = (base: string): string | null =>
   localStorage.getItem(scopeCfgKey(base)) ?? localStorage.getItem(base);
 const writeCfg = (base: string, value: string) => localStorage.setItem(scopeCfgKey(base), value);
 
-const loadVisibleMetrics = (base: string): string[] => {
-  const saved = readCfg(base);
-  return saved ? JSON.parse(saved) : METRICS_CONFIG.map(m => m.id);
+// O que está no localStorage não é confiável: escrita truncada, edição manual, extensão do
+// navegador. Um JSON.parse cru aqui derruba a RENDER INTEIRA da seção (estes loaders rodam dentro
+// de initializer de useState), e aí o usuário não tem nem como limpar a chave pela UI. Todo loader
+// passa por aqui e cai no default em vez de quebrar.
+const parseCfgArray = (raw: string | null, fallback: string[]): string[] => {
+  if (!raw) return fallback;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : fallback;
+  } catch {
+    return fallback;
+  }
 };
+
+const loadVisibleMetrics = (base: string): string[] =>
+  parseCfgArray(readCfg(base), METRICS_CONFIG.map(m => m.id));
 const loadMetricsOrder = (base: string): string[] => {
   const initial = METRICS_CONFIG.map(m => m.id);
   const saved = readCfg(base);
   if (!saved) return initial;
-  const parsed: string[] = JSON.parse(saved);
+  const parsed = parseCfgArray(saved, initial);
   const valid = parsed.filter((id) => initial.includes(id));
   const missing = initial.filter((id) => !valid.includes(id));
   return [...valid, ...missing];
 };
-const loadFunnelOrder = (): string[] => {
-  const saved = readCfg('mkt_funnel_order');
-  return saved ? JSON.parse(saved) : [];
+// Colunas configuráveis da tabela "Investimento por Campanha". A 1ª coluna (nome da
+// campanha/conjunto/anúncio) NÃO entra aqui: é o identificador da linha, sem ela a tabela
+// não faz sentido. Ordem fixa (a tabela é uma grade, não cards) — aqui só se liga/desliga.
+// `as const` (e não `: { id: string }[]`) de propósito: é o que faz CampaignColId ser a UNIÃO dos
+// ids literais. Com a anotação larga, `(typeof CAMPAIGN_COLUMNS)[number]['id']` colapsa para
+// `string` e o vis() abaixo deixa de pegar typo nenhum.
+const CAMPAIGN_COLUMNS = [
+  { id: 'origem',       label: 'Origem' },
+  { id: 'criativos',    label: 'Criativos' },
+  { id: 'investimento', label: 'Investimento' },
+  { id: 'instagram',    label: '% Instagram' },
+  { id: 'leads',        label: 'Leads' },
+  { id: 'ganho',        label: 'Ganho' },
+  { id: 'perdido',      label: 'Perdido' },
+  { id: 'cpl',          label: 'CPL' },
+  { id: 'cac',          label: 'CAC' },
+] as const satisfies readonly { id: string; label: string }[];
+type CampaignColId = (typeof CAMPAIGN_COLUMNS)[number]['id'];
+const loadCampaignColumns = (): string[] => {
+  const all: string[] = CAMPAIGN_COLUMNS.map(c => c.id);
+  const saved = readCfg('mkt_campaign_cols');
+  if (!saved) return all;
+  // Descarta id que não existe mais (coluna renomeada/removida) E acrescenta os que ainda não
+  // estão na lista salva. Sem o segundo passo, coluna NOVA nasceria invisível para todo mundo que
+  // já mexeu nesse painel uma vez, sem nenhuma pista na UI de que ela existe. Mesma abordagem do
+  // loadMetricsOrder logo acima.
+  const valid = parseCfgArray(saved, all).filter(id => CAMPAIGN_COLUMNS.some(c => c.id === id));
+  const missing = all.filter(id => !valid.includes(id));
+  return [...valid, ...missing];
 };
+
+const loadFunnelOrder = (): string[] => parseCfgArray(readCfg('mkt_funnel_order'), []);
+// null aqui NÃO é o mesmo que []: null = "nunca configurado" (o chamador aplica o padrão de
+// ocultar as etapas de entrada), [] = "o usuário mandou não ocultar nada".
 const loadFunnelHidden = (): string[] | null => {
   const saved = readCfg('mkt_funnel_hidden');
-  return saved ? JSON.parse(saved) : null;
+  if (!saved) return null;
+  try {
+    const parsed = JSON.parse(saved);
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : null;
+  } catch {
+    return null;
+  }
 };
 
 // Paleta de cores (hex) para as etapas do Funil de Vendas configurável
@@ -1764,8 +1812,42 @@ function dedupeCreatives(list: CreativeItem[]): CreativeItem[] {
 const NO_ADSET = '__sem_conjunto__';
 
 function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platformSplit: any[] }) {
+  const { activeClinicId } = useAuth();
   const [openCampaigns, setOpenCampaigns] = useState<Set<string>>(new Set());
   const [openAdsets, setOpenAdsets] = useState<Set<string>>(new Set());
+  // Colunas visíveis (persistidas por clínica). `vis` guarda cada <th>/<td> do mesmo id, então
+  // ligar/desligar mantém header, corpo e rodapé alinhados sem precisar contar colunas na mão.
+  const [visibleCols, setVisibleCols] = useState<string[]>(loadCampaignColumns);
+  const [colsOpen, setColsOpen] = useState(false);
+  // Tipado com a UNIÃO dos ids reais (não `string`): são ~45 chamadas literais, e um typo passava
+  // batido no tsc e sumia com a coluna inteira (th + tds) em silêncio.
+  const vis = (id: CampaignColId) => visibleCols.includes(id);
+
+  // Trocar de clínica precisa RECARREGAR esta config, igual o pai faz com as dele. Sem isto o
+  // estado continuava com as colunas da clínica anterior e, pior, o primeiro toggle gravava esse
+  // conjunto herdado na chave da clínica NOVA (writeCfg escopa por activeClinicId), destruindo em
+  // silêncio a configuração salva dela. Os acordeões abertos também são resetados: campanha
+  // expandida de outra clínica não quer dizer nada aqui.
+  const cfgClinicRef = useRef(activeClinicId);
+  useEffect(() => {
+    if (cfgClinicRef.current === activeClinicId) return;
+    cfgClinicRef.current = activeClinicId;
+    setVisibleCols(loadCampaignColumns());
+    setOpenCampaigns(new Set());
+    setOpenAdsets(new Set());
+  }, [activeClinicId]);
+
+  // O próximo estado é calculado FORA do updater e a gravação acontece aqui, não lá dentro.
+  // Updater de useState é função de render: o React pode reexecutá-la (StrictMode chama duas vezes
+  // em dev) ou adiá-la. Como writeCfg resolve a chave por scopeCfgKey, que lê o activeClinicId do
+  // sessionStorage NA HORA da chamada, um updater reexecutado depois de uma troca de clínica
+  // gravaria as colunas da clínica antiga na chave da nova — exatamente a perda de config que o
+  // efeito acima existe para evitar.
+  const toggleCol = (id: string) => {
+    const next = visibleCols.includes(id) ? visibleCols.filter(x => x !== id) : [...visibleCols, id];
+    setVisibleCols(next);
+    writeCfg('mkt_campaign_cols', JSON.stringify(next));
+  };
   const toggleCampaign = (k: string) => setOpenCampaigns(s => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const toggleAdset = (k: string) => setOpenAdsets(s => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
 
@@ -1902,16 +1984,69 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
   }, [creatives, rows]);
   if (!rows || rows.length === 0) return null;
 
+  // Card SEM overflow-hidden (diferente dos outros desta tela): o painel "Colunas" é absolute e
+  // sai da borda do Card, então com overflow-hidden as últimas opções (CPL, CAC) ficavam cortadas
+  // e inalcançáveis num card curto. A tabela abaixo tem o próprio overflow-x-auto, então nada
+  // vaza pelos cantos arredondados.
   return (
-    <Card className="bg-white border-slate-200 shadow-xl rounded-3xl p-8 overflow-hidden">
+    <Card className="bg-white border-slate-200 shadow-xl rounded-3xl p-8">
       <CardHeader className="p-0 pb-6">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center">
-            <DollarSign className="w-5 h-5 text-indigo-600" />
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center">
+              <DollarSign className="w-5 h-5 text-indigo-600" />
+            </div>
+            <div className="flex flex-col">
+              <CardTitle className="text-xs font-black text-slate-400 uppercase tracking-widest">Investimento por Campanha</CardTitle>
+              <span className="text-[9px] font-semibold text-slate-300 normal-case tracking-tight">gasto × leads × desfecho — campanha › conjunto › anúncio</span>
+            </div>
           </div>
-          <div className="flex flex-col">
-            <CardTitle className="text-xs font-black text-slate-400 uppercase tracking-widest">Investimento por Campanha</CardTitle>
-            <span className="text-[9px] font-semibold text-slate-300 normal-case tracking-tight">gasto × leads × desfecho — campanha › conjunto › anúncio</span>
+
+          <div className="relative shrink-0">
+            <Button
+              onClick={() => setColsOpen(v => !v)}
+              variant="outline"
+              className={cn(
+                "gap-2 transition-all shadow-sm",
+                colsOpen ? "bg-indigo-50 border-indigo-200 text-indigo-600" : "border-slate-200 bg-white hover:bg-slate-50 text-slate-600"
+              )}
+            >
+              <SettingsIcon className={cn("w-4 h-4 transition-transform duration-500", colsOpen ? "rotate-90 text-indigo-600" : "")} />
+              <span className="text-[10px] font-bold uppercase tracking-tight">Colunas</span>
+            </Button>
+
+            <AnimatePresence>
+              {colsOpen && (
+                <>
+                  <div className="fixed inset-0 z-[105]" onClick={() => setColsOpen(false)} />
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                    className="absolute top-full right-0 mt-2 w-52 bg-white rounded-2xl border border-slate-200 shadow-2xl z-[110] p-3"
+                  >
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3 pl-2">Colunas Visíveis</p>
+                    {/* max-h + scroll: são 9 colunas (~350px). Em tela baixa, sem isto a lista
+                        passa da viewport e as últimas opções não têm como ser alcançadas. */}
+                    <div className="space-y-1 max-h-[60vh] overflow-y-auto custom-scrollbar">
+                      {CAMPAIGN_COLUMNS.map(c => (
+                        <button
+                          key={c.id}
+                          onClick={() => toggleCol(c.id)}
+                          className={cn(
+                            "w-full flex items-center justify-between px-3 py-2 rounded-xl text-[10px] font-bold transition-all",
+                            vis(c.id) ? "bg-indigo-50 text-indigo-700" : "text-slate-400 hover:bg-slate-50 hover:text-slate-600"
+                          )}
+                        >
+                          <span className="uppercase tracking-tight">{c.label}</span>
+                          {vis(c.id) && <CheckCircle2 className="w-3 h-3" />}
+                        </button>
+                      ))}
+                    </div>
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
           </div>
         </div>
       </CardHeader>
@@ -1930,15 +2065,15 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
           <thead>
             <tr className="text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
               <th className="text-left px-2 py-2">Campanha / Conjunto / Anúncio</th>
-              <th className="text-center px-2 py-2">Origem</th>
-              <th className="text-center px-2 py-2">Criativos</th>
-              <th className="text-right px-2 py-2">Investimento</th>
-              <th className="text-right px-2 py-2">% Instagram</th>
-              <th className="text-right px-2 py-2">Leads</th>
-              <th className="text-right px-2 py-2">Ganho</th>
-              <th className="text-right px-2 py-2">Perdido</th>
-              <th className="text-right px-2 py-2">CPL</th>
-              <th className="text-right px-2 py-2">CAC</th>
+              {vis('origem') && <th className="text-center px-2 py-2">Origem</th>}
+              {vis('criativos') && <th className="text-center px-2 py-2">Criativos</th>}
+              {vis('investimento') && <th className="text-right px-2 py-2">Investimento</th>}
+              {vis('instagram') && <th className="text-right px-2 py-2">% Instagram</th>}
+              {vis('leads') && <th className="text-right px-2 py-2">Leads</th>}
+              {vis('ganho') && <th className="text-right px-2 py-2">Ganho</th>}
+              {vis('perdido') && <th className="text-right px-2 py-2">Perdido</th>}
+              {vis('cpl') && <th className="text-right px-2 py-2">CPL</th>}
+              {vis('cac') && <th className="text-right px-2 py-2">CAC</th>}
             </tr>
           </thead>
           <tbody>
@@ -1962,19 +2097,23 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
                         <span className="truncate font-bold text-slate-800" title={camp.label}>{camp.label}</span>
                       </button>
                     </td>
-                    <td className="px-2 py-2.5 text-center">
-                      <img src={camp.platform === 'meta_ads' ? MetaLogo : GoogleLogo} alt={camp.platform} className="w-4 h-4 inline-block object-contain opacity-80" />
-                    </td>
-                    <td className="px-2 py-2.5 text-center">
-                      {camp.platform === 'meta_ads' ? renderCreativesCell(creativesByCampaign.get(camp.key), camp.label) : <span className="text-slate-300">—</span>}
-                    </td>
-                    <td className="px-2 py-2.5 text-right font-bold text-slate-800">{fmtMoney(camp.investment)}</td>
-                    <td className="px-2 py-2.5 text-right text-slate-500">{igShare != null ? `${igShare.toFixed(0)}%` : '—'}</td>
-                    <td className="px-2 py-2.5 text-right text-slate-700">{camp.leads}</td>
-                    <td className="px-2 py-2.5 text-right text-emerald-600 font-semibold">{camp.wins}</td>
-                    <td className="px-2 py-2.5 text-right text-rose-500">{camp.losses}</td>
-                    <td className="px-2 py-2.5 text-right text-slate-600">{fmtMoney(campaignRatio(camp.investment, camp.leads))}</td>
-                    <td className="px-2 py-2.5 text-right font-bold text-indigo-600">{fmtMoney(campaignRatio(camp.investment, camp.wins))}</td>
+                    {vis('origem') && (
+                      <td className="px-2 py-2.5 text-center">
+                        <img src={camp.platform === 'meta_ads' ? MetaLogo : GoogleLogo} alt={camp.platform} className="w-4 h-4 inline-block object-contain opacity-80" />
+                      </td>
+                    )}
+                    {vis('criativos') && (
+                      <td className="px-2 py-2.5 text-center">
+                        {camp.platform === 'meta_ads' ? renderCreativesCell(creativesByCampaign.get(camp.key), camp.label) : <span className="text-slate-300">—</span>}
+                      </td>
+                    )}
+                    {vis('investimento') && <td className="px-2 py-2.5 text-right font-bold text-slate-800">{fmtMoney(camp.investment)}</td>}
+                    {vis('instagram') && <td className="px-2 py-2.5 text-right text-slate-500">{igShare != null ? `${igShare.toFixed(0)}%` : '—'}</td>}
+                    {vis('leads') && <td className="px-2 py-2.5 text-right text-slate-700">{camp.leads}</td>}
+                    {vis('ganho') && <td className="px-2 py-2.5 text-right text-emerald-600 font-semibold">{camp.wins}</td>}
+                    {vis('perdido') && <td className="px-2 py-2.5 text-right text-rose-500">{camp.losses}</td>}
+                    {vis('cpl') && <td className="px-2 py-2.5 text-right text-slate-600">{fmtMoney(campaignRatio(camp.investment, camp.leads))}</td>}
+                    {vis('cac') && <td className="px-2 py-2.5 text-right font-bold text-indigo-600">{fmtMoney(campaignRatio(camp.investment, camp.wins))}</td>}
                   </tr>
 
                   {campOpen && camp.adsets.map((adset) => {
@@ -1997,17 +2136,19 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
                               <span className="truncate text-slate-600 font-medium" title={adset.label}>{adset.label}</span>
                             </button>
                           </td>
-                          <td className="px-2 py-2" />
-                          <td className="px-2 py-2 text-center">
-                            {camp.platform === 'meta_ads' ? renderCreativesCell(creativesByAdset.get(`${camp.key}|${adset.key}`), `${camp.label} › ${adset.label}`) : <span className="text-slate-300">—</span>}
-                          </td>
-                          <td className="px-2 py-2 text-right text-slate-700">{fmtMoney(adset.investment)}</td>
-                          <td className="px-2 py-2 text-right text-slate-300">—</td>
-                          <td className="px-2 py-2 text-right text-slate-600">{adset.leads}</td>
-                          <td className="px-2 py-2 text-right text-emerald-600">{adset.wins}</td>
-                          <td className="px-2 py-2 text-right text-rose-400">{adset.losses}</td>
-                          <td className="px-2 py-2 text-right text-slate-500">{fmtMoney(campaignRatio(adset.investment, adset.leads))}</td>
-                          <td className="px-2 py-2 text-right font-semibold text-indigo-500">{fmtMoney(campaignRatio(adset.investment, adset.wins))}</td>
+                          {vis('origem') && <td className="px-2 py-2" />}
+                          {vis('criativos') && (
+                            <td className="px-2 py-2 text-center">
+                              {camp.platform === 'meta_ads' ? renderCreativesCell(creativesByAdset.get(`${camp.key}|${adset.key}`), `${camp.label} › ${adset.label}`) : <span className="text-slate-300">—</span>}
+                            </td>
+                          )}
+                          {vis('investimento') && <td className="px-2 py-2 text-right text-slate-700">{fmtMoney(adset.investment)}</td>}
+                          {vis('instagram') && <td className="px-2 py-2 text-right text-slate-300">—</td>}
+                          {vis('leads') && <td className="px-2 py-2 text-right text-slate-600">{adset.leads}</td>}
+                          {vis('ganho') && <td className="px-2 py-2 text-right text-emerald-600">{adset.wins}</td>}
+                          {vis('perdido') && <td className="px-2 py-2 text-right text-rose-400">{adset.losses}</td>}
+                          {vis('cpl') && <td className="px-2 py-2 text-right text-slate-500">{fmtMoney(campaignRatio(adset.investment, adset.leads))}</td>}
+                          {vis('cac') && <td className="px-2 py-2 text-right font-semibold text-indigo-500">{fmtMoney(campaignRatio(adset.investment, adset.wins))}</td>}
                         </tr>
 
                         {adsetOpen && adset.ads.map((ad) => (
@@ -2015,17 +2156,19 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
                             <td className="px-2 py-2 max-w-[320px] pl-14">
                               <span className="truncate text-slate-500 text-[13px]" title={ad.label}>{ad.label}</span>
                             </td>
-                            <td className="px-2 py-2" />
-                            <td className="px-2 py-2 text-center">
-                              {camp.platform === 'meta_ads' ? renderAdCreativeCell(creativesByAd.get(`${camp.key}|${adset.key}|${ad.key}`), `${camp.label} › ${adset.label} › ${ad.label}`) : <span className="text-slate-300">—</span>}
-                            </td>
-                            <td className="px-2 py-2 text-right text-slate-600 text-[13px]">{fmtMoney(ad.investment)}</td>
-                            <td className="px-2 py-2 text-right text-slate-300">—</td>
-                            <td className="px-2 py-2 text-right text-slate-500 text-[13px]">{ad.leads}</td>
-                            <td className="px-2 py-2 text-right text-emerald-500 text-[13px]">{ad.wins}</td>
-                            <td className="px-2 py-2 text-right text-rose-400 text-[13px]">{ad.losses}</td>
-                            <td className="px-2 py-2 text-right text-slate-400 text-[13px]">{fmtMoney(campaignRatio(ad.investment, ad.leads))}</td>
-                            <td className="px-2 py-2 text-right font-medium text-indigo-400 text-[13px]">{fmtMoney(campaignRatio(ad.investment, ad.wins))}</td>
+                            {vis('origem') && <td className="px-2 py-2" />}
+                            {vis('criativos') && (
+                              <td className="px-2 py-2 text-center">
+                                {camp.platform === 'meta_ads' ? renderAdCreativeCell(creativesByAd.get(`${camp.key}|${adset.key}|${ad.key}`), `${camp.label} › ${adset.label} › ${ad.label}`) : <span className="text-slate-300">—</span>}
+                              </td>
+                            )}
+                            {vis('investimento') && <td className="px-2 py-2 text-right text-slate-600 text-[13px]">{fmtMoney(ad.investment)}</td>}
+                            {vis('instagram') && <td className="px-2 py-2 text-right text-slate-300">—</td>}
+                            {vis('leads') && <td className="px-2 py-2 text-right text-slate-500 text-[13px]">{ad.leads}</td>}
+                            {vis('ganho') && <td className="px-2 py-2 text-right text-emerald-500 text-[13px]">{ad.wins}</td>}
+                            {vis('perdido') && <td className="px-2 py-2 text-right text-rose-400 text-[13px]">{ad.losses}</td>}
+                            {vis('cpl') && <td className="px-2 py-2 text-right text-slate-400 text-[13px]">{fmtMoney(campaignRatio(ad.investment, ad.leads))}</td>}
+                            {vis('cac') && <td className="px-2 py-2 text-right font-medium text-indigo-400 text-[13px]">{fmtMoney(campaignRatio(ad.investment, ad.wins))}</td>}
                           </tr>
                         ))}
                       </React.Fragment>
@@ -2038,17 +2181,19 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
           <tfoot>
             <tr className="border-t-2 border-slate-200 bg-slate-50/70">
               <td className="px-2 py-3 text-[11px] font-black text-slate-500 uppercase tracking-wider">Total</td>
-              <td className="px-2 py-3" />
-              <td className="px-2 py-3 text-center">
-                {totalCreatives.length > 0 ? renderCreativesCell(totalCreatives, 'Criativos ativos das campanhas do período') : <span className="text-slate-300">—</span>}
-              </td>
-              <td className="px-2 py-3 text-right font-black text-slate-800">{fmtMoney(totals.investment)}</td>
-              <td className="px-2 py-3 text-right font-bold text-slate-500">{igTotalPct != null ? `${igTotalPct.toFixed(0)}%` : '—'}</td>
-              <td className="px-2 py-3 text-right font-black text-slate-800">{totals.leads}</td>
-              <td className="px-2 py-3 text-right font-black text-emerald-600">{totals.wins}</td>
-              <td className="px-2 py-3 text-right font-black text-rose-500">{totals.losses}</td>
-              <td className="px-2 py-3 text-right font-bold text-slate-600">{fmtMoney(campaignRatio(totals.investment, totals.leads))}</td>
-              <td className="px-2 py-3 text-right font-black text-indigo-600">{fmtMoney(campaignRatio(totals.investment, totals.wins))}</td>
+              {vis('origem') && <td className="px-2 py-3" />}
+              {vis('criativos') && (
+                <td className="px-2 py-3 text-center">
+                  {totalCreatives.length > 0 ? renderCreativesCell(totalCreatives, 'Criativos ativos das campanhas do período') : <span className="text-slate-300">—</span>}
+                </td>
+              )}
+              {vis('investimento') && <td className="px-2 py-3 text-right font-black text-slate-800">{fmtMoney(totals.investment)}</td>}
+              {vis('instagram') && <td className="px-2 py-3 text-right font-bold text-slate-500">{igTotalPct != null ? `${igTotalPct.toFixed(0)}%` : '—'}</td>}
+              {vis('leads') && <td className="px-2 py-3 text-right font-black text-slate-800">{totals.leads}</td>}
+              {vis('ganho') && <td className="px-2 py-3 text-right font-black text-emerald-600">{totals.wins}</td>}
+              {vis('perdido') && <td className="px-2 py-3 text-right font-black text-rose-500">{totals.losses}</td>}
+              {vis('cpl') && <td className="px-2 py-3 text-right font-bold text-slate-600">{fmtMoney(campaignRatio(totals.investment, totals.leads))}</td>}
+              {vis('cac') && <td className="px-2 py-3 text-right font-black text-indigo-600">{fmtMoney(campaignRatio(totals.investment, totals.wins))}</td>}
             </tr>
           </tfoot>
         </table>

@@ -98,6 +98,26 @@ Desde 18/07 os três **partem da MESMA definição por conceito** — as **views
 
 **Atribuição IA × Humano:** régua canônica única precomputada em `lead_kpi_attribution` (cron 10min) → view `vw_lead_agent_class`. A VG já lê dela. **RESSALVA (pendente):** `get_commercial_dashboard` ainda tem cálculo inline p/ `agents.leadsTouched` e `appointments.generated` por `created_at` — até unificar, esses dois podem divergir da VG. O resto do Comercial já usa as views/precompute.
 
+### ⚠️ Toda RPC de painel é um PAR: wrapper (guard) + `_impl` (corpo)
+
+Desde 26/07 as **9** RPCs de painel — as 6 `marketing_*`, `get_dashboard_stats`, `get_commercial_dashboard`, `get_commercial_leads` — seguem este formato. O nome público é um wrapper fino `SECURITY DEFINER` que só chama `assert_clinic_access(p_clinic_id)` e delega; **a lógica mora em `<nome>_impl`**.
+
+- **Mexer na regra do painel = mexer no `_impl`.** Reescrever o *wrapper* como se fosse a RPC **apaga o guard** e reabre vazamento cross-tenant.
+- `_impl` **não tem EXECUTE** para anon/authenticated. Chamar direto pelo PostgREST dá erro de permissão — não é "a RPC sumiu".
+
+> ⚠️ **Grant de função aqui vem por DOIS caminhos, e revogar um só não fecha nada.** Uma função em `public` costuma ter `=X/postgres` (o PUBLIC, que todo `create function` concede) **e** `anon=X/postgres` (nominal, vindo do `pg_default_acl` do schema). Revogar só de `public` deixa o nominal de pé; revogar só de `anon` deixa o PUBLIC de pé. **Sempre `revoke all on function ... from public, anon, authenticated`** e depois `grant` para quem deve. Foi assim que o vazamento de PII "corrigido" em 26/07 seguiu aberto sob o nome `_impl` até 27/07.
+>
+> **Confirme sempre com `has_function_privilege('anon', p.oid, 'EXECUTE')`, nunca lendo o DDL da migration.**
+>
+> Desde 27/07 o `alter default privileges` do schema já revoga EXECUTE de anon/authenticated, então **RPC nova para o front precisa de `grant execute ... to authenticated` EXPLÍCITO** — sem isso o PostgREST devolve erro de permissão e parece "a RPC não existe".
+- **`assert_clinic_access` barra o navegador, não o backend.** É **fail-closed**: passa sem checar em exatamente dois casos, e barra todo o resto.
+  1. **sem `request.jwt.claims`** = chamada de dentro do banco (`pg_cron`, psql, outra função) — é o que mantém `build_commercial_report` (cron 21) funcionando;
+  2. **role do JWT = `service_role`** = backend (que já tem `rolbypassrls` de qualquer forma).
+  Qualquer outro portador de JWT, inclusive um role novo do PostgREST, precisa provar `has_clinic_access`. **Não voltar para a forma `if v_jwt_role in ('anon','authenticated')`**: aquilo era fail-OPEN, um role desconhecido passava direto. E **não trocar por `has_clinic_access` cru**, que depende de `auth.uid()` e mata o relatório automático de hora em hora.
+- Guard **nunca** é `is_clinic_admin()` sozinho: ele deixa de fora o `gestor` de `clinic_users`, que é quem mais abre o painel.
+
+**Por que DEFINER e não a RLS:** painel de clínica grande lendo com RLS paga `is_clinic_active(clinic_id)`/`is_clinic_admin(clinic_id)` **por linha** (a policy passa a COLUNA, então o planner não resolve uma vez). Medido na "Intubação" (8.236 leads): `marketing_kpis` custava 2.328 ms com RLS contra 44 ms sem, e as RPCs da tela somavam 8.371 ms, acima do **`statement_timeout` de 8s do role `authenticated`** — o painel devolvia 500 e pintava "SEM DADOS". Sintoma de timeout se parece com lentidão: **conferir os 500 no console e `canceling statement due to statement timeout` nos logs do Postgres antes de caçar query lenta.**
+
 ## O produto não é só clínicas
 
 **Cerca de 40% dos tenants não são clínica** (`clinics.category = 'outro'`): loja de celular, joalheria, metalúrgica, turismo, café. Isso **não é dado de teste**.
@@ -158,6 +178,23 @@ Formulário que grava um JSONB inteiro sem reler tudo **zera silenciosamente** o
 ## RLS multi-tenant
 Usar **`is_clinic_admin(clinic_id)`** / **`is_super_admin()`**.
 ⚠️ **`is_admin()` ainda existe, mas está fora de todas as policies — não reintroduzir.** Ela dava **bypass cross-org**.
+
+### ⚠️ Policy que passa a COLUNA roda POR LINHA (e é o que derruba clínica grande)
+
+`is_clinic_active(clinic_id)` / `is_clinic_admin(clinic_id)` recebendo a **coluna** impedem o planner de resolver uma vez, então executam **uma vez por linha**. Desde 27/07 **`leads` e `tickets`** usam a régua nova, que roda **1× por query**:
+
+```sql
+using (clinic_id in (select public.my_clinic_ids()) or (select public.is_super_admin()))
+```
+
+`my_clinic_ids()` é `setof uuid`, STABLE, DEFINER, e **sem argumento de propósito** — é a ausência de argumento que permite o `hashed SubPlan`. **Não "melhore" passando `clinic_id` para ela: isso desfaz todo o ganho.** Medido no Kanban da Metaltres: **2.548 ms → 33 ms**.
+
+⚠️ **O braço `or (select is_super_admin())` não é enfeite:** `my_clinic_ids()` só devolve ids que existem em `clinics`, então linha com `clinic_id` NULL ou órfão sai do alcance do super-admin (`NULL in (...)` é NULL), e como a policy é `FOR ALL` o USING vale de WITH CHECK, então ele perde até o UPDATE para consertar a linha. Copiar a régua sem esse braço reintroduz a cegueira, uma tabela por vez.
+
+- As **outras ~27 policies ainda usam o padrão caro** — ao mexer numa, migre para a régua nova, mas confira as que têm regra extra (ex.: `appointments_doctor_isolation`, médico só vê os próprios, **não** dá para condensar).
+- Trocar `is_clinic_active` de plpgsql para SQL **não adianta** (medido: 7%). O custo é tocar as tabelas por linha.
+- **Custo de RLS pode ser GLOBAL:** embed do PostgREST (`lead:leads(*)`) **não propaga o `clinic_id`** para a tabela embutida, então a RLS dela varre o **banco inteiro**. Foi por isso que a Metaltres (3,5k) estourou antes da Intubação (8,2k).
+- Antes de trocar qualquer policy, **prove equivalência**: compare a expressão velha e a nova como função de `(usuário, clínica)` num `cross join` de todos os pares, conferindo `ganharia_acesso_indevido = 0` e `perderia_acesso = 0`.
 
 ## `chat_messages` é destrutivo
 `chat_messages.lead_id` é **`ON DELETE CASCADE`** — apagar um lead **apaga a conversa**. E **toda FK nova para `chat_messages` precisa de índice**, senão vira seq scan e dá timeout ao resetar lead.

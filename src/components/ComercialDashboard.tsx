@@ -46,7 +46,7 @@ import { supabase } from "../lib/supabase";
 import { cn } from "../lib/utils";
 import { LeadChat } from "./LeadChat";
 import type { Lead } from "../hooks/useSupabase";
-import { useOrcamentos, getCached, setCached, logSystemError } from "../hooks/useSupabase";
+import { useOrcamentos, getCached, setCached, logSystemError, logFetchFailThrottled } from "../hooks/useSupabase";
 import { downloadReportPdf } from "../lib/reportPdf";
 import { TrendBarChart, fmtByType } from "./TrendBarChart";
 import { Button } from "./ui/button";
@@ -502,8 +502,25 @@ export function ComercialDashboard() {
       setCached(cacheKey, res);   // cache pode gravar mesmo se superada (chave é correta)
       if (gen !== fetchGenRef.current) return;   // superada por chamada mais nova → não pinta
       setData(res as CommercialData);
-    } catch (err) {
+    } catch (err: any) {
       console.error("ComercialDashboard fetch error:", err);
+      // console.error sozinho é invisível (CLAUDE.md): sem isto o painel repinta o
+      // estado antigo e ninguém fica sabendo. Vale principalmente para o 42501 do
+      // assert_clinic_access (PostgREST devolve 403): acesso negado indevidamente
+      // aparece como "SEM DADOS" na tela, que é o sintoma mais difícil de rastrear.
+      // Só registra se ESTA chamada ainda é a corrente: numa rajada de troca de filtro as
+      // anteriores são abandonadas de propósito e não são falha de verdade.
+      if (gen === fetchGenRef.current) {
+        const negadoPorGuard = err?.code === "42501" || /42501|acesso negado/i.test(err?.message ?? "");
+        logFetchFailThrottled(
+          negadoPorGuard ? "DASH_ACCESS_DENIED" : "COMM_DASH_FETCH_FAIL",
+          negadoPorGuard
+            ? "get_commercial_dashboard: acesso negado pelo guard de tenant — painel Comercial ficou SEM DADOS"
+            : "get_commercial_dashboard: falha ao carregar — painel Comercial manteve o estado anterior",
+          clinicId,
+          { fn: "get_commercial_dashboard", code: err?.code ?? null, error: err?.message ?? String(err) },
+        );
+      }
     } finally {
       if (gen === fetchGenRef.current && showSpinner) setLoading(false);
     }
@@ -597,8 +614,20 @@ export function ComercialDashboard() {
       setLeadsList(r?.rows || []);
       setLeadsTotal(r?.total || 0);
       setLeadsMetricCount(r?.metricCount || 0);
-    } catch (err) {
+    } catch (err: any) {
       console.error("ComercialDashboard leads fetch error:", err);
+      // get_commercial_leads também passou a levantar 42501 (guard de tenant). Sem registrar, a
+      // lista fica com a página anterior, leadsLoading=false e nenhum sinal — nem na tela nem na
+      // Central. Mesmo tratamento dos dois fetches irmãos.
+      const negadoPorGuard = err?.code === "42501" || /42501|acesso negado/i.test(err?.message ?? "");
+      logFetchFailThrottled(
+        negadoPorGuard ? "DASH_ACCESS_DENIED" : "COMM_LEADS_FETCH_FAIL",
+        negadoPorGuard
+          ? "get_commercial_leads: acesso negado pelo guard de tenant — lista de leads ficou vazia"
+          : "get_commercial_leads: falha ao carregar — lista de leads manteve o estado anterior",
+        clinicId,
+        { fn: "get_commercial_leads", code: err?.code ?? null, error: err?.message ?? String(err) },
+      );
     } finally {
       setLeadsLoading(false);
     }

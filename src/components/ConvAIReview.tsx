@@ -24,6 +24,12 @@ import { LeadChat } from "./LeadChat";
 // fechamento do ticket + CAPI). Aprovar uma etapa passa pelo dono único do
 // stage_id. Nenhum caminho de escrita é duplicado aqui.
 //
+// ⚠️ Na VENDA o modal vem ANTES da decisão: decide_conv_ai_insight já grava
+// status='approved', e a fila só mostra 'pending'. Decidir primeiro fazia a
+// sugestão sumir da tela ao fechar o modal no X, sem venda nenhuma lançada.
+// Quem tira o card da fila é o desfecho: conversão criada (aprova) ou "Não foi
+// venda" (recusa). Fechar o modal não decide nada.
+//
 // O manual da clínica é editável nesta tela: o bootstrap aprende do histórico, e
 // o histórico rotula a conversa com o desfecho FINAL do ticket — foi assim que a
 // IA confundiu "agendamento confirmado" (etapa Agendado) com venda na Vaz.
@@ -287,6 +293,7 @@ export function ConvAIReview() {
     setTimeout(() => { refetch(); setAnalisando(false); }, 20000);
   };
   const [ganho, setGanho] = useState<{
+    insightId: string;
     id: string; name: string; phone: string | null; patientId: string | null;
     ticketId: string; ctwaClid: string | null; email: string | null; suggested: number | null;
   } | null>(null);
@@ -297,12 +304,11 @@ export function ConvAIReview() {
   const pendingEtapas = pending.filter(i => i.kind === "stage");
 
   const aprovar = async (ins: ConvAiInsight) => {
-    setBusy(ins.id);
-    const res = await decide(ins.id, "approve");
-    setBusy(null);
-    if (!res.success) return;
-    if (res.needs_ganho_modal) {
+    // Venda: só abre o modal. A aprovação (que tira da fila) acontece no onCreate,
+    // depois que a conversão existe de verdade — desistir no meio não perde o card.
+    if (ins.kind === "sale") {
       setGanho({
+        insightId: ins.id,
         id: ins.lead_id ?? "",
         name: ins.leads?.name ?? "Contato",
         phone: ins.leads?.phone ?? null,
@@ -312,7 +318,12 @@ export function ConvAIReview() {
         email: ins.leads?.email ?? null,
         suggested: ins.sale_value,
       });
+      return;
     }
+    // Etapa: a própria RPC move o card, não há segundo passo.
+    setBusy(ins.id);
+    await decide(ins.id, "approve");
+    setBusy(null);
   };
 
   const recusar = async (ins: ConvAiInsight) => {
@@ -593,6 +604,11 @@ export function ConvAIReview() {
             if (ok) {
               if (ganhoStage) await moveTicket(ganho.ticketId, ganhoStage.id);
               await closeTicket(ganho.ticketId, "ganho");
+              // Venda lançada: agora sim a sugestão está decidida (e vira aprendizado).
+              const dec = await decide(ganho.insightId, "approve");
+              if (!dec.success) {
+                flash("info", "Venda registrada, mas não consegui baixar a sugestão da fila. Ela pode reaparecer aqui — use \"Não foi venda\" para tirá-la, sem lançar de novo.", 12000);
+              }
             }
             return ok;
           }}

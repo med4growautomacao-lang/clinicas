@@ -1732,7 +1732,13 @@ interface ExternalIntegrationRow {
     crm_token: string;
     won_enabled: boolean;
     lost_enabled: boolean;
+    lead_enabled: boolean;
 }
+
+// Os três eventos que o CRM do cliente manda pelo MESMO token (crm_token), separados por ?tipo=.
+// 'lead' é a ENTRADA (abre card na etapa do WhatsApp), 'ganho'/'perdido' são DESFECHO (fecham).
+type CrmTipo = 'lead' | 'ganho' | 'perdido';
+type CrmField = 'lead_enabled' | 'won_enabled' | 'lost_enabled';
 
 // Painel "Integração Externa" — webhook nativo por clínica para o formulário do site do cliente
 // disparar leads direto no nosso banco (substitui a planilha/n8n "Webhook Forms | Leads Captados").
@@ -1750,7 +1756,11 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
     const [copied, setCopied] = useState(false);
     const [regenerating, setRegenerating] = useState(false);
     const [togglingCapture, setTogglingCapture] = useState(false);
-    const [copiedCrm, setCopiedCrm] = useState<'ganho' | 'perdido' | null>(null);
+    const [copiedCrm, setCopiedCrm] = useState<CrmTipo | null>(null);
+    // Trava de clique duplo POR CAMPO: são três toggles independentes, e travar o card inteiro
+    // impediria ligar 'ganho' enquanto 'lead' ainda grava. Set, e não `CrmField | null`, porque
+    // a chave única se sobrescreve e liberaria o botão que ainda está em voo.
+    const [togglingCrm, setTogglingCrm] = useState<Set<CrmField>>(new Set());
 
     // Carrega (ou cria, se ainda não existir) a linha de config desta clínica.
     useEffect(() => {
@@ -1758,7 +1768,7 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
         if (!effClinicId) { setLoading(true); return; }
         (async () => {
             setLoading(true);
-            const cols = 'capture_token, capture_enabled, capture_count, last_capture_at, crm_token, won_enabled, lost_enabled';
+            const cols = 'capture_token, capture_enabled, capture_count, last_capture_at, crm_token, won_enabled, lost_enabled, lead_enabled';
             let { data, error } = await supabase
                 .from('clinic_external_integrations')
                 .select(cols)
@@ -1821,17 +1831,20 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
         setTogglingCapture(false);
     };
 
-    // ── Ganho/Perdido (entrada do CRM do cliente) ──────────────────────────────────────────────
-    const crmUrl = (tipo: 'ganho' | 'perdido') => row?.crm_token ? `${EXTERNAL_CRM_STATUS_URL}?k=${row.crm_token}&tipo=${tipo}` : '';
-    const copyCrm = (tipo: 'ganho' | 'perdido') => {
+    // ── Lead/Ganho/Perdido (entrada do CRM do cliente) ─────────────────────────────────────────
+    const crmUrl = (tipo: CrmTipo) => row?.crm_token ? `${EXTERNAL_CRM_STATUS_URL}?k=${row.crm_token}&tipo=${tipo}` : '';
+    const copyCrm = (tipo: CrmTipo) => {
         const u = crmUrl(tipo);
         if (!u) return;
         navigator.clipboard.writeText(u);
         setCopiedCrm(tipo);
-        setTimeout(() => setCopiedCrm(null), 2000);
+        // Só apaga se ainda for ESTE tipo: senão o timeout do primeiro clique some com o
+        // "Copiado!" do segundo.
+        setTimeout(() => setCopiedCrm(c => (c === tipo ? null : c)), 2000);
     };
-    const toggleCrm = async (field: 'won_enabled' | 'lost_enabled') => {
-        if (!effClinicId || !row) return;
+    const toggleCrm = async (field: CrmField) => {
+        if (!effClinicId || !row || togglingCrm.has(field)) return;
+        setTogglingCrm(s => new Set(s).add(field));
         const next = !row[field];
         const { error } = await supabase
             .from('clinic_external_integrations')
@@ -1839,6 +1852,7 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
             .eq('clinic_id', effClinicId);
         if (error) showToast('Falha ao atualizar.', 'error');
         else setRow(r => r ? { ...r, [field]: next } : r);
+        setTogglingCrm(s => { const n = new Set(s); n.delete(field); return n; });
     };
 
     const copyChip = (e: React.MouseEvent, text: string) => {
@@ -1967,7 +1981,7 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
                 </CardContent>
             </Card>
 
-            {/* Ganho / Perdido — entrada do CRM do cliente */}
+            {/* Lead / Ganho / Perdido — entrada do CRM do cliente */}
             {row && (
                 <Card className="border border-slate-200 shadow-sm bg-white overflow-hidden">
                     <CardHeader className="bg-slate-50 border-b border-slate-200 pb-6 px-8">
@@ -1976,24 +1990,30 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
                                 <RefreshCw className="w-6 h-6 text-slate-600" />
                             </div>
                             <div>
-                                <CardTitle className="text-xl font-bold text-slate-800">Ganho / Perdido (CRM do cliente)</CardTitle>
-                                <p className="text-[12px] text-slate-500 font-medium mt-0.5">Recebe o status do CRM do cliente e reflete no funil, achando o lead por telefone/e-mail. Se não existir aqui, cria já com o status.</p>
+                                <CardTitle className="text-xl font-bold text-slate-800">Lead / Ganho / Perdido (CRM do cliente)</CardTitle>
+                                <p className="text-[12px] text-slate-500 font-medium mt-0.5">Recebe os eventos do CRM do cliente e reflete no funil, achando o lead por telefone/e-mail. Se não existir aqui, cria na hora.</p>
                             </div>
                         </div>
                     </CardHeader>
                     <CardContent className="p-8 space-y-4">
                         {([
-                            { tipo: 'ganho' as const, field: 'won_enabled' as const, enabled: row.won_enabled, label: 'Ganho', desc: 'negócio ganho', emerald: true },
-                            { tipo: 'perdido' as const, field: 'lost_enabled' as const, enabled: row.lost_enabled, label: 'Perdido', desc: 'negócio perdido', emerald: false },
-                        ]).map(({ tipo, field, enabled, label, desc, emerald }) => (
+                            { tipo: 'lead' as const, field: 'lead_enabled' as const, enabled: row.lead_enabled, label: 'Lead', desc: 'lead novo', bar: 'bg-blue-500', chip: 'bg-blue-100 text-blue-700', nota: 'Abre o card na etapa de entrada do WhatsApp. Não marca desfecho.' },
+                            { tipo: 'ganho' as const, field: 'won_enabled' as const, enabled: row.won_enabled, label: 'Ganho', desc: 'negócio ganho', bar: 'bg-emerald-500', chip: 'bg-emerald-100 text-emerald-700', nota: null },
+                            { tipo: 'perdido' as const, field: 'lost_enabled' as const, enabled: row.lost_enabled, label: 'Perdido', desc: 'negócio perdido', bar: 'bg-rose-500', chip: 'bg-rose-100 text-rose-700', nota: null },
+                        ]).map(({ tipo, field, enabled, label, desc, bar, chip, nota }) => (
                             <div key={tipo} className="space-y-3 p-5 bg-slate-50 border border-slate-100 rounded-2xl relative overflow-hidden">
-                                <div className={cn("absolute top-0 left-0 w-1 h-full", emerald ? 'bg-emerald-500' : 'bg-rose-500')}></div>
+                                <div className={cn("absolute top-0 left-0 w-1 h-full", bar)}></div>
                                 <div className="flex items-center justify-between gap-3">
                                     <label className="text-xs font-bold text-slate-700 flex items-center gap-2">
-                                        <span className={cn("px-2 py-0.5 rounded-md text-[9px] uppercase tracking-wider", emerald ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700')}>{label}</span>
+                                        <span className={cn("px-2 py-0.5 rounded-md text-[9px] uppercase tracking-wider", chip)}>{label}</span>
                                         Webhook de {desc}
+                                        {nota && <span className="text-[11px] font-medium text-slate-400">{nota}</span>}
                                     </label>
-                                    <button onClick={() => toggleCrm(field)} className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-slate-900 shrink-0">
+                                    <button
+                                        onClick={() => toggleCrm(field)}
+                                        disabled={togglingCrm.has(field)}
+                                        className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-slate-900 shrink-0 disabled:opacity-50"
+                                    >
                                         {enabled ? <ToggleRight className="w-5 h-5 text-emerald-500" /> : <ToggleLeft className="w-5 h-5 text-slate-400" />}
                                         {enabled ? 'Ativo' : 'Desligado'}
                                     </button>

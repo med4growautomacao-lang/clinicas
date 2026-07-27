@@ -1,10 +1,17 @@
-// external-crm-status — ENTRADA de Ganho/Perdido vindos do CRM do cliente (ex.: Clint).
+// external-crm-status — ENTRADA de Lead/Ganho/Perdido vindos do CRM do cliente (ex.: Clint).
 // Substitui o papel dos fluxos n8n "Clint | Status Ganho/Perdido": aqueles jogavam numa planilha;
 // este reflete o status no NOSSO banco, achando o lead (telefone->email), fazendo upsert se não
 // existir (como o appendOrUpdate da planilha) e finalizando o ticket via finalize_ticket.
 //
-// Auth: TOKEN opaco da clínica (crm_token) na query (?k=). O tipo do evento vem de ?tipo=ganho|perdido
-// (setado pelo n8n) ou é inferido do payload (deal_status=WON -> ganho; deal_lost_status -> perdido).
+// Auth: TOKEN opaco da clínica (crm_token) na query (?k=). O tipo do evento vem de
+// ?tipo=lead|ganho|perdido (setado pelo n8n) ou é inferido do payload (deal_status=WON -> ganho;
+// deal_lost_status -> perdido; deal_status aberto/novo -> lead).
+//
+// ⚠️ tipo=lead NÃO é desfecho: só garante lead + ticket ABERTO na etapa WHATSAPP (nunca chama
+// finalize_ticket). É a entrada de quem cria o negócio no CRM antes de qualquer resultado.
+// A etapa NÃO é escolhida aqui nem pelo slug dentro da RPC: quem decide é a marca de transação
+// `app.crm_intake`, que desliga o trg_auto_open_ticket_forms e deixa a RPC abrir o ticket.
+// O caminho de FORMULÁRIO continua sendo o external-forms-ingest (outro token, outro dialeto).
 //
 // Falha -> Central de Erros (log_system_error).
 
@@ -89,7 +96,7 @@ serve(async (req) => {
 
   const { data: cfg, error: cfgErr } = await supa
     .from('clinic_external_integrations')
-    .select('clinic_id, won_enabled, lost_enabled')
+    .select('clinic_id, won_enabled, lost_enabled, lead_enabled')
     .eq('crm_token', effToken)
     .maybeSingle();
 
@@ -103,18 +110,33 @@ serve(async (req) => {
   const txt = (k: string) => String(body[k] ?? '').trim();
 
   try {
-    // ── Decide o tipo: ?tipo= explícito, senão infere do payload ───────────────────────────────
+    // ── Decide o tipo: ?tipo= da QUERYSTRING, senão infere do payload ──────────────────────────
+    // ⚠️ O tipo NÃO é aceito pelo corpo, de propósito. `tipo` é nome comum em payload de CRM
+    // brasileiro (tipo de contato, tipo de serviço), e um valor "Perdido" querendo dizer outra
+    // coisa fecharia o ticket como perda de verdade, com data e tudo. Allowlist não protege aqui:
+    // o valor perigoso é exatamente um dos literais válidos. A URL que a tela entrega sempre traz
+    // `&tipo=`, então o fallback pelo corpo resolveria um problema que ninguém tem.
+    const tipoEff = tipoParam;
     const dealStatus = txt('deal_status').toUpperCase();
     const dealLostStatus = txt('deal_lost_status');
-    let outcome: 'ganho' | 'perdido' | null =
-      tipoParam === 'ganho' ? 'ganho' :
-      tipoParam === 'perdido' ? 'perdido' :
+    // Allowlist FECHADA de "negócio em aberto" -> lead. Inferir lead de qualquer status desconhecido
+    // faria todo evento não reconhecido virar lead novo (e abrir ticket) em vez de falhar visível.
+    const STATUS_ABERTO = ['OPEN', 'NEW', 'CREATED', 'LEAD', 'ABERTO', 'NOVO'];
+    const outcome: 'ganho' | 'perdido' | 'lead' | null =
+      tipoEff === 'ganho' ? 'ganho' :
+      tipoEff === 'perdido' ? 'perdido' :
+      tipoEff === 'lead' ? 'lead' :
       dealStatus === 'WON' ? 'ganho' :
-      (dealLostStatus || ['LOST', 'LOSE', 'LOSS'].includes(dealStatus)) ? 'perdido' : null;
+      (dealLostStatus || ['LOST', 'LOSE', 'LOSS'].includes(dealStatus)) ? 'perdido' :
+      STATUS_ABERTO.includes(dealStatus) ? 'lead' : null;
 
     if (!outcome) return json({ ok: false, error: 'tipo_indeterminado' }, 200);
-    if (outcome === 'ganho' && cfg.won_enabled === false) return json({ ok: false, error: 'won_disabled' }, 403);
-    if (outcome === 'perdido' && cfg.lost_enabled === false) return json({ ok: false, error: 'lost_disabled' }, 403);
+    // Gate FAIL-CLOSED: `!cfg.x`, não `cfg.x === false`. Com a comparação estrita, um valor
+    // null/undefined (coluna nova ainda não migrada, linha legada, bundle antigo cujo .select()
+    // não pedia a coluna) passa direto e liga a integração para quem nunca a habilitou.
+    if (outcome === 'ganho' && !cfg.won_enabled) return json({ ok: false, error: 'won_disabled' }, 403);
+    if (outcome === 'perdido' && !cfg.lost_enabled) return json({ ok: false, error: 'lost_disabled' }, 403);
+    if (outcome === 'lead' && !cfg.lead_enabled) return json({ ok: false, error: 'lead_disabled' }, 403);
 
     // ── Campos do contato (padrão Clint contact_*), com fuzzy de fallback ──────────────────────
     const phone = txt('contact_phone') || findByFragments(body, ['telefone', 'whatsapp', 'celular', 'phone']);
@@ -128,6 +150,11 @@ serve(async (req) => {
     const origem = mapearOrigem(utmSource);
     const adPlatform = derivarPlataforma(utmMedium, utmSource);
 
+    // O corpo vai INTEIRO para external_crm_events.raw (ledger). Como o token também é aceito
+    // pelo corpo, ele acabaria gravado em texto puro em milhares de linhas, e não há rotação de
+    // crm_token na UI (só o capture_token tem "Gerar novo endereço"). Tira antes de persistir.
+    const { k: _k, token: _token, ...rawSemSegredo } = body;
+
     const { data: res, error: rpcErr } = await supa.rpc('apply_external_crm_outcome', {
       p_clinic_id: clinicId,
       p_outcome: outcome,
@@ -140,26 +167,33 @@ serve(async (req) => {
       p_adset: txt('contact_utm_term') || txt('utm_term') || null,
       p_ad: txt('contact_utm_content') || txt('utm_content') || null,
       p_ad_platform: adPlatform,
-      p_raw: body,
+      p_raw: rawSemSegredo,
     });
 
     if (rpcErr) {
-      await registrarErro('gravacao_outcome_falhou', 'Evento de Ganho/Perdido do CRM chegou mas NÃO foi aplicado', 'critical', clinicId,
+      await registrarErro('gravacao_outcome_falhou', 'Evento do CRM chegou mas NÃO foi aplicado', 'critical', clinicId,
         { erro: rpcErr.message, outcome, tem_telefone: !!phone, tem_email: !!email });
       return json({ ok: false, error: 'apply_failed' }, 200);
     }
 
     if (res?.error) {
       const level = res.error === 'sem_identidade' ? 'warning' : 'error';
-      await registrarErro('evento_nao_aplicado', 'Evento de Ganho/Perdido do CRM não pôde ser aplicado', level, clinicId,
+      await registrarErro('evento_nao_aplicado', 'Evento do CRM não pôde ser aplicado', level, clinicId,
         { motivo: res.error, outcome, campos: Object.keys(body) });
       return json({ ok: false, error: res.error }, 200);
     }
 
-    return json({ ok: true, outcome, lead_id: res?.lead_id ?? null, ticket_id: res?.ticket_id ?? null, created_lead: res?.created_lead ?? false, skipped: res?.skipped ?? false });
+    return json({
+      ok: true, outcome,
+      lead_id: res?.lead_id ?? null,
+      ticket_id: res?.ticket_id ?? null,
+      created_lead: res?.created_lead ?? false,
+      created_ticket: res?.created_ticket ?? false,
+      skipped: res?.skipped ?? false,
+    });
 
   } catch (e) {
-    await registrarErro('ciclo_falhou', 'Erro inesperado no webhook de Ganho/Perdido do CRM', 'critical', clinicId,
+    await registrarErro('ciclo_falhou', 'Erro inesperado no webhook do CRM', 'critical', clinicId,
       { erro: e instanceof Error ? e.message : String(e) });
     return json({ ok: false, error: 'unexpected' }, 200);
   }

@@ -69,13 +69,32 @@ O n8n já lê essa view: workflow **"Agente IA"** → `Puxa dados Prompt` → `P
 
 ## Tickets
 
-**Quatro caminhos de criação — e um deles não passa por RPC:**
+**Cinco caminhos de criação — e dois deles não passam por RPC:**
 - WhatsApp → trigger `trg_auto_open_ticket` em `chat_messages` (fn `fn_auto_open_ticket`)
 - Formulários → trigger `trg_auto_open_ticket_forms` em `leads`
 - App → RPC `create_lead_with_ticket`
 - App → **`insert` direto em `tickets`** (`useSupabase.ts`, criação avulsa no Kanban)
+- CRM do cliente → RPC `apply_external_crm_outcome` com **`p_outcome='lead'`** (edge `external-crm-status?tipo=lead`), que também dá **`insert` direto em `tickets`**
 
 Por isso **a invariante não pode morar na aplicação** — ela é garantida por índice (abaixo).
+
+### ⚠️ A etapa de entrada é escolhida pela TRIGGER, não por quem chama
+
+Todo lead criado com `capture_channel='forms'` já nasce com ticket: `trg_auto_open_ticket_forms` é **AFTER INSERT**, então quando a sua RPC chega na própria busca de etapa **o ticket já existe**, na etapa `forms`. Mexer no slug dentro da RPC não muda nada — é código morto.
+
+Quem precisa desviar disso usa a marca de transação **`app.crm_intake`** (mesmo idioma do `app.stage_source`/`app.stage_actor` do `fn_log_ticket_stage_change`). Com ela em `'1'`, **três** triggers mudam de comportamento:
+
+| trigger | com `app.crm_intake='1'` |
+|---|---|
+| `fn_auto_open_ticket_forms` | não abre o ticket (quem abre é a RPC, na etapa que ela escolher) |
+| `fn_touchpoint_from_site_form` | grava o toque como "Negócio criado no CRM externo", não "Preencheu formulário" |
+| `fn_handle_lead_uniqueness` | mesma troca de texto no ramo de **mesclagem** ("...novamente") |
+
+⚠️ **`fn_reset_followup_on_new_ticket` NÃO é gateada, e isso é decisão, não esquecimento.** Chegamos a suprimi-la e o efeito foi pior: o `insert` de ticket só roda quando o lead está **sem** ticket aberto, então o `handoff_triggered_at`/`followup_count` que estão lá são do ciclo **morto**. Herdar esse estado deixa o card novo **mudo** para IA e follow-up (o `fn_ai_loop_guard` e o `fn_followup_candidates_reengagement` leem `handoff_triggered_at`), para sempre e sem erro nenhum. "Ticket novo = atendimento novo" vale para os cinco caminhos, sem exceção.
+
+Hoje só `apply_external_crm_outcome` com `p_outcome='lead'` a liga, e a RPC a seta em **toda** chamada (`'1'` para lead, `'0'` para o resto) — sem isso, um lote rodando várias chamadas na mesma transação herdaria o valor da anterior e um `ganho` ficaria sem ticket. Com a marca ausente, `current_setting(..., true)` devolve NULL e tudo se comporta como antes.
+
+⚠️ **A cascata de etapa mora em `fn_default_entry_stage(clinic_id, slug_preferido)`** (preferido → `whatsapp` → primeira por `position`). Era copiada em 3 lugares. Os 34 tenants com funil têm `forms` **e** `whatsapp`, então o fallback quase nunca roda: trocar a ordem muda 100% dos tenants de uma vez, não um subconjunto.
 
 Ciclo de vida: `move_lead_stage`, `finalize_ticket`, `reopen_ticket`, `move_ticket_keep_outcome`.
 
@@ -156,6 +175,7 @@ Venda = **1 ticket ganho**. `stage` e `outcome` são **acoplados** — mexer num
 
 - **`attribution_inbox` tem DUAS chaves de reconciliação:** telefone (`phone_norm`, usada pelo CTWA) e **`protocolo`** (usada pelo clique do site — o lead ainda não tem telefone quando clica). Linha sem telefone é ignorada pelos reconciliadores de telefone **de propósito**.
 - **`external-forms-ingest` é O caminho nativo de formulário** (token `?k=` por clínica, criado sozinho pela UI). O n8n "Webhook Forms" só existe para sites não migrados.
+- ⚠️ **`capture_channel='forms'` NÃO quer dizer "veio de formulário".** A edge **`external-crm-status`** (webhook do CRM do cliente, ex.: Clint) cria lead com esse mesmo canal nos três tipos (`lead`/`ganho`/`perdido`), só para herdar o pipeline de forms. Já são ~5 mil leads assim. **Os tokens são diferentes: `capture_token` (formulário) ≠ `crm_token` (CRM)** — ligar um não liga o outro.
 - **Convenção de UTM é SOURCE-AWARE e mora em `_shared/attribution.ts`** — não invente mapeamento novo: Google → adset=`utm_medium`, ad=`utm_content`, term=`utm_term`; Meta → adset=`utm_term` (`{{adset.name}}`), ad=`utm_content`, e o posicionamento (`utm_medium`) vira `ad_platform`. Meta grava em `fb_*`, o resto em `g_*`.
 - **O script dos sites é SERVIDO pela edge `site-script`** (`?c=<clinic_id>`, cache 1h) a partir de `system_settings.global_tracking_script` — mudou o blob no banco, todos os sites atualizam sozinhos. **Nunca** volte a distribuir o script inline.
 
@@ -171,6 +191,8 @@ Venda = **1 ticket ganho**. `stage` e `outcome` são **acoplados** — mexer num
 | `lead_touchpoints.source` (origem) | `meta_ads` · `google_ads` · `instagram` · `null` = orgânico |
 
 Repare: `leads` diz **`forms`**; `lead_touchpoints` separa em **`site_forms`** e **`meta_forms`**.
+
+⚠️ **O canal é vocabulário FECHADO na prática, mesmo sem CHECK no banco.** Não existe constraint: um valor novo (`crm`, `parceiro`) entra sem erro e só quebra depois, de dois jeitos ao mesmo tempo. As views `v_kpi_*` e o Marketing usam `CASE ... ELSE 'whatsapp'`, então o valor novo **vira WhatsApp**; já o Visão Geral e o Comercial filtram por **igualdade** (`capture_channel = ANY(...)`), então ele **some de todos os chips**. Isso é divergência de DEFINIÇÃO entre painéis, que aqui é bug. Valor novo exige mexer nas 5 views, nas 3 RPCs de painel e nos chips de 4 telas.
 
 ## Nunca reconstruir JSONB do zero
 Formulário que grava um JSONB inteiro sem reler tudo **zera silenciosamente** os campos que não conhece. Já causou 3 bugs de "salvar apaga campo". **Sempre `COALESCE` / merge parcial.**

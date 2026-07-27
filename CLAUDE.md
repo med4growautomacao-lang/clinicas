@@ -24,7 +24,9 @@ O sistema **não vive só neste repo**. Antes de procurar um comportamento aqui,
 
 ### ⚠️ O repo NÃO é a fonte completa das edge functions
 
-Há funções **ativas em produção sem código-fonte aqui** — hoje: **`webhook-proxy`**, **`validate-medico-email`** e `mcp-deploy-test`. As duas primeiras **são chamadas pelo frontend**. Antes de concluir "essa função não existe", **liste as deployadas** (MCP `list_edge_functions`), não só o disco.
+Há funções **ativas em produção sem código-fonte aqui** — hoje: **`validate-medico-email`** (chamada no cadastro, Login.tsx) e `mcp-deploy-test`. Antes de concluir "essa função não existe", **liste as deployadas** (MCP `list_edge_functions`), não só o disco.
+
+⚠️ **`webhook-proxy`** já teve a fonte trazida para o repo (`supabase/functions/webhook-proxy/index.ts`) e endurecida em 27/07: era um **proxy SSRF aberto** (fetch para qualquer URL, `verify_jwt=false`). Hoje tem **allowlist** para `*.med4growautomacao.com.br` e **está sem uso** — os dois callers antigos (encerramento de ticket, teste de gatilho) migraram para trigger/RPC nativos. A constante morta `TEST_GATILHO_WEBHOOK_FALLBACK` em `useSupabase.ts` pode ser removida.
 
 ### Os nomes de WhatsApp enganam
 

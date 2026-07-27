@@ -20,6 +20,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/src/lib/utils";
 import { matchesSearch } from "../lib/search";
+import { logSystemError } from "../hooks/useSupabase";
 
 interface TeamMember {
   id: string;
@@ -213,10 +214,20 @@ export function TeamManagement() {
         return;
       }
     } else {
-      // Usuário ativo: limpa tudo (clinic_users + org_users + auth.users + prontuario_passwords)
-      const { error: rpcError } = await supabase.rpc("delete_user_full", { p_user_id: member.id });
+      // Usuário ativo: limpa tudo (clinic_users + org_users + auth.users + prontuario_passwords).
+      // Passa por delete_clinic_member (wrapper com guard de tenant); delete_user_full não é mais
+      // executável por authenticated de propósito — não tinha guard nenhum (migration 20260727163000).
+      const { error: rpcError } = await supabase.rpc("delete_clinic_member", { p_user_id: member.id });
       if (rpcError) {
         setError(rpcError.message);
+        // console/setError somem quando o modal fecha; registra na Central para a operação ver.
+        logSystemError(
+          "TEAM_MEMBER_DELETE_FAIL",
+          `Falha ao remover membro da equipe: ${rpcError.message}`,
+          member.clinic_id,
+          { fn: "delete_clinic_member", target: member.id, code: (rpcError as any)?.code ?? null },
+          "error",
+        );
         setSubmitting(false);
         return;
       }

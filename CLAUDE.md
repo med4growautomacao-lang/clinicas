@@ -203,7 +203,7 @@ Usar **`is_clinic_admin(clinic_id)`** / **`is_super_admin()`**.
 
 ### ⚠️ Policy que passa a COLUNA roda POR LINHA (e é o que derruba clínica grande)
 
-`is_clinic_active(clinic_id)` / `is_clinic_admin(clinic_id)` recebendo a **coluna** impedem o planner de resolver uma vez, então executam **uma vez por linha**. Desde 27/07 **`leads` e `tickets`** usam a régua nova, que roda **1× por query**:
+`is_clinic_active(clinic_id)` / `is_clinic_admin(clinic_id)` recebendo a **coluna** impedem o planner de resolver uma vez, então executam **uma vez por linha**. Desde 27/07 **`leads`, `tickets`, `chat_messages`, `lead_stage_history`, `lead_touchpoints` e ~25 tabelas de forma standard** usam a régua nova, que roda **1× por query**:
 
 ```sql
 using (clinic_id in (select public.my_clinic_ids()) or (select public.is_super_admin()))
@@ -213,7 +213,8 @@ using (clinic_id in (select public.my_clinic_ids()) or (select public.is_super_a
 
 ⚠️ **O braço `or (select is_super_admin())` não é enfeite:** `my_clinic_ids()` só devolve ids que existem em `clinics`, então linha com `clinic_id` NULL ou órfão sai do alcance do super-admin (`NULL in (...)` é NULL), e como a policy é `FOR ALL` o USING vale de WITH CHECK, então ele perde até o UPDATE para consertar a linha. Copiar a régua sem esse braço reintroduz a cegueira, uma tabela por vez.
 
-- As **outras ~27 policies ainda usam o padrão caro** — ao mexer numa, migre para a régua nova, mas confira as que têm regra extra (ex.: `appointments_doctor_isolation`, médico só vê os próprios, **não** dá para condensar).
+- **Restam ~18 policies no padrão caro** (todas pequenas ou lidas só por RPC DEFINER, sem penhasco de escala): `clinic_users` (self-ref `id=auth.uid()`), as **admin-only** (`lead_kpi_attribution`, `meta_cloud_*`, `outbound_messages`, `report_sends/settings`, `historical_leads_import_log`), as **role-específicas** (`financial_gestor_only`, `pending_clinic_users`, `prontuario_passwords`) e as **sem `is_clinic_active`** (`consultation_types`, `external_crm_events`, `external_form_submissions`, `clinic_external_integrations`, `clinic_enc_keys`). ⚠️ **Migrar essas para `my_clinic_ids()` por cópia NÃO é seguro** — mudaria semântica ou **regrediria segurança** (ex.: `prontuario_passwords` perderia a trava de `gestor`; `clinic_enc_keys` ampliaria acesso às chaves). Migre só provando equivalência caso a caso.
+- ⚠️ **`appointments_doctor_isolation` e `medical_records_doctor_isolation` foram REMOVIDAS em 27/07** (fase2): o braço `EXISTS` sobre `clinic_users` **não correlacionava `clinic_id`** e vazava consultas/prontuários cross-tenant. Hoje **`appointments_all` dá a agenda inteira da clínica a qualquer membro** — o "médico só vê os próprios" é **só de UI** (filtro client-side em `useSupabase.ts`), **não existe na RLS**. Impor de verdade exige policy `RESTRICTIVE` (decisão de produto pendente).
 - Trocar `is_clinic_active` de plpgsql para SQL **não adianta** (medido: 7%). O custo é tocar as tabelas por linha.
 - **Custo de RLS pode ser GLOBAL:** embed do PostgREST (`lead:leads(*)`) **não propaga o `clinic_id`** para a tabela embutida, então a RLS dela varre o **banco inteiro**. Foi por isso que a Metaltres (3,5k) estourou antes da Intubação (8,2k).
 - Antes de trocar qualquer policy, **prove equivalência**: compare a expressão velha e a nova como função de `(usuário, clínica)` num `cross join` de todos os pares, conferindo `ganharia_acesso_indevido = 0` e `perderia_acesso = 0`.
@@ -225,7 +226,7 @@ using (clinic_id in (select public.my_clinic_ids()) or (select public.is_super_a
 `consultation_types.slug` é **texto livre digitado pela clínica**. Use o **`id`**. Já gerou 3 bugs — incluindo liberar a exclusão de tipos com consultas futuras.
 
 ## KPI nunca nasce de array do client
-O PostgREST clampa **TODA** resposta REST em `max_rows` — **inclusive quando o código pede `.limit()` maior** (um `.limit(5000)` devolvia 1000 em silêncio). Contar/agregar sobre um hook (`useLeads` etc.) mente em clínica grande — foi assim que o KPI do Marketing zerou com 39 leads reais no dia. **Agregação = RPC no banco** (`get_dashboard_stats`, `marketing_kpis`, `marketing_funnel_cohort`…). Lista grande = paginação com `.range()`. O helper `warnPostgrestClamp` (`useSupabase.ts`) loga na Central de Erros toda resposta que bate o teto — mantenha `CLAMP_SIZES` em sincronia com o `max_rows` do projeto.
+O PostgREST clampa **TODA** resposta REST em `max_rows` — **inclusive quando o código pede `.limit()` maior** (qualquer `.limit()` acima do teto é cortado em silêncio). O `max_rows` do projeto é **5000** hoje (medido via REST: `Content-Range 0-4999/…`); a constante `POSTGREST_MAX_ROWS` em `useSupabase.ts` **tem que bater com ele**, senão o detector de clamp fica cego. Contar/agregar sobre um hook (`useLeads` etc.) mente em clínica grande — foi assim que o KPI do Marketing zerou com 39 leads reais no dia. **Agregação = RPC no banco** (`get_dashboard_stats`, `marketing_kpis`, `marketing_funnel_cohort`…). Lista grande = paginação com `.range()`. O helper `warnPostgrestClamp` (`useSupabase.ts`) loga na Central de Erros toda resposta que bate o teto.
 
 ## Observabilidade — a Central de Erros é o único olho que temos
 

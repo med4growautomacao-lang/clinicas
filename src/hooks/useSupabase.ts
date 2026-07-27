@@ -1101,6 +1101,53 @@ export function useCampaignInvestment(start: string | null, end: string | null) 
   );
 }
 
+// ── Conversões PERSONALIZADAS do Meta (colunas opcionais da tabela de campanha) ──────────────
+// São por clínica (cada conta cria as suas), então a lista de colunas é DINÂMICA: o catálogo
+// alimenta o seletor e o breakdown traz os números. Duas RPCs em vez de embutir na de
+// investimento porque a relação é 1:N (várias conversões por campanha) — não caberia em colunas
+// fixas de um RETURNS TABLE.
+export interface ConversionCatalogRow {
+  conversion_id: string;
+  name: string | null;
+  is_archived: boolean;
+  tem_dado: boolean;      // já tem número gravado no período sincronizado
+}
+export function useConversionCatalog() {
+  return useRpcRows<ConversionCatalogRow>(
+    'marketing_conversion_catalog',
+    {},
+    (r: any) => ({
+      conversion_id: String(r.conversion_id),
+      name: r.name ?? null,
+      is_archived: r.is_archived === true,
+      tem_dado: r.tem_dado === true,
+    })
+  );
+}
+
+// Números por campanha/conjunto/anúncio. Vem com a chave JÁ normalizada (mesma régua da RPC de
+// investimento) para o front casar linha a linha sem repetir a limpeza de texto.
+export interface CampaignConversionRow {
+  k_campaign: string;
+  k_adset: string;
+  k_ad: string;
+  conversion_id: string;
+  conversions: number;
+}
+export function useCampaignConversions(start: string | null, end: string | null) {
+  return useRpcRows<CampaignConversionRow>(
+    'marketing_campaign_conversions',
+    start && end ? { p_start: start, p_end: end } : null,
+    (r: any) => ({
+      k_campaign: String(r.k_campaign ?? ''),
+      k_adset: String(r.k_adset ?? ''),
+      k_ad: String(r.k_ad ?? ''),
+      conversion_id: String(r.conversion_id),
+      conversions: Number(r.conversions) || 0,
+    })
+  );
+}
+
 // Split de investimento por REDE dentro do Meta (facebook/instagram/…), por campanha.
 // Só o lado do GASTO — não junta com leads (rede de veiculação não chega no UTM do lead).
 export interface CampaignPlatformSplitRow {
@@ -1569,6 +1616,9 @@ export function useDashboardStats(dateRange?: { start: string; end: string }, or
     chartData: []
   });
   const [loading, setLoading] = useState(true);
+  // Estado de erro exposto à tela: sem isto, falha de RPC (ex.: 42501 do guard, timeout)
+  // pinta os zeros iniciais como se fossem números reais — a classe de bug mais cara daqui.
+  const [error, setError] = useState<{ code: string | null; message: string } | null>(null);
   // Guarda de geração: a resposta que chega tarde de um período/filtro ANTIGO não pode
   // sobrescrever o atual (sem isso, troca rápida de filtro exibia número errado).
   const genRef = useRef(0);
@@ -1618,6 +1668,7 @@ export function useDashboardStats(dateRange?: { start: string; end: string }, or
       setCached(cacheKey, mapped);   // cache pode gravar mesmo se superada (chave é correta)
       if (gen !== genRef.current) return;   // superada por uma chamada mais nova → não pinta
       setData(mapped);
+      setError(null);
     } catch (error: any) {
       console.error('Erro ao carregar estatísticas do dashboard:', error);
       // console.error sozinho é invisível (CLAUDE.md). O 42501 do assert_clinic_access
@@ -1635,6 +1686,12 @@ export function useDashboardStats(dateRange?: { start: string; end: string }, or
           activeClinicId,
           { fn: 'get_dashboard_stats', code: error?.code ?? null, error: error?.message ?? String(error) },
         );
+        setError({
+          code: error?.code ?? null,
+          message: negadoPorGuard
+            ? 'Acesso negado a esta clínica.'
+            : 'Não foi possível carregar os dados. Tente novamente.',
+        });
       }
     } finally {
       if (gen === genRef.current && showSpinner) setLoading(false);
@@ -1656,7 +1713,7 @@ export function useDashboardStats(dateRange?: { start: string; end: string }, or
     return () => { supabase.removeChannel(channel); };
   }, [load, activeClinicId]);
 
-  return { data, loading, refetch: load };
+  return { data, loading, error, refetch: load };
 }
 
 // ==========================================
@@ -3910,12 +3967,21 @@ export function useOrcamentos() {
   const fetch = useCallback(async (silent = false) => {
     if (!activeClinicId) return;
     if (!silent) setLoading(true);
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('orcamentos')
       .select('*, lead:leads(name, phone)')
       .eq('clinic_id', activeClinicId)
       .order('number', { ascending: false });
-    setData((data as Orcamento[]) || []);
+    if (error) {
+      // Faturamento/taxa de aprovação do card WakeDesk saem de reduce sobre esta lista;
+      // erro engolido zerava o card sem rastro. Registra e preserva o estado anterior.
+      logFetchFailThrottled('ORCAMENTOS_FETCH_FAIL', `orcamentos: falha ao carregar — ${error.message}`, activeClinicId, { error: error.message });
+      setLoading(false);
+      return;
+    }
+    const list = (data as Orcamento[]) || [];
+    warnPostgrestClamp('useOrcamentos', list.length, activeClinicId);
+    setData(list);
     setLoading(false);
   }, [activeClinicId]);
 

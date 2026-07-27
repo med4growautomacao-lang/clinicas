@@ -63,7 +63,7 @@ export function Dashboard() {
     end: format(dateRange.end, 'yyyy-MM-dd')
   }), [dateRange]);
 
-  const { data: stats, loading } = useDashboardStats(
+  const { data: stats, loading, error: statsError, refetch } = useDashboardStats(
     statsDateRange,
     origin.length ? origin.join(',') : 'todos',
     channel.length ? channel.join(',') : 'todos',
@@ -190,6 +190,19 @@ export function Dashboard() {
             <Loader2 className="w-5 h-5 text-teal-600 animate-spin" />
             <span className="text-xs font-bold text-slate-600 uppercase tracking-widest">Atualizando...</span>
           </div>
+        </div>
+      )}
+      {statsError && !loading && (
+        <div className="flex items-center justify-between gap-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3">
+          <span className="text-sm font-semibold text-red-700">
+            {statsError.message} Os números abaixo podem estar desatualizados.
+          </span>
+          <button
+            onClick={() => refetch()}
+            className="text-xs font-bold uppercase tracking-widest text-red-700 hover:text-red-900"
+          >
+            Tentar novamente
+          </button>
         </div>
       )}
       {/* Header com Filtros */}

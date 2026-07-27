@@ -332,6 +332,9 @@ export function ComercialDashboard() {
   const orcamentosProcessados = isOutro ? orcamentosWD.filter(o => o.status === 'aprovado' || o.status === 'recusado').length : 0;
   const taxaAprovacaoWD = orcamentosProcessados > 0 ? Math.round((orcamentosAprovados.length / orcamentosProcessados) * 100) : null;
   const [data, setData] = useState<CommercialData | null>(null);
+  // Erro exposto à tela: sem isto, a 1ª carga com falha fica em spinner eterno (o gate `if (!data)`),
+  // e o 42501 do guard vira "carregando..." para sempre em vez de mensagem.
+  const [fetchError, setFetchError] = useState<{ code: string | null; message: string } | null>(null);
   // Guarda de geração: resposta de um recorte antigo não sobrescreve o atual.
   const fetchGenRef = useRef(0);
   const [clinicFeatures, setClinicFeatures] = useState<{ feature_followup?: boolean; feature_ia?: boolean } | null>(null);
@@ -502,6 +505,7 @@ export function ComercialDashboard() {
       setCached(cacheKey, res);   // cache pode gravar mesmo se superada (chave é correta)
       if (gen !== fetchGenRef.current) return;   // superada por chamada mais nova → não pinta
       setData(res as CommercialData);
+      setFetchError(null);
     } catch (err: any) {
       console.error("ComercialDashboard fetch error:", err);
       // console.error sozinho é invisível (CLAUDE.md): sem isto o painel repinta o
@@ -520,6 +524,12 @@ export function ComercialDashboard() {
           clinicId,
           { fn: "get_commercial_dashboard", code: err?.code ?? null, error: err?.message ?? String(err) },
         );
+        setFetchError({
+          code: err?.code ?? null,
+          message: negadoPorGuard
+            ? "Acesso negado a esta clínica."
+            : "Não foi possível carregar o painel Comercial. Tente novamente.",
+        });
       }
     } finally {
       if (gen === fetchGenRef.current && showSpinner) setLoading(false);
@@ -747,6 +757,20 @@ export function ComercialDashboard() {
     URL.revokeObjectURL(url);
   };
 
+  // 1ª carga falhou (sem dados em cache): mostra erro + retry em vez de spinner eterno.
+  if (!data && fetchError) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 gap-3">
+        <span className="text-sm font-semibold text-red-700">{fetchError.message}</span>
+        <button
+          onClick={() => fetchData()}
+          className="text-xs font-bold uppercase tracking-widest text-red-700 hover:text-red-900 border border-red-200 bg-red-50 rounded-xl px-4 py-2"
+        >
+          Tentar novamente
+        </button>
+      </div>
+    );
+  }
   // Spinner cheio só no 1º carregamento (sem dados ainda). Em mudanças de filtro,
   // mantém os dados atuais visíveis durante o refetch (sem "piscar" a tela inteira).
   if (!data) {

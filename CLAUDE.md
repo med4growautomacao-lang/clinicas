@@ -279,6 +279,8 @@ Hoje só `apply_external_crm_outcome` com `p_outcome='lead'` a liga, e a RPC a s
 
 ⚠️ **A cascata de etapa mora em `fn_default_entry_stage(clinic_id, slug_preferido)`** (preferido → `whatsapp` → primeira por `position`). Era copiada em 3 lugares. Os 34 tenants com funil têm `forms` **e** `whatsapp`, então o fallback quase nunca roda: trocar a ordem muda 100% dos tenants de uma vez, não um subconjunto.
 
+📌 **Quem escolhe o `slug_preferido` não é mais o código, é o cliente:** `fn_clinic_entry_stage_slug(clinic_id)` (§2, "Canal e etapa de entrada"). Ao mexer num caminho que abre card, passe a chave, **nunca um slug fixo** — slug fixo aqui é o que fez a decisão de 27/07 virar letra morta sem ninguém notar.
+
 Ciclo de vida: `move_lead_stage`, `finalize_ticket`, `reopen_ticket`, `move_ticket_keep_outcome`.
 
 ## Dashboards — fonte ÚNICA por conceito; divergência só de RECORTE
@@ -395,8 +397,25 @@ Repare: `leads` diz **`forms`**; `lead_touchpoints` separa em **`site_forms`** e
 Decisão do dono (28/07). **`forms` significa formulário de verdade**, nativo (`external-forms-ingest`) ou de site. Nenhuma outra origem pode se pendurar nesse canal só para herdar o pipeline dele.
 
 - **Lead que não veio de formulário nasce `whatsapp`.** É o valor de fallback do vocabulário fechado, então não inventa termo novo nem some dos painéis.
-- ⚠️ **O caso aberto é o CRM externo** (`apply_external_crm_outcome`), que hoje cria lead como `forms` de propósito, com um comentário na própria função dizendo que trocar "partiria o recorte de canal ao meio". A decisão acima **derruba esse comentário**: quando a troca for feita, é para `whatsapp`.
+- ⚠️ **O caso aberto é o CRM externo** (`apply_external_crm_outcome`), que hoje cria lead como `forms` de propósito, com um comentário na própria função dizendo que trocar "partiria o recorte de canal ao meio". A decisão acima **derruba esse comentário**: quando a troca for feita, é para `whatsapp`. Ainda **não** foi feita.
 - Efeito medido antes de mexer: **só a Intubação usa CRM de verdade** (5.574 eventos), e **nenhum lead de CRM recebe boas-vindas hoje** (o welcome só sai onde o canal é `forms` **e** a clínica tem o follow-up ligado, o que não é o caso). Ou seja, a troca **não silencia mensagem nenhuma**. O que muda é o recorte do painel dessa clínica.
+
+### ⚠️ Canal e ETAPA DE ENTRADA são coisas separadas, e só a etapa é escolha do cliente
+
+Confundir as duas é a armadilha desta parte do sistema, porque as duas usam as palavras "forms" e "whatsapp".
+
+| | o que é | quem decide |
+|---|---|---|
+| **canal** (`leads.capture_channel`) | **fato**: como o contato chegou | a origem, nunca uma preferência |
+| **etapa de entrada** | **escolha de fluxo**: em que coluna o card nasce | o cliente, em `clinic_external_integrations.entry_stage_slug` (`forms` \| `whatsapp`, default `forms`) |
+
+Desde 28/07 a etapa é configurável por cliente, na aba Integração Externa ("Onde o card começa"). A chave vale para **os dois caminhos que criam card sem conversa**: o formulário (`fn_auto_open_ticket_forms`) e o CRM (`apply_external_crm_outcome`), ambos via **`fn_clinic_entry_stage_slug(clinic_id)`**.
+
+📌 **A chave NÃO toca o canal, e isso é deliberado.** Amarrar um no outro faria um lead de formulário ser contado como WhatsApp nos painéis, que é exatamente a corrupção que a régua do canal existe para impedir.
+
+⚠️ **A exceção antiga do CRM morreu.** Até 28/07 a RPC do CRM passava `'whatsapp'` fixo, por uma decisão de 27/07 que **nunca teve efeito nenhum**: as duas clínicas com CRM têm **zero** evento `outcome='lead'` (a Intubação nem tem `lead_enabled`), então aquele ramo jamais rodou. Na prática 100% dos cards entravam em `forms`. Não "restaure" o slug fixo achando que era regra viva.
+
+Hoje: Intubação em `forms` (é captação por formulário mesmo), GG Imports em `whatsapp` (loja, atende tudo por WhatsApp).
 
 ⚠️ **O canal é vocabulário FECHADO na prática, mesmo sem CHECK no banco.** Não existe constraint: um valor novo (`crm`, `parceiro`) entra sem erro e só quebra depois, de dois jeitos ao mesmo tempo. As views `v_kpi_*` e o Marketing usam `CASE ... ELSE 'whatsapp'`, então o valor novo **vira WhatsApp**; já o Visão Geral e o Comercial filtram por **igualdade** (`capture_channel = ANY(...)`), então ele **some de todos os chips**. Isso é divergência de DEFINIÇÃO entre painéis, que aqui é bug. Valor novo exige mexer nas 5 views, nas 3 RPCs de painel e nos chips de 4 telas.
 
@@ -420,7 +439,9 @@ using (clinic_id in (select public.my_clinic_ids()) or (select public.is_super_a
 ⚠️ **O braço `or (select is_super_admin())` não é enfeite:** `my_clinic_ids()` só devolve ids que existem em `clinics`, então linha com `clinic_id` NULL ou órfão sai do alcance do super-admin (`NULL in (...)` é NULL), e como a policy é `FOR ALL` o USING vale de WITH CHECK, então ele perde até o UPDATE para consertar a linha. Copiar a régua sem esse braço reintroduz a cegueira, uma tabela por vez.
 
 - **Restam ~18 policies no padrão caro** (todas pequenas ou lidas só por RPC DEFINER, sem penhasco de escala): `clinic_users` (self-ref `id=auth.uid()`), as **admin-only** (`lead_kpi_attribution`, `meta_cloud_*`, `outbound_messages`, `report_sends/settings`, `historical_leads_import_log`), as **role-específicas** (`financial_gestor_only`, `pending_clinic_users`, `prontuario_passwords`) e as **sem `is_clinic_active`** (`consultation_types`, `external_crm_events`, `external_form_submissions`, `clinic_external_integrations`, `clinic_enc_keys`). ⚠️ **Migrar essas para `my_clinic_ids()` por cópia NÃO é seguro** — mudaria semântica ou **regrediria segurança** (ex.: `prontuario_passwords` perderia a trava de `gestor`; `clinic_enc_keys` ampliaria acesso às chaves). Migre só provando equivalência caso a caso.
-- ⚠️ **`appointments_doctor_isolation` e `medical_records_doctor_isolation` foram REMOVIDAS em 27/07** (fase2): o braço `EXISTS` sobre `clinic_users` **não correlacionava `clinic_id`** e vazava consultas/prontuários cross-tenant. Hoje **`appointments_all` dá a agenda inteira da clínica a qualquer membro** — o "médico só vê os próprios" é **só de UI** (filtro client-side em `useSupabase.ts`), **não existe na RLS**. Impor de verdade exige policy `RESTRICTIVE` (decisão de produto pendente).
+- ⚠️ **`appointments_doctor_isolation` e `medical_records_doctor_isolation` foram REMOVIDAS em 27/07** (`20260727223829_fase2_fix_cross_tenant_doctor_isolation.sql`): o braço `EXISTS` sobre `clinic_users` **não correlacionava `clinic_id`** e vazava consultas/prontuários cross-tenant (medido: staff de clínica com 0 consultas enxergava 234, todas alheias). Hoje **`appointments_all` dá a agenda inteira da clínica a qualquer membro** — o "médico só vê os próprios" é **só de UI** (filtro client-side em `useSupabase.ts`), **não existe na RLS**.
+
+  ⚠️ **E nunca existiu, apesar do nome.** Elas eram **PERMISSIVE**, e policy permissiva só **soma** acesso, nunca subtrai: rodando ao lado de `appointments_all`, jamais impediram um membro de ver a agenda de outro médico. O nome prometia isolamento; o efeito real era só o vazamento entre clínicas. Por isso removê-las **não regrediu nada** — quem procurar "a regra que existia para evitar isso" vai achar essas duas e pode concluir errado que havia proteção. **Impor de verdade exige policy `RESTRICTIVE`** (decisão de produto pendente).
 - Trocar `is_clinic_active` de plpgsql para SQL **não adianta** (medido: 7%). O custo é tocar as tabelas por linha.
 - **Custo de RLS pode ser GLOBAL:** embed do PostgREST (`lead:leads(*)`) **não propaga o `clinic_id`** para a tabela embutida, então a RLS dela varre o **banco inteiro**. Foi por isso que a Metaltres (3,5k) estourou antes da Intubação (8,2k).
 - Antes de trocar qualquer policy, **prove equivalência**: compare a expressão velha e a nova como função de `(usuário, clínica)` num `cross join` de todos os pares, conferindo `ganharia_acesso_indevido = 0` e `perderia_acesso = 0`.

@@ -1733,7 +1733,13 @@ interface ExternalIntegrationRow {
     won_enabled: boolean;
     lost_enabled: boolean;
     lead_enabled: boolean;
+    // Etapa em que o card NASCE para quem entra sem conversa (formulário e CRM).
+    // Só a etapa: o canal do lead continua dizendo como ele chegou de verdade.
+    entry_stage_slug: EntryStage;
 }
+
+// Onde o card começa. Sem escolha, 'forms' — que é o comportamento histórico.
+type EntryStage = 'forms' | 'whatsapp';
 
 // Os três eventos que o CRM do cliente manda pelo MESMO token (crm_token), separados por ?tipo=.
 // 'lead' é a ENTRADA (abre card na etapa do WhatsApp), 'ganho'/'perdido' são DESFECHO (fecham).
@@ -1757,6 +1763,7 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
     const [regenerating, setRegenerating] = useState(false);
     const [togglingCapture, setTogglingCapture] = useState(false);
     const [copiedCrm, setCopiedCrm] = useState<CrmTipo | null>(null);
+    const [savingEntry, setSavingEntry] = useState(false);
     // Trava de clique duplo POR CAMPO: são três toggles independentes, e travar o card inteiro
     // impediria ligar 'ganho' enquanto 'lead' ainda grava. Set, e não `CrmField | null`, porque
     // a chave única se sobrescreve e liberaria o botão que ainda está em voo.
@@ -1768,7 +1775,7 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
         if (!effClinicId) { setLoading(true); return; }
         (async () => {
             setLoading(true);
-            const cols = 'capture_token, capture_enabled, capture_count, last_capture_at, crm_token, won_enabled, lost_enabled, lead_enabled';
+            const cols = 'capture_token, capture_enabled, capture_count, last_capture_at, crm_token, won_enabled, lost_enabled, lead_enabled, entry_stage_slug';
             let { data, error } = await supabase
                 .from('clinic_external_integrations')
                 .select(cols)
@@ -1855,6 +1862,27 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
         setTogglingCrm(s => { const n = new Set(s); n.delete(field); return n; });
     };
 
+    // ── Etapa de entrada ───────────────────────────────────────────────────────────────────────
+    // Vale para os DOIS caminhos que criam card sem conversa: formulário (nativo e de site) e CRM.
+    // Muda só onde o card nasce; não mexe no canal do lead, que é fato de origem.
+    const entryStage: EntryStage = row?.entry_stage_slug === 'whatsapp' ? 'whatsapp' : 'forms';
+    const setEntryStage = async (next: EntryStage) => {
+        if (!effClinicId || !row || savingEntry || next === entryStage) return;
+        setSavingEntry(true);
+        const { error } = await supabase
+            .from('clinic_external_integrations')
+            .update({ entry_stage_slug: next })
+            .eq('clinic_id', effClinicId);
+        if (error) showToast('Não foi possível mudar a etapa de entrada.', 'error');
+        else {
+            setRow(r => r ? { ...r, entry_stage_slug: next } : r);
+            showToast(next === 'whatsapp'
+                ? 'Novos contatos passam a entrar na etapa de WhatsApp.'
+                : 'Novos contatos passam a entrar na etapa de Formulários.', 'success');
+        }
+        setSavingEntry(false);
+    };
+
     const copyChip = (e: React.MouseEvent, text: string) => {
         navigator.clipboard.writeText(text);
         const icon = (e.currentTarget as HTMLElement).querySelector('svg');
@@ -1863,6 +1891,61 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
 
     return (
         <div className="max-w-4xl mx-auto space-y-6">
+            {/* Etapa de entrada — governa os DOIS caminhos abaixo (formulário e CRM), por isso
+                vem antes deles. Não altera o canal do lead: um contato que veio de formulário
+                continua contando como Formulário nos painéis, só começa noutra coluna. */}
+            {row && (
+                <Card className="border border-slate-200 shadow-sm bg-white overflow-hidden">
+                    <CardHeader className="bg-slate-50 border-b border-slate-200 pb-6 px-8">
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-200">
+                                <ClipboardList className="w-6 h-6 text-slate-600" />
+                            </div>
+                            <div>
+                                <CardTitle className="text-xl font-bold text-slate-800">Onde o card começa</CardTitle>
+                                <p className="text-[12px] text-slate-500 font-medium mt-0.5">
+                                    Coluna do funil em que nasce todo contato que chega sem conversa: formulário do site, formulário nativo e CRM.
+                                </p>
+                            </div>
+                        </div>
+                    </CardHeader>
+                    <CardContent className="p-8 space-y-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            {([
+                                { slug: 'forms' as const, Icon: FileText, titulo: 'Contato via Forms', ajuda: 'Para quem trabalha o lead de formulário como uma fila própria.' },
+                                { slug: 'whatsapp' as const, Icon: MessageCircle, titulo: 'Contato via WhatsApp', ajuda: 'Para quem atende tudo pelo WhatsApp e quer o card já na fila do atendimento.' },
+                            ]).map(({ slug, Icon, titulo, ajuda }) => {
+                                const ativo = entryStage === slug;
+                                return (
+                                    <button
+                                        key={slug}
+                                        onClick={() => setEntryStage(slug)}
+                                        disabled={savingEntry}
+                                        className={cn(
+                                            "text-left p-5 rounded-2xl border-2 transition-all disabled:opacity-50",
+                                            ativo
+                                                ? "border-teal-500 bg-teal-50 shadow-sm"
+                                                : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
+                                        )}
+                                    >
+                                        <div className="flex items-center gap-2 mb-1.5">
+                                            <Icon className={cn("w-4 h-4 shrink-0", ativo ? "text-teal-600" : "text-slate-400")} />
+                                            <span className={cn("text-sm font-bold", ativo ? "text-teal-900" : "text-slate-700")}>{titulo}</span>
+                                            {ativo && <Check className="w-4 h-4 text-teal-600 ml-auto shrink-0" />}
+                                        </div>
+                                        <p className="text-[11px] font-medium text-slate-500 leading-relaxed">{ajuda}</p>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        <p className="text-[11px] font-medium text-slate-400 leading-relaxed">
+                            Vale só para os contatos que chegarem daqui em diante. Os cards que já existem ficam onde estão, e a contagem
+                            por canal nos painéis não muda: quem veio de formulário continua sendo contado como formulário.
+                        </p>
+                    </CardContent>
+                </Card>
+            )}
+
             <Card className="border border-blue-200 shadow-sm bg-white overflow-hidden">
                 <CardHeader className="bg-blue-50 border-b border-blue-200 pb-6 px-8">
                     <div className="flex items-center justify-between">
@@ -1997,7 +2080,9 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
                     </CardHeader>
                     <CardContent className="p-8 space-y-4">
                         {([
-                            { tipo: 'lead' as const, field: 'lead_enabled' as const, enabled: row.lead_enabled, label: 'Lead', desc: 'lead novo', bar: 'bg-blue-500', chip: 'bg-blue-100 text-blue-700', nota: 'Abre o card na etapa de entrada do WhatsApp. Não marca desfecho.' },
+                            // A nota segue a chave "Onde o card começa": texto fixo aqui já mentiu
+                            // para o cliente uma vez (dizia WhatsApp enquanto tudo entrava em Forms).
+                            { tipo: 'lead' as const, field: 'lead_enabled' as const, enabled: row.lead_enabled, label: 'Lead', desc: 'lead novo', bar: 'bg-blue-500', chip: 'bg-blue-100 text-blue-700', nota: `Abre o card em "${entryStage === 'whatsapp' ? 'Contato via WhatsApp' : 'Contato via Forms'}". Não marca desfecho.` },
                             { tipo: 'ganho' as const, field: 'won_enabled' as const, enabled: row.won_enabled, label: 'Ganho', desc: 'negócio ganho', bar: 'bg-emerald-500', chip: 'bg-emerald-100 text-emerald-700', nota: null },
                             { tipo: 'perdido' as const, field: 'lost_enabled' as const, enabled: row.lost_enabled, label: 'Perdido', desc: 'negócio perdido', bar: 'bg-rose-500', chip: 'bg-rose-100 text-rose-700', nota: null },
                         ]).map(({ tipo, field, enabled, label, desc, bar, chip, nota }) => (

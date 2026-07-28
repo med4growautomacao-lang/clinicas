@@ -17,16 +17,16 @@ O sistema **não vive só neste repo**. Antes de procurar um comportamento aqui,
 |---|---|
 | **Repo (React/TS)** | telas, hooks (`src/hooks/useSupabase.ts`), configuração |
 | **Banco (Postgres)** | RPCs, triggers, invariantes, RLS, crons (`pg_cron`) |
-| **Edge Functions** (`supabase/functions/`) | integrações que falam com o mundo (~18 — `supabase/functions/` é a lista) |
-| **n8n** | recepção do WhatsApp, o agente de IA e os disparos de follow-up |
+| **Edge Functions** (`supabase/functions/`) | ~42 edges + `_shared/` (lista no disco). Inclui integrações externas, o **Agente IA nativo** (`ai-agent` + `ai-agent-worker`), **Analista Conversacional** (`conv-ai-analyst` + `conv-ai-learn`), **Emissor** (`emissor-worker`), follow-ups (`forms-welcome-followup`, `reengagement-followup`), assistente IA (`ai-assistant`), sandbox (`ai-sandbox`) |
+| **n8n** | recepção do WhatsApp (workflow "Receptor de mensagens"). ⚠️ O agente de IA e os follow-ups **migraram para edge functions** — n8n NÃO roda mais o loop do agente |
 
-**Regra prática:** comportamento do agente → n8n + prompt. Regra de negócio → banco. Integração externa → edge. Tela → repo.
+**Regra prática:** comportamento do agente → edge (`ai-agent-worker`) + prompt. Regra de negócio → banco. Integração externa → edge. Tela → repo.
 
 ### ⚠️ O repo NÃO é a fonte completa das edge functions
 
-Há funções **ativas em produção sem código-fonte aqui** — hoje: **`validate-medico-email`** (chamada no cadastro, Login.tsx) e `mcp-deploy-test`. Antes de concluir "essa função não existe", **liste as deployadas** (MCP `list_edge_functions`), não só o disco.
+Há funções **ativas em produção sem código-fonte aqui** — hoje: **`validate-medico-email`** (chamada no cadastro, Login.tsx). Antes de concluir "essa função não existe", **liste as deployadas** (MCP `list_edge_functions`), não só o disco.
 
-⚠️ **`webhook-proxy`** já teve a fonte trazida para o repo (`supabase/functions/webhook-proxy/index.ts`) e endurecida em 27/07: era um **proxy SSRF aberto** (fetch para qualquer URL, `verify_jwt=false`). Hoje tem **allowlist** para `*.med4growautomacao.com.br` e **está sem uso** — os dois callers antigos (encerramento de ticket, teste de gatilho) migraram para trigger/RPC nativos. A constante morta `TEST_GATILHO_WEBHOOK_FALLBACK` em `useSupabase.ts` pode ser removida.
+⚠️ **`webhook-proxy`** já teve a fonte trazida para o repo (`supabase/functions/webhook-proxy/index.ts`) e endurecida em 27/07: era um **proxy SSRF aberto** (fetch para qualquer URL, `verify_jwt=false`). Hoje tem **allowlist** para `*.med4growautomacao.com.br` e **está sem uso** — os dois callers antigos (encerramento de ticket, teste de gatilho) migraram para trigger/RPC nativos.
 
 ### Os nomes de WhatsApp enganam
 
@@ -44,7 +44,7 @@ O agente recebe **DOIS prompts**, e confundi-los já custou tempo:
 
 A view **`public.v_clinic_ai_prompt`** concatena: `combined_prompt = template.content + '\n\n---\n\n' + ai_config.prompt`. **Sistema primeiro, clínica depois.** Sem template, é só o da clínica.
 
-O n8n já lê essa view: workflow **"Agente IA"** → `Puxa dados Prompt` → `Prompt Combinado` → `systemMessage` do `AI Agent`.
+Quem lê essa view é o pipeline nativo: `wa-inbound` → **`ai-agent`** (ingest, enfileira em `ai_turn_buffer`) → **`ai-agent-worker`** (loop LLM + tool-calling + envio). O worker monta o prompt via `_shared/agent/prompt.ts` → `fetchAgentContext` → `assembleSystemPrompt`, que puxa a view.
 
 - **Regra de comportamento está no prompt do SISTEMA.** Procurar no da clínica não acha.
 - Editar um `prompt_template` **mexe com várias clínicas ao mesmo tempo**.
@@ -53,6 +53,46 @@ O n8n já lê essa view: workflow **"Agente IA"** → `Puxa dados Prompt` → `P
 **Uma terceira fonte, que não é prompt:** as **descrições dos tipos de consulta** (`consultation_types.description`) chegam ao agente em tempo de execução, pela tool `LISTAR_TIPOS_CONSULTA`. **É lá que se ensina quando usar cada tipo.**
 
 ⚠️ Essa regra também está **explicada na UI** (Configurações IA e Super Admin › Prompts Fixos). Se ela mudar, **os textos da tela mudam junto** — senão o app passa a mentir para o cliente.
+
+## Pipeline do Agente IA nativo (substituiu o n8n)
+
+O agente de IA **não roda mais no n8n**. O pipeline é inteiramente de edge functions:
+
+```
+wa-inbound → ai-agent (ingest) → ai_turn_buffer → ai-agent-worker (loop LLM)
+                                                         ↓
+                                                    outbound_messages → emissor-worker → uazapi
+```
+
+| edge | o que faz |
+|---|---|
+| **`wa-inbound`** | Recebe webhook do uazapi, persiste `chat_messages`, encaminha para o agente via `HUB_AI_WEBHOOK_URL` → edge `ai-agent`. **Substitui o workflow n8n "Receptor de mensagens" por clínica (canário)** — ambos coexistem |
+| **`ai-agent`** | Ponto de entrada (ingest). Enfileira o turno em `ai_turn_buffer` e "cutuca" o worker. Retorno 200 imediato |
+| **`ai-agent-worker`** | O cérebro. Claim atômico (`claim_due_ai_turns`), loop LLM com tool-calling (`_shared/agent/tools.ts`), fan-out em bolhas, grava memória, transição de etapa. **Stateless, horizontal** |
+| **`emissor-worker`** | Fila de saída (`outbound_messages`). É o **ÚNICO** ponto que fala com a uazapi para enviar. Token pelo gate canônico (`fn_clinic_send_token`), lê a resposta, só grava em `chat_messages` após 200, retry + DLQ |
+| **`ai-sandbox`** | Ambiente de teste (Super Admin). Injeta mensagem no mesmo pipeline mas roteia p/ `transport='sandbox'` (nunca toca uazapi real) |
+
+**Módulos compartilhados em `_shared/agent/`:**
+- `tools.ts` — specs e execução das 9 tools do agente: `LISTAR_TIPOS_CONSULTA`, `VER_HORARIOS`, `MARCAR_HORARIO`, `REAGENDAR_HORARIO`, `CANCELAR_HORARIO`, `VER_AGENDAMENTOS_PACIENTE`, `VER_HISTORICO_PACIENTE`, `ACIONAR_HANDOFF`, `ENCERRAR_FORA_PERFIL`. Todas delegam para a edge `ai-scheduler`
+- `prompt.ts` — `fetchAgentContext` + `assembleSystemPrompt` (puxa `v_clinic_ai_prompt`)
+- `memory.ts` — leitura/escrita de `chat_messages` como memória conversacional
+- `guard.ts` — sanitização de resposta (detecta vazamento técnico, strip de code fences)
+- `split.ts` — quebra resposta longa em bolhas de WhatsApp
+
+**`_shared/llm.ts`** — abstração multi-provider (Gemini/Anthropic). O modelo padrão hoje é `gemini-3.1-pro-preview-customtools`; pode ser override por clínica via `ai_config`.
+
+⚠️ **O ai-agent-worker NÃO faz retry do envio** — quem retenta é o `emissor-worker`. Se o worker falhar no loop LLM, o erro vai para a Central e a sessão fica pendente para o sweep do `pg_cron`.
+
+## Analista Conversacional (conv-ai)
+
+Dois módulos que classificam conversas **sem intervenção humana**:
+
+| edge | o que faz |
+|---|---|
+| **`conv-ai-analyst`** | Lê a conversa de cada atendimento com mensagem nova. Decide: (1) em que etapa do funil o ticket deveria estar, (2) se houve venda. Etapa comum → aplica sozinha (`source='ia_analise'`). Etapa de conversão → **nunca aplica**, vira sugestão pendente ("Vendas sugeridas"). Cron 5min |
+| **`conv-ai-learn`** | "Aprendizado" do analista. Gera/atualiza o manual de análise **por clínica** (`conv_ai_prompt_versions`), a partir de conversas históricas rotuladas (bootstrap) ou decisões humanas recentes (learn). Cron 1×/dia |
+
+Gates: `system_settings.conv_ai_config.mode` (`off`/`shadow`/`active`) + `conv_ai_clinic_config.enabled` por clínica. Em `shadow`, nada é aplicado — só registra o que **teria** feito.
 
 ## Agendamento
 
@@ -238,8 +278,8 @@ O PostgREST clampa **TODA** resposta REST em `max_rows` — **inclusive quando o
 
 Vale para **edge function, RPC, trigger e cron**. "Importa" = **se falhar, alguém perde dado, dinheiro ou atendimento** — e ninguém percebe na hora.
 
-- **Edge function:** copie o helper **`registrarErro()`** (veja `ai-scheduler/index.ts`) — chama `log_system_error`.
-  Já instrumentadas: `ai-scheduler`, `ctwa-tracking`, `meta-forms-sync`, `whatsapp-redirect`.
+- **Edge function:** copie o helper **`registrarErro()`** (veja `ai-agent/index.ts` ou qualquer edge existente) — chama `log_system_error`.
+  A maioria das edges já tem `registrarErro`. Exemplos: `ai-agent`, `ai-agent-worker`, `ai-scheduler`, `conv-ai-analyst`, `conv-ai-learn`, `emissor-worker`, `external-crm-status`, `external-forms-ingest`, `forms-welcome-followup`, `google-spend-sync`, `meta-cloud-webhook`, `meta-creatives`, `meta-spend-sync`, `onboarding-rehost-avatars`, `reengagement-followup`, `site-script`, `site-tracking`, `wa-inbound`, `whatsapp-group`.
 - **Banco:** chame **`log_system_error(scope, code, title, level, clinic_id, context, is_monitor)`**.
 - **Chamada HTTP saindo do banco:** use **`system_http_post`**, nunca `net.http_post` cru — é o que permite saber **qual URL** falhou. Hoje **nenhuma** função usa o cru: **mantenha assim.**
 
@@ -261,8 +301,11 @@ Isso é **remoção, não filtro de UI**: o trigger **`trg_system_error_arquiva_
 
 # 3. n8n — produção, com pacientes reais
 
-- **Não alterar "Receptor de mensagens" sem permissão explícita** — alimenta a IA.
-- **Não alterar "Agente IA" sem ordem explícita.**
+⚠️ **O agente de IA e os follow-ups NÃO rodam mais no n8n** — migraram para edge functions nativas (ver seção "Onde as coisas moram"). O n8n ainda hospeda:
+
+- **"Receptor de mensagens"** — recepção do WhatsApp para clínicas **não migradas para `wa-inbound`** (migração é por clínica, canário). **Não alterar sem permissão explícita** — alimenta a IA nas clínicas que ainda o usam.
+- Outros workflows auxiliares que ainda não migraram.
+
 - n8n tem modelo **draft/publish**: editar salva **rascunho**. Sempre confirmar com **`mode: 'active'`** que a mudança está na versão publicada.
 
 ---

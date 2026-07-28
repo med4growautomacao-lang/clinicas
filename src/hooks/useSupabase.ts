@@ -4317,9 +4317,13 @@ export function useSystemErrors() {
 
   const fetch = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
+    // Resolvido não volta: o trigger trg_system_error_arquiva_resolvido move a linha para
+    // system_errors_archive e a apaga daqui. O neq é cinto de segurança para o instante entre
+    // o update e o trigger, não a regra — a regra mora no banco.
     const { data: rows } = await supabase
       .from('system_errors')
       .select('*')
+      .neq('status', 'resolved')
       .order('last_seen_at', { ascending: false })
       .limit(300);
     setData((rows as SystemError[]) || []);
@@ -4331,6 +4335,9 @@ export function useSystemErrors() {
   // Um MONITOR não se resolve na mão: ele reflete uma condição que ou existe ou não existe, e o cron
   // reavalia a cada 5 min. Deixar o super admin "resolver" um WhatsApp que continua caído só
   // esconderia o problema até a próxima rodada. Por isso só eventos podem ser resolvidos aqui.
+  //
+  // Resolver aqui REMOVE do painel (trigger arquiva em system_errors_archive e apaga). Se o mesmo
+  // problema voltar, o log_system_error insere de novo, como episódio novo.
   const setStatus = async (id: string, status: 'open' | 'ack' | 'resolved') => {
     const { error } = await supabase
       .from('system_errors')

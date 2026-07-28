@@ -17,6 +17,10 @@ import { cn } from '@/src/lib/utils';
 //
 // Tudo é agrupado por fingerprint: 500 erros iguais viram UMA linha com contador. Sem isso o painel
 // vira enxurrada e ninguém olha — que é o mesmo que não ter monitoramento.
+//
+// RESOLVIDO SAI DO PAINEL (regra do dono). Não existe aba nem contador de resolvidos: a linha é
+// arquivada em system_errors_archive e apagada pelo trigger trg_system_error_arquiva_resolvido.
+// Aqui só aparece o que está aberto, então a contagem da tela É a fila de trabalho.
 
 const LEVEL: Record<string, { label: string; icon: any; chip: string; dot: string; rank: number }> = {
   critical: { label: 'Crítico', icon: AlertOctagon,  chip: 'bg-rose-50 text-rose-700 border-rose-200',    dot: 'bg-rose-500',   rank: 0 },
@@ -124,7 +128,6 @@ function Linha({ e, clinica, onResolver }: {
 export function ErrorCenter() {
   const { data, loading, setStatus, refetch } = useSystemErrors();
   const { data: clinics } = useClinics();
-  const [verResolvidos, setVerResolvidos] = useState(false);
 
   const nomeClinica = useMemo(() => {
     const m = new Map<string, string>();
@@ -132,16 +135,13 @@ export function ErrorCenter() {
     return m;
   }, [clinics]);
 
-  const abertos = data.filter(e => e.status !== 'resolved');
-  const resolvidos = data.filter(e => e.status === 'resolved');
-  const lista = verResolvidos ? resolvidos : abertos;
-
-  const ordenada = useMemo(() => [...lista].sort((a, b) => {
+  // Não há filtro por status: o que chega aqui está aberto, por construção.
+  const ordenada = useMemo(() => [...data].sort((a, b) => {
     const r = (LEVEL[a.level]?.rank ?? 9) - (LEVEL[b.level]?.rank ?? 9);
     return r !== 0 ? r : new Date(b.last_seen_at).getTime() - new Date(a.last_seen_at).getTime();
-  }), [lista]);
+  }), [data]);
 
-  const conta = (nivel: string) => abertos.filter(e => e.level === nivel).length;
+  const conta = (nivel: string) => data.filter(e => e.level === nivel).length;
 
   if (loading) {
     return (
@@ -154,12 +154,11 @@ export function ErrorCenter() {
   return (
     <div className="space-y-5">
       {/* Resumo */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         {[
           { label: 'Críticos',  value: conta('critical'), icon: AlertOctagon,  color: 'bg-rose-50 text-rose-600' },
           { label: 'Erros',     value: conta('error'),    icon: AlertTriangle, color: 'bg-amber-50 text-amber-600' },
           { label: 'Avisos',    value: conta('warn'),     icon: Info,          color: 'bg-slate-100 text-slate-500' },
-          { label: 'Resolvidos', value: resolvidos.length, icon: CheckCircle2, color: 'bg-teal-50 text-teal-600' },
         ].map(s => (
           <div key={s.label} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex items-center gap-3">
             <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center shrink-0', s.color)}>
@@ -175,22 +174,9 @@ export function ErrorCenter() {
 
       {/* Barra */}
       <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
-          <button
-            onClick={() => setVerResolvidos(false)}
-            className={cn('px-3 py-1.5 rounded-lg text-xs font-bold transition-all',
-              !verResolvidos ? 'bg-white text-teal-700 shadow-sm' : 'text-slate-500 hover:text-slate-700')}
-          >
-            Abertos ({abertos.length})
-          </button>
-          <button
-            onClick={() => setVerResolvidos(true)}
-            className={cn('px-3 py-1.5 rounded-lg text-xs font-bold transition-all',
-              verResolvidos ? 'bg-white text-teal-700 shadow-sm' : 'text-slate-500 hover:text-slate-700')}
-          >
-            Resolvidos ({resolvidos.length})
-          </button>
-        </div>
+        <span className="text-xs font-bold text-slate-500">
+          {ordenada.length} em aberto
+        </span>
 
         <button
           onClick={() => refetch()}
@@ -207,9 +193,7 @@ export function ErrorCenter() {
           <div className="w-12 h-12 rounded-2xl bg-teal-50 text-teal-600 flex items-center justify-center mx-auto mb-3">
             <ShieldCheck className="w-6 h-6" />
           </div>
-          <p className="text-sm font-bold text-slate-700">
-            {verResolvidos ? 'Nada resolvido ainda.' : 'Nenhum problema aberto.'}
-          </p>
+          <p className="text-sm font-bold text-slate-700">Nenhum problema aberto.</p>
           <p className="text-xs text-slate-400 mt-1">
             Os monitores rodam a cada 5 minutos.
           </p>
@@ -231,6 +215,7 @@ export function ErrorCenter() {
         <Activity className="w-3.5 h-3.5" />
         Erros iguais são agrupados e contados numa linha só. As <b className="font-semibold">condições</b> se
         resolvem sozinhas quando o problema é corrigido; os <b className="font-semibold">eventos</b> você encerra.
+        O que é resolvido <b className="font-semibold">sai daqui</b> e vai para o histórico.
       </p>
     </div>
   );

@@ -59,7 +59,7 @@ import {
 import { cn } from "@/src/lib/utils";
 import { TrendBarChart, fmtByType } from "./TrendBarChart";
 import { motion, AnimatePresence } from "framer-motion";
-import { useMarketing, MarketingData, useFunnelStages, useUtmFunnelCohort, useFunnelCohort, useMarketingKpis, MarketingKpiRow, useCampaignInvestment, useCampaignPlatformSplit, useLossReasons, useMetaCreatives, type CreativeItem } from "../hooks/useSupabase";
+import { useMarketing, MarketingData, useFunnelStages, useUtmFunnelCohort, useFunnelCohort, useMarketingKpis, MarketingKpiRow, useCampaignInvestment, useCampaignPlatformSplit, useConversionCatalog, useCampaignConversions, useLossReasons, useMetaCreatives, type CreativeItem } from "../hooks/useSupabase";
 import { ReportQuick } from "./ReportQuick";
 import {
   format,
@@ -173,6 +173,12 @@ const CAMPAIGN_COLUMNS = [
   { id: 'cac',          label: 'CAC' },
 ] as const satisfies readonly { id: string; label: string }[];
 type CampaignColId = (typeof CAMPAIGN_COLUMNS)[number]['id'];
+// Conversões personalizadas escolhidas p/ virar coluna. Vazio por padrão: a lista depende da
+// conta de anúncios da clínica, e ligar todas encheria a tabela (a Intubação tem 17).
+const loadCampaignConversions = (): string[] => {
+  const saved = readCfg('mkt_campaign_convs');
+  return saved ? JSON.parse(saved) : [];
+};
 const loadCampaignColumns = (): string[] => {
   const all: string[] = CAMPAIGN_COLUMNS.map(c => c.id);
   const saved = readCfg('mkt_campaign_cols');
@@ -348,6 +354,13 @@ export function MarketingAnalytics() {
     format(dateRange.end, 'yyyy-MM-dd')
   );
   const campaignPlatformSplit = useCampaignPlatformSplit(
+    format(dateRange.start, 'yyyy-MM-dd'),
+    format(dateRange.end, 'yyyy-MM-dd')
+  );
+  // Conversões personalizadas do Meta: catálogo (alimenta o seletor de colunas) + números do
+  // período. São por clínica, por isso viram colunas DINÂMICAS da tabela de campanha.
+  const conversionCatalog = useConversionCatalog();
+  const campaignConversions = useCampaignConversions(
     format(dateRange.start, 'yyyy-MM-dd'),
     format(dateRange.end, 'yyyy-MM-dd')
   );
@@ -973,6 +986,8 @@ export function MarketingAnalytics() {
                 utmCohortCompare={utmCohortCompare}
                 campaignInvestment={campaignInvestment}
                 campaignPlatformSplit={campaignPlatformSplit}
+                conversionCatalog={conversionCatalog}
+                campaignConversions={campaignConversions}
                 lossReasons={lossReasons}
                 funnelOrder={funnelStagesOrder}
                 funnelHidden={effectiveFunnelHidden}
@@ -1065,11 +1080,35 @@ const SYNC_PLATFORMS: { fn: string; label: string; notConfigured: string }[] = [
   { fn: 'google-spend-sync', label: 'Google', notConfigured: 'google_not_configured' },
 ];
 
+// A sincronização vai EM BLOCOS de poucos dias, uma chamada por bloco.
+// Motivo: a edge tem teto de ~150s e cada rodada faz DUAS varreduras paginadas da Graph (gasto
+// por anúncio + conversões). Pedir o mês inteiro de uma vez estourava com 504 — e pior, gravava
+// PELA METADE (27/07: julho sincronizou o gasto todo mas só as conversões até o dia 15), o que
+// parece sucesso e deixa a tabela com "—" no resto do período.
+// 15 dias é o tamanho calibrado no incidente: 27 dias já estourava.
+const SYNC_CHUNK_DAYS = 15;
+
+function splitRange(from: string, to: string, days: number): Array<{ since: string; until: string }> {
+  const out: Array<{ since: string; until: string }> = [];
+  const end = new Date(to + 'T00:00:00Z');
+  let cur = new Date(from + 'T00:00:00Z');
+  while (cur <= end) {
+    const chunkEnd = new Date(cur);
+    chunkEnd.setUTCDate(chunkEnd.getUTCDate() + days - 1);
+    if (chunkEnd > end) chunkEnd.setTime(end.getTime());
+    out.push({ since: cur.toISOString().slice(0, 10), until: chunkEnd.toISOString().slice(0, 10) });
+    cur = new Date(chunkEnd);
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return out;
+}
+
 function SyncInvestmentButton({ clinicId, onDone }: { clinicId: string | null; onDone: () => void }) {
   const [isOpen, setIsOpen] = useState(false);
   const [from, setFrom] = useState(() => format(startOfMonth(new Date()), 'yyyy-MM-dd'));
   const [to, setTo] = useState(() => format(new Date(), 'yyyy-MM-dd'));
   const [syncing, setSyncing] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
   const fmtBRL = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
@@ -1079,34 +1118,54 @@ function SyncInvestmentButton({ clinicId, onDone }: { clinicId: string | null; o
     setSyncing(true);
     setResult(null);
 
+    const blocos = splitRange(from, to, SYNC_CHUNK_DAYS);
     const okLines: string[] = [];
     const errLines: string[] = [];
     let touched = false;
 
     for (const p of SYNC_PLATFORMS) {
-      try {
-        const { data, error } = await supabase.functions.invoke(p.fn, {
-          body: { clinic_id: clinicId, since: from, until: to },
-        });
-        if (error) {
-          // status não-2xx: o corpo detalhado vem em error.context (Response), não em error.message.
-          let detail = error.message;
-          try { const b = await (error as any).context?.json?.(); if (b?.detail || b?.error) detail = b.detail || b.error; } catch { /* usa message */ }
-          errLines.push(`${p.label}: ${detail}`);
-          continue;
+      let dias = 0, gasto = 0, falhas = 0;
+      let naoConfigurada = false;
+
+      for (let i = 0; i < blocos.length; i++) {
+        const b = blocos[i];
+        setProgress(blocos.length > 1 ? `${p.label} · bloco ${i + 1}/${blocos.length}` : p.label);
+        try {
+          const { data, error } = await supabase.functions.invoke(p.fn, {
+            body: { clinic_id: clinicId, since: b.since, until: b.until },
+          });
+          if (error) {
+            // status não-2xx: o corpo detalhado vem em error.context (Response), não em error.message.
+            let detail = error.message;
+            try { const bd = await (error as any).context?.json?.(); if (bd?.detail || bd?.error) detail = bd.detail || bd.error; } catch { /* usa message */ }
+            // Identifica O BLOCO que falhou: sem isso o operador não sabe qual parte do período
+            // ficou sem dado e teria que refazer tudo.
+            errLines.push(`${p.label} (${b.since} a ${b.until}): ${detail}`);
+            falhas++;
+            continue;
+          }
+          if (!data?.ok) {
+            if (data?.error === p.notConfigured) { naoConfigurada = true; break; }  // não insiste nos demais blocos
+            errLines.push(`${p.label} (${b.since} a ${b.until}): ${data?.detail || data?.error || 'falha'}`);
+            falhas++;
+            continue;
+          }
+          touched = true;
+          dias += Number(data.days) || 0;
+          gasto += Number(data.total_spend) || 0;
+        } catch (e: any) {
+          errLines.push(`${p.label} (${b.since} a ${b.until}): ${e?.message || 'erro'}`);
+          falhas++;
         }
-        if (!data?.ok) {
-          // Plataforma sem credencial nesta clínica → pula em silêncio; outro erro → mostra.
-          if (data?.error !== p.notConfigured) errLines.push(`${p.label}: ${data?.detail || data?.error || 'falha'}`);
-          continue;
-        }
-        touched = true;
-        okLines.push(`${p.label}: ${data.days} dia(s) · ${fmtBRL(data.total_spend)}`);
-      } catch (e: any) {
-        errLines.push(`${p.label}: ${e?.message || 'erro'}`);
+      }
+
+      if (naoConfigurada) continue;            // plataforma ausente nesta clínica: silêncio
+      if (dias > 0 || falhas === 0) {
+        okLines.push(`${p.label}: ${dias} dia(s) · ${fmtBRL(gasto)}${falhas > 0 ? ` (${falhas} bloco(s) com erro)` : ''}`);
       }
     }
 
+    setProgress(null);
     if (touched) onDone();
     if (okLines.length === 0 && errLines.length === 0) {
       setResult({ ok: false, msg: 'Nenhuma plataforma de anúncios configurada nesta clínica.' });
@@ -1167,7 +1226,9 @@ function SyncInvestmentButton({ clinicId, onDone }: { clinicId: string | null; o
                 className="mt-3 w-full rounded-xl bg-teal-600 hover:bg-teal-700 text-white h-9 text-[10px] font-black uppercase shadow-lg shadow-teal-100 transition-all active:scale-[0.98] disabled:opacity-60"
               >
                 {syncing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                {syncing ? 'Sincronizando…' : 'Sincronizar manualmente'}
+                {/* Mostra o bloco em andamento: em período longo são várias chamadas e, sem isso,
+                    o botão parece travado (e o operador cancela no meio, deixando dado parcial). */}
+                {syncing ? (progress ? `Sincronizando ${progress}…` : 'Sincronizando…') : 'Sincronizar manualmente'}
               </Button>
             </motion.div>
           </>
@@ -1340,7 +1401,7 @@ function FunnelConfigButton({ stages, order, hidden, toggleStage, moveStage, fix
   );
 }
 
-function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, isComparing, visibleMetrics, metricsOrder, toggleMetric, moveMetric, funnelStages, funnelCohort, funnelCohortCompare, utmCohort, utmCohortCompare, campaignInvestment, campaignPlatformSplit, lossReasons, funnelOrder, funnelHidden, toggleFunnelStage, moveFunnelStage, selectedPlatform, selectedChannel }: any) {
+function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, isComparing, visibleMetrics, metricsOrder, toggleMetric, moveMetric, funnelStages, funnelCohort, funnelCohortCompare, utmCohort, utmCohortCompare, campaignInvestment, campaignPlatformSplit, conversionCatalog, campaignConversions, lossReasons, funnelOrder, funnelHidden, toggleFunnelStage, moveFunnelStage, selectedPlatform, selectedChannel }: any) {
 
   const [selectedMetric, setSelectedMetric] = useState('leads');
   const latestPeriod = periods[periods.length - 1]?.label || '';
@@ -1765,7 +1826,8 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
         selectedChannel={selectedChannel}
       />
 
-      <CampaignInvestmentSection rows={campaignInvestment} platformSplit={campaignPlatformSplit} />
+      <CampaignInvestmentSection rows={campaignInvestment} platformSplit={campaignPlatformSplit}
+        conversionCatalog={conversionCatalog} campaignConversions={campaignConversions} />
 
       <LossReasonsSection rows={lossReasons} />
     </div>
@@ -1811,10 +1873,14 @@ function dedupeCreatives(list: CreativeItem[]): CreativeItem[] {
 
 const NO_ADSET = '__sem_conjunto__';
 
-function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platformSplit: any[] }) {
+function CampaignInvestmentSection({ rows, platformSplit, conversionCatalog, campaignConversions }: { rows: any[]; platformSplit: any[]; conversionCatalog?: any[]; campaignConversions?: any[] }) {
   const { activeClinicId } = useAuth();
   const [openCampaigns, setOpenCampaigns] = useState<Set<string>>(new Set());
   const [openAdsets, setOpenAdsets] = useState<Set<string>>(new Set());
+  // Conversões personalizadas ESCOLHIDAS (ids). Ficam numa chave separada das colunas fixas
+  // porque a lista de opções é da CLÍNICA (vem do catálogo do Meta), não do código.
+  const [visibleConvs, setVisibleConvs] = useState<string[]>(loadCampaignConversions);
+  const [convsOpen, setConvsOpen] = useState(false);   // submenu das conversões (hover)
   // Colunas visíveis (persistidas por clínica). `vis` guarda cada <th>/<td> do mesmo id, então
   // ligar/desligar mantém header, corpo e rodapé alinhados sem precisar contar colunas na mão.
   const [visibleCols, setVisibleCols] = useState<string[]>(loadCampaignColumns);
@@ -1833,6 +1899,7 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
     if (cfgClinicRef.current === activeClinicId) return;
     cfgClinicRef.current = activeClinicId;
     setVisibleCols(loadCampaignColumns());
+    setVisibleConvs(loadCampaignConversions());
     setOpenCampaigns(new Set());
     setOpenAdsets(new Set());
   }, [activeClinicId]);
@@ -1848,6 +1915,59 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
     setVisibleCols(next);
     writeCfg('mkt_campaign_cols', JSON.stringify(next));
   };
+  // Mesma regra do toggleCol acima (calcula fora do updater, grava aqui) — ver comentário lá.
+  const toggleConv = (id: string) => {
+    const next = visibleConvs.includes(id) ? visibleConvs.filter(x => x !== id) : [...visibleConvs, id];
+    setVisibleConvs(next);
+    writeCfg('mkt_campaign_convs', JSON.stringify(next));
+  };
+
+  // Fechar o menu de colunas fecha o submenu junto: senão ele reabre já expandido na próxima vez,
+  // cobrindo a lista principal antes de o mouse chegar nela.
+  useEffect(() => { if (!colsOpen) setConvsOpen(false); }, [colsOpen]);
+
+  // Catálogo ATIVO (sem arquivadas) — usado no submenu e para saber se ele deve existir.
+  const convCatalogAtivo = useMemo(
+    () => (conversionCatalog ?? []).filter((c: any) => !c.is_archived),
+    [conversionCatalog],
+  );
+
+  // Conversões escolhidas que EXISTEM no catálogo da clínica atual, na ordem do catálogo.
+  // Filtrar pelo catálogo evita coluna órfã quando a conversão é apagada no Meta (o id ficaria
+  // salvo no localStorage e viraria uma coluna sem cabeçalho até alguém limpar a config).
+  const convColumns = useMemo(() => {
+    const cat: any[] = conversionCatalog ?? [];
+    return cat.filter(c => visibleConvs.includes(c.conversion_id));
+  }, [conversionCatalog, visibleConvs]);
+
+  // Números por chave normalizada. A chave vem PRONTA do banco (mesma régua da RPC de
+  // investimento); aqui só indexo. Níveis: campanha = k_adset/k_ad vazios; conjunto = k_ad vazio.
+  const convByKey = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of (campaignConversions ?? [])) {
+      m.set(`${r.k_campaign}|${r.k_adset}|${r.k_ad}|${r.conversion_id}`, r.conversions);
+    }
+    return m;
+  }, [campaignConversions]);
+  // Soma de uma conversão num nó da árvore: o breakdown é por ANÚNCIO, então campanha e conjunto
+  // somam os filhos (não existe linha "total da campanha" no dado gravado).
+  const convSum = (convId: string, kCamp: string, kAdset?: string, kAd?: string): number => {
+    let total = 0;
+    for (const r of (campaignConversions ?? [])) {
+      if (r.conversion_id !== convId) continue;
+      if (r.k_campaign !== kCamp) continue;
+      if (kAdset !== undefined && r.k_adset !== kAdset) continue;
+      if (kAd !== undefined && r.k_ad !== kAd) continue;
+      total += r.conversions;
+    }
+    return total;
+  };
+  // Chave normalizada no MESMO padrão do SQL (lower + remove tudo que não é alfanumérico).
+  // \p{L}\p{N} (Unicode) e não [a-z0-9]: o Postgres trata acento como alnum, então "anúncio"
+  // vira "anúncio" lá — com a régua ASCII o front geraria "anncio" e NADA casaria.
+  const normKey = (s: string | null | undefined) =>
+    (s ?? '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+
   const toggleCampaign = (k: string) => setOpenCampaigns(s => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const toggleAdset = (k: string) => setOpenAdsets(s => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
 
@@ -2043,6 +2163,67 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
                         </button>
                       ))}
                     </div>
+
+                    {/* Conversões personalizadas do Meta — lista da CLÍNICA (catálogo sincronizado),
+                        não do código. Arquivadas ficam de fora: poluiriam a lista com campanhas
+                        antigas que não voltam a disparar.
+                        Em SUBMENU (abre no hover) porque a lista é longa e varia por conta.
+                        ⚠️ FORA do <div> com `overflow-y-auto` acima de propósito: overflow cria
+                        contexto de recorte e COMEU o submenu (ele existia, mas invisível). Aqui
+                        vira um rodapé fixo do menu e o painel lateral pode escapar da caixa. */}
+                    {convCatalogAtivo.length > 0 && (
+                        <div
+                          className="relative mt-3 border-t border-slate-100 pt-3"
+                          onMouseEnter={() => setConvsOpen(true)}
+                          onMouseLeave={() => setConvsOpen(false)}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setConvsOpen(v => !v)}   // toque/teclado: hover não existe
+                            className={cn(
+                              "w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-[10px] font-bold transition-all",
+                              convsOpen || visibleConvs.length > 0 ? "bg-violet-50 text-violet-700" : "text-slate-400 hover:bg-slate-50 hover:text-slate-600"
+                            )}
+                          >
+                            <span className="uppercase tracking-tight">Conversões do Meta</span>
+                            <span className="flex items-center gap-1 shrink-0">
+                              {visibleConvs.length > 0 && (
+                                <span className="px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700 text-[9px] font-black">
+                                  {visibleConvs.length}
+                                </span>
+                              )}
+                              <ChevronLeft className="w-3 h-3" />
+                            </span>
+                          </button>
+
+                          {convsOpen && (
+                            /* pr-2 no wrapper (e não margem no painel) é a PONTE do hover: com
+                               margem, o gap fica fora do elemento e o mouse "cai" no caminho,
+                               fechando o submenu antes de chegar nele. */
+                            <div className="absolute right-full top-0 pr-2 z-[120]">
+                              <div className="w-60 max-h-[50vh] overflow-y-auto custom-scrollbar bg-white rounded-2xl border border-slate-200 shadow-2xl p-2">
+                                {convCatalogAtivo.map((c: any) => (
+                                  <button
+                                    key={c.conversion_id}
+                                    onClick={() => toggleConv(c.conversion_id)}
+                                    title={c.tem_dado ? (c.name || c.conversion_id) : 'Sem dado no período sincronizado'}
+                                    className={cn(
+                                      "w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-[10px] font-bold transition-all",
+                                      visibleConvs.includes(c.conversion_id) ? "bg-violet-50 text-violet-700" : "text-slate-400 hover:bg-slate-50 hover:text-slate-600"
+                                    )}
+                                  >
+                                    <span className="truncate text-left normal-case tracking-tight">
+                                      {c.name || c.conversion_id}
+                                      {!c.tem_dado && <span className="text-slate-300"> · sem dado</span>}
+                                    </span>
+                                    {visibleConvs.includes(c.conversion_id) && <CheckCircle2 className="w-3 h-3 shrink-0" />}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                   </motion.div>
                 </>
               )}
@@ -2074,6 +2255,11 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
               {vis('perdido') && <th className="text-right px-2 py-2">Perdido</th>}
               {vis('cpl') && <th className="text-right px-2 py-2">CPL</th>}
               {vis('cac') && <th className="text-right px-2 py-2">CAC</th>}
+              {convColumns.map((c: any) => (
+                <th key={c.conversion_id} className="text-right px-2 py-2 max-w-[120px]">
+                  <span className="block truncate normal-case" title={c.name || c.conversion_id}>{c.name || c.conversion_id}</span>
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -2114,6 +2300,10 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
                     {vis('perdido') && <td className="px-2 py-2.5 text-right text-rose-500">{camp.losses}</td>}
                     {vis('cpl') && <td className="px-2 py-2.5 text-right text-slate-600">{fmtMoney(campaignRatio(camp.investment, camp.leads))}</td>}
                     {vis('cac') && <td className="px-2 py-2.5 text-right font-bold text-indigo-600">{fmtMoney(campaignRatio(camp.investment, camp.wins))}</td>}
+                    {convColumns.map((c: any) => {
+                      const n = convSum(c.conversion_id, normKey(camp.key));
+                      return <td key={c.conversion_id} className="px-2 py-2.5 text-right font-semibold text-violet-600">{n > 0 ? n : <span className="text-slate-300">—</span>}</td>;
+                    })}
                   </tr>
 
                   {campOpen && camp.adsets.map((adset) => {
@@ -2149,6 +2339,10 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
                           {vis('perdido') && <td className="px-2 py-2 text-right text-rose-400">{adset.losses}</td>}
                           {vis('cpl') && <td className="px-2 py-2 text-right text-slate-500">{fmtMoney(campaignRatio(adset.investment, adset.leads))}</td>}
                           {vis('cac') && <td className="px-2 py-2 text-right font-semibold text-indigo-500">{fmtMoney(campaignRatio(adset.investment, adset.wins))}</td>}
+                          {convColumns.map((c: any) => {
+                            const n = convSum(c.conversion_id, normKey(camp.key), normKey(adset.key === NO_ADSET ? '' : adset.key));
+                            return <td key={c.conversion_id} className="px-2 py-2 text-right text-violet-500">{n > 0 ? n : <span className="text-slate-300">—</span>}</td>;
+                          })}
                         </tr>
 
                         {adsetOpen && adset.ads.map((ad) => (
@@ -2169,6 +2363,10 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
                             {vis('perdido') && <td className="px-2 py-2 text-right text-rose-400 text-[13px]">{ad.losses}</td>}
                             {vis('cpl') && <td className="px-2 py-2 text-right text-slate-400 text-[13px]">{fmtMoney(campaignRatio(ad.investment, ad.leads))}</td>}
                             {vis('cac') && <td className="px-2 py-2 text-right font-medium text-indigo-400 text-[13px]">{fmtMoney(campaignRatio(ad.investment, ad.wins))}</td>}
+                            {convColumns.map((c: any) => {
+                              const n = convSum(c.conversion_id, normKey(camp.key), normKey(adset.key === NO_ADSET ? '' : adset.key), normKey(ad.key));
+                              return <td key={c.conversion_id} className="px-2 py-2 text-right text-violet-400 text-[13px]">{n > 0 ? n : <span className="text-slate-300">—</span>}</td>;
+                            })}
                           </tr>
                         ))}
                       </React.Fragment>
@@ -2194,14 +2392,16 @@ function CampaignInvestmentSection({ rows, platformSplit }: { rows: any[]; platf
               {vis('perdido') && <td className="px-2 py-3 text-right font-black text-rose-500">{totals.losses}</td>}
               {vis('cpl') && <td className="px-2 py-3 text-right font-bold text-slate-600">{fmtMoney(campaignRatio(totals.investment, totals.leads))}</td>}
               {vis('cac') && <td className="px-2 py-3 text-right font-black text-indigo-600">{fmtMoney(campaignRatio(totals.investment, totals.wins))}</td>}
+              {convColumns.map((c: any) => {
+                // Total = soma das campanhas EXIBIDAS (mesma régua das outras colunas do rodapé),
+                // não o total bruto da conta — senão o rodapé não fecharia com a tabela.
+                const n = campaignTree.reduce((acc, camp) => acc + convSum(c.conversion_id, normKey(camp.key)), 0);
+                return <td key={c.conversion_id} className="px-2 py-3 text-right font-black text-violet-600">{n > 0 ? n : <span className="text-slate-300">—</span>}</td>;
+              })}
             </tr>
           </tfoot>
         </table>
       </div>
-      <p className="text-[10px] text-slate-400 mt-4">
-        Ganho/Perdido aqui são do <b>coorte de entrada</b> (leads que ENTRARAM nesta janela e o desfecho atual do ticket) — por isso costumam vir <b>menores</b> que o "Ganho" do Funil de Vendas acima, que conta pela <b>data da conversão</b> (pode incluir leads que entraram bem antes). Os dois estão certos: são perguntas diferentes. Aqui a pergunta é "dos leads que este investimento gerou, quantos já compraram" — a única forma de o CAC ficar ligado ao gasto real do período. Em janelas recentes, o coorte ainda está maturando (leads podem converter depois) — o CAC tende a cair conforme os dias passam. Cada nível (campanha/conjunto/anúncio) soma investimento e leads primeiro, e SÓ DEPOIS calcula CPL/CAC — nunca é a soma dos CPL/CAC dos itens abaixo. "—" = sem investimento sincronizado para esse item no período (não é gasto zero); campanhas com sincronização parcial (alguns anúncios ainda sem dado) mostram a soma do que já foi sincronizado.
-      </p>
-
       <CreativesModal data={creativeModal} onClose={() => setCreativeModal(null)} />
     </Card>
   );

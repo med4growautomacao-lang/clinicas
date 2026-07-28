@@ -8,8 +8,13 @@
 // Cada função retorna { rows: [{date, spend}], error? } — nunca lança; o chamador decide o que
 // registrar na Central de Erros.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-type Supa = ReturnType<typeof createClient>;
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+// `ReturnType<typeof createClient>` (sem genéricos) resolve para um cliente com schema `never`,
+// que NÃO aceita o `createClient(url, key)` das edges (schema "public") — dava 8 erros de tipo
+// pré-existentes no deno check, um por chamada. Genéricos frouxos: aqui só passamos o cliente
+// adiante, não dependemos dos tipos das tabelas.
+// deno-lint-ignore no-explicit-any
+type Supa = SupabaseClient<any, any, any>;
 
 export type SpendRow = { date: string; spend: number };
 // errorCode = o `code` da Graph quando o erro veio dela. Sem ele, quem chama só recebe texto e não
@@ -33,6 +38,18 @@ export type SpendBreakdownRow = {
   ad_id: string;
   ad_name: string;
   spend: number;
+};
+
+// Conversões personalizadas por dia × campanha/conjunto/anúncio.
+export type ConversionBreakdownRow = {
+  date: string;
+  campaign_id: string;
+  campaign_name: string;
+  adset_id: string;
+  adset_name: string;
+  ad_id: string;
+  ad_name: string;
+  conversions: Record<string, number>;   // { "<conversion_id>": quantidade }
 };
 // truncated=true = bateu o teto de páginas de algum bloco de data — dado PARCIAL (investimento
 // subestimado nesse período). Contas grandes (ex.: milhares de anúncios) podem estourar; o
@@ -83,6 +100,101 @@ export async function fetchMetaDaily(
       }
       url = j.paging?.next ?? null;
     }
+  }
+  return { rows };
+}
+
+// As conversões personalizadas chegam dentro de `actions` com action_type no formato
+// "offsite_conversion.custom.<id>". Os demais action_type (link_click, purchase, page_engagement…)
+// são métricas padrão e NÃO entram aqui — o painel só quer as conversões que a clínica criou.
+// deno-lint-ignore no-explicit-any
+export function extrairConversoesCustom(actions: any): Record<string, number> | undefined {
+  if (!Array.isArray(actions)) return undefined;
+  const out: Record<string, number> = {};
+  for (const a of actions) {
+    const tipo = String(a?.action_type ?? "");
+    if (!tipo.startsWith("offsite_conversion.custom.")) continue;
+    const id = tipo.slice("offsite_conversion.custom.".length);
+    const v = Number(a?.value) || 0;
+    if (id && v > 0) out[id] = (out[id] ?? 0) + v;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+// Conversões personalizadas por anúncio/dia — chamada SEPARADA do gasto, de propósito.
+// ⚠️ Tentar pedir `actions` junto do spend em fetchMetaAdBreakdown QUEBROU o sync (27/07): a 1ª
+// página volta 200, mas com `actions` cada linha fica grande e a paginação profunda faz a Graph
+// devolver "An unknown error occurred" — e, como o gasto vinha na MESMA chamada, o detalhamento
+// por campanha parou de gravar junto. Aqui vai sem `breakdowns=publisher_platform` (a conversão é
+// do anúncio, não da rede — e é somada por rede no upsert de qualquer forma), o que corta ~4x as
+// linhas e mantém a paginação leve.
+export async function fetchMetaConversions(
+  metaToken: string, adAccountId: string, since: string, until: string,
+): Promise<{ rows: ConversionBreakdownRow[]; error?: string; truncated?: boolean }> {
+  const account = String(adAccountId).replace(/^act_/, "");
+  const rows: ConversionBreakdownRow[] = [];
+  let truncated = false;
+  for (const chunk of dateChunks(since, until)) {
+    const timeRange = encodeURIComponent(JSON.stringify({ since: chunk.since, until: chunk.until }));
+    let url: string | null =
+      `https://graph.facebook.com/${META_GRAPH_VERSION}/act_${account}/insights` +
+      `?fields=actions,campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name` +
+      `&level=ad&time_increment=1&limit=500&time_range=${timeRange}` +
+      `&access_token=${encodeURIComponent(metaToken)}`;
+    let pages = 0;
+    while (url && pages < META_BREAKDOWN_PAGE_CAP) {
+      pages++;
+      const resp = await fetchWithBackoff(url);
+      const j = await resp.json();
+      if (j.error) return { rows, error: `meta: ${j.error?.message ?? "graph error"}` };
+      for (const d of (j.data ?? [])) {
+        const convs = extrairConversoesCustom(d?.actions);
+        if (!d?.date_start || !convs) continue;   // sem conversão custom: nada a gravar
+        rows.push({
+          date: String(d.date_start),
+          campaign_id: String(d.campaign_id ?? ""),
+          campaign_name: String(d.campaign_name ?? ""),
+          adset_id: String(d.adset_id ?? ""),
+          adset_name: String(d.adset_name ?? ""),
+          ad_id: String(d.ad_id ?? ""),
+          ad_name: String(d.ad_name ?? ""),
+          conversions: convs,
+        });
+      }
+      url = j.paging?.next ?? null;
+    }
+    if (url && pages >= META_BREAKDOWN_PAGE_CAP) truncated = true;
+  }
+  return { rows, truncated: truncated || undefined };
+}
+
+// Catálogo de conversões personalizadas da conta (id -> nome). O insights só devolve o ID; o nome
+// vive em /customconversions. Chamada barata (1x por sync) e tolerante a falha: sem catálogo o
+// painel ainda mostra os números, só sem rótulo bonito.
+export async function fetchCustomConversionsCatalog(
+  metaToken: string, adAccountId: string,
+): Promise<{ rows: Array<{ conversion_id: string; name: string; custom_event_type: string; is_archived: boolean; last_fired_at: string | null }>; error?: string }> {
+  const account = String(adAccountId).replace(/^act_/, "");
+  const rows: Array<{ conversion_id: string; name: string; custom_event_type: string; is_archived: boolean; last_fired_at: string | null }> = [];
+  let url: string | null =
+    `https://graph.facebook.com/${META_GRAPH_VERSION}/act_${account}/customconversions` +
+    `?fields=id,name,custom_event_type,is_archived,last_fired_time&limit=100` +
+    `&access_token=${encodeURIComponent(metaToken)}`;
+  while (url) {
+    const resp = await fetchWithBackoff(url);
+    const j = await resp.json();
+    if (j.error) return { rows, error: `meta: ${j.error?.message ?? "graph error"}` };
+    for (const c of (j.data ?? [])) {
+      if (!c?.id) continue;
+      rows.push({
+        conversion_id: String(c.id),
+        name: String(c.name ?? ""),
+        custom_event_type: String(c.custom_event_type ?? ""),
+        is_archived: c.is_archived === true,
+        last_fired_at: c.last_fired_time ? String(c.last_fired_time) : null,
+      });
+    }
+    url = j.paging?.next ?? null;
   }
   return { rows };
 }
@@ -332,5 +444,46 @@ export async function upsertSpendBreakdown(
   }));
   const { error } = await service.from("marketing_spend_breakdown")
     .upsert(payload, { onConflict: "clinic_id,date,platform,ad_platform,campaign_id,adset_id,ad_id" });
+  return { error: error?.message };
+}
+
+// Conversões PERSONALIZADAS por dia × campanha/conjunto/anúncio. Soma as redes (publisher_platform):
+// a conversão é do anúncio, não da rede — manter a dimensão de rede aqui só multiplicaria linhas
+// sem ninguém consultar por isso (o painel pergunta "quantas conversões esse anúncio deu").
+export async function upsertConversionsBreakdown(
+  service: Supa, clinicId: string, platform: "meta_ads" | "google_ads", rows: ConversionBreakdownRow[],
+): Promise<{ error?: string; gravadas: number }> {
+  type Acc = { date: string; campaign_id: string; campaign_name: string; adset_id: string;
+               adset_name: string; ad_id: string; ad_name: string; conversion_id: string; conversions: number };
+  const byKey = new Map<string, Acc>();
+  for (const r of rows) {
+    if (!r.conversions) continue;
+    for (const [convId, qtd] of Object.entries(r.conversions)) {
+      const key = `${r.date}|${r.campaign_id}|${r.adset_id}|${r.ad_id}|${convId}`;
+      const acc = byKey.get(key);
+      if (acc) acc.conversions += qtd;
+      else byKey.set(key, {
+        date: r.date, campaign_id: r.campaign_id, campaign_name: r.campaign_name,
+        adset_id: r.adset_id, adset_name: r.adset_name, ad_id: r.ad_id, ad_name: r.ad_name,
+        conversion_id: convId, conversions: qtd,
+      });
+    }
+  }
+  if (byKey.size === 0) return { gravadas: 0 };
+  const payload = [...byKey.values()].map((r) => ({ clinic_id: clinicId, platform, ...r, updated_at: new Date().toISOString() }));
+  const { error } = await service.from("marketing_conversions_breakdown")
+    .upsert(payload, { onConflict: "clinic_id,date,platform,campaign_id,adset_id,ad_id,conversion_id" });
+  return { error: error?.message, gravadas: payload.length };
+}
+
+// Catálogo (id -> nome) da clínica. Best-effort: falhar aqui não invalida os números já gravados.
+export async function upsertConversionCatalog(
+  service: Supa, clinicId: string,
+  rows: Array<{ conversion_id: string; name: string; custom_event_type: string; is_archived: boolean; last_fired_at: string | null }>,
+): Promise<{ error?: string }> {
+  if (rows.length === 0) return {};
+  const payload = rows.map((r) => ({ clinic_id: clinicId, ...r, synced_at: new Date().toISOString() }));
+  const { error } = await service.from("meta_custom_conversions")
+    .upsert(payload, { onConflict: "clinic_id,conversion_id" });
   return { error: error?.message };
 }

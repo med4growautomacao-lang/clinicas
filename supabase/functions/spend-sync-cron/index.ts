@@ -16,7 +16,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { fetchMetaDaily, fetchGoogleDaily, getGoogleAccessToken, upsertSpend, applyAdStatus, fetchMetaAdBreakdown, fetchGoogleAdGroupBreakdown, upsertSpendBreakdown } from "../_shared/spend.ts";
+import { fetchMetaDaily, fetchGoogleDaily, getGoogleAccessToken, upsertSpend, applyAdStatus, fetchMetaAdBreakdown, fetchGoogleAdGroupBreakdown, upsertSpendBreakdown, fetchMetaConversions, upsertConversionsBreakdown, fetchCustomConversionsCatalog, upsertConversionCatalog } from "../_shared/spend.ts";
 import { type CamadaToken, comFallback, lembrarCamada, ordenarCandidatos, tokenDaPlataforma } from "../_shared/meta-token.ts";
 
 const corsHeaders = {
@@ -36,7 +36,18 @@ const corsHeaders = {
 // e cada dia teria UMA só chance de ser capturado: bastava a rodada das 05:00 falhar uma vez para
 // aquele dia ficar sem investimento para sempre, já que no dia seguinte a janela anda junto. Com 2
 // há um dia de sobreposição, e a rodada seguinte repesca o que a anterior perdeu.
-const DEFAULT_CONFIG = { enabled: false, every_hours: 24, run_hour_sp: 5, lookback_days: 2, platforms: ["meta_ads", "google_ads"], batch_size: 300, breakdown_enabled: false, include_today: false };
+//
+// conversions_lookback_days: 7, uma janela SEPARADA e mais longa só para as conversões. GASTO e
+// CONVERSÃO envelhecem diferente: o gasto é final em D+1, mas a conversão do Meta é atribuída
+// RETROATIVAMENTE dentro da janela de atribuição (7d click / 1d view), então a mesma data
+// resincronizada dias depois vem MAIOR. Medido em 28/07 na Intubação, janela 01-25/07: Sala
+// Vermelha 74→79, Pág Obg. Perpétuo +9. Com lookback 2 o número de um dia congelava 48h depois
+// dele e ficava permanentemente subestimado, sem erro nenhum aparecendo.
+//
+// ⚠️ Por que NÃO basta subir lookback_days para 7: ele governa o gasto do Meta E do Google, e o
+// Google Ads tem teto de quota diária (Basic = 15k ops/dia). Subir 2→7 pagaria 3,5× de quota para
+// reescrever números que não mudam. A janela longa é cirúrgica: só a chamada de conversões.
+const DEFAULT_CONFIG = { enabled: false, every_hours: 24, run_hour_sp: 5, lookback_days: 2, conversions_lookback_days: 7, platforms: ["meta_ads", "google_ads"], batch_size: 300, breakdown_enabled: false, include_today: false };
 const CONCURRENCY = 8; // contas processadas em paralelo por lote
 
 interface ClinicRow {
@@ -90,7 +101,7 @@ serve(async (req) => {
 
   // since/until ficam no state enquanto um sweep está em andamento (ver a janela, mais abaixo).
   const state = await readJson("ad_spend_sync_state", { last_run_at: null, cursor: 0 }) as
-    { last_run_at: string | null; cursor: number; since?: string; until?: string };
+    { last_run_at: string | null; cursor: number; since?: string; until?: string; cv_since?: string };
   const now = Date.now();
   const sweeping = (Number(state.cursor) || 0) > 0;
   const everyHours = Math.max(1, Number(cfg.every_hours) || 24);
@@ -142,6 +153,13 @@ serve(async (req) => {
   const retomando = sweeping && !!state.since && !!state.until;
   const since = retomando ? state.since! : dayOffset(todaySP, lookback);
   const until = retomando ? state.until! : dayOffset(todaySP, cfg.include_today === true ? 0 : 1);
+
+  // Janela das CONVERSÕES: mais longa (ver conversions_lookback_days), mesmo `until` do gasto.
+  // Congelada no state pelo mesmo motivo que a do gasto: sweep multi-lote que atravesse a
+  // meia-noite gravaria dias diferentes para clínicas do mesmo ciclo, silenciosamente.
+  // Nunca menor que a do gasto — se alguém configurar 1, o dia de sobreposição se perderia.
+  const cvLookback = Math.max(lookback, Number(cfg.conversions_lookback_days) || 7);
+  const cvSince = retomando && state.cv_since ? state.cv_since : dayOffset(todaySP, cvLookback);
 
   const platforms: string[] = Array.isArray(cfg.platforms) ? cfg.platforms : DEFAULT_CONFIG.platforms;
   const wantMeta = platforms.includes("meta_ads");
@@ -200,7 +218,7 @@ serve(async (req) => {
   }
 
   const list = (clinics ?? []) as ClinicRow[];
-  let metaOk = 0, googleOk = 0, errors = 0;
+  let metaOk = 0, googleOk = 0, errors = 0, conversoesOk = 0;
   const breakdownEnabled = cfg.breakdown_enabled === true;
 
   await mapPool(list, CONCURRENCY, async (c) => {
@@ -223,15 +241,55 @@ serve(async (req) => {
         const up = await upsertSpend(service, c.id, "meta_ads", rows);
         if (up.error) { errors++; await registrar("meta_upsert_falhou", "Gravação do investimento (Meta) falhou", "error", c.id, { error: up.error }); }
         else metaOk++;
-        // Detalhamento por anúncio × rede — best-effort, atrás do flag; não conta em errors/metaOk.
+        // Detalhamento por anúncio e conversões personalizadas — best-effort, atrás do flag;
+        // não contam em errors/metaOk.
+        //
+        // São chamadas SEPARADAS e IRMÃS, em paralelo. Duas lições pagas caro:
+        // 1) pedir `actions` junto do gasto derrubava a paginação da Graph e levava o detalhamento
+        //    junto (27/07) — por isso não voltam a ser uma chamada só;
+        // 2) em sequência, a soma dos tempos estourou o wall-clock de 150 s da edge — por isso
+        //    `allSettled` (e não `all`: uma falhando não pode cancelar a outra).
+        //
+        // ⚠️ As conversões NÃO ficam mais aninhadas no `bd.rows.length > 0`. O acoplamento parecia
+        // inofensivo e cegava exatamente o caso que a janela de 7 dias existe para cobrir: campanha
+        // que PAROU de gastar continua recebendo conversão atribuída para trás, e com gasto zerado
+        // na janela o `bd.rows` vem vazio — as conversões maduras nunca seriam buscadas.
         if (breakdownEnabled) {
-          const bd = await fetchMetaAdBreakdown(metaTok, c.meta_ad_account_id, since, until);
-          if (bd.error) await registrar("meta_breakdown_falhou", "Detalhamento por anúncio (Meta) falhou nesta clínica", "warning", c.id, { error: bd.error });
+          const [bdRes, cvRes] = await Promise.allSettled([
+            fetchMetaAdBreakdown(metaTok, c.meta_ad_account_id, since, until),
+            fetchMetaConversions(metaTok, c.meta_ad_account_id, cvSince, until),
+          ]);
+
+          if (bdRes.status === "rejected") await registrar("meta_breakdown_falhou", "Detalhamento por anúncio (Meta) falhou nesta clínica", "warning", c.id, { error: String(bdRes.reason) });
           else {
-            if (bd.truncated) await registrar("meta_breakdown_truncado", "Detalhamento por anúncio (Meta) veio PARCIAL nesta clínica (muitos anúncios×dias)", "warning", c.id, { since, until, rows: bd.rows.length });
-            if (bd.rows.length > 0) {
-              const upBd = await upsertSpendBreakdown(service, c.id, "meta_ads", bd.rows);
-              if (upBd.error) await registrar("meta_breakdown_gravacao_falhou", "Detalhamento por anúncio (Meta) veio, mas não foi gravado", "warning", c.id, { error: upBd.error });
+            const bd = bdRes.value;
+            if (bd.error) await registrar("meta_breakdown_falhou", "Detalhamento por anúncio (Meta) falhou nesta clínica", "warning", c.id, { error: bd.error });
+            else {
+              if (bd.truncated) await registrar("meta_breakdown_truncado", "Detalhamento por anúncio (Meta) veio PARCIAL nesta clínica (muitos anúncios×dias)", "warning", c.id, { since, until, rows: bd.rows.length });
+              if (bd.rows.length > 0) {
+                const upBd = await upsertSpendBreakdown(service, c.id, "meta_ads", bd.rows);
+                if (upBd.error) await registrar("meta_breakdown_gravacao_falhou", "Detalhamento por anúncio (Meta) veio, mas não foi gravado", "warning", c.id, { error: upBd.error });
+              }
+            }
+          }
+
+          if (cvRes.status === "rejected") await registrar("meta_conversoes_falhou", "Conversões personalizadas (Meta) falharam nesta clínica (gasto OK)", "warning", c.id, { error: String(cvRes.reason), cv_since: cvSince, until });
+          else {
+            const cv = cvRes.value;
+            if (cv.error) await registrar("meta_conversoes_falhou", "Conversões personalizadas (Meta) falharam nesta clínica (gasto OK)", "warning", c.id, { error: cv.error, cv_since: cvSince, until });
+            else {
+              // Truncado aqui é pior que no gasto: a janela é mais longa, então o corte cai no
+              // meio de dias que ninguém vai revisitar (o botão manual é que ninguém clica).
+              if (cv.truncated) await registrar("meta_conversoes_truncado", "Conversões personalizadas (Meta) vieram PARCIAIS nesta clínica", "warning", c.id, { cv_since: cvSince, until, rows: cv.rows.length });
+              if (cv.rows.length > 0) {
+                const upCv = await upsertConversionsBreakdown(service, c.id, "meta_ads", cv.rows);
+                if (upCv.error) await registrar("meta_conversoes_gravacao_falhou", "Conversões personalizadas (Meta) vieram, mas não foram gravadas", "warning", c.id, { error: upCv.error });
+                else conversoesOk++;
+              }
+              // Catálogo (id -> nome) p/ o seletor de colunas do painel. Fora do `rows.length`:
+              // conversão renomeada/arquivada no Meta precisa refletir mesmo em dia sem disparo.
+              const cat = await fetchCustomConversionsCatalog(metaTok, c.meta_ad_account_id);
+              if (!cat.error && cat.rows.length > 0) await upsertConversionCatalog(service, c.id, cat.rows);
             }
           }
         }
@@ -268,8 +326,8 @@ serve(async (req) => {
   await writeState({
     last_run_at: done ? new Date(now).toISOString() : state.last_run_at,
     cursor: newCursor,
-    ...(done ? {} : { since, until }),
+    ...(done ? {} : { since, until, cv_since: cvSince }),
   });
 
-  return json({ ok: true, since, until, processed: list.length, cursor: newCursor, sweep_complete: done, metaOk, googleOk, errors });
+  return json({ ok: true, since, until, cv_since: cvSince, processed: list.length, cursor: newCursor, sweep_complete: done, metaOk, googleOk, errors, conversoesOk });
 });

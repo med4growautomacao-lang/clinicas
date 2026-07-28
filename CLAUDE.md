@@ -247,6 +247,16 @@ Vale para **edge function, RPC, trigger e cron**. "Importa" = **se falhar, algu�
 
 Aparece em **Super Admin › Central de Erros** (fingerprint agregado; EVENTO conta ocorrências, CONDIÇÃO se auto-resolve).
 
+### 📌 REGRA: erro resolvido SAI do painel
+
+Decisão do dono (27/07). A Central mostra **só o que está aberto** — não há aba, contador nem filtro de "resolvidos". A contagem da tela **é** a fila de trabalho.
+
+Isso é **remoção, não filtro de UI**: o trigger **`trg_system_error_arquiva_resolvido`** copia a linha para **`system_errors_archive`** e a apaga de `system_errors`. Vale para os três caminhos (botão do painel, auto-resolve do `run_system_monitors`, `update` na mão) — a invariante mora no trigger de propósito.
+
+- **Não "restaure" a aba de resolvidos** ao mexer no `ErrorCenter.tsx`, e não troque o trigger por um `where status <> 'resolved'` na consulta: o painel voltaria a acumular.
+- O histórico **não** se perde: está em `system_errors_archive` (RLS de super admin, fora do painel).
+- Como o `fingerprint` volta a ficar livre, um problema que reincide entra como **episódio novo** (`first_seen_at` e contador próprios). Para CONDIÇÃO isso é o certo: ela sumiu e voltou, não é a mesma ocorrência arrastada. Para série histórica de um mesmo erro, consulte o arquivo.
+
 ---
 
 # 3. n8n — produção, com pacientes reais

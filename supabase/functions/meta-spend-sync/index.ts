@@ -18,7 +18,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { applyAdStatus, fetchMetaAdBreakdown, upsertSpendBreakdown } from "../_shared/spend.ts";
+import { applyAdStatus, fetchCustomConversionsCatalog, fetchMetaAdBreakdown, fetchMetaConversions, upsertConversionCatalog, upsertConversionsBreakdown, upsertSpendBreakdown } from "../_shared/spend.ts";
 import { candidatosDaClinica, comFallback, type ErroGraph, lembrarCamada } from "../_shared/meta-token.ts";
 
 const GRAPH_VERSION = "v24.0";
@@ -198,8 +198,19 @@ serve(async (req) => {
   // a resposta nem afeta o total acima (já gravado, fonte dos painéis). Falha vira aviso na
   // Central; o sync do total é sucesso de qualquer forma.
   let breakdownRows = 0;
+  let conversionRows = 0;
+  // As DUAS varreduras da Graph (gasto por anúncio e conversões) saem EM PARALELO. Sequencial,
+  // a soma dos tempos estourou o teto de 150s da edge e o botão devolveu 504 (27/07, janela de
+  // vários meses). Em paralelo o custo é ~o da mais lenta. allSettled e não all: uma falhando
+  // não pode cancelar a outra — são dados independentes.
+  const [bdSettled, cvSettled] = await Promise.allSettled([
+    fetchMetaAdBreakdown(metaToken, account, since, until),
+    fetchMetaConversions(metaToken, account, since, until),
+  ]);
+
   try {
-    const bd = await fetchMetaAdBreakdown(metaToken, account, since, until);
+    if (bdSettled.status === "rejected") throw bdSettled.reason;
+    const bd = bdSettled.value;
     if (bd.error) {
       await registrarErro("breakdown_falhou", "Detalhamento por anúncio do Meta falhou (total por conta OK)", "warning", { detail: bd.error });
     } else {
@@ -219,5 +230,36 @@ serve(async (req) => {
     await registrarErro("breakdown_excecao", "Detalhamento por campanha do Meta quebrou (total por conta OK)", "warning", { detail: e instanceof Error ? e.message : String(e) });
   }
 
-  return json({ ok: true, days: rows.length, updated, total_spend: totalSpend, from: since, to: until, breakdown_rows: breakdownRows });
+  // (6b) Conversões PERSONALIZADAS — busca SEPARADA (acima, em paralelo) e gravação em try
+  // PRÓPRIO, de propósito: pedir `actions` junto do gasto derrubava a paginação e levava o
+  // detalhamento junto (27/07). Isolado assim, falha aqui não afeta o gasto.
+  try {
+    if (cvSettled.status === "rejected") throw cvSettled.reason;
+    const cv = cvSettled.value;
+    if (cv.error) {
+      await registrarErro("conversoes_falhou", "Conversões personalizadas do Meta falharam (gasto OK)", "warning", { detail: cv.error });
+    } else if (cv.rows.length > 0) {
+      const upc = await upsertConversionsBreakdown(service, clinicId, "meta_ads", cv.rows);
+      if (upc.error) await registrarErro("conversoes_gravacao_falhou", "Conversões personalizadas do Meta vieram, mas não foram gravadas", "warning", { detail: upc.error });
+      else conversionRows = upc.gravadas;
+    }
+  } catch (e) {
+    await registrarErro("conversoes_excecao", "Conversões personalizadas do Meta quebraram (gasto OK)", "warning", { detail: e instanceof Error ? e.message : String(e) });
+  }
+
+  // (7) Catálogo das conversões personalizadas (id -> nome). O insights devolve só o ID; sem isto
+  // o seletor de colunas do painel mostraria números sem rótulo. 1 chamada por sync, best-effort.
+  try {
+    const cat = await fetchCustomConversionsCatalog(metaToken, account);
+    if (cat.error) {
+      await registrarErro("catalogo_conversoes_falhou", "Não foi possível listar as conversões personalizadas do Meta (números seguem gravados, sem rótulo)", "warning", { detail: cat.error });
+    } else if (cat.rows.length > 0) {
+      const upc = await upsertConversionCatalog(service, clinicId, cat.rows);
+      if (upc.error) await registrarErro("catalogo_conversoes_gravacao_falhou", "Catálogo de conversões do Meta veio, mas não foi gravado", "warning", { detail: upc.error });
+    }
+  } catch (e) {
+    await registrarErro("catalogo_conversoes_excecao", "Catálogo de conversões do Meta quebrou (gasto e conversões OK)", "warning", { detail: e instanceof Error ? e.message : String(e) });
+  }
+
+  return json({ ok: true, days: rows.length, updated, total_spend: totalSpend, from: since, to: until, breakdown_rows: breakdownRows, conversion_rows: conversionRows });
 });

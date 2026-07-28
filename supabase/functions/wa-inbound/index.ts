@@ -302,9 +302,31 @@ serve(async (req) => {
   const leadPhone = chatSource.split("@")[0].replace(/\D/g, "");
   if (!leadPhone) return json({ ok: true, ignored: true, reason: "no_phone" });
 
-  const isText = (msg.type === "text" || msg.messageType === "Conversation" || msg.messageType === "ExtendedTextMessage");
+  // RESPOSTA DE BOTAO / LISTA / ENQUETE. A uazapi entrega o id escolhido em `buttonOrListid`
+  // (doc: https://docs.uazapi.com/endpoint/post/send~menu) e manda `text` VAZIO.
+  //
+  // Sem este ramo o clique caia no `else` de midia: virava "[ButtonsResponseMessage recebida]",
+  // o id era jogado fora, e ainda tentava baixar um arquivo que nao existe (o erro `media_no_url`
+  // da Central saia dai). Consequencia real: `fn_handle_confirmation_reply` procura 'confirmado' /
+  // 'remarcar' / 'cancelado' no conteudo da mensagem, nao achava nada e o paciente que clicou em
+  // "Confirmar consulta" era ignorado em silencio. 7 cliques perdidos entre 21/07 e 28/07.
+  //
+  // Gravamos o ROTULO (`vote` = "Cancelar consulta"), nao o id (`buttonOrListid` = "cancelado"):
+  //   - a equipe abre a conversa e le o que o paciente realmente tocou;
+  //   - o Agente IA recebe uma frase em portugues, nao um token solto.
+  // `fn_handle_confirmation_reply` casa as DUAS formas (`like '%cancelar consulta%'` OU
+  // `= 'cancelado'`), entao a trava anti-resposta-dupla (`app.confirmation_handled`, lida por
+  // `ingest_wa_message` para decidir o forward_ai) continua levantando igual. O id fica de
+  // reserva para o caso de a uazapi mandar so ele.
+  const botaoId = String(msg.buttonOrListid ?? "").trim();
+  const botaoRotulo = String(msg.vote ?? "").trim();
+  const ehResposta = botaoId !== "" || botaoRotulo !== "";
+
+  const isText = ehResposta || msg.type === "text" || msg.messageType === "Conversation" || msg.messageType === "ExtendedTextMessage";
   // `content` pode ser enriquecido com a transcrição da mídia (C5-b) antes do insert.
-  let content = isText
+  let content = ehResposta
+    ? (botaoRotulo || botaoId)
+    : isText
     ? String(msg.text ?? msg.content ?? "")
     : (String(msg.caption ?? "").trim() || `[${msg.messageType || msg.mediaType || "mídia"} recebida]`);
 

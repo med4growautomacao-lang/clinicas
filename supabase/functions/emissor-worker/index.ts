@@ -1,5 +1,6 @@
-// emissor-worker — drena a fila de saida (`outbound_messages`). E o UNICO lugar que fala com a
-// uazapi depois que os 13 produtores forem migrados.
+// emissor-worker — drena a fila de saida (`outbound_messages`). Desde 28/07 (chave `all: true`)
+// e o UNICO lugar que fala com a uazapi para ENVIAR, em todas as clinicas. Os ramos inline dos
+// produtores continuam no codigo como rollback: `all: false` devolve tudo ao caminho antigo.
 //
 // O que ele faz que o envio inline de hoje nao faz:
 //   1. TOKEN PELO GATE CANONICO (`fn_clinic_send_token`): exige instancia 'connected', token nao
@@ -48,6 +49,9 @@ interface Mensagem {
   media_mime: string | null;
   media_kind: string | null;
   media_filename: string | null;
+  // Campos especificos do /send/menu (type, text, choices, footerText...). O envelope so poe
+  // destino e delay por cima. Nulo em tudo que nao e kind='menu'.
+  menu_payload: Record<string, unknown> | null;
   delay_ms: number;
   transport: string;
   producer: string;
@@ -162,8 +166,27 @@ async function processar(supa: Supa, m: Mensagem, cache: Map<string, string | nu
   }
 
   const ehTexto = m.kind === "text";
-  const caminho = ehTexto ? "/send/text" : "/send/media";
-  const corpo = ehTexto
+  const ehMenu = m.kind === "menu";
+
+  // MENU INTERATIVO (botoes, lista, enquete, carrosel): https://docs.uazapi.com/endpoint/post/send~menu
+  // Obrigatorios pela doc: number, type, text, choices[]. Os tres ultimos vem prontos do produtor
+  // em menu_payload; aqui entram so `number` (ja normalizado pelo emit_message, com o 9 preservado)
+  // e `delay`. Eles sobrescrevem o payload de proposito: destino e ritmo sao do envelope, nao do
+  // produtor. Uma check constraint no banco ja barra kind='menu' sem choices; este guarda existe
+  // para o caso de a linha vir de fora do emit_message, e falha PERMANENTE (repetir nao conserta).
+  if (ehMenu && !m.menu_payload) {
+    await supa.rpc("mark_outbound_failed", {
+      p_id: m.id,
+      p_error: "mensagem de menu sem menu_payload (nada a enviar)",
+      p_provider_status: null, p_provider_response: null, p_permanente: true,
+    });
+    return;
+  }
+
+  const caminho = ehMenu ? "/send/menu" : ehTexto ? "/send/text" : "/send/media";
+  const corpo = ehMenu
+    ? { ...m.menu_payload, number: m.to_addr, delay: m.delay_ms ?? 0 }
+    : ehTexto
     ? { number: m.to_addr, text: m.body ?? "", delay: m.delay_ms ?? 0 }
     : {
         number: m.to_addr,

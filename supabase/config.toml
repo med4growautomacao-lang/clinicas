@@ -67,6 +67,15 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/emissor-worker/index.ts"
 
+[functions.wa-inbound]
+enabled = true
+# ⚠️ RECEPÇÃO DE TODAS AS 34 CLÍNICAS. Recebe webhook da uazapi, que NÃO manda JWT nenhum.
+# O valor real em produção é false; estava FORA deste arquivo, então um deploy pelo CLI ligaria o
+# JWT (default true) e a uazapi passaria a levar 401: nenhuma mensagem de paciente entraria, sem
+# erro visível de nosso lado. Registrado aqui em 28/07 para desarmar isso de vez.
+verify_jwt = false
+entrypoint = "./functions/wa-inbound/index.ts"
+
 [functions.ai-sandbox]
 enabled = true
 # Chamada pelo frontend (Super Admin) com o JWT do usuario; a funcao valida is_super_admin por dentro.

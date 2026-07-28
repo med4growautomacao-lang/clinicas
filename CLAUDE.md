@@ -3,22 +3,156 @@
 Instruções para o Claude Code neste repositório.
 Aqui mora só o que é **load-bearing** e **não-descobrível num grep rápido**. Se dá pra achar em 5 segundos, não entra.
 
-## Idioma
+---
 
-Responder sempre em **português (pt-BR)**.
+# 0. Diretrizes (o que NÃO muda)
+
+Isto aqui é o contrato do produto. Módulo, função e tabela mudam toda semana; **isto não**. Quando uma decisão de implementação bater de frente com esta seção, quem cede é a implementação.
+
+## 0.1 Idioma e fuso são fixos, não configuráveis
+
+- **Tudo em pt-BR**: telas, mensagens ao paciente, prompts do agente, nomes de etapa, relatórios, erros da Central, comentário de código e resposta ao dono.
+- **Fuso do negócio: `America/Sao_Paulo`, único.**
+- ⚠️ **Não existe coluna de idioma nem de fuso em lugar nenhum do banco** (conferido 28/07: zero colunas `timezone`/`locale`/`lang` em `public`). Não invente `clinics.timezone` "para o futuro": internacionalizar é decisão de produto, não detalhe de implementação, e um campo órfão vira fonte de bug.
+- Dia de negócio é dia em SP: `(now() at time zone 'America/Sao_Paulo')::date`, nunca `now()::date` cru.
+- 📌 **SP é o padrão em tudo: dado, cron, relatório e tela.** Ao encontrar algo que não segue (um cron em UTC, uma coluna com hora deslocada, um relatório com corte estranho), **avise em vez de converter por conta própria**. Fora do padrão é candidato a defeito, e "consertar" no lugar errado só empurra o deslocamento para outro ponto.
+- A armadilha real não é o fuso, é a **mistura de tipos** (`timestamp` sem tz já em SP × `timestamptz`). Ver §3.
+
+## 0.2 Um sistema, duas marcas: MedDesk e WakeDesk
+
+`clinics.category` é o discriminador. Mesmo código, mesmo banco, mesmas RPCs; **a diferença é de tela**.
+
+| `category` | marca | tenants (28/07) | quem é |
+|---|---|---|---|
+| `clinica` | **MedDesk** (MED4GROW) | 20 | clínica médica/odonto |
+| `outro` | **WakeDesk** (WAKEMARKETING) | 13 | loja, joalheria, metalúrgica, turismo, café |
+| `meta_tester` | plano reduzido | 1 | barra cortada a 3 abas |
+
+Quem decide o menu é `Sidebar.tsx`, por três marcas no item:
+
+- `clinicOnly` (some no WakeDesk): **Agendamentos, Prontuários, Corpo Clínico**
+- `outroOnly` (só no WakeDesk): **Produção** (estoque/PCP/manutenção), **Orçamentos**
+- `metaTesterOnly` + a barra reduzida do plano Meta Tester
+
+⚠️ **Não existe camada de vocabulário, e isso é dívida conhecida.** `activeClinicCategory` é lido em **4 arquivos** (Sidebar, Comercial, DoctorScheduleSettings, AuthContext), enquanto há **~112 ocorrências de "paciente" fixas em 20 telas**. Na prática o cliente WakeDesk lê "paciente" e "consulta" no que é transversal.
+
+- **Texto novo em tela transversal** (funil, conversas, IA, painéis, follow-up) nasce **neutro**: contato, atendimento, cliente, profissional. Não aumente a dívida.
+- Só ramifique por `category` quando o termo for mesmo incompatível (o padrão está em `DoctorScheduleSettings.tsx`).
+
+**Régua:** feature nova é **transversal por padrão**. Vira `clinicOnly`/`outroOnly` só quando depende de um conceito que o outro lado não tem (prontuário, ordem de produção).
+
+## 0.3 Assuma que o cliente NÃO usa o módulo
+
+O sistema é vendido em partes. Presumir que todo mundo tem agenda ou trabalha o Kanban na mão é a origem de card zerado e de KPI mentiroso.
+
+| módulo | uso real (90 dias, 34 tenants) |
+|---|---|
+| **Agenda** (`appointments`) | **5 tenants**, todos `clinica`. Zero no WakeDesk |
+| **Funil/Kanban** | 34 configurados, **30** com movimento (mas muito card é movido por IA/gatilho, não pela mão) |
+| **IA, follow-up, envio manual, analista** | por clínica, em `clinics.features` |
+
+### `clinics.features` (jsonb) e a semântica que MUDA por flag
+
+| flag | semântica | quem lê |
+|---|---|---|
+| `feature_ia` | opt-**out** (`!== false`) | tela Comercial |
+| `feature_followup` | opt-**out** (`!== false`) | tela Comercial |
+| `feature_chat_send` | opt-**in** (`=== true`) | `ChatComposer.tsx` |
+| `feature_conv_ai` | opt-**in** (`=== true`) | aba do Analista Conversacional |
+| `agenda_via_funil` | opt-**in**, **só no banco** | `get_commercial_dashboard` |
+
+⚠️ Trocar `!== false` por `=== true` (ou o contrário) **liga ou desliga módulo em 34 clientes de uma vez**, sem erro nenhum. Copiar a linha de outra flag é exatamente como isso acontece.
+
+**`agenda_via_funil = true`** = a clínica não usa `appointments`. Agendado/Realizado/Faltou saem das **etapas do funil** (`lead_stage_history`, slugs `agendado` / `ganho` / `faltou_cancelou`), ancorados em `changed_at`. Hoje: 1 clínica.
+
+⚠️ **Nenhum formulário do app edita `agenda_via_funil`.** Super Admin e OrgAdmin fazem `{ ...clinic.features, ... }` de propósito. Reconstruir o jsonb do zero apaga a flag e **zera o painel Comercial daquela clínica em silêncio** (é a regra "nunca reconstruir JSONB" do §2, na sua forma mais cara).
+
+**Régua:** KPI ou tela que só existe com agenda precisa de um dos dois: fallback pelo funil, ou sumir para quem não tem. Card mostrando "0" onde o módulo nem foi vendido é bug de produto.
+
+## 0.4 WhatsApp é uazapi, e a documentação é a fonte
+
+Receber e enviar mensagem passa pela **uazapi** (`https://med4growautomacao.uazapi.com`, base em `UAZAPI_BASE`).
+
+📌 **Antes de criar ou alterar qualquer requisição, consulte https://docs.uazapi.com/.** Não deduza payload por analogia com outro endpoint nosso: `/send/text`, `/send/media` e `/send/menu` têm corpos diferentes, e campo errado falha com 200 em alguns casos.
+
+| direção | estado real (28/07) |
+|---|---|
+| **receber** | 100% na edge **`wa-inbound`**. O n8n **não recebe mais mensagem**. ⚠️ Sobram 2 linhas com `whatsapp_instances.inbound_route = 'n8n'` (Meta Tester, Fernando Massoterapeuta): são instâncias **nunca conectadas, com zero mensagem na história**. É valor velho parado, não rota viva. **Não conte linha de `inbound_route` como se fosse tráfego** |
+| **enviar** | **todo envio automático passa pelo Emissor** (`emit_message` → `outbound_messages` → `emissor-worker`). Desde 28/07 o gate `fn_emissor_ativo` está em `{enabled:true, all:true}`: vale para as 34 clínicas **e para toda clínica criada daqui em diante**, sem cadastro nenhum |
+
+📌 **Código novo que manda mensagem produz para a fila** (`emit_message`), nunca `fetch` direto nem `system_http_post` para a uazapi. É o que dá retry, DLQ, e a garantia de só gravar em `chat_messages` depois do 200.
+
+⚠️ **Os ramos `else` inline ainda existem no código e NÃO são código morto: são o rollback.** Cada produtor é `if fn_emissor_ativo(clinic) then emit_message(...) else <envio antigo> end if`. Voltar `all` para `false` devolve os 34 tenants ao caminho antigo sem deploy. Não "limpe" esses ramos achando que são resíduo.
+- **Token nunca é constante nem variável de ambiente por clínica**: sai do gate `fn_clinic_send_token`, que exige instância `connected`.
+- **Telefone: normalizar os dois lados** antes de comparar (o 9º dígito), mas o endereço de entrega vai como a uazapi devolveu. Ver §2.
+- Chamada HTTP saindo do **banco** usa `system_http_post`, nunca `net.http_post` cru.
+
+## 0.5 Se falhar em silêncio, não existe
+
+**Não há Sentry.** O que não estiver em `system_errors` não aconteceu para ninguém.
+
+📌 **Toda função que importa registra erro na Central.** "Importa" = se falhar, alguém perde dado, dinheiro ou atendimento. Vale para edge (`registrarErro()`), RPC, trigger e cron (`log_system_error`). `catch` que só faz `console.error` é invisível. Detalhes, formato e a regra de arquivamento: §2.
+
+**Critério de pronto:** feature nova sem caminho de erro na Central não está pronta, mesmo funcionando.
+
+## 0.6 Falar com o dono: resumo primeiro, linguagem de negócio sempre
+
+**O dono não é programador.** Ele decide o rumo do produto, e só consegue decidir bem se entender o que está na mesa. Resposta que ele não entende é resposta perdida, por mais correta que esteja.
+
+📌 **Toda resposta começa pelo resumo:** o que aconteceu, o que isso significa para o negócio e o que ele precisa decidir. O detalhe técnico vem **depois**, e só o necessário para sustentar a conclusão.
+
+- **Traduza para consequência, não para mecanismo.** Não é "o `buttonOrListid` não era lido no parser"; é "o paciente clicou em Confirmar e o sistema ignorou". O nome técnico entra no fim, para quem for procurar depois.
+- **Todo número vem com o que ele quer dizer.** "7 cliques perdidos" sozinho não decide nada. "7 cliques perdidos, mas só 1 clínica tinha a automação ligada, então 3 pacientes reais foram ignorados" decide.
+- **Diga sempre quem perde o quê:** paciente, dinheiro, dado ou tempo da equipe. Se nada disso se perde, diga também, para ele não gastar atenção à toa.
+- **Termo técnico inevitável vem explicado na mesma frase.** "RLS (a regra que impede uma clínica de ver dados de outra)". Uma vez, não a cada menção.
+- **Fecha com a decisão dele**, quando houver: o que dá para fazer, o custo/risco de cada caminho e a sua recomendação. Uma recomendação clara, não um cardápio.
+- **Não esconda o problema no meio do texto.** Se algo quebrou, está na primeira linha.
+- **Erro seu se admite em uma frase e segue.** Sem autoflagelo, sem repetir o assunto.
+
+⚠️ Isso vale **inclusive quando a notícia é ruim ou o assunto é chato**. Relatório técnico que ele não consegue ler vira decisão adiada, e decisão adiada em produção custa paciente.
+
+## 0.7 "Está desligado" NÃO é diagnóstico. A pergunta é: ligado, funciona?
+
+O dono **já sabe** o que está desligado, e desliga de propósito: o sistema está em fase de testes, e chave off é o estado normal de quase tudo. Entregar "a flag está off" como achado gasta a atenção dele e não responde nada.
+
+🚫 **NÃO relate estado de chave, texto em branco nem módulo desligado como se fosse problema.** Isso não é achado, é o cenário. Se for indispensável para entender o resto, cabe em meia linha de contexto.
+
+📌 **Relate DEFEITO DE CÓDIGO, e só.** A pergunta é sempre: no dia em que ligarem, funciona de ponta a ponta?
+
+- **Percorra o caminho inteiro**, não o primeiro `if`. Gatilho → regra → envio → gravação → retorno. Um elo quebrado no meio só aparece quando alguém liga, e aí aparece em produção com paciente na frente.
+- **Teste com a chave ligada**, não com ela como está. `begin; ... rollback;` com a flag ligada na transação, lead `is_simulation` (roteia para sandbox, não toca uazapi), e confira o efeito real: mudou o status? entrou na fila? gravou a conversa?
+- **Separe as três causas, sempre**, porque a solução de cada uma é diferente:
+  1. **desligado** → é só ligar, e o dono decide quando;
+  2. **falta configuração** (texto vazio, grupo não cadastrado) → é preencher formulário, ninguém precisa programar;
+  3. **defeito de código** → só conserta mexendo no sistema. **É o único que é problema seu.**
+- **Chave que a tela grava e o backend não lê é DEFEITO**, não configuração: o cliente desliga e continua ligado, ou vice-versa. Procure isso ativamente ao mexer numa feature com toggle.
+- **Diga o que está provado e o que não está.** "Testei o caminho todo com a chave ligada" é diferente de "li o código e parece certo". O segundo é palpite, e tem que ser dito como palpite.
+
+## 0.8 Régua de decisão (rodar antes de mexer)
+
+1. **Em que camada isso mora?** Repo, banco ou edge (§1). Comportamento do agente é prompt + edge, não tela.
+2. **Vale para as duas marcas?** Se não, o que decide: `category` ou uma flag de `features`? (§0.2, §0.3)
+3. **E se o cliente não tiver esse módulo?** Agenda, Kanban, IA e envio manual são opcionais. O que ele vê?
+3b. **E quando LIGAREM, funciona?** Percorra o caminho todo com a chave ligada, não pare no gate (§0.7).
+4. **Se falhar, quem descobre?** Se a resposta não for "a Central de Erros", falta código. (§0.5)
+5. **Que número é esse?** Conceito (lead/venda/faturamento/agendado) e **eixo de data** são coisas separadas. Fonte única por conceito; divergência legítima é só de recorte. (§1)
+6. **Isso é produção?** Banco e edge são **um só** para todas as sessões, com pacientes reais do outro lado. Até 4 sessões editam esta árvore ao mesmo tempo (§3).
+7. **Quando parar e perguntar:** risco de dinheiro, de dado de paciente ou de mudança que o cliente enxerga. O resto, decida e siga. Pergunta em linguagem de negócio, não de banco (§0.6).
+8. **Como contar o que fez:** resumo primeiro, consequência antes de mecanismo, decisão do dono no fim (§0.6).
 
 ---
 
 # 1. Onde as coisas moram
 
-O sistema **não vive só neste repo**. Antes de procurar um comportamento aqui, decida em qual das quatro camadas ele roda:
+O sistema **não vive só neste repo**. Antes de procurar um comportamento aqui, decida em qual das **três camadas** ele roda:
 
 | camada | o que roda ali |
 |---|---|
 | **Repo (React/TS)** | telas, hooks (`src/hooks/useSupabase.ts`), configuração |
 | **Banco (Postgres)** | RPCs, triggers, invariantes, RLS, crons (`pg_cron`) |
 | **Edge Functions** (`supabase/functions/`) | ~42 edges + `_shared/` (lista no disco). Inclui integrações externas, o **Agente IA nativo** (`ai-agent` + `ai-agent-worker`), **Analista Conversacional** (`conv-ai-analyst` + `conv-ai-learn`), **Emissor** (`emissor-worker`), follow-ups (`forms-welcome-followup`, `reengagement-followup`), assistente IA (`ai-assistant`), sandbox (`ai-sandbox`) |
-| **n8n** | recepção do WhatsApp (workflow "Receptor de mensagens"). ⚠️ O agente de IA e os follow-ups **migraram para edge functions** — n8n NÃO roda mais o loop do agente |
+
+⚠️ **O n8n não é mais camada deste sistema.** Não recebe, não envia, não roda o agente nem os follow-ups. Sobrou lá só o rastreamento de formulário dos sites cujo webhook ainda aponta para ele, e isso é pendência do lado dos sites, não código nosso. **Não procure comportamento no n8n**; se um dia parecer que a resposta está lá, é sinal de que a pergunta está errada.
 
 **Regra prática:** comportamento do agente → edge (`ai-agent-worker`) + prompt. Regra de negócio → banco. Integração externa → edge. Tela → repo.
 
@@ -35,12 +169,15 @@ Há funções **ativas em produção sem código-fonte aqui** — hoje: **`valid
 
 ## Como o agente de IA é instruído
 
-O agente recebe **DOIS prompts**, e confundi-los já custou tempo:
+O agente é instruído por **TRÊS fontes**, e confundi-las já custou tempo. As duas primeiras se chamam prompt; **a terceira não se chama, mas é prompt do mesmo jeito**:
 
 | | define | onde mora | escopo |
 |---|---|---|---|
 | **1. Prompt do Sistema** | **COMO** o agente age: tom, etapas, quando usar cada tool | `prompt_templates.content`, escolhido via `ai_config.prompt_template_id` | ⚠️ **COMPARTILHADO entre clínicas** |
 | **2. Prompt da Clínica** | **O QUE** ele sabe: médicos, horários, valores, endereço | `ai_config.prompt` | só daquela clínica |
+| **3. Descrição do tipo de consulta** | **QUANDO usar cada tipo**: para quem serve, o que inclui, quando não oferecer | `consultation_types.description` | só daquela clínica |
+
+⚠️ **A terceira é a mais fácil de esquecer e a mais fácil de estragar**, porque quem escreve é a própria clínica, num campo que parece cadastro e não parece instrução de IA. Texto vago ali vira agente oferecendo o tipo errado, e ninguém procura o defeito no cadastro.
 
 A view **`public.v_clinic_ai_prompt`** concatena: `combined_prompt = template.content + '\n\n---\n\n' + ai_config.prompt`. **Sistema primeiro, clínica depois.** Sem template, é só o da clínica.
 
@@ -50,7 +187,7 @@ Quem lê essa view é o pipeline nativo: `wa-inbound` → **`ai-agent`** (ingest
 - Editar um `prompt_template` **mexe com várias clínicas ao mesmo tempo**.
 - O prompt da clínica vir por último **não o torna capaz de revogar** uma regra do sistema.
 
-**Uma terceira fonte, que não é prompt:** as **descrições dos tipos de consulta** (`consultation_types.description`) chegam ao agente em tempo de execução, pela tool `LISTAR_TIPOS_CONSULTA`. **É lá que se ensina quando usar cada tipo.**
+**Como a terceira fonte chega:** as descrições (`consultation_types.description`) não entram no prompt montado; chegam ao agente **em tempo de execução**, pela tool `LISTAR_TIPOS_CONSULTA`. Por isso não aparecem em `v_clinic_ai_prompt` e não adianta procurá-las lá.
 
 ⚠️ Essa regra também está **explicada na UI** (Configurações IA e Super Admin › Prompts Fixos). Se ela mudar, **os textos da tela mudam junto** — senão o app passa a mentir para o cliente.
 
@@ -66,10 +203,10 @@ wa-inbound → ai-agent (ingest) → ai_turn_buffer → ai-agent-worker (loop LL
 
 | edge | o que faz |
 |---|---|
-| **`wa-inbound`** | Recebe webhook do uazapi, persiste `chat_messages`, encaminha para o agente via `HUB_AI_WEBHOOK_URL` → edge `ai-agent`. **Substitui o workflow n8n "Receptor de mensagens" por clínica (canário)** — ambos coexistem |
+| **`wa-inbound`** | Recebe webhook do uazapi, persiste `chat_messages`, encaminha para o agente via `HUB_AI_WEBHOOK_URL` → edge `ai-agent`. **Substituiu o workflow n8n "Receptor de mensagens", que hoje está desativado**. O chaveamento em `whatsapp_instances.inbound_route` (`hub` × `n8n`) sobrou da migração canário e não decide mais nada em produção |
 | **`ai-agent`** | Ponto de entrada (ingest). Enfileira o turno em `ai_turn_buffer` e "cutuca" o worker. Retorno 200 imediato |
 | **`ai-agent-worker`** | O cérebro. Claim atômico (`claim_due_ai_turns`), loop LLM com tool-calling (`_shared/agent/tools.ts`), fan-out em bolhas, grava memória, transição de etapa. **Stateless, horizontal** |
-| **`emissor-worker`** | Fila de saída (`outbound_messages`). É o **ÚNICO** ponto que fala com a uazapi para enviar. Token pelo gate canônico (`fn_clinic_send_token`), lê a resposta, só grava em `chat_messages` após 200, retry + DLQ |
+| **`emissor-worker`** | Fila de saída (`outbound_messages`). Token pelo gate canônico (`fn_clinic_send_token`), lê a resposta, só grava em `chat_messages` após 200, retry + DLQ. **Ligado para todas as clínicas desde 28/07** (§0.4). Sabe 3 formatos: `/send/text`, `/send/media` e `/send/menu` (botões, via `outbound_messages.menu_payload`) |
 | **`ai-sandbox`** | Ambiente de teste (Super Admin). Injeta mensagem no mesmo pipeline mas roteia p/ `transport='sandbox'` (nunca toca uazapi real) |
 
 **Módulos compartilhados em `_shared/agent/`:**
@@ -96,7 +233,11 @@ Gates: `system_settings.conv_ai_config.mode` (`off`/`shadow`/`active`) + `conv_a
 
 ## Agendamento
 
-- **`book_appointment` é a única coisa que insere em `appointments`** (verificado). App, Kanban e IA passam por ela; `convert_lead_to_appointment` **delega** para ela. **Nunca inserir direto.**
+### ⚠️ `book_appointment` é a função mais crítica do sistema
+
+Tudo que marca horário passa por ela: app, Kanban, IA e `convert_lead_to_appointment` (que **delega**). É a única coisa que insere em `appointments` (verificado). **Nunca inserir direto.**
+
+📌 **Cuidado redobrado ao otimizar ou refatorar essa função.** Ela concentra, no mesmo corpo, a validação de disponibilidade, os buffers dos dois lados, o aviso mínimo, a trava contra marcação simultânea e a invariante de um agendamento ativo por ticket. "Simplificar" qualquer um desses trechos por parecer redundante já é, por definição, o bug: o efeito não aparece no teste, aparece como **horário vendido duas vezes** com dois pacientes na porta. Se precisar mexer, mexa num pedaço por vez e prove cada um.
   - `v_validate := COALESCE(p_validate_availability, true)` → **default seguro (valida)**; burlar é explícito.
   - `v_ignore_min := COALESCE(p_ignore_min_notice, p_source <> 'ia')` → **só a IA respeita o aviso mínimo**; o manual o ignora **de propósito** (encaixe de recepção).
 - **`get_available_slots` tem 2 overloads.** A versão por **`consultation_type_id` (uuid) é a real**; a de texto é só adaptador de legado.
@@ -153,7 +294,9 @@ Desde 18/07 os três **partem da MESMA definição por conceito** — as **views
 | faturamento | `v_kpi_sales_value` = **vendas lançadas** (`conversions` s/ 'Orçamento Enviado') | `converted_at` |
 | agendado | `v_kpi_scheduled` (união consulta ∪ etapa, 1×/ticket) | `LEAST` das duas |
 
-⚠️ **O módulo Financeiro está DESABILITADO nos painéis** (decisão do dono, 18/07) — **não puxar de `financial_transactions`** em RPC de painel nenhuma. Faturamento = valor lançado (`conversions`), em todo lugar.
+⚠️ **O módulo Financeiro está DESABILITADO nos painéis, POR ENQUANTO** (decisão do dono, 18/07, reconfirmada em 28/07). Enquanto estiver assim: **não puxar de `financial_transactions`** em RPC de painel nenhuma, e faturamento é sempre o **valor lançado** (`conversions`), em todo lugar.
+
+É pausa, não aposentadoria: a tabela continua viva e a aba está só comentada no `Sidebar.tsx`. **Para religar não basta descomentar** — o painel voltaria a mostrar dois faturamentos diferentes (o lançado e o financeiro) sem ninguém saber qual é o certo. Religar exige antes decidir **qual dos dois é a fonte única** e alinhar as views `v_kpi_*` a ela.
 
 ⚠️ **Divergência legítima agora é SÓ de recorte, nunca de definição.** Um painel pode fatiar por **criação do lead** (`created_at`), **conversão** (`outcome_at`) ou **realização da consulta** (`appointments.date`) — mesmo conceito, janela diferente → números diferentes e ambos certos. **Antes de "corrigir" uma divergência, confirme qual eixo cada lado usa.** Se as definições divergirem (não o recorte), aí é bug — as três devem bater na mesma janela.
 
@@ -202,8 +345,21 @@ Não confie na aplicação para mantê-las (vide o `insert` direto em `tickets`)
 ## `tickets.outcome` é a fonte única da verdade
 Venda = **1 ticket ganho**. `stage` e `outcome` são **acoplados** — mexer num sem o outro corrompe todos os painéis.
 
-## Telefone: normalizar os DOIS lados, sempre
-`leads` chega normalizado **do n8n**; `patients` é normalizado **no banco** (`normalize_br_phone`). Comparar telefone **cru** gera "não encontrado" fantasma — é o **9º dígito**. Em RPC, normalize **os dois lados** da comparação.
+## Telefone: normalizar SEMPRE, e nos DOIS lados
+
+O **9º dígito** é a razão: o mesmo contato aparece com e sem ele, e comparar telefone **cru** gera "não encontrado" fantasma. Em RPC, normalize **os dois lados** da comparação, sem exceção. `patients` é normalizado no banco (`normalize_br_phone`); `leads` chega já normalizado da captação.
+
+⚠️ **A base NÃO é só celular brasileiro.** Conferido em 28/07:
+
+| caso | volume | como `normalize_br_phone` trata |
+|---|---|---|
+| celular BR | ~31 mil | 13 dígitos com `9` na 5ª posição → **tira o 9** e vira 12 |
+| **fixo** (DDD + 8 dígitos) | **1.296 leads** | 10 dígitos → cola `55` e vira 12. **O 9 não é tirado**, então funciona |
+| **exterior** (Argentina 54, Uruguai/Paraguai 59x, Portugal, Espanha, EUA…) | ~150 leads | com DDI, passa intacto: a regra do 9 só dispara quando começa com `55` |
+
+⚠️ **A armadilha do exterior:** número com **10 ou 11 dígitos ganha `55` na marra**, porque a função assume Brasil. Estrangeiro digitado **sem o código do país vira um número brasileiro** e nunca mais casa com a pessoa. Ao cadastrar contato de fora, o DDI é obrigatório.
+
+Fixo e celular não colidem por sorte estrutural (o resto do celular começa em 6-9 e o do fixo em 2-5), então o índice de telefone único não funde duas pessoas. **Não é garantia escrita em lugar nenhum**: se um dia mudar a numeração, isso quebra em silêncio.
 
 ## `rast_id` ≠ protocolo
 - **`rast_id`** (UUID v4) = **identidade do lead**. **protocolo** = id **de um clique**.
@@ -217,7 +373,7 @@ Venda = **1 ticket ganho**. `stage` e `outcome` são **acoplados** — mexer num
 
 - **`attribution_inbox` tem DUAS chaves de reconciliação:** telefone (`phone_norm`, usada pelo CTWA) e **`protocolo`** (usada pelo clique do site — o lead ainda não tem telefone quando clica). Linha sem telefone é ignorada pelos reconciliadores de telefone **de propósito**.
 - **`external-forms-ingest` é O caminho nativo de formulário** (token `?k=` por clínica, criado sozinho pela UI). O n8n "Webhook Forms" só existe para sites não migrados.
-- ⚠️ **`capture_channel='forms'` NÃO quer dizer "veio de formulário".** A edge **`external-crm-status`** (webhook do CRM do cliente, ex.: Clint) cria lead com esse mesmo canal nos três tipos (`lead`/`ganho`/`perdido`), só para herdar o pipeline de forms. Já são ~5 mil leads assim. **Os tokens são diferentes: `capture_token` (formulário) ≠ `crm_token` (CRM)** — ligar um não liga o outro.
+- ⚠️ **Hoje `capture_channel='forms'` NÃO quer dizer "veio de formulário", e isso é dívida a pagar** (ver a regra do canal, abaixo). A edge **`external-crm-status`** (webhook do CRM do cliente, ex.: Clint) cria lead com esse mesmo canal nos três tipos (`lead`/`ganho`/`perdido`), só para herdar o pipeline de forms. **Os tokens são diferentes: `capture_token` (formulário) ≠ `crm_token` (CRM)** — ligar um não liga o outro.
 - **Convenção de UTM é SOURCE-AWARE e mora em `_shared/attribution.ts`** — não invente mapeamento novo: Google → adset=`utm_medium`, ad=`utm_content`, term=`utm_term`; Meta → adset=`utm_term` (`{{adset.name}}`), ad=`utm_content`, e o posicionamento (`utm_medium`) vira `ad_platform`. Meta grava em `fb_*`, o resto em `g_*`.
 - **O script dos sites é SERVIDO pela edge `site-script`** (`?c=<clinic_id>`, cache 1h) a partir de `system_settings.global_tracking_script` — mudou o blob no banco, todos os sites atualizam sozinhos. **Nunca** volte a distribuir o script inline.
 
@@ -233,6 +389,14 @@ Venda = **1 ticket ganho**. `stage` e `outcome` são **acoplados** — mexer num
 | `lead_touchpoints.source` (origem) | `meta_ads` · `google_ads` · `instagram` · `null` = orgânico |
 
 Repare: `leads` diz **`forms`**; `lead_touchpoints` separa em **`site_forms`** e **`meta_forms`**.
+
+### 📌 REGRA: `forms` é SÓ formulário. O resto entra como `whatsapp`
+
+Decisão do dono (28/07). **`forms` significa formulário de verdade**, nativo (`external-forms-ingest`) ou de site. Nenhuma outra origem pode se pendurar nesse canal só para herdar o pipeline dele.
+
+- **Lead que não veio de formulário nasce `whatsapp`.** É o valor de fallback do vocabulário fechado, então não inventa termo novo nem some dos painéis.
+- ⚠️ **O caso aberto é o CRM externo** (`apply_external_crm_outcome`), que hoje cria lead como `forms` de propósito, com um comentário na própria função dizendo que trocar "partiria o recorte de canal ao meio". A decisão acima **derruba esse comentário**: quando a troca for feita, é para `whatsapp`.
+- Efeito medido antes de mexer: **só a Intubação usa CRM de verdade** (5.574 eventos), e **nenhum lead de CRM recebe boas-vindas hoje** (o welcome só sai onde o canal é `forms` **e** a clínica tem o follow-up ligado, o que não é o caso). Ou seja, a troca **não silencia mensagem nenhuma**. O que muda é o recorte do painel dessa clínica.
 
 ⚠️ **O canal é vocabulário FECHADO na prática, mesmo sem CHECK no banco.** Não existe constraint: um valor novo (`crm`, `parceiro`) entra sem erro e só quebra depois, de dois jeitos ao mesmo tempo. As views `v_kpi_*` e o Marketing usam `CASE ... ELSE 'whatsapp'`, então o valor novo **vira WhatsApp**; já o Visão Geral e o Comercial filtram por **igualdade** (`capture_channel = ANY(...)`), então ele **some de todos os chips**. Isso é divergência de DEFINIÇÃO entre painéis, que aqui é bug. Valor novo exige mexer nas 5 views, nas 3 RPCs de painel e nos chips de 4 telas.
 
@@ -299,18 +463,7 @@ Isso é **remoção, não filtro de UI**: o trigger **`trg_system_error_arquiva_
 
 ---
 
-# 3. n8n — produção, com pacientes reais
-
-⚠️ **O agente de IA e os follow-ups NÃO rodam mais no n8n** — migraram para edge functions nativas (ver seção "Onde as coisas moram"). O n8n ainda hospeda:
-
-- **"Receptor de mensagens"** — recepção do WhatsApp para clínicas **não migradas para `wa-inbound`** (migração é por clínica, canário). **Não alterar sem permissão explícita** — alimenta a IA nas clínicas que ainda o usam.
-- Outros workflows auxiliares que ainda não migraram.
-
-- n8n tem modelo **draft/publish**: editar salva **rascunho**. Sempre confirmar com **`mode: 'active'`** que a mudança está na versão publicada.
-
----
-
-# 4. Ambiente
+# 3. Ambiente
 
 ## Supabase
 - **project_id: `yzpclhuifquhfqpiwysh`** — o MCP **exige** esse parâmetro em toda chamada; sem ele a chamada falha.
@@ -335,14 +488,25 @@ Você **não enxerga as outras sessões** e elas não te avisam. Trabalhe assumi
 
 O que **não** precisa de cuidado: editar arquivo. O harness recusa sobrescrever o que você não leu e avisa quando mudou no disco. **O ponto cego é o índice do git.**
 
-⚠️ **Banco, edge function e n8n são UM só para todas as sessões** — worktree e regra nenhuma isolam isso. Antes de `apply_migration`, deploy ou mexer em workflow, lembre que outra sessão pode estar no mesmo objeto, **em produção com pacientes reais**.
+⚠️ **Banco e edge function são UM só para todas as sessões** — worktree e regra nenhuma isolam isso. Antes de `apply_migration` ou de um deploy, lembre que outra sessão pode estar no mesmo objeto, **em produção com pacientes reais**.
 
 ## Fuso horário — o banco MISTURA os dois tipos
 O negócio é todo em **`America/Sao_Paulo`**, mas as colunas **não são uniformes**. **Confira o tipo antes de converter** — converter duas vezes desloca em 3h e **ninguém percebe**:
 
 | `timestamp` **sem** tz (já é SP — não converter) | `timestamptz` (converter para exibir) |
 |---|---|
-| `leads.created_at`, `lead_stage_history.changed_at` | `tickets.outcome_at`, `lead_touchpoints.occurred_at`, `attribution_inbox.occurred_at` |
+| `leads.created_at`, `lead_stage_history.changed_at`, **`chat_messages.created_at`** | `tickets.outcome_at`, `lead_touchpoints.occurred_at`, `attribution_inbox.occurred_at`, **`outbound_messages.created_at`** |
+
+⚠️ **As duas metades da MESMA conversa caem em lados opostos desta tabela:** `chat_messages` é SP sem tz, `outbound_messages` é timestamptz. Numa consulta que cruza as duas, cada lado precisa da sua régua:
+
+```sql
+-- chat_messages: comparar com a hora de SP
+where m.created_at > (now() at time zone 'America/Sao_Paulo') - interval '30 minutes'
+-- outbound_messages: comparar com now() cru
+where o.created_at > now() - interval '30 minutes'
+```
+
+Trocar isso **não dá erro**: devolve zero linha, e zero linha aqui se parece exatamente com "o sistema parou de mandar mensagem". Já custou um diagnóstico errado de fila travada em 28/07, com o sistema 100% no ar.
 
 ## Dados que parecem bug e não são
 **"MedDesk Demonstrativa" é um clone anonimizado da Clínica Vaz.** Registros "duplicados" entre essas duas clínicas (inclusive `rast_id`) são **esperados** — não investigar como corrupção.

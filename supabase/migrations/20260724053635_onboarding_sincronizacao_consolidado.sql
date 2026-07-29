@@ -327,11 +327,6 @@ REVOKE ALL ON FUNCTION public.onboarding_pending_leads(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.onboarding_pending_leads(uuid) TO authenticated, service_role;
 
 -- 7) Aplicar a auditoria de um lead -----------------------------------------------------------
--- ⚠️ O 1º DROP é a versão BOOLEANA original (p_not_patient/p_in_conversation), criada pelo arquivo
--- 20260724053444_onboarding_audit_apply.sql. Sem dropá-la, um banco novo ficaria com DUAS overloads
--- coexistindo (a booleana e a por categoria) — ambiguidade no PostgREST. Em produção ela já não
--- existe (foi removida pelo passo ..190000_onboarding_audit_categories, consolidado aqui).
-DROP FUNCTION IF EXISTS public.onboarding_audit_apply(uuid, boolean, boolean, date, boolean, date, boolean, boolean);
 DROP FUNCTION IF EXISTS public.onboarding_audit_apply(uuid, text, date, boolean, date, boolean, boolean);
 DROP FUNCTION IF EXISTS public.onboarding_audit_apply(uuid, text, date, boolean, date, boolean, boolean, boolean);
 DROP FUNCTION IF EXISTS public.onboarding_audit_apply(uuid, text, date, boolean, date, boolean, boolean, boolean, boolean);

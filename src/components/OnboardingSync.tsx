@@ -360,10 +360,33 @@ function DeepSyncProgress({ clinicId, onProgress }: { clinicId: string; onProgre
 
   const running = st?.exists && (st.status === 'pending' || st.status === 'running');
   const done = st?.exists && st.status === 'done';
+  // ⚠️ Sem este ramo, status='error' caía no card neutro e ficava IDÊNTICO a "nunca começou": o
+  // operador via "Puxar histórico" e não tinha como saber que a importação havia travado.
+  const erro = st?.exists && st.status === 'error';
 
   return (
-    <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-3.5 text-left">
-      {running ? (
+    <div className={cn('mt-3 rounded-2xl border p-3.5 text-left',
+      erro ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-slate-50')}>
+      {erro ? (
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-xs font-bold text-rose-700 flex items-center gap-1.5">
+              <History className="w-3.5 h-3.5" /> Histórico travou
+            </p>
+            <p className="text-[10px] text-rose-600 mt-0.5 break-words">
+              {st.last_error || 'não foi possível falar com o WhatsApp'}
+            </p>
+            <p className="text-[10px] text-rose-500/80 mt-1">
+              O sistema tenta de novo sozinho a cada poucos minutos. Se o celular estiver desligado, ligue
+              e ele retoma. O que já veio está salvo.
+            </p>
+          </div>
+          <button onClick={start} disabled={starting}
+            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-all disabled:opacity-60">
+            {starting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Tentar agora
+          </button>
+        </div>
+      ) : running ? (
         <>
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5"><History className="w-3.5 h-3.5 text-teal-600" /> Puxando o histórico do período…</span>
@@ -446,16 +469,28 @@ export function OnboardingModal({ clinicId, onComplete }: { clinicId: string; on
     const { data, error } = await supabase.rpc('onboarding_import_conversations', { p_clinic_id: clinicId });
     setImporting(false);
     if (error || !data?.success) {
-      const msg = error?.message || data?.error_code || 'erro';
-      // Clínica grande estoura o teto de 8s do banco: cai para o caminho em segundo plano
-      // (deep-sync), que importa a mesma coisa via cron sem limite de tempo.
-      if (/timeout|57014/i.test(String(msg))) {
-        await supabase.rpc('onboarding_deep_sync_start', { p_clinic_id: clinicId });
+      const code = data?.error_code as string | undefined;
+      // ⚠️ A RPC captura a falha de rede e devolve 200 com error_code:'exception' e o motivo em
+      // `detail`. A versão anterior testava /timeout/ contra o error_code, que nunca contém isso,
+      // então o caminho em segundo plano NUNCA disparava e o operador via "Falha: exception".
+      const motivo = (data?.detail as string) || error?.message || code || 'erro';
+      // Causas de configuração: segundo plano não resolve, então explica em vez de empurrar.
+      const semSaida: Record<string, string> = {
+        forbidden: 'Você não tem permissão para organizar os contatos desta clínica.',
+        no_whatsapp_instance: 'Esta clínica não tem WhatsApp conectado.',
+        no_sincronizacao_stage: 'Falta a etapa Sincronização no funil desta clínica.',
+        lead_not_found: 'Contato não encontrado.',
+      };
+      if (code && semSaida[code]) { showToast(semSaida[code], 'error'); return; }
+      // Qualquer falha de conversa com o WhatsApp (timeout, SSL, rede) tem plano B real: o cron
+      // importa em segundo plano, sem o teto de tempo do banco.
+      const { data: bg } = await supabase.rpc('onboarding_deep_sync_start', { p_clinic_id: clinicId });
+      if ((bg as any)?.success) {
         setSynced(true);
-        showToast('Volume grande: a importação continuará em segundo plano. Acompanhe a barra abaixo.', 'info');
-        return;
+        showToast('Não deu para importar agora (' + motivo + '). Continua em segundo plano; acompanhe a barra abaixo.', 'info');
+      } else {
+        showToast('Falha ao sincronizar: ' + motivo, 'error');
       }
-      showToast('Falha ao sincronizar: ' + msg, 'error');
       return;
     }
     showToast(`Sincronizado: ${data.new_leads} leads, ${data.new_messages} mensagens.`, 'success');

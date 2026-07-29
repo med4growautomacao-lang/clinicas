@@ -185,6 +185,14 @@ function ColunaEixo({ eixo, modo, onModo, itens, vazioTexto, busy, onAprovar, on
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm font-black text-slate-900">{ins.leads?.name ?? "Contato"}</span>
                 <Confianca valor={ins.confidence} />
+                {ins.origin === "mecanico" && (
+                  <span
+                    title="Sugestão por padrão de frases (sem IA). Confira a evidência antes de aprovar."
+                    className="text-[10px] font-black text-sky-700 bg-sky-50 border border-sky-200 rounded px-1.5 py-0.5 tracking-wider"
+                  >
+                    MECÂNICA
+                  </span>
+                )}
                 {ins.sale_value != null && (
                   <span className="text-[11px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">
                     R$ {Number(ins.sale_value).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}

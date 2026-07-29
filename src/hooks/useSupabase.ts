@@ -4450,6 +4450,7 @@ export interface ConvAiInsight {
   rationale: string | null;
   evidence: string[] | null;
   status: string;
+  origin?: string;
   decided_at: string | null;
   decision_note: string | null;
   model: string | null;
@@ -4470,17 +4471,21 @@ export function useConvAiInsights() {
     if (!activeClinicId) { setLoading(false); return; }
     if (!silent) setLoading(true);
     const desde = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
-    const [{ data: pend }, { data: recentes }] = await Promise.all([
+    const [{ data: pend }, { data: mec }, { data: recentes }] = await Promise.all([
       supabase.from('conv_ai_insights').select(CONV_AI_SELECT)
         .eq('clinic_id', activeClinicId).eq('status', 'pending')
         .order('created_at', { ascending: false }).limit(200),
+      // Sugestões mecânicas visíveis (clínica com o modo mecânico em 'active').
+      supabase.from('conv_ai_insights').select(CONV_AI_SELECT)
+        .eq('clinic_id', activeClinicId).eq('status', 'mec_pending')
+        .order('confidence', { ascending: false }).limit(200),
       supabase.from('conv_ai_insights').select(CONV_AI_SELECT)
         .eq('clinic_id', activeClinicId).eq('kind', 'stage')
         .in('status', ['auto_applied', 'shadow'])
         .gte('created_at', desde)
         .order('created_at', { ascending: false }).limit(100),
     ]);
-    setPending((pend || []) as ConvAiInsight[]);
+    setPending(([...(pend || []), ...(mec || [])]) as ConvAiInsight[]);
     setRecentStages((recentes || []) as ConvAiInsight[]);
     setLoading(false);
   }, [activeClinicId]);

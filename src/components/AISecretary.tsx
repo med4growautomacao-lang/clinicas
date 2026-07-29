@@ -1655,6 +1655,53 @@ interface FollowupPreview {
   amostra: { lead_id: string | null; nome: string; telefone: string; detalhe: string; quando: string; balde: string }[];
 }
 
+/**
+ * Follow-ups desligados ESPECIFICAMENTE para este contato (lead_followup_optout), com religar.
+ * Sem isto, uma exclusão feita na tela de ativação ficaria invisível: ninguém saberia que aquele
+ * contato deixou de receber confirmação, por exemplo, nem teria como voltar atrás depois de fechar
+ * a janela. Não confundir com o toggle FOLLOW-UP do cabeçalho, que é o interruptor MESTRE do lead.
+ */
+function LeadFollowupOptouts({ leadId }: { leadId: string }) {
+  const [kinds, setKinds] = useState<FollowupKind[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const load = React.useCallback(async () => {
+    const { data } = await supabase.from("lead_followup_optout").select("kind").eq("lead_id", leadId);
+    setKinds((data || []).map((r: any) => r.kind as FollowupKind));
+  }, [leadId]);
+  useEffect(() => { load(); }, [load]);
+
+  const religar = async (k: FollowupKind) => {
+    setBusy(k);
+    const { data: r, error } = await supabase.rpc("set_lead_followup_optout", {
+      p_lead_id: leadId, p_kind: k, p_off: false,
+    });
+    setBusy(null);
+    if (!error && (r as any)?.success) setKinds(s => s.filter(x => x !== k));
+  };
+
+  if (kinds.length === 0) return null;
+  return (
+    <div className="px-6 py-2 border-b border-slate-100 shrink-0 flex items-center gap-2 flex-wrap">
+      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 shrink-0">
+        Não recebe
+      </span>
+      {kinds.map(k => (
+        <button
+          key={k}
+          onClick={() => religar(k)}
+          disabled={busy === k}
+          title={`${FOLLOWUP_LABELS[k] ?? k} está desligado só para este contato. Clique para religar.`}
+          className="inline-flex items-center gap-1 pl-2 pr-1.5 py-0.5 rounded-full bg-rose-50 border border-rose-200 text-rose-700 text-[10px] font-bold transition-all hover:bg-rose-100 disabled:opacity-40"
+        >
+          {FOLLOWUP_LABELS[k] ?? k}
+          {busy === k ? <Loader2 className="w-3 h-3 animate-spin" /> : <X className="w-3 h-3" />}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 const ActivationGuardCtx = React.createContext<(kind: FollowupKind, activate: () => void) => void>(
   (_kind, activate) => activate()
 );
@@ -3136,6 +3183,8 @@ function ChatsView() {
                 </button>
               </div>
             </CardHeader>
+
+            <LeadFollowupOptouts leadId={selectedLead.id} />
 
             {selectedLead.ai_summary && selectedLead.ai_summary.trim() && (
               <details className="group/aisum px-6 py-2 border-b border-slate-100 shrink-0">

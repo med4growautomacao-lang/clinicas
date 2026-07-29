@@ -516,8 +516,9 @@ export function OnboardingModal({ clinicId, onComplete }: { clinicId: string; on
           <h2 className="text-2xl font-black text-slate-900">Vamos organizar seus contatos</h2>
           <p className="text-slate-500 text-sm mt-2 leading-relaxed">
             Trouxemos suas conversas do WhatsApp. Passe por cada contato e diga o que ele é, um de cada vez.
-            Quem já tem agendamento na sua agenda vem marcado e pré-preenchido. Pode liberar o Comercial a qualquer momento:
-            quem ficar pendente aparece piscando em vermelho na coluna Sincronização para organizar depois.
+            Quem já tem agendamento na sua agenda vem marcado e pré-preenchido. Pode liberar o Comercial a
+            qualquer momento e voltar depois pelo botão <strong>Organizar contatos</strong>, que continua de
+            onde você parou.
           </p>
           {synced && (
             <div className="mt-4 text-left rounded-2xl border border-amber-200 bg-amber-50 p-3.5 flex items-start gap-2">
@@ -638,13 +639,19 @@ export function OnboardingModal({ clinicId, onComplete }: { clinicId: string; on
 // ─────────────────────────────────────────────────────────────────────────────
 export function OnboardingGate() {
   const { activeClinicId } = useAuth();
-  const [status, setStatus] = useState<{ should: boolean; pending: number } | null>(null);
+  const [status, setStatus] = useState<{ should: boolean; pending: number; pendingTotal: number } | null>(null);
   const [forceOpen, setForceOpen] = useState(false);
 
   const check = useCallback(async () => {
     if (!activeClinicId) { setStatus(null); return; }
     const { data } = await supabase.rpc('onboarding_gate_status', { p_clinic_id: activeClinicId });
-    setStatus({ should: !!data?.should_onboard, pending: data?.pending ?? 0 });
+    setStatus({
+      should: !!data?.should_onboard,
+      pending: data?.pending ?? 0,
+      // pending_total é a fila INTEIRA (inclui quem já estava no funil, que não pisca no Kanban).
+      // Vem null quando a clínica não tem rodada em curso: aí não alarmamos.
+      pendingTotal: data?.pending_total ?? 0,
+    });
   }, [activeClinicId]);
 
   useEffect(() => { check(); }, [check]);
@@ -665,15 +672,32 @@ export function OnboardingGate() {
     );
   }
 
-  // Já liberado, mas sobraram pendentes na Sincronização → pílula flutuante para retomar.
-  if (status.pending > 0) {
+  // Já liberado, mas ficou pendência → alerta vermelho persiste.
+  // Usa a fila INTEIRA (pending_total), não só os importados: quem já estava no funil não gera
+  // ticket na Sincronização e portanto não pisca no Kanban, então sem isto a pendência ficava
+  // invisível depois de liberar o Comercial no meio da organização.
+  const pendentes = Math.max(status.pending, status.pendingTotal);
+  if (pendentes > 0) {
     return (
       <button onClick={() => setForceOpen(true)}
+        title="Você liberou o Comercial antes de terminar. Clique para continuar de onde parou."
         className="absolute bottom-5 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-4 py-2.5 rounded-full bg-rose-600 hover:bg-rose-700 text-white text-sm font-black shadow-lg animate-pulse transition-all">
-        <Bell className="w-4 h-4" /> Organizar {status.pending} pendente{status.pending > 1 ? 's' : ''}
+        <Bell className="w-4 h-4" /> Organizar {pendentes} pendente{pendentes > 1 ? 's' : ''}
       </button>
     );
   }
 
-  return null;
+  // Porta de entrada SOB DEMANDA, discreta e sem contador.
+  // Sem isto o cliente ficava sem caminho de volta: o modal só abre no 1º ciclo, a pílula acima só
+  // conta os importados (zero para quem já estava no funil) e o "Refazer" mora em Organizações e
+  // APAGA a auditoria. Medido na Lorena: 123 contatos na fila e nenhuma forma de alcançá-los.
+  // Não mostra número de propósito: contar a fila inteira a cada abertura do Comercial seria caro
+  // em clínica grande (milhares de leads) e viraria alarme para um trabalho que ninguém pediu.
+  return (
+    <button onClick={() => setForceOpen(true)}
+      title="Retomar a organização dos contatos de onde você parou"
+      className="absolute bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/90 hover:bg-white border border-slate-200 text-slate-500 hover:text-teal-700 text-xs font-bold shadow-sm transition-all">
+      <Sparkles className="w-3.5 h-3.5" /> Organizar contatos
+    </button>
+  );
 }

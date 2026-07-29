@@ -27,6 +27,7 @@ import {
   AlertTriangle,
   X,
   BellRing,
+  BellOff,
   UserCheck,
   Plus,
   Trash2,
@@ -1686,6 +1687,20 @@ function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
     if (!e && data) setChatLead(data as Lead);
   };
 
+  // Tirar UM lead da fila sem cancelar a ativação: desliga o follow-up daquele lead (followup_enabled
+  // = false). Reversível no mesmo clique. Os contadores do topo NÃO recalculam (a RPC roda uma vez);
+  // por isso o aviso na tela em vez de número mentiroso.
+  const [foraDaFila, setForaDaFila] = useState<Set<string>>(new Set());
+  const [mexendo, setMexendo] = useState<Set<string>>(new Set());
+  const toggleFollowupLead = async (leadId: string) => {
+    const tirar = !foraDaFila.has(leadId);
+    setMexendo(s => new Set(s).add(leadId));
+    const { error: e } = await supabase.from("leads").update({ followup_enabled: !tirar }).eq("id", leadId);
+    setMexendo(s => { const n = new Set(s); n.delete(leadId); return n; });
+    if (e) return;
+    setForaDaFila(s => { const n = new Set(s); if (tirar) n.add(leadId); else n.delete(leadId); return n; });
+  };
+
   const guard = React.useCallback((k: FollowupKind, activate: () => void) => {
     pending.current = activate;
     // Sem clínica resolvida a trava NÃO some em silêncio: abre a janela avisando que o impacto
@@ -1713,6 +1728,7 @@ function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
     reqId.current++;
     pending.current = null;
     setKind(null); setData(null); setError(null); setLoading(false);
+    setForaDaFila(new Set()); setMexendo(new Set());
   };
   const close = () => reset();
   const confirm = () => {
@@ -1855,16 +1871,18 @@ function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
                         Quem entra na fila ({data.amostra.length} de {data.total_7d})
                       </p>
                       <div className="border border-slate-100 rounded-xl divide-y divide-slate-50 max-h-64 overflow-y-auto custom-scrollbar">
-                        {data.amostra.map((p, i) => (
-                          <div key={i} className="px-3 py-2 flex items-center gap-3 text-xs group">
+                        {data.amostra.map((p, i) => {
+                          const fora = !!p.lead_id && foraDaFila.has(p.lead_id);
+                          return (
+                          <div key={i} className={cn("px-3 py-2 flex items-center gap-3 text-xs group", fora && "bg-slate-50/80")}>
                             <span className={cn(
                               "px-1.5 py-0.5 rounded text-[9px] font-bold uppercase shrink-0",
-                              badge(p.balde)
+                              fora ? "bg-slate-200 text-slate-500" : badge(p.balde)
                             )}>
-                              {p.balde === "agora" ? "agora" : p.balde === "horas" ? "hoje" : p.quando}
+                              {fora ? "fora" : p.balde === "agora" ? "agora" : p.balde === "horas" ? "hoje" : p.quando}
                             </span>
-                            <span className="font-bold text-slate-800 truncate flex-1">{p.nome}</span>
-                            <span className="text-slate-400 font-medium shrink-0">{p.telefone}</span>
+                            <span className={cn("font-bold truncate flex-1", fora ? "text-slate-400 line-through" : "text-slate-800")}>{p.nome}</span>
+                            <span className={cn("font-medium shrink-0", fora ? "text-slate-300" : "text-slate-400")}>{p.telefone}</span>
                             {p.lead_id && (
                               <button
                                 onClick={() => openLeadChat(p.lead_id!)}
@@ -1874,12 +1892,32 @@ function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
                                 <MessageSquare className="w-3.5 h-3.5" />
                               </button>
                             )}
+                            {p.lead_id && (
+                              <button
+                                onClick={() => toggleFollowupLead(p.lead_id!)}
+                                disabled={mexendo.has(p.lead_id)}
+                                title={fora ? "Devolver este lead para a fila (religar o follow-up dele)" : "Não enviar para este lead (desliga o follow-up dele)"}
+                                className={cn("shrink-0 p-1 rounded-md transition-all disabled:opacity-40",
+                                  fora ? "text-emerald-600 hover:bg-emerald-50" : "text-slate-400 hover:text-rose-600 hover:bg-rose-50")}
+                              >
+                                {mexendo.has(p.lead_id) ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  : fora ? <BellRing className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
+                              </button>
+                            )}
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
-                      <p className="text-[10px] text-slate-400 font-medium italic">
-                        Amostra dos primeiros da fila, em ordem de envio.
-                      </p>
+                      {foraDaFila.size > 0 ? (
+                        <p className="text-[10px] text-amber-700 font-bold bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                          {foraDaFila.size} contato(s) fora da fila (follow-up desligado só para eles).
+                          Os números acima não recalculam: feche e abra de novo para conferir.
+                        </p>
+                      ) : (
+                        <p className="text-[10px] text-slate-400 font-medium italic">
+                          Amostra dos primeiros da fila, em ordem de envio. Use o sino para tirar alguém da fila.
+                        </p>
+                      )}
                     </div>
                   )}
 

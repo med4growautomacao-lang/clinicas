@@ -31,8 +31,13 @@ const CARD_SIZE: React.CSSProperties = { width: 380, height: 580 };
 // ─────────────────────────────────────────────────────────────────────────────
 // Conversa — painel GRANDE centralizado (não preso no card)
 // ─────────────────────────────────────────────────────────────────────────────
+// chat_messages.created_at é timestamp SEM fuso (já está em São Paulo): formatamos direto da
+// string, sem passar por Date, senão o navegador reinterpreta como UTC e desloca 3h.
+const diaDe = (at: string) => { const [a, m, d] = (at || '').split('T')[0].split('-'); return d ? `${d}/${m}/${a}` : ''; };
+const horaDe = (at: string) => ((at || '').split('T')[1] || '').slice(0, 5);
+
 function ChatViewer({ leadId, name, onClose }: { leadId: string; name: string; onClose: () => void }) {
-  const [msgs, setMsgs] = useState<{ id: string; dir: string; content: string }[]>([]);
+  const [msgs, setMsgs] = useState<{ id: string; dir: string; content: string; at: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -43,7 +48,7 @@ function ChatViewer({ leadId, name, onClose }: { leadId: string; name: string; o
       const { data } = await supabase.from('chat_messages').select('id, direction, message, created_at')
         .eq('lead_id', leadId).order('created_at', { ascending: true }).limit(500);
       if (!alive) return;
-      setMsgs((data || []).map((m: any) => ({ id: m.id, dir: m.direction, content: m.message?.content ?? '' })));
+      setMsgs((data || []).map((m: any) => ({ id: m.id, dir: m.direction, content: m.message?.content ?? '', at: m.created_at || '' })));
       setLoading(false);
       setTimeout(() => endRef.current?.scrollIntoView(), 60);
     })();
@@ -71,14 +76,29 @@ function ChatViewer({ leadId, name, onClose }: { leadId: string; name: string; o
             <div className="flex items-center justify-center h-full text-slate-400"><Loader2 className="w-5 h-5 animate-spin" /></div>
           ) : msgs.length === 0 ? (
             <div className="flex items-center justify-center h-full text-slate-400 text-sm">Sem mensagens importadas.</div>
-          ) : msgs.map(m => (
-            <div key={m.id} className={cn('flex', m.dir === 'inbound' ? 'justify-start' : 'justify-end')}>
-              <div className={cn('max-w-[78%] px-3 py-2 rounded-2xl text-sm leading-snug whitespace-pre-wrap break-words',
-                m.dir === 'inbound' ? 'bg-white border border-slate-200 text-slate-700 rounded-tl-sm' : 'bg-teal-600 text-white rounded-tr-sm')}>
-                {m.content || <span className="italic opacity-60">(mídia)</span>}
-              </div>
-            </div>
-          ))}
+          ) : msgs.map((m, i) => {
+            const dia = diaDe(m.at);
+            const novoDia = dia && dia !== diaDe(msgs[i - 1]?.at || '');
+            return (
+              <React.Fragment key={m.id}>
+                {novoDia && (
+                  <div className="flex justify-center py-2">
+                    <span className="px-2.5 py-0.5 rounded-full bg-slate-200 text-slate-600 text-[10px] font-bold">{dia}</span>
+                  </div>
+                )}
+                <div className={cn('flex', m.dir === 'inbound' ? 'justify-start' : 'justify-end')}>
+                  <div className={cn('max-w-[78%] px-3 py-2 rounded-2xl text-sm leading-snug whitespace-pre-wrap break-words',
+                    m.dir === 'inbound' ? 'bg-white border border-slate-200 text-slate-700 rounded-tl-sm' : 'bg-teal-600 text-white rounded-tr-sm')}>
+                    {m.content || <span className="italic opacity-60">(mídia)</span>}
+                    <span className={cn('block text-[9px] font-semibold mt-1 tabular-nums',
+                      m.dir === 'inbound' ? 'text-slate-400 text-right' : 'text-white/60 text-right')}>
+                      {horaDe(m.at)}
+                    </span>
+                  </div>
+                </div>
+              </React.Fragment>
+            );
+          })}
           <div ref={endRef} />
         </div>
         <button onClick={onClose} className="shrink-0 py-3.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-sm transition-all">

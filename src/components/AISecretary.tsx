@@ -1896,7 +1896,9 @@ function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
                               <button
                                 onClick={() => toggleFollowupLead(p.lead_id!)}
                                 disabled={mexendo.has(p.lead_id)}
-                                title={fora ? "Devolver este lead para a fila (religar o follow-up dele)" : "Não enviar para este lead (desliga o follow-up dele)"}
+                                title={fora
+                                  ? "Religar os follow-ups deste lead"
+                                  : "Desliga TODOS os follow-ups deste lead (reengajamento, confirmação, lembrete de consulta e pós-atendimento). Não é só este disparo."}
                                 className={cn("shrink-0 p-1 rounded-md transition-all disabled:opacity-40",
                                   fora ? "text-emerald-600 hover:bg-emerald-50" : "text-slate-400 hover:text-rose-600 hover:bg-rose-50")}
                               >
@@ -1910,12 +1912,13 @@ function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
                       </div>
                       {foraDaFila.size > 0 ? (
                         <p className="text-[10px] text-amber-700 font-bold bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
-                          {foraDaFila.size} contato(s) fora da fila (follow-up desligado só para eles).
+                          {foraDaFila.size} contato(s) com follow-up desligado. ⚠️ Vale para TODOS os
+                          follow-ups desse contato (inclusive confirmação e lembrete de consulta), não só este disparo.
                           Os números acima não recalculam: feche e abra de novo para conferir.
                         </p>
                       ) : (
                         <p className="text-[10px] text-slate-400 font-medium italic">
-                          Amostra dos primeiros da fila, em ordem de envio. Use o sino para tirar alguém da fila.
+                          Amostra dos primeiros da fila, em ordem de envio. O sino desliga TODOS os follow-ups do contato.
                         </p>
                       )}
                     </div>

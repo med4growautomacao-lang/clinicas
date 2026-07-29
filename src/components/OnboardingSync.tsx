@@ -142,6 +142,7 @@ function ActiveAuditCard({ lead, onApplied, onOpenChat }: { lead: PendingLead; o
   const isExisting = lead.is_scheduled; // já é cliente (agendado OU venda ganha) → confirma sem mexer no ticket
   const [patientMode, setPatientMode] = useState(isExisting || hasAppt);
   const [lastDate, setLastDate] = useState(lead.last_appt || '');
+  const [lastTime, setLastTime] = useState((lead.last_appt_time || '').slice(0, 5)); // HH:MM da agenda
   const [resolvePast, setResolvePast] = useState(true);
   const [nextDate, setNextDate] = useState(lead.next_appt || '');
   const [nextTime, setNextTime] = useState((lead.next_appt_time || '').slice(0, 5)); // HH:MM da agenda
@@ -162,6 +163,7 @@ function ActiveAuditCard({ lead, onApplied, onOpenChat }: { lead: PendingLead; o
     const { data, error } = await supabase.rpc('onboarding_audit_apply', {
       p_ticket_id: lead.ticket_id, p_category: category,
       p_last_appt_date: category === 'paciente' && lastDate ? lastDate : null,
+      p_last_appt_time: category === 'paciente' && lastDate && lastTime ? lastTime : null,
       p_resolve_past: resolvePast,
       p_next_appt_date: category === 'paciente' && nextDate ? nextDate : null,
       p_next_appt_time: category === 'paciente' && nextDate && nextTime ? nextTime : null,
@@ -248,8 +250,12 @@ function ActiveAuditCard({ lead, onApplied, onOpenChat }: { lead: PendingLead; o
             <div className="grid grid-cols-2 gap-2">
               <label className="flex flex-col gap-1">
                 <span className="text-[10px] font-bold text-white/60 uppercase tracking-wide">Último atend.</span>
-                <input type="date" value={lastDate} onChange={e => setLastDate(e.target.value)}
-                  className="px-2 py-1.5 text-xs bg-white/90 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300" />
+                <div className="flex gap-1">
+                  <input type="date" value={lastDate} onChange={e => setLastDate(e.target.value)}
+                    className="min-w-0 flex-1 px-2 py-1.5 text-xs bg-white/90 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300" />
+                  <input type="time" value={lastTime} onChange={e => setLastTime(e.target.value)} title="Horário do atendimento anterior"
+                    className="w-[74px] shrink-0 px-1.5 py-1.5 text-xs bg-white/90 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300" />
+                </div>
               </label>
               <label className="flex flex-col gap-1">
                 <span className="text-[10px] font-bold text-white/60 uppercase tracking-wide">Próximo agend.</span>

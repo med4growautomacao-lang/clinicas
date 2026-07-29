@@ -19,6 +19,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { comMonitor, FEATURE } from "../_shared/llm-usage.ts";
 
 const SCOPE = "conv-ai-learn";
 const CORS = {
@@ -81,10 +82,15 @@ function anthropicBody(model: string, temperature: number, maxTokens: number, sy
   return body;
 }
 
-async function callLlm(
+// Passou a devolver os tokens junto com o texto: antes eles vinham na resposta dos 3 provedores e
+// eram jogados fora aqui dentro, entao o "aprendizado" (que roda no modelo CARO, 1x/dia por
+// clinica) nao aparecia em conta nenhuma.
+type SaidaLlm = { text: string; tokens_in: number; tokens_out: number };
+
+async function chamarProvedor(
   provider: string, model: string, temperature: number, maxTokens: number,
   system: string, user: string,
-): Promise<string> {
+): Promise<SaidaLlm> {
   const key = await llmKey(provider);
   if (!key) throw new Error(`sem chave de API para ${provider}`);
 
@@ -97,7 +103,11 @@ async function callLlm(
     });
     if (!r.ok) throw new Error(`anthropic ${r.status}: ${(await r.text().catch(() => "")).slice(0, 300)}`);
     const j = await r.json();
-    return (j?.content ?? []).map((c: any) => c?.text).filter(Boolean).join("\n").trim();
+    return {
+      text: (j?.content ?? []).map((c: any) => c?.text).filter(Boolean).join("\n").trim(),
+      tokens_in: j?.usage?.input_tokens ?? 0,
+      tokens_out: j?.usage?.output_tokens ?? 0,
+    };
   }
 
   if (provider === "openai") {
@@ -112,7 +122,11 @@ async function callLlm(
     });
     if (!r.ok) throw new Error(`openai ${r.status}: ${(await r.text().catch(() => "")).slice(0, 300)}`);
     const j = await r.json();
-    return (j?.choices?.[0]?.message?.content ?? "").trim();
+    return {
+      text: (j?.choices?.[0]?.message?.content ?? "").trim(),
+      tokens_in: j?.usage?.prompt_tokens ?? 0,
+      tokens_out: j?.usage?.completion_tokens ?? 0,
+    };
   }
 
   const r = await fetch(
@@ -130,7 +144,26 @@ async function callLlm(
   );
   if (!r.ok) throw new Error(`gemini ${r.status}: ${(await r.text().catch(() => "")).slice(0, 300)}`);
   const j = await r.json();
-  return (j?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p?.text).filter(Boolean).join(" ").trim();
+  return {
+    text: (j?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p?.text).filter(Boolean).join(" ").trim(),
+    tokens_in: j?.usageMetadata?.promptTokenCount ?? 0,
+    tokens_out: j?.usageMetadata?.candidatesTokenCount ?? 0,
+  };
+}
+
+// Envelope do MONITOR. Devolve so o texto para os chamadores nao mudarem.
+async function callLlm(
+  provider: string, model: string, temperature: number, maxTokens: number,
+  system: string, user: string,
+  uso: { scope: string; clinicId?: string | null } = { scope: "aprendizado" },
+): Promise<string> {
+  const out = await comMonitor(
+    admin,
+    { feature: FEATURE.analista, scope: uso.scope, provider, model, clinicId: uso.clinicId ?? null },
+    () => chamarProvedor(provider, model, temperature, maxTokens, system, user),
+    (r) => ({ input: r.tokens_in, output: r.tokens_out }),
+  );
+  return out.text;
 }
 
 async function stagesDaClinica(clinicId: string): Promise<string> {
@@ -167,6 +200,7 @@ ${c.conversa}`).join("\n\n")}`;
   const texto = await callLlm(
     learn.provider ?? cfg.provider, learn.model ?? cfg.model,
     learn.temperature ?? 0.3, 2000, cfg.bootstrap_prompt ?? "", user,
+    { scope: "bootstrap", clinicId },
   );
   if (!texto) throw new Error("bootstrap devolveu texto vazio");
 
@@ -212,6 +246,7 @@ ${correcoes.length ? JSON.stringify(correcoes, null, 1) : "(nenhuma)"}`;
   const texto = await callLlm(
     learn.provider ?? cfg.provider, learn.model ?? cfg.model,
     learn.temperature ?? 0.3, 2000, cfg.learn_prompt ?? "", user,
+    { scope: "aprendizado", clinicId },
   );
   if (!texto) throw new Error("aprendizado devolveu texto vazio");
 

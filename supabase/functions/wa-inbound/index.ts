@@ -27,6 +27,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { registrarUsoIA, FEATURE } from "../_shared/llm-usage.ts";
 
 const UAZAPI_BASE = "https://med4growautomacao.uazapi.com";
 const HUB_AI_WEBHOOK_URL = Deno.env.get("HUB_AI_WEBHOOK_URL") ?? "";
@@ -405,11 +406,30 @@ serve(async (req) => {
                     for (const cand of candidates) {
                       const key = await llmKey(supabase, cand.provider);
                       if (!key) { fails.push(`${cand.provider}/${cand.model}: sem chave`); continue; }
+                      // Monitor por TENTATIVA, nao por midia: a escada de custo tenta varios
+                      // provedores e cada tentativa e cobrada. Registrar so o vencedor esconderia
+                      // o gasto das que falharam, que e justamente o que dispara quando um
+                      // provedor esta fora do ar.
+                      // As funcoes de transcricao devolvem so o texto, entao aqui nao ha token:
+                      // `units` guarda o TAMANHO da midia, que e o que explica o volume.
+                      const tMidia = Date.now();
                       try {
                         t = await transcribeMedia(mediaKind, bytes, mime, cand.provider, cand.model, key);
+                        registrarUsoIA(supabase, {
+                          feature: FEATURE.midia, scope: `transcricao-${mediaKind}`,
+                          provider: cand.provider, model: cand.model, clinicId,
+                          units: bytes.length, unitKind: "bytes",
+                          ok: !!t, error: t ? null : "resposta vazia", durationMs: Date.now() - tMidia,
+                        });
                         if (t) break;
                         fails.push(`${cand.provider}/${cand.model}: resposta vazia`);
                       } catch (e) {
+                        registrarUsoIA(supabase, {
+                          feature: FEATURE.midia, scope: `transcricao-${mediaKind}`,
+                          provider: cand.provider, model: cand.model, clinicId,
+                          units: bytes.length, unitKind: "bytes",
+                          ok: false, error: String(e).slice(0, 200), durationMs: Date.now() - tMidia,
+                        });
                         fails.push(`${cand.provider}/${cand.model}: ${String(e).slice(0, 200)}`);
                       }
                     }

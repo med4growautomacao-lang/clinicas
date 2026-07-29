@@ -4,6 +4,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.7.1";
 import { Client as PgClient } from "https://deno.land/x/postgres@v0.19.3/mod.ts";
+import { registrarUsoIAAsync, FEATURE } from "../_shared/llm-usage.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -169,6 +170,7 @@ serve(async (req) => {
 
     // 4) Loop do agente (tool use).
     for (let step = 0; step < MAX_AGENT_STEPS; step++) {
+      const tPasso = Date.now();
       const resp = await fetch(ANTHROPIC_URL, {
         method: "POST",
         headers: {
@@ -182,10 +184,24 @@ serve(async (req) => {
       if (!resp.ok) {
         const errText = await resp.text();
         console.error("Anthropic error", resp.status, errText);
+        await registrarUsoIAAsync(admin, {
+          feature: FEATURE.assistente, scope: "assistente", provider: "anthropic", model,
+          clinicId, ok: false, error: `anthropic ${resp.status}: ${errText.slice(0, 200)}`,
+          durationMs: Date.now() - tPasso,
+        });
         return jsonResponse({ error: "Falha ao consultar o modelo." }, 502);
       }
 
       const data = await resp.json();
+      // Uma pergunta do usuario pode virar ate MAX_AGENT_STEPS chamadas (o modelo consulta o banco
+      // e volta a pensar), entao cada PASSO e registrado. Contar so a pergunta subestimaria o gasto.
+      // Aguardado porque o passo FINAL do loop tambem termina em `return` (linha do end_turn):
+      // solto, o registro morreria com o isolate junto com a resposta.
+      await registrarUsoIAAsync(admin, {
+        feature: FEATURE.assistente, scope: "assistente", provider: "anthropic", model, clinicId,
+        tokensIn: data?.usage?.input_tokens ?? 0, tokensOut: data?.usage?.output_tokens ?? 0,
+        ok: true, durationMs: Date.now() - tPasso,
+      });
       convo.push({ role: "assistant", content: data.content });
 
       if (data.stop_reason === "tool_use") {
@@ -226,10 +242,22 @@ serve(async (req) => {
         tools, tool_choice: { type: "none" }, messages: convo,
       }),
     });
+    // ⚠️ AQUI o registro e AGUARDADO (nao fire-and-forget): esta chamada acontece imediatamente
+    // antes do `return`, e o isolate da edge e derrubado depois da resposta. Solto, sumia
+    // justamente a chamada de FECHAMENTO, que carrega a conversa inteira e costuma ser a maior.
     if (finalResp.ok) {
       const fd = await finalResp.json();
+      await registrarUsoIAAsync(admin, {
+        feature: FEATURE.assistente, scope: "assistente-fechamento", provider: "anthropic", model, clinicId,
+        tokensIn: fd?.usage?.input_tokens ?? 0, tokensOut: fd?.usage?.output_tokens ?? 0, ok: true,
+      });
       const t = (fd.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n").trim();
       if (t) return jsonResponse({ reply: t });
+    } else {
+      await registrarUsoIAAsync(admin, {
+        feature: FEATURE.assistente, scope: "assistente-fechamento", provider: "anthropic", model, clinicId,
+        ok: false, error: `anthropic ${finalResp.status}`,
+      });
     }
     return jsonResponse({ reply: "Não consegui responder isso com os dados disponíveis. Tente reformular a pergunta." });
   } catch (e) {

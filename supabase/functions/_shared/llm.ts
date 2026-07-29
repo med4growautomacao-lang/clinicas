@@ -7,6 +7,8 @@
 // que o wa-inbound usa na transcricao de midia. Modelo/temperatura vem de system_settings
 // (agent_ai_config), editavel no painel Super Admin.
 
+import { comMonitor, registrarUsoIA, FEATURE } from "./llm-usage.ts";
+
 export type JSONSchema = {
   type: "object";
   properties: Record<string, { type: string; description?: string; enum?: string[] }>;
@@ -208,11 +210,56 @@ async function anthropicTurn(
 }
 
 // ── Dispatch ─────────────────────────────────────────────────────────────────
+/**
+ * Contexto do monitor de consumo. Opcional para nao quebrar chamador antigo, mas SEM ele a linha
+ * entra sem clinica e o painel do Super Admin nao consegue dizer quem gastou. Passe sempre.
+ */
+export interface UsoCtx {
+  /** chave de system_settings que o Super Admin edita (agrupa o painel) */
+  feature?: string;
+  /** edge/passo de origem, para achar o culpado quando um numero pular */
+  scope?: string;
+  clinicId?: string | null;
+  leadId?: string | null;
+}
+
+/**
+ * Ponto UNICO de chamada ao LLM do agente. O monitor mora aqui de proposito: instrumentar cada
+ * chamador daria 3 lugares para esquecer, e o mais caro (o loop de tool-calling, que chama isto
+ * varias vezes por turno) e justamente o que mais escapa da conta.
+ * Registra sucesso E falha — falha tambem consome cota e explica pico de erro no painel.
+ */
 export async function runAgentTurn(
   supabase: any, cfg: ModelConfig, system: string, messages: AgentMsg[], tools: AgentTool[],
+  uso: UsoCtx = {},
 ): Promise<TurnOut> {
   const key = await llmKey(supabase, cfg.provider);
-  if (!key) throw new Error(`sem chave de API para provider "${cfg.provider}" (Vault/env)`);
-  if (cfg.provider === "anthropic") return anthropicTurn(cfg, key, system, messages, tools);
-  return geminiTurn(cfg, key, system, messages, tools);
+  if (!key) {
+    // Registra ANTES de lancar: chave revogada/rotacionada e exatamente o caso em que o painel
+    // precisa mostrar um pico de falha. Sem isto o agente simplesmente emudecia no grafico, que
+    // e o sintoma mais dificil de interpretar.
+    registrarUsoIA(supabase, {
+      feature: uso.feature ?? FEATURE.agente, scope: uso.scope ?? "llm",
+      provider: cfg.provider, model: cfg.model,
+      clinicId: uso.clinicId ?? null, leadId: uso.leadId ?? null,
+      ok: false, error: `sem chave de API para provider "${cfg.provider}" (Vault/env)`,
+    });
+    throw new Error(`sem chave de API para provider "${cfg.provider}" (Vault/env)`);
+  }
+
+  return comMonitor(
+    supabase,
+    {
+      feature: uso.feature ?? FEATURE.agente,
+      scope: uso.scope ?? "llm",
+      provider: cfg.provider,
+      model: cfg.model,
+      clinicId: uso.clinicId ?? null,
+      leadId: uso.leadId ?? null,
+    },
+    () => cfg.provider === "anthropic"
+      ? anthropicTurn(cfg, key, system, messages, tools)
+      : geminiTurn(cfg, key, system, messages, tools),
+    (out) => ({ input: out.usage?.input, output: out.usage?.output }),
+  );
 }

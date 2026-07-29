@@ -8,6 +8,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.7.1";
 import { runAgentTurn, type AgentMsg, type ModelConfig } from "../_shared/llm.ts";
+import { registrarUsoIA, FEATURE } from "../_shared/llm-usage.ts";
 import { agentToolSpecs, executeToolCall, type SessionCtx } from "../_shared/agent/tools.ts";
 import { assembleSystemPrompt, fetchAgentContext } from "../_shared/agent/prompt.ts";
 import { splitIntoBubbles } from "../_shared/agent/split.ts";
@@ -135,15 +136,41 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
-async function ttsElevenLabs(key: string, voiceId: string, modelId: string, text: string): Promise<string | null> {
-  const resp = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
-    method: "POST",
-    signal: AbortSignal.timeout(30000),
-    headers: { "xi-api-key": key, "Content-Type": "application/json", "Accept": "audio/mpeg" },
-    body: JSON.stringify({ text, model_id: modelId || "eleven_multilingual_v2" }),
+// A ElevenLabs cobra por CARACTERE, nao por token, entao o monitor registra em `units`
+// (unit_kind='chars'). Sem isso a voz sairia de graca no painel e ela e o item mais caro por
+// mensagem quando esta ligada.
+async function ttsElevenLabs(
+  supabase: any, clinicId: string | null, key: string, voiceId: string, modelId: string, text: string,
+): Promise<string | null> {
+  const t0 = Date.now();
+  const chars = (text || "").length;
+  // Usa o helper compartilhado (nao rpc na mao): e ele que limpa a chave do provedor da mensagem
+  // de erro e que centraliza os nomes de `feature`. String solta aqui orfanaria a linha do painel
+  // no dia em que alguem renomear a chave, sem erro de compilacao.
+  const registra = (ok: boolean, erro: string | null) => registrarUsoIA(supabase, {
+    feature: FEATURE.voz, scope: "voz-tts", provider: "elevenlabs",
+    model: modelId || "eleven_multilingual_v2", clinicId,
+    ok, error: erro, durationMs: Date.now() - t0,
+    units: chars, unitKind: "chars",
   });
-  if (!resp.ok) return null;
-  return toBase64(new Uint8Array(await resp.arrayBuffer()));
+  try {
+    const resp = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+      method: "POST",
+      signal: AbortSignal.timeout(30000),
+      headers: { "xi-api-key": key, "Content-Type": "application/json", "Accept": "audio/mpeg" },
+      body: JSON.stringify({ text, model_id: modelId || "eleven_multilingual_v2" }),
+    });
+    if (!resp.ok) { registra(false, `elevenlabs ${resp.status}`); return null; }
+    // Le o corpo ANTES de registrar sucesso: o cabecalho pode vir 200 e o stream abortar no meio
+    // (timeout de 30s, conexao cortada). Registrando antes, a mesma chamada gerava DUAS linhas
+    // (uma ok e uma falha) e o painel contava o audio em dobro.
+    const b64 = toBase64(new Uint8Array(await resp.arrayBuffer()));
+    registra(true, null);
+    return b64;
+  } catch (e) {
+    registra(false, String((e as Error)?.message ?? e));
+    throw e;
+  }
 }
 
 async function sendAudio(token: string, number: string, base64: string): Promise<boolean> {
@@ -166,7 +193,8 @@ async function formatForVoice(supabase: any, cfg: ModelConfig, clinicId: string 
     const { data } = await supabase.from("system_settings").select("value").eq("id", "agent_ssml_prompt").maybeSingle();
     const prompt = (data?.value || "").trim();
     if (!prompt) return text;
-    const out = await runAgentTurn(supabase, cfg, prompt, [{ role: "user", text }], []);
+    const out = await runAgentTurn(supabase, cfg, prompt, [{ role: "user", text }], [],
+      { feature: "agent_ai_config", scope: "voz-ssml", clinicId });
     const ssml = stripCodeFences((out.text || "").trim());
     return ssml || text;
   } catch (e) {
@@ -191,13 +219,20 @@ async function applyStageTransition(supabase: any, clinicId: string, leadId: str
 }
 
 // Uma rodada de modelo, com fallback de provider/modelo se o primario quebrar.
-async function modelTurn(supabase: any, cfg: ModelConfig, system: string, messages: AgentMsg[], tools: any[]) {
+// O `scope` separa a rodada normal do fallback no painel: se o fallback comecar a aparecer, o
+// modelo primario esta quebrando, e isso precisa ser visivel ANTES de virar conta alta ou silencio.
+async function modelTurn(
+  supabase: any, cfg: ModelConfig, system: string, messages: AgentMsg[], tools: any[],
+  clinicId: string | null = null, leadId: string | null = null,
+) {
   try {
-    return await runAgentTurn(supabase, cfg, system, messages, tools);
+    return await runAgentTurn(supabase, cfg, system, messages, tools,
+      { feature: "agent_ai_config", scope: "agente", clinicId, leadId });
   } catch (e) {
     if (cfg.fallback?.provider && cfg.fallback?.model) {
       const fb: ModelConfig = { provider: cfg.fallback.provider as any, model: cfg.fallback.model, temperature: cfg.temperature, fallback: null };
-      return await runAgentTurn(supabase, fb, system, messages, tools);
+      return await runAgentTurn(supabase, fb, system, messages, tools,
+        { feature: "agent_ai_config", scope: "agente-fallback", clinicId, leadId });
     }
     throw e;
   }
@@ -231,7 +266,7 @@ async function processTurn(supabase: any, turn: { session_id: string; clinic_id:
     let finalText = "";
     const toolsExecutadas: string[] = [];
     for (let iter = 0; iter < MAX_TOOL_ITERS; iter++) {
-      const out = await modelTurn(supabase, cfg, system, messages, tools);
+      const out = await modelTurn(supabase, cfg, system, messages, tools, clinicId, ctx.lead_id ?? null);
       if (out.toolCalls.length === 0) { finalText = out.text; break; }
 
       // registra o passo do assistente (texto + tool_calls) e executa as tools em paralelo
@@ -244,7 +279,7 @@ async function processTurn(supabase: any, turn: { session_id: string; clinic_id:
 
       if (iter === MAX_TOOL_ITERS - 1) {
         // ultimo passo: forca uma resposta textual sem mais tools
-        const closing = await modelTurn(supabase, cfg, system, messages, []);
+        const closing = await modelTurn(supabase, cfg, system, messages, [], clinicId, ctx.lead_id ?? null);
         finalText = closing.text;
       }
     }
@@ -268,7 +303,7 @@ async function processTurn(supabase: any, turn: { session_id: string; clinic_id:
         let reparado = "";
         let erroReparo: string | null = null;
         try {
-          const rep = await modelTurn(supabase, cfg, system, [...messages, { role: "assistant", text: finalText }, { role: "user", text: REPAIR_INSTRUCTION }], []);
+          const rep = await modelTurn(supabase, cfg, system, [...messages, { role: "assistant", text: finalText }, { role: "user", text: REPAIR_INSTRUCTION }], [], clinicId, ctx.lead_id ?? null);
           reparado = sanitizeForPatient((rep.text || "").trim());
         } catch (e) {
           // Sem isso o operador nao distingue "o modelo insistiu no formato tecnico" de "a chamada
@@ -309,7 +344,7 @@ async function processTurn(supabase: any, turn: { session_id: string; clinic_id:
             speakText = finalText;
             await registrarErro(supabase, "ssml_tecnico_descartado", "O formatador de voz devolveu conteudo tecnico; o audio foi gerado do texto ja aprovado", "warning", clinicId, { session_id: turn.session_id, ssml: ssml.slice(0, 300) });
           }
-          audioB64 = await ttsElevenLabs(el.key, el.voice_id, el.model_id, speakText);
+          audioB64 = await ttsElevenLabs(supabase, clinicId, el.key, el.voice_id, el.model_id, speakText);
           // Caminho antigo (chave desligada): entrega o audio aqui mesmo.
           if (audioB64 && !viaEmissor && token) sentAudio = await sendAudio(token, number, audioB64);
         } catch { audioB64 = null; }

@@ -25,6 +25,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { comMonitor, FEATURE } from "../_shared/llm-usage.ts";
 
 const SCOPE = "conv-ai-analyst";
 const CORS = {
@@ -160,7 +161,7 @@ function anthropicBody(model: string, temperature: number, maxTokens: number, sy
 // `jsonMode` liga o modo JSON NATIVO do provedor: em vez de pedir o formato no prompt (que o modelo
 // às vezes ignora, embrulhando em ```json ou soltando aspas), o envelope passa a ser garantido pela
 // API. Opt-in por chamada porque nem todo uso quer JSON (o manual do 'learn' é texto puro).
-async function callLlm(
+async function chamarProvedor(
   provider: string, model: string, temperature: number, maxTokens: number,
   system: string, user: string, jsonMode = false,
 ): Promise<LlmOut> {
@@ -254,6 +255,30 @@ async function callLlm(
     tokens_in: j?.usageMetadata?.promptTokenCount ?? 0,
     tokens_out: j?.usageMetadata?.candidatesTokenCount ?? 0,
   };
+}
+
+// Envelope do MONITOR de consumo: `chamarProvedor` fala com a API, isto registra o gasto.
+// Fica aqui e não em cada provider porque os três (anthropic/openai/gemini) devolvem o consumo
+// em campos com nomes diferentes, e o normalizador já é o `chamarProvedor`.
+// A análise continua guardando tokens em conv_ai_insights (por ticket); esta linha é a visão
+// CENTRAL, que junta o analista com o agente, a transcrição e a voz no mesmo painel.
+async function callLlm(
+  provider: string, model: string, temperature: number, maxTokens: number,
+  system: string, user: string, jsonMode = false,
+  uso: { scope?: string; clinicId?: string | null; leadId?: string | null } = {},
+): Promise<LlmOut> {
+  return await comMonitor(
+    admin,
+    {
+      feature: FEATURE.analista,
+      scope: uso.scope ?? "analise",
+      provider, model,
+      clinicId: uso.clinicId ?? null,
+      leadId: uso.leadId ?? null,
+    },
+    () => chamarProvedor(provider, model, temperature, maxTokens, system, user, jsonMode),
+    (r) => ({ input: r.tokens_in, output: r.tokens_out }),
+  );
 }
 
 // O modelo às vezes embrulha o JSON em cerca de markdown ou em prosa. Pega o
@@ -391,6 +416,7 @@ async function analisarTicket(item: any, cfg: any, dry: boolean, debug = false, 
   const out = await callLlm(
     cfg.provider, cfg.model, cfg.temperature, cfg.max_output_tokens,
     cfg.system_prompt, buildUserPrompt(ctx), jsonMode,
+    { scope: "analise", clinicId: item.clinic_id, leadId: leadIdMem },
   );
   const parsed = extractJson(out.text);
   if (!parsed) {

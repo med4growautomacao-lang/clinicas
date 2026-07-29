@@ -27,7 +27,6 @@ import {
   AlertTriangle,
   X,
   BellRing,
-  BellOff,
   UserCheck,
   Plus,
   Trash2,
@@ -1687,18 +1686,29 @@ function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
     if (!e && data) setChatLead(data as Lead);
   };
 
-  // Tirar UM lead da fila sem cancelar a ativação: desliga o follow-up daquele lead (followup_enabled
-  // = false). Reversível no mesmo clique. Os contadores do topo NÃO recalculam (a RPC roda uma vez);
-  // por isso o aviso na tela em vez de número mentiroso.
-  const [foraDaFila, setForaDaFila] = useState<Set<string>>(new Set());
-  const [mexendo, setMexendo] = useState<Set<string>>(new Set());
-  const toggleFollowupLead = async (leadId: string) => {
-    const tirar = !foraDaFila.has(leadId);
-    setMexendo(s => new Set(s).add(leadId));
-    const { error: e } = await supabase.from("leads").update({ followup_enabled: !tirar }).eq("id", leadId);
-    setMexendo(s => { const n = new Set(s); n.delete(leadId); return n; });
-    if (e) return;
-    setForaDaFila(s => { const n = new Set(s); if (tirar) n.add(leadId); else n.delete(leadId); return n; });
+  // Tirar UM lead da fila DESTE follow-up, sem cancelar a ativação e sem silenciar os outros tipos:
+  // grava uma exceção em lead_followup_optout (lead + kind) via RPC. NÃO mexe em
+  // leads.followup_enabled, que é o interruptor mestre ("não recebe nada") do painel da conversa.
+  // Os contadores do topo NÃO recalculam (a RPC de preview roda uma vez); por isso o aviso na tela
+  // em vez de número mentiroso.
+  const [removidos, setRemovidos] = useState<Set<string>>(new Set());
+  const [removendo, setRemovendo] = useState<Set<string>>(new Set());
+  const removerDaFila = async (leadId: string, k: FollowupKind) => {
+    setRemovendo(s => new Set(s).add(leadId));
+    const { data: r, error: e } = await supabase.rpc("set_lead_followup_optout", {
+      p_lead_id: leadId, p_kind: k, p_off: true, p_reason: "removido na tela de ativação",
+    });
+    setRemovendo(s => { const n = new Set(s); n.delete(leadId); return n; });
+    if (e || !(r as any)?.success) return;
+    setRemovidos(s => new Set(s).add(leadId));
+  };
+  const desfazerRemocoes = async (k: FollowupKind) => {
+    const ids = [...removidos];
+    setRemovendo(new Set(ids));
+    await Promise.all(ids.map(id =>
+      supabase.rpc("set_lead_followup_optout", { p_lead_id: id, p_kind: k, p_off: false })));
+    setRemovendo(new Set());
+    setRemovidos(new Set());
   };
 
   const guard = React.useCallback((k: FollowupKind, activate: () => void) => {
@@ -1728,7 +1738,7 @@ function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
     reqId.current++;
     pending.current = null;
     setKind(null); setData(null); setError(null); setLoading(false);
-    setForaDaFila(new Set()); setMexendo(new Set());
+    setRemovidos(new Set()); setRemovendo(new Set());
   };
   const close = () => reset();
   const confirm = () => {
@@ -1868,21 +1878,21 @@ function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
                   {data.amostra.length > 0 && (
                     <div className="space-y-2">
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                        Quem entra na fila ({data.amostra.length} de {data.total_7d})
+                        Quem entra na fila ({data.amostra.filter(p => !(p.lead_id && removidos.has(p.lead_id))).length} de {Math.max(0, data.total_7d - removidos.size)})
                       </p>
                       <div className="border border-slate-100 rounded-xl divide-y divide-slate-50 max-h-64 overflow-y-auto custom-scrollbar">
-                        {data.amostra.map((p, i) => {
-                          const fora = !!p.lead_id && foraDaFila.has(p.lead_id);
-                          return (
-                          <div key={i} className={cn("px-3 py-2 flex items-center gap-3 text-xs group", fora && "bg-slate-50/80")}>
+                        {data.amostra
+                          .filter(p => !(p.lead_id && removidos.has(p.lead_id)))
+                          .map((p, i) => (
+                          <div key={i} className="px-3 py-2 flex items-center gap-3 text-xs group">
                             <span className={cn(
                               "px-1.5 py-0.5 rounded text-[9px] font-bold uppercase shrink-0",
-                              fora ? "bg-slate-200 text-slate-500" : badge(p.balde)
+                              badge(p.balde)
                             )}>
-                              {fora ? "fora" : p.balde === "agora" ? "agora" : p.balde === "horas" ? "hoje" : p.quando}
+                              {p.balde === "agora" ? "agora" : p.balde === "horas" ? "hoje" : p.quando}
                             </span>
-                            <span className={cn("font-bold truncate flex-1", fora ? "text-slate-400 line-through" : "text-slate-800")}>{p.nome}</span>
-                            <span className={cn("font-medium shrink-0", fora ? "text-slate-300" : "text-slate-400")}>{p.telefone}</span>
+                            <span className="font-bold text-slate-800 truncate flex-1">{p.nome}</span>
+                            <span className="text-slate-400 font-medium shrink-0">{p.telefone}</span>
                             {p.lead_id && (
                               <button
                                 onClick={() => openLeadChat(p.lead_id!)}
@@ -1894,31 +1904,34 @@ function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
                             )}
                             {p.lead_id && (
                               <button
-                                onClick={() => toggleFollowupLead(p.lead_id!)}
-                                disabled={mexendo.has(p.lead_id)}
-                                title={fora
-                                  ? "Religar os follow-ups deste lead"
-                                  : "Desliga TODOS os follow-ups deste lead (reengajamento, confirmação, lembrete de consulta e pós-atendimento). Não é só este disparo."}
-                                className={cn("shrink-0 p-1 rounded-md transition-all disabled:opacity-40",
-                                  fora ? "text-emerald-600 hover:bg-emerald-50" : "text-slate-400 hover:text-rose-600 hover:bg-rose-50")}
+                                onClick={() => removerDaFila(p.lead_id!, kind)}
+                                disabled={removendo.has(p.lead_id)}
+                                title={`Remover este contato da fila de ${FOLLOWUP_LABELS[kind]}. Os outros follow-ups dele continuam funcionando.`}
+                                className="shrink-0 p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all disabled:opacity-40"
                               >
-                                {mexendo.has(p.lead_id) ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                  : fora ? <BellRing className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
+                                {removendo.has(p.lead_id) ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
                               </button>
                             )}
                           </div>
-                          );
-                        })}
+                        ))}
                       </div>
-                      {foraDaFila.size > 0 ? (
-                        <p className="text-[10px] text-amber-700 font-bold bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
-                          {foraDaFila.size} contato(s) com follow-up desligado. ⚠️ Vale para TODOS os
-                          follow-ups desse contato (inclusive confirmação e lembrete de consulta), não só este disparo.
-                          Os números acima não recalculam: feche e abra de novo para conferir.
-                        </p>
+                      {removidos.size > 0 ? (
+                        <div className="flex items-center justify-between gap-2 text-[10px] bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                          <span className="text-amber-700 font-bold">
+                            {removidos.size} removido(s) da fila de {FOLLOWUP_LABELS[kind]}.
+                            Os outros follow-ups deles seguem normais. Os números acima não recalculam.
+                          </span>
+                          <button
+                            onClick={() => desfazerRemocoes(kind)}
+                            disabled={removendo.size > 0}
+                            className="shrink-0 font-bold text-amber-800 underline underline-offset-2 hover:text-amber-900 disabled:opacity-40"
+                          >
+                            Desfazer
+                          </button>
+                        </div>
                       ) : (
                         <p className="text-[10px] text-slate-400 font-medium italic">
-                          Amostra dos primeiros da fila, em ordem de envio. O sino desliga TODOS os follow-ups do contato.
+                          Amostra dos primeiros da fila, em ordem de envio. Use o ✕ para remover alguém desta fila.
                         </p>
                       )}
                     </div>

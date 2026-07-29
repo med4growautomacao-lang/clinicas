@@ -136,7 +136,7 @@ Chave off é o estado normal de quase tudo, e o dono desliga de propósito: ele 
 
 ⚠️ **O repo não é a fonte completa das edges:** há função rodando em produção sem código aqui. Antes de concluir "essa função não existe", liste as deployadas (MCP `list_edge_functions`).
 
-**Os nomes de WhatsApp enganam:** `whatsapp-orchestrator` é quem faz o trabalho (máquina de estados da conexão); `whatsapp-bridge` é só roteador de retrocompatibilidade e pode ser removido.
+**Conexão do WhatsApp:** quem faz o trabalho é `whatsapp-orchestrator` (máquina de estados: start, cancel, disconnect, reset, status). A antiga `whatsapp-bridge` foi **removida em 28/07/2026**, depois de provado que nada a chamava (front, banco, cron, outras edges e registros de uso).
 
 ## Como o agente de IA é instruído
 
@@ -193,7 +193,7 @@ Tudo que marca horário passa por ela: app, Kanban, IA e `convert_lead_to_appoin
 
 **A divisão não é óbvia:** duração, `slot_step`, buffers e `min_notice` vêm de `consultation_types`; `working_hours`, `days_off` e `blocked_times` vêm de `doctors`.
 
-⚠️ `doctors.consultation_duration / slot_step / buffer_* / min_notice_*` **existem e são IGNORADOS**, letra morta. Mas o expediente é do médico mesmo (o tipo só sobrepõe via `working_hours_override`).
+⚠️ **`doctors.consultation_duration` NÃO é letra morta**, apesar do nome repetido em `consultation_types`. Ela é o fallback lido por `book_appointment`, `reschedule_appointment` e pela trigger `trg_appointment_inherit_doctor_duration` quando o tipo não define duração. **Dropar essa coluna não falha na migration, falha na primeira marcação de consulta.** As irmãs (`slot_step`, `buffer_*`, `min_notice_*`) eram mesmo letra morta e foram removidas de `doctors` em 28/07/2026; os nomes iguais em `consultation_types` continuam valendo. O expediente é do médico (o tipo só sobrepõe via `working_hours_override`).
 
 ## Tickets
 
@@ -351,6 +351,13 @@ Quase todo bug grave deste sistema foi **perda silenciosa**, não exceção baru
 📌 **Toda função nova que importa registra erro na Central**, seja edge, RPC, trigger ou cron. Edge: copie o helper `registrarErro()` de qualquer edge existente. Banco: `log_system_error(...)`. HTTP saindo do banco: **`system_http_post`**, nunca `net.http_post` cru (é o que permite saber qual URL falhou).
 
 ⚠️ **Não engula o erro no `catch`.** `console.error` sozinho é invisível: o log da edge some, a Central não vê, e o bug vira "sumiu o lead".
+
+### 📌 Quatro regras deste arquivo são VIGIADAS, não só escritas
+
+Desde 28/07/2026 o `run_system_monitors` (cron) acende na Central sozinho se alguém regredir: **função interna aberta para anon/authenticated** (o vazamento das 17 horas), **chamada HTTP crua** no lugar de `system_http_post`, **sumiço de um dos 4 índices invariantes**, e **wrapper de painel sem `assert_clinic_access`**.
+
+- Hoje os quatro devolvem zero: entraram mudos e só falam quando houver regressão.
+- Cada um roda no seu próprio `begin/exception`, e se um quebrar acende `monitor_falhou_*` em vez de derrubar os outros. ⚠️ **Ao acrescentar bloco novo, empilhe o fingerprint em `v_tocados`**: sem isso o alerta é criado e resolvido na mesma execução, e o monitor parece funcionar sem nunca aparecer nada.
 
 ### 📌 REGRA: erro resolvido SAI do painel
 

@@ -35,9 +35,9 @@ BEGIN
   WHERE fs.slug = 'agendado' ORDER BY c.created_at LIMIT 1;
   ASSERT v_clinic IS NOT NULL, 'fixture: nenhuma clinica real com etapa agendado';
 
-  -- Expediente fixo 09:00-12:00 todos os dias (slot_step 30) -> slots deterministicos p/ T8
-  INSERT INTO doctors (clinic_id, name, is_active, consultation_duration, slot_step, working_hours)
-  VALUES (v_clinic, 'ZZ Test Doctor', true, 30, 30,
+  -- Expediente fixo 09:00-12:00 todos os dias; o passo vem do tipo de consulta -> slots deterministicos p/ T8
+  INSERT INTO doctors (clinic_id, name, is_active, consultation_duration, working_hours)
+  VALUES (v_clinic, 'ZZ Test Doctor', true, 30,
     '{"0":[{"start":"09:00","end":"12:00"}],"1":[{"start":"09:00","end":"12:00"}],"2":[{"start":"09:00","end":"12:00"}],"3":[{"start":"09:00","end":"12:00"}],"4":[{"start":"09:00","end":"12:00"}],"5":[{"start":"09:00","end":"12:00"}],"6":[{"start":"09:00","end":"12:00"}]}'::jsonb)
   RETURNING id INTO v_doctor;
 
@@ -181,9 +181,9 @@ BEGIN
    WHERE fs.slug='agendado' AND EXISTS(SELECT 1 FROM funnel_stages w WHERE w.clinic_id=fs.clinic_id AND w.slug='whatsapp') ORDER BY c.created_at LIMIT 1;
   SELECT id INTO v_wa FROM funnel_stages WHERE clinic_id=v_cA AND slug='whatsapp' LIMIT 1;
   SELECT id INTO v_perdido FROM funnel_stages WHERE clinic_id=v_cA AND slug='perdido' LIMIT 1;
-  INSERT INTO doctors (clinic_id,name,is_active,consultation_duration,slot_step,working_hours) VALUES (v_cA,'ZZ DocX',true,30,30,v_wh) RETURNING id INTO v_doc;
-  INSERT INTO doctors (clinic_id,name,is_active,consultation_duration,slot_step,working_hours,days_off,blocked_times)
-    VALUES (v_cA,'ZZ DocX2',true,60,30,v_wh, jsonb_build_array((v_d+2)::text), jsonb_build_array(jsonb_build_object('date',(v_d+3)::text,'start','09:00','end','12:00','name','Bloq')))
+  INSERT INTO doctors (clinic_id,name,is_active,consultation_duration,working_hours) VALUES (v_cA,'ZZ DocX',true,30,v_wh) RETURNING id INTO v_doc;
+  INSERT INTO doctors (clinic_id,name,is_active,consultation_duration,working_hours,days_off,blocked_times)
+    VALUES (v_cA,'ZZ DocX2',true,60,v_wh, jsonb_build_array((v_d+2)::text), jsonb_build_array(jsonb_build_object('date',(v_d+3)::text,'start','09:00','end','12:00','name','Bloq')))
     RETURNING id INTO v_doc2;
   INSERT INTO consultation_types (clinic_id,doctor_id,slug,name,modality,is_active,consultation_duration) VALUES (v_cA,v_doc,'presencial','P','presencial',true,30) RETURNING id INTO v_ctP;
   INSERT INTO consultation_types (clinic_id,doctor_id,slug,name,modality,is_active,consultation_duration) VALUES (v_cA,v_doc,'online','O','online',true,60) RETURNING id INTO v_ctO;
@@ -272,7 +272,7 @@ DECLARE
 BEGIN
   SELECT fs.clinic_id INTO v_cA FROM funnel_stages fs JOIN clinics c ON c.id=fs.clinic_id
    WHERE fs.slug='agendado' AND EXISTS(SELECT 1 FROM funnel_stages w WHERE w.clinic_id=fs.clinic_id AND w.slug='ganho') ORDER BY c.created_at LIMIT 1;
-  INSERT INTO doctors (clinic_id,name,is_active,consultation_duration,slot_step,working_hours) VALUES (v_cA,'ZZ DocLC',true,30,30,v_wh) RETURNING id INTO v_doc;
+  INSERT INTO doctors (clinic_id,name,is_active,consultation_duration,working_hours) VALUES (v_cA,'ZZ DocLC',true,30,v_wh) RETURNING id INTO v_doc;
   INSERT INTO consultation_types (clinic_id,doctor_id,slug,name,modality,is_active,consultation_duration) VALUES (v_cA,v_doc,'presencial','P','presencial',true,30) RETURNING id INTO v_ct;
   INSERT INTO patients (clinic_id,name,phone) VALUES (v_cA,'Ciclo',v_ph) RETURNING id INTO v_p;
 

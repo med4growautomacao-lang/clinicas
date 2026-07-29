@@ -4531,6 +4531,8 @@ export interface ConvAiClinicConfig {
   decisions_since_learn: number;
   last_learned_at: string | null;
   last_analysis_at: string | null;
+  mechanical_mode?: 'off' | 'shadow' | 'active';
+  mechanical_available?: boolean;
 }
 
 export function useConvAiClinicConfig() {

@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Loader2, Check, X, Sparkles, TrendingUp, MessageSquare, ChevronDown, ChevronRight,
   ArrowRight, Quote, Brain, ShieldCheck, RefreshCw, History, Power,
-  Hand, ListChecks, Zap, MoveRight, Pencil,
+  Hand, ListChecks, Zap, MoveRight, Pencil, Cog,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { supabase } from "../lib/supabase";
@@ -57,16 +57,28 @@ const MODOS: Array<{ id: ConvAiMode; label: string; icon: typeof Hand; hint: (ei
     hint: (e) => e === "etapa" ? "A IA move o card sozinha." : "A IA fecha a venda sozinha e lança o faturamento." },
 ];
 
+// 4º modo, só na coluna de etapa e só onde o PLANO libera (mechanical_available):
+// em vez de a IA ler a conversa, um motor de padrões de frase sugere a etapa, de
+// graça. É um motor diferente, por isso é um modo à parte, não um sabor da IA.
+type UiMode = ConvAiMode | "mecanico";
+const MECANICO = {
+  id: "mecanico" as const, label: "Mecânico", icon: Cog,
+  hint: (_e: "etapa" | "venda") =>
+    "Sem IA: um motor de padrões de frase sugere a etapa, sem gastar token. Cada card vem marcado MECÂNICA.",
+};
+
 // Cada eixo é um PAINEL próprio: são decisões independentes (uma mexe no card,
 // a outra em faturamento), e misturá-las num bloco só confunde quem configura.
-function PainelModo({ eixo, valor, onChange, disabled }: {
+function PainelModo({ eixo, valor, onChange, disabled, mecanicoDisponivel }: {
   eixo: "etapa" | "venda";
-  valor: ConvAiMode;
-  onChange: (m: ConvAiMode) => void;
+  valor: UiMode;
+  onChange: (m: UiMode) => void;
   disabled?: boolean;
+  mecanicoDisponivel?: boolean;
 }) {
   const etapa = eixo === "etapa";
   const Icone = etapa ? MoveRight : TrendingUp;
+  const opcoes = etapa && mecanicoDisponivel ? [...MODOS, MECANICO] : MODOS;
   return (
     <div className={cn(
       "bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col",
@@ -89,20 +101,23 @@ function PainelModo({ eixo, valor, onChange, disabled }: {
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-1.5">
-        {MODOS.map(m => {
+      <div className={cn("grid gap-1.5", opcoes.length === 4 ? "grid-cols-2" : "grid-cols-3")}>
+        {opcoes.map(m => {
           const Icon = m.icon;
           const sel = valor === m.id;
           const perigo = !etapa && m.id === "auto";
+          const mec = m.id === "mecanico";
           return (
             <button key={m.id} type="button" onClick={() => onChange(m.id)}
               className={cn("rounded-xl border px-2 py-2 text-center transition-all",
                 sel
-                  ? perigo
-                    ? "border-amber-400 bg-amber-50 text-amber-800 ring-2 ring-amber-400/20"
-                    : etapa
-                      ? "border-violet-400 bg-violet-50 text-violet-800 ring-2 ring-violet-400/20"
-                      : "border-emerald-400 bg-emerald-50 text-emerald-800 ring-2 ring-emerald-400/20"
+                  ? mec
+                    ? "border-sky-400 bg-sky-50 text-sky-800 ring-2 ring-sky-400/20"
+                    : perigo
+                      ? "border-amber-400 bg-amber-50 text-amber-800 ring-2 ring-amber-400/20"
+                      : etapa
+                        ? "border-violet-400 bg-violet-50 text-violet-800 ring-2 ring-violet-400/20"
+                        : "border-emerald-400 bg-emerald-50 text-emerald-800 ring-2 ring-emerald-400/20"
                   : "border-slate-200 bg-white text-slate-500 hover:border-slate-300")}>
               <span className="flex items-center justify-center gap-1.5 text-xs font-bold">
                 <Icon className="w-3.5 h-3.5 shrink-0" /> {m.label}
@@ -112,7 +127,7 @@ function PainelModo({ eixo, valor, onChange, disabled }: {
         })}
       </div>
 
-      <p className="text-[11px] text-slate-500 mt-2 leading-snug">{MODOS.find(m => m.id === valor)?.hint(eixo)}</p>
+      <p className="text-[11px] text-slate-500 mt-2 leading-snug">{opcoes.find(m => m.id === valor)?.hint(eixo)}</p>
 
       {!etapa && valor === "auto" && (
         <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mt-2 leading-snug">
@@ -143,10 +158,10 @@ function Evidencias({ itens }: { itens: string[] | null }) {
 // Uma COLUNA por eixo: a configuração daquele eixo e, logo abaixo, a fila que
 // ela alimenta. Ler de cima para baixo responde "o que a IA faz aqui" e "o que
 // está esperando por mim" sem cruzar a tela.
-function ColunaEixo({ eixo, modo, onModo, itens, vazioTexto, busy, onAprovar, onRecusar, onVerConversa, stageName, disabled }: {
+function ColunaEixo({ eixo, modo, onModo, itens, vazioTexto, busy, onAprovar, onRecusar, onVerConversa, stageName, disabled, mecanicoDisponivel }: {
   eixo: "etapa" | "venda";
-  modo: ConvAiMode;
-  onModo: (m: ConvAiMode) => void;
+  modo: UiMode;
+  onModo: (m: UiMode) => void;
   itens: ConvAiInsight[];
   vazioTexto: string;
   busy: string | null;
@@ -155,12 +170,13 @@ function ColunaEixo({ eixo, modo, onModo, itens, vazioTexto, busy, onAprovar, on
   onVerConversa: (i: ConvAiInsight) => void;
   stageName: (id: string | null) => string;
   disabled?: boolean;
+  mecanicoDisponivel?: boolean;
 }) {
   const venda = eixo === "venda";
   const Icone = venda ? TrendingUp : MoveRight;
   return (
     <div className="space-y-3 min-w-0">
-      <PainelModo eixo={eixo} valor={modo} onChange={onModo} disabled={disabled} />
+      <PainelModo eixo={eixo} valor={modo} onChange={onModo} disabled={disabled} mecanicoDisponivel={mecanicoDisponivel} />
 
       <h3 className={cn("text-xs font-black uppercase tracking-widest flex items-center gap-2 px-1 pt-1",
         venda ? "text-emerald-600" : "text-violet-600")}>
@@ -417,17 +433,23 @@ export function ConvAIReview() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         <ColunaEixo
           eixo="etapa"
-          modo={config?.stage_mode ?? "auto"}
-          onModo={m => save({ stage_mode: m })}
+          modo={config?.mechanical_mode === "active" ? "mecanico" : (config?.stage_mode ?? "auto")}
+          onModo={m => {
+            if (m === "mecanico") save({ stage_mode: "off", mechanical_mode: "active" });
+            else save({ stage_mode: m as ConvAiMode, mechanical_mode: "off" });
+          }}
+          mecanicoDisponivel={config?.mechanical_available === true}
           itens={pendingEtapas}
           disabled={desligada}
           vazioTexto={desligada
             ? "Ative a análise para a IA começar a ler as conversas."
-            : (config?.stage_mode ?? "auto") === "suggest"
-              ? "Nenhuma mudança de etapa aguardando."
-              : (config?.stage_mode === "auto"
-                ? "Está em Automático: a IA move os cards sozinha, e o histórico fica no final da página."
-                : "Está em Manual: a IA não mexe nos cards desta clínica.")}
+            : config?.mechanical_mode === "active"
+              ? "O motor mecânico não encontrou nenhuma etapa para sugerir por enquanto."
+              : (config?.stage_mode ?? "auto") === "suggest"
+                ? "Nenhuma mudança de etapa aguardando."
+                : (config?.stage_mode === "auto"
+                  ? "Está em Automático: a IA move os cards sozinha, e o histórico fica no final da página."
+                  : "Está em Manual: a IA não mexe nos cards desta clínica.")}
           busy={busy}
           onAprovar={aprovar}
           onRecusar={recusar}
@@ -437,7 +459,7 @@ export function ConvAIReview() {
         <ColunaEixo
           eixo="venda"
           modo={config?.sale_mode ?? "suggest"}
-          onModo={m => save({ sale_mode: m })}
+          onModo={m => save({ sale_mode: m as ConvAiMode })}
           itens={pendingVendas}
           disabled={desligada}
           vazioTexto={desligada

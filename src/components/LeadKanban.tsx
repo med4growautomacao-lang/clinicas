@@ -3420,7 +3420,7 @@ export function LeadKanban() {
                     <div className="p-6 space-y-5">
                       {/* Contexto e Resposta esperada saíram: nenhum motor lê esses
                           campos. O que a IA precisa saber do negócio mora no manual
-                          da clínica (Comercial › Sugestões IA), que é versionado. */}
+                          da clínica (Comercial › Auditoria), que é versionado. */}
                       <div className="grid grid-cols-2 gap-5">
                         <div className="space-y-2">
                           <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">

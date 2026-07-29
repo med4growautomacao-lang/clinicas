@@ -2687,7 +2687,7 @@ export function AISecretary() {
             { id: "leads", label: "CRM", show: true },
             { id: "dashboard", label: "Resultados", show: true },
             { id: "chats", label: "Conversas", show: true },
-            { id: "sugestoes", label: convAiPending.length ? `Sugestões IA (${convAiPending.length})` : "Sugestões IA", show: hasConvAi },
+            { id: "sugestoes", label: convAiPending.length ? `Auditoria (${convAiPending.length})` : "Auditoria", show: hasConvAi },
             { id: "followups", label: "Follow-up", show: hasFollowup },
             { id: "config", label: "Configurações IA", show: hasIA },
             { id: "sandbox", label: "Testar o Agente", show: hasIA },

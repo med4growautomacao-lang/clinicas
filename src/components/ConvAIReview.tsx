@@ -14,7 +14,7 @@ import {
 import { GanhoModal } from "./LeadKanban";
 import { LeadChat } from "./LeadChat";
 
-// Comercial › "Sugestões IA".
+// Comercial › "Auditoria" (fila de sugestões de etapa/venda, de IA e do motor mecânico).
 //
 // Duas COLUNAS independentes, uma por eixo (etapa e venda). Cada coluna tem o
 // seletor de 3 modos daquele eixo (Manual / Sugestão / Automático) e, embaixo, a
@@ -441,11 +441,13 @@ export function ConvAIReview() {
           }}
           mecanicoDisponivel={config?.mechanical_available === true}
           itens={pendingEtapas}
-          disabled={desligada}
-          vazioTexto={desligada
-            ? "Ative a análise para a IA começar a ler as conversas."
-            : config?.mechanical_mode === "active"
-              ? "O motor mecânico não encontrou nenhuma etapa para sugerir por enquanto."
+          // O mecânico funciona sem IA: se o plano libera o motor, a coluna de etapa
+          // não é travada pelo desligamento da Análise de IA.
+          disabled={desligada && config?.mechanical_available !== true}
+          vazioTexto={config?.mechanical_mode === "active"
+            ? "O motor mecânico não encontrou nenhuma etapa para sugerir por enquanto."
+            : desligada
+              ? "Ative a análise para a IA começar a ler as conversas."
               : (config?.stage_mode ?? "auto") === "suggest"
                 ? "Nenhuma mudança de etapa aguardando."
                 : (config?.stage_mode === "auto"

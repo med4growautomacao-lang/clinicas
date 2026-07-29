@@ -2,14 +2,14 @@ import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Loader2, Check, X, Sparkles, TrendingUp, MessageSquare, ChevronDown, ChevronRight,
-  ArrowRight, Quote, Brain, ShieldCheck, RefreshCw, History, Power,
+  ArrowRight, Quote, Brain, ShieldCheck, RefreshCw, History,
   Hand, ListChecks, Zap, MoveRight, Pencil, Cog,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { supabase } from "../lib/supabase";
 import {
   useConvAiInsights, useConvAiClinicConfig, useFunnelStages, useTickets,
-  useConversions, usePatients, ConvAiInsight, ConvAiMode, Lead,
+  useConversions, usePatients, ConvAiInsight, Lead,
 } from "../hooks/useSupabase";
 import { GanhoModal } from "./LeadKanban";
 import { LeadChat } from "./LeadChat";
@@ -46,79 +46,68 @@ function Confianca({ valor }: { valor: number | null }) {
   );
 }
 
-// Seletor de 3 estados, o mesmo espírito do kill-switch do Super Admin, só que
-// por clínica e por eixo (etapa e venda).
-const MODOS: Array<{ id: ConvAiMode; label: string; icon: typeof Hand; hint: (eixo: "etapa" | "venda") => string }> = [
-  { id: "off", label: "Manual", icon: Hand,
-    hint: (e) => e === "etapa" ? "A IA não move card nenhum." : "A IA não procura vendas." },
-  { id: "suggest", label: "Sugestão", icon: ListChecks,
-    hint: (e) => e === "etapa" ? "Toda mudança de etapa vai para a fila abaixo." : "As vendas vão para a fila abaixo." },
-  { id: "auto", label: "Automático", icon: Zap,
-    hint: (e) => e === "etapa" ? "A IA move o card sozinha." : "A IA fecha a venda sozinha e lança o faturamento." },
+// UM seletor de motor para a clínica inteira (etapa E venda). A leitura da IA é
+// uma só e é compartilhada pelos dois eixos, então escolher motor por eixo criava
+// combinações incoerentes (ex.: Mecânico na etapa + IA na venda paga a leitura e
+// não economiza). Um motor por clínica impede o incoerente.
+//   Manual      = ninguém mexe (você move etapa e marca venda na mão)
+//   Mecânico    = sem IA: padrões sugerem a etapa; venda na mão (plano sem IA, custo zero)
+//   Sugestão    = a IA lê e sugere etapa e venda para você aprovar
+//   Automático  = a IA move a etapa sozinha; venda vira sugestão (ou fecha sozinha, opt-in)
+type Motor = "manual" | "mecanico" | "sugestao" | "automatico";
+const MOTORES: Array<{ id: Motor; label: string; icon: typeof Hand; hint: string }> = [
+  { id: "manual", label: "Manual", icon: Hand,
+    hint: "Ninguém mexe: você move os cards e marca as vendas na mão." },
+  { id: "mecanico", label: "Mecânico", icon: Cog,
+    hint: "Sem IA e sem token: um motor de padrões de frase sugere a etapa. A venda você marca na mão." },
+  { id: "sugestao", label: "Sugestão", icon: ListChecks,
+    hint: "A IA lê a conversa e sugere etapa e venda para você aprovar na fila abaixo." },
+  { id: "automatico", label: "Automático", icon: Zap,
+    hint: "A IA move a etapa sozinha. A venda vira sugestão para você confirmar (ou fecha sozinha, se você ativar abaixo)." },
 ];
 
-// 4º modo, só na coluna de etapa e só onde o PLANO libera (mechanical_available):
-// em vez de a IA ler a conversa, um motor de padrões de frase sugere a etapa, de
-// graça. É um motor diferente, por isso é um modo à parte, não um sabor da IA.
-type UiMode = ConvAiMode | "mecanico";
-const MECANICO = {
-  id: "mecanico" as const, label: "Mecânico", icon: Cog,
-  hint: (_e: "etapa" | "venda") =>
-    "Sem IA: um motor de padrões de frase sugere a etapa, sem gastar token. Cada card vem marcado MECÂNICA.",
-};
-
-// Cada eixo é um PAINEL próprio: são decisões independentes (uma mexe no card,
-// a outra em faturamento), e misturá-las num bloco só confunde quem configura.
-function PainelModo({ eixo, valor, onChange, disabled, mecanicoDisponivel }: {
-  eixo: "etapa" | "venda";
-  valor: UiMode;
-  onChange: (m: UiMode) => void;
-  disabled?: boolean;
+// UM seletor de motor para a clínica inteira. Antes eram dois painéis (um por eixo);
+// como a leitura da IA é compartilhada, viraram uma escolha só. No Automático, uma
+// sub-opção decide se a venda fecha sozinha (risco de faturamento/CAPI) ou só sugere.
+function SeletorMotor({ motor, onMotor, mecanicoDisponivel, vendaAuto, onVendaAuto, disabled }: {
+  motor: Motor;
+  onMotor: (m: Motor) => void;
   mecanicoDisponivel?: boolean;
+  vendaAuto: boolean;
+  onVendaAuto: (v: boolean) => void;
+  disabled?: boolean;
 }) {
-  const etapa = eixo === "etapa";
-  const Icone = etapa ? MoveRight : TrendingUp;
-  // Mecânico entra logo depois do Manual (os dois "sem IA"), antes de Sugestão/Automático.
-  const opcoes = etapa && mecanicoDisponivel ? [MODOS[0], MECANICO, ...MODOS.slice(1)] : MODOS;
+  const opcoes = mecanicoDisponivel ? MOTORES : MOTORES.filter(m => m.id !== "mecanico");
+  const atual = opcoes.find(m => m.id === motor);
   return (
     <div className={cn(
-      "bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col",
+      "bg-white rounded-2xl border border-slate-200 shadow-sm p-4",
       disabled && "opacity-50 pointer-events-none"
     )}>
       <div className="flex items-start gap-2.5 mb-3">
-        <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
-          etapa ? "bg-violet-50 text-violet-600" : "bg-emerald-50 text-emerald-600")}>
-          <Icone className="w-4 h-4" />
+        <div className="w-8 h-8 rounded-lg bg-violet-50 text-violet-600 flex items-center justify-center shrink-0">
+          <Cog className="w-4 h-4" />
         </div>
         <div className="min-w-0">
-          <p className="text-sm font-black text-slate-900 leading-tight">
-            {etapa ? "Mudança de etapa" : "Detecção de venda"}
-          </p>
+          <p className="text-sm font-black text-slate-900 leading-tight">Motor de análise</p>
           <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
-            {etapa
-              ? "O que a IA faz quando a conversa indica que o card deveria estar em outra etapa."
-              : "O que a IA faz quando a conversa indica que o negócio foi fechado."}
+            Quem cuida das conversas desta clínica, na etapa e na venda. Uma escolha só, porque a leitura é compartilhada.
           </p>
         </div>
       </div>
 
-      <div className={cn("grid gap-1.5", opcoes.length === 4 ? "grid-cols-2" : "grid-cols-3")}>
+      <div className={cn("grid gap-1.5", opcoes.length >= 4 ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3")}>
         {opcoes.map(m => {
           const Icon = m.icon;
-          const sel = valor === m.id;
-          const perigo = !etapa && m.id === "auto";
+          const sel = motor === m.id;
           const mec = m.id === "mecanico";
           return (
-            <button key={m.id} type="button" onClick={() => onChange(m.id)}
+            <button key={m.id} type="button" onClick={() => onMotor(m.id)}
               className={cn("rounded-xl border px-2 py-2 text-center transition-all",
                 sel
                   ? mec
                     ? "border-sky-400 bg-sky-50 text-sky-800 ring-2 ring-sky-400/20"
-                    : perigo
-                      ? "border-amber-400 bg-amber-50 text-amber-800 ring-2 ring-amber-400/20"
-                      : etapa
-                        ? "border-violet-400 bg-violet-50 text-violet-800 ring-2 ring-violet-400/20"
-                        : "border-emerald-400 bg-emerald-50 text-emerald-800 ring-2 ring-emerald-400/20"
+                    : "border-violet-400 bg-violet-50 text-violet-800 ring-2 ring-violet-400/20"
                   : "border-slate-200 bg-white text-slate-500 hover:border-slate-300")}>
               <span className="flex items-center justify-center gap-1.5 text-xs font-bold">
                 <Icon className="w-3.5 h-3.5 shrink-0" /> {m.label}
@@ -128,14 +117,32 @@ function PainelModo({ eixo, valor, onChange, disabled, mecanicoDisponivel }: {
         })}
       </div>
 
-      <p className="text-[11px] text-slate-500 mt-2 leading-snug">{opcoes.find(m => m.id === valor)?.hint(eixo)}</p>
+      <p className="text-[11px] text-slate-500 mt-2 leading-snug">{atual?.hint}</p>
 
-      {!etapa && valor === "auto" && (
-        <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mt-2 leading-snug">
-          A IA lança a conversão e o faturamento sem passar por você, e a conversão vai para a Meta.
-          Cancelar a venda no CRM desfaz o lançamento, mas o evento já enviado à Meta não tem desfazer.
-          Sem valor identificado na conversa, a venda cai na fila em vez de ser lançada.
-        </p>
+      {motor === "automatico" && (
+        <div className="mt-3 border-t border-slate-100 pt-3">
+          <p className="text-[11px] font-bold text-slate-600 mb-1.5">E a venda, quando a IA detectar?</p>
+          <div className="grid grid-cols-2 gap-1.5">
+            <button type="button" onClick={() => onVendaAuto(false)}
+              className={cn("rounded-xl border px-2 py-2 text-xs font-bold transition-all",
+                !vendaAuto ? "border-emerald-400 bg-emerald-50 text-emerald-800 ring-2 ring-emerald-400/20"
+                  : "border-slate-200 bg-white text-slate-500 hover:border-slate-300")}>
+              Sugerir (você confirma)
+            </button>
+            <button type="button" onClick={() => onVendaAuto(true)}
+              className={cn("rounded-xl border px-2 py-2 text-xs font-bold transition-all",
+                vendaAuto ? "border-amber-400 bg-amber-50 text-amber-800 ring-2 ring-amber-400/20"
+                  : "border-slate-200 bg-white text-slate-500 hover:border-slate-300")}>
+              Fechar sozinha
+            </button>
+          </div>
+          {vendaAuto && (
+            <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mt-2 leading-snug">
+              A IA lança a conversão e o faturamento sem passar por você, e o evento vai para a Meta (que não tem desfazer).
+              Sem valor identificado na conversa, a venda cai na fila em vez de ser lançada.
+            </p>
+          )}
+        </div>
       )}
     </div>
   );
@@ -156,13 +163,10 @@ function Evidencias({ itens }: { itens: string[] | null }) {
   );
 }
 
-// Uma COLUNA por eixo: a configuração daquele eixo e, logo abaixo, a fila que
-// ela alimenta. Ler de cima para baixo responde "o que a IA faz aqui" e "o que
-// está esperando por mim" sem cruzar a tela.
-function ColunaEixo({ eixo, modo, onModo, itens, vazioTexto, busy, onAprovar, onRecusar, onVerConversa, stageName, disabled, mecanicoDisponivel }: {
+// A fila de um eixo (etapa ou venda): só a lista para auditar. O motor virou um
+// seletor único acima, então a coluna deixou de ter painel de modo próprio.
+function FilaConfirmar({ eixo, itens, vazioTexto, busy, onAprovar, onRecusar, onVerConversa, stageName }: {
   eixo: "etapa" | "venda";
-  modo: UiMode;
-  onModo: (m: UiMode) => void;
   itens: ConvAiInsight[];
   vazioTexto: string;
   busy: string | null;
@@ -170,14 +174,11 @@ function ColunaEixo({ eixo, modo, onModo, itens, vazioTexto, busy, onAprovar, on
   onRecusar: (i: ConvAiInsight) => void;
   onVerConversa: (i: ConvAiInsight) => void;
   stageName: (id: string | null) => string;
-  disabled?: boolean;
-  mecanicoDisponivel?: boolean;
 }) {
   const venda = eixo === "venda";
   const Icone = venda ? TrendingUp : MoveRight;
   return (
     <div className="space-y-3 min-w-0">
-      <PainelModo eixo={eixo} valor={modo} onChange={onModo} disabled={disabled} mecanicoDisponivel={mecanicoDisponivel} />
 
       <h3 className={cn("text-xs font-black uppercase tracking-widest flex items-center gap-2 px-1 pt-1",
         venda ? "text-emerald-600" : "text-violet-600")}>
@@ -280,24 +281,8 @@ export function ConvAIReview() {
     setTimeout(() => setAviso(null), ms);
   };
 
-  // Ligar a análise já monta o manual da clínica a partir das conversas que ela
-  // já tem, em vez de esperar o job da madrugada.
-  const handleToggle = async () => {
-    setAtivando(true);
-    const res = await setEnabled(!config?.enabled);
-    setAtivando(false);
-    if (!res.success) {
-      flash("info", res.error_code === "feature_off"
-        ? "Esta clínica ainda não tem a funcionalidade liberada. Fale com o suporte."
-        : "Não consegui alterar agora. Tente de novo.");
-      return;
-    }
-    if (res.enabled && res.montando_manual) {
-      flash("ok", "Análise ativada. Estou lendo as conversas já existentes para montar o manual desta clínica — leva um ou dois minutos. As primeiras sugestões chegam logo depois.", 12000);
-    } else if (res.enabled) {
-      flash("ok", "Análise ativada.");
-    }
-  };
+  // O liga/desliga da IA agora mora no próprio seletor de motor (aplicarMotor):
+  // Sugestão/Automático ligam a IA (e disparam o bootstrap do manual); Manual/Mecânico desligam.
 
   // Não espera o ciclo automático (5 min): enfileira e chama o worker na hora.
   const handleAnalisarAgora = async () => {
@@ -327,6 +312,36 @@ export function ConvAIReview() {
   const ganhoStage = stages.find(s => s.slug === "ganho");
   const pendingVendas = pending.filter(i => i.kind === "sale");
   const pendingEtapas = pending.filter(i => i.kind === "stage");
+
+  // Motor único da clínica, derivado da config (a leitura é compartilhada por etapa e venda).
+  const motor: Motor = config?.mechanical_mode === "active" ? "mecanico"
+    : config?.stage_mode === "auto" ? "automatico"
+    : config?.stage_mode === "suggest" ? "sugestao" : "manual";
+  const aplicarMotor = async (m: Motor) => {
+    const usaIA = m === "sugestao" || m === "automatico";
+    setAtivando(true);
+    // Liga/desliga a IA conforme o motor. Ligar dispara o bootstrap (monta o manual).
+    if (usaIA && !config?.enabled) {
+      const res = await setEnabled(true);
+      if (!res.success) {
+        setAtivando(false);
+        flash("info", res.error_code === "feature_off"
+          ? "Esta clínica ainda não tem a IA liberada. Fale com o suporte."
+          : "Não consegui ligar a IA agora. Tente de novo.");
+        return;
+      }
+      if (res.montando_manual) {
+        flash("ok", "IA ligada. Estou lendo as conversas para montar o manual desta clínica, leva um ou dois minutos.", 12000);
+      }
+    } else if (!usaIA && config?.enabled) {
+      await setEnabled(false);
+    }
+    if (m === "manual") await save({ stage_mode: "off", sale_mode: "off", mechanical_mode: "off" });
+    else if (m === "mecanico") await save({ stage_mode: "off", sale_mode: "off", mechanical_mode: "active" });
+    else if (m === "sugestao") await save({ stage_mode: "suggest", sale_mode: "suggest", mechanical_mode: "off" });
+    else await save({ stage_mode: "auto", sale_mode: config?.sale_mode === "auto" ? "auto" : "suggest", mechanical_mode: "off" });
+    setAtivando(false);
+  };
 
   const aprovar = async (ins: ConvAiInsight) => {
     // Venda: só abre o modal. A aprovação (que tira da fila) acontece no onCreate,
@@ -391,11 +406,11 @@ export function ConvAIReview() {
           </div>
           <div>
             <p className="text-sm font-black text-slate-900">
-              Análise de conversas {desligada ? "desligada" : "ativa"}
+              Análise por IA {desligada ? "desligada" : "ligada"}
             </p>
             <p className="text-xs text-slate-500 mt-0.5 max-w-2xl">
-              A IA lê as conversas desta clínica e decide duas coisas, configuradas separadamente
-              abaixo. Cada decisão sua afina o manual desta clínica.
+              Escolha o motor abaixo. Manual e Mecânico não usam IA (o Mecânico sugere de graça).
+              Sugestão e Automático ligam a IA, que lê as conversas e afina o manual desta clínica.
             </p>
           </div>
         </div>
@@ -408,15 +423,6 @@ export function ConvAIReview() {
               {analisando ? "Analisando…" : "Analisar agora"}
             </button>
           )}
-          <button
-            onClick={handleToggle}
-            disabled={ativando}
-            className={cn("flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-colors disabled:opacity-60",
-              desligada ? "bg-teal-600 hover:bg-teal-700 text-white" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50")}
-          >
-            {ativando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Power className="w-3.5 h-3.5" />}
-            {desligada ? "Ativar análise" : "Desativar"}
-          </button>
         </div>
       </div>
 
@@ -429,49 +435,44 @@ export function ConvAIReview() {
         </div>
       )}
 
-      {/* Duas colunas independentes: cada eixo com a sua configuração no topo e a
-          fila que ela alimenta logo abaixo. */}
+      {/* Um seletor de motor para a clínica inteira. */}
+      <SeletorMotor
+        motor={motor}
+        onMotor={aplicarMotor}
+        mecanicoDisponivel={config?.mechanical_available === true}
+        vendaAuto={config?.sale_mode === "auto"}
+        onVendaAuto={(v) => save({ sale_mode: v ? "auto" : "suggest" })}
+        disabled={ativando}
+      />
+
+      {/* As duas filas para auditar, embaixo do seletor. */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-        <ColunaEixo
+        <FilaConfirmar
           eixo="etapa"
-          modo={config?.mechanical_mode === "active" ? "mecanico" : (config?.stage_mode ?? "auto")}
-          onModo={m => {
-            if (m === "mecanico") save({ stage_mode: "off", mechanical_mode: "active" });
-            else save({ stage_mode: m as ConvAiMode, mechanical_mode: "off" });
-          }}
-          mecanicoDisponivel={config?.mechanical_available === true}
           itens={pendingEtapas}
-          // O mecânico funciona sem IA: se o plano libera o motor, a coluna de etapa
-          // não é travada pelo desligamento da Análise de IA.
-          disabled={desligada && config?.mechanical_available !== true}
-          vazioTexto={config?.mechanical_mode === "active"
+          vazioTexto={motor === "mecanico"
             ? "O motor mecânico não encontrou nenhuma etapa para sugerir por enquanto."
             : desligada
               ? "Ative a análise para a IA começar a ler as conversas."
-              : (config?.stage_mode ?? "auto") === "suggest"
+              : motor === "sugestao"
                 ? "Nenhuma mudança de etapa aguardando."
-                : (config?.stage_mode === "auto"
+                : motor === "automatico"
                   ? "Está em Automático: a IA move os cards sozinha, e o histórico fica no final da página."
-                  : "Está em Manual: a IA não mexe nos cards desta clínica.")}
+                  : "Está em Manual: ninguém sugere etapa nesta clínica."}
           busy={busy}
           onAprovar={aprovar}
           onRecusar={recusar}
           onVerConversa={verConversa}
           stageName={stageName}
         />
-        <ColunaEixo
+        <FilaConfirmar
           eixo="venda"
-          modo={config?.sale_mode ?? "suggest"}
-          onModo={m => save({ sale_mode: m as ConvAiMode })}
           itens={pendingVendas}
-          disabled={desligada}
-          vazioTexto={desligada
-            ? "Ative a análise para a IA começar a ler as conversas."
-            : (config?.sale_mode ?? "suggest") === "suggest"
-              ? "Nenhuma venda aguardando. Assim que a IA encontrar uma, ela aparece aqui."
-              : (config?.sale_mode === "auto"
-                ? "Está em Automático: a IA fecha as vendas sozinha e nada cai aqui."
-                : "Está em Manual: a IA não procura vendas nesta clínica.")}
+          vazioTexto={(motor === "mecanico" || motor === "manual")
+            ? "Neste motor a venda é marcada na mão (pelo Ganho, no Kanban)."
+            : desligada
+              ? "Ative a análise para a IA começar a ler as conversas."
+              : "Nenhuma venda aguardando. Assim que a IA encontrar uma, ela aparece aqui."}
           busy={busy}
           onAprovar={aprovar}
           onRecusar={recusar}

@@ -10,7 +10,9 @@
 // outcome vem pela via de PAR auto-evidente (pendente), não por esta.
 //
 // Uso manual: ?clinic=<uuid>&dry=1 (mostra o que gravaria sem gravar). Sem clinic: varre as
-// clínicas com o analista ligado. Consumo de IA registrado (FEATURE.analista). Toda falha vai
+// clínicas com o analista de IA ligado (enabled) OU com o motor mecânico ligado (shadow/active),
+// porque quem usa só o Mecânico fica com enabled=false e ainda precisa dos padrões minerados.
+// Consumo de IA registrado (FEATURE.analista). Toda falha vai
 // para a Central de Erros: perda silenciosa é o pecado capital deste sistema.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -319,7 +321,12 @@ serve(async (req) => {
     if (oneClinic) {
       alvos = [oneClinic];
     } else {
-      const { data } = await admin.from("conv_ai_clinic_config").select("clinic_id").eq("enabled", true);
+      // Analista de IA ligado (enabled) OU motor mecânico em shadow/active. Sem o segundo braço,
+      // clínica que escolhe só Mecânico (enabled=false) nunca teria padrões e a fila ficaria vazia.
+      const { data } = await admin
+        .from("conv_ai_clinic_config")
+        .select("clinic_id")
+        .or("enabled.eq.true,mechanical_mode.in.(shadow,active)");
       alvos = (data ?? []).map((c: any) => c.clinic_id);
     }
 

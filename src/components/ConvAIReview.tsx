@@ -69,15 +69,17 @@ const MOTORES: Array<{ id: Motor; label: string; icon: typeof Hand; hint: string
 // UM seletor de motor para a clínica inteira. Antes eram dois painéis (um por eixo);
 // como a leitura da IA é compartilhada, viraram uma escolha só. No Automático, uma
 // sub-opção decide se a venda fecha sozinha (risco de faturamento/CAPI) ou só sugere.
-function SeletorMotor({ motor, onMotor, mecanicoDisponivel, vendaAuto, onVendaAuto, disabled }: {
+function SeletorMotor({ motor, onMotor, iaDisponivel, vendaAuto, onVendaAuto, disabled }: {
   motor: Motor;
   onMotor: (m: Motor) => void;
-  mecanicoDisponivel?: boolean;
+  iaDisponivel?: boolean;
   vendaAuto: boolean;
   onVendaAuto: (v: boolean) => void;
   disabled?: boolean;
 }) {
-  const opcoes = mecanicoDisponivel ? MOTORES : MOTORES.filter(m => m.id !== "mecanico");
+  // Manual e Mecânico sempre (o Mecânico é grátis, padrão pra todas). Sugestão/Automático
+  // só onde o cliente tem a feature "Sugestões da IA" (feature_conv_ai).
+  const opcoes = MOTORES.filter(m => (m.id === "sugestao" || m.id === "automatico") ? iaDisponivel : true);
   const atual = opcoes.find(m => m.id === motor);
   return (
     <div className={cn(
@@ -257,7 +259,7 @@ function FilaConfirmar({ eixo, itens, vazioTexto, busy, onAprovar, onRecusar, on
   );
 }
 
-export function ConvAIReview() {
+export function ConvAIReview({ iaDisponivel = true }: { iaDisponivel?: boolean }) {
   const { pending, recentStages, loading, decide, refetch } = useConvAiInsights();
   const { config, current, versions, loading: cfgLoading, save, rollback, editar, setEnabled, analisarAgora } = useConvAiClinicConfig();
   const { data: stages } = useFunnelStages();
@@ -394,7 +396,8 @@ export function ConvAIReview() {
 
   return (
     <div className="h-full overflow-y-auto custom-scrollbar pr-1 space-y-5 pb-10">
-      {/* Estado do analista nesta clínica */}
+      {/* Cabeçalho da IA: só para quem tem o plano "Sugestões da IA". O Mecânico não usa IA. */}
+      {iaDisponivel && (
       <div className={cn(
         "rounded-2xl border p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3",
         desligada ? "bg-slate-50 border-slate-200" : "bg-teal-50/40 border-teal-200"
@@ -425,6 +428,7 @@ export function ConvAIReview() {
           )}
         </div>
       </div>
+      )}
 
       {aviso && (
         <div className={cn("flex items-start gap-2 px-3 py-2.5 rounded-xl text-xs font-medium border",
@@ -439,7 +443,7 @@ export function ConvAIReview() {
       <SeletorMotor
         motor={motor}
         onMotor={aplicarMotor}
-        mecanicoDisponivel={config?.mechanical_available === true}
+        iaDisponivel={iaDisponivel}
         vendaAuto={config?.sale_mode === "auto"}
         onVendaAuto={(v) => save({ sale_mode: v ? "auto" : "suggest" })}
         disabled={ativando}
@@ -452,7 +456,7 @@ export function ConvAIReview() {
           itens={pendingEtapas}
           vazioTexto={motor === "mecanico"
             ? "O motor mecânico não encontrou nenhuma etapa para sugerir por enquanto."
-            : desligada
+            : (desligada && iaDisponivel)
               ? "Ative a análise para a IA começar a ler as conversas."
               : motor === "sugestao"
                 ? "Nenhuma mudança de etapa aguardando."
@@ -481,6 +485,8 @@ export function ConvAIReview() {
         />
       </div>
 
+      {/* Histórico de movimentos + manual: seções de IA, só com o plano "Sugestões da IA". */}
+      {iaDisponivel && (<>
       {/* Auditoria: o que a IA moveu sozinha */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm">
         <button onClick={() => setShowAudit(v => !v)} className="w-full flex items-center justify-between p-4">
@@ -611,6 +617,7 @@ export function ConvAIReview() {
           </div>
         )}
       </div>
+      </>)}
 
       {/* Auditoria manual: a mesma conversa que o Kanban abre */}
       <AnimatePresence>

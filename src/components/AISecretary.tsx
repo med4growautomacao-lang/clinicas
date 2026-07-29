@@ -2630,10 +2630,8 @@ export function AISecretary() {
   // A aba fica no localStorage: se a funcionalidade for desligada enquanto ela
   // estava aberta, cai para Conversas em vez de deixar a tela em branco.
   useEffect(() => {
-    if (activeTab === "sugestoes" && !hasConvAi) {
-      setActiveTab("chats");
-      localStorage.setItem('aiSecretaryTab', 'chats');
-    }
+    // A Auditoria agora aparece para TODAS (o Mecânico é padrão, não depende de plano de IA),
+    // então não redireciona mais quando falta o feature_conv_ai.
     // As abas de IA (config/sandbox) somem quando a IA e desligada; sem isto a area de conteudo
     // ficaria em branco com a aba salva no localStorage.
     if ((activeTab === "sandbox" || activeTab === "config") && !hasIA) {
@@ -2687,7 +2685,7 @@ export function AISecretary() {
             { id: "leads", label: "CRM", show: true },
             { id: "dashboard", label: "Resultados", show: true },
             { id: "chats", label: "Conversas", show: true },
-            { id: "sugestoes", label: convAiPending.length ? `Auditoria (${convAiPending.length})` : "Auditoria", show: hasConvAi },
+            { id: "sugestoes", label: convAiPending.length ? `Auditoria (${convAiPending.length})` : "Auditoria", show: true },
             { id: "followups", label: "Follow-up", show: hasFollowup },
             { id: "config", label: "Configurações IA", show: hasIA },
             { id: "sandbox", label: "Testar o Agente", show: hasIA },
@@ -2720,7 +2718,7 @@ export function AISecretary() {
           {activeTab === "chats" && <ChatsView />}
           {activeTab === "leads" && <LeadKanban />}
           {activeTab === "dashboard" && <ComercialDashboard />}
-          {activeTab === "sugestoes" && hasConvAi && <ConvAIReview />}
+          {activeTab === "sugestoes" && <ConvAIReview iaDisponivel={hasConvAi} />}
           {activeTab === "followups" && <AllFollowupsView />}
 
           {activeTab === "config" && <ConfigView />}

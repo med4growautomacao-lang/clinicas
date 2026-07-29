@@ -239,9 +239,11 @@ function ConfirmationsView() {
   };
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 h-full">
+    // Sem h-full: dentro do container rolável, height:100% congela o grid na altura visível e o
+    // Card (overflow-hidden) corta o resto, sem o scroll de fora nunca crescer.
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
       <ValidationModal
-        isOpen={showValidation} 
+        isOpen={showValidation}
         onClose={() => setShowValidation(false)} 
         missingTags={missingTags} 
       />
@@ -569,7 +571,8 @@ function RemindersView() {
   };
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 h-full">
+    // Sem h-full: mesma armadilha da Confirmação (grid preso à altura visível + Card overflow-hidden).
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
       <ValidationModal isOpen={showValidation} onClose={() => setShowValidation(false)} missingTags={missingTags} />
       <Card className="border border-slate-200 shadow-sm relative overflow-hidden">
         <div className="h-1.5 bg-teal-600 absolute top-0 left-0 right-0" />

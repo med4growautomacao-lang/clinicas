@@ -4,7 +4,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.7.1";
 import { Client as PgClient } from "https://deno.land/x/postgres@v0.19.3/mod.ts";
-import { registrarUsoIAAsync, FEATURE } from "../_shared/llm-usage.ts";
+import { registrarUsoIA, FEATURE } from "../_shared/llm-usage.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -184,7 +184,7 @@ serve(async (req) => {
       if (!resp.ok) {
         const errText = await resp.text();
         console.error("Anthropic error", resp.status, errText);
-        await registrarUsoIAAsync(admin, {
+        registrarUsoIA(admin, {
           feature: FEATURE.assistente, scope: "assistente", provider: "anthropic", model,
           clinicId, ok: false, error: `anthropic ${resp.status}: ${errText.slice(0, 200)}`,
           durationMs: Date.now() - tPasso,
@@ -197,7 +197,7 @@ serve(async (req) => {
       // e volta a pensar), entao cada PASSO e registrado. Contar so a pergunta subestimaria o gasto.
       // Aguardado porque o passo FINAL do loop tambem termina em `return` (linha do end_turn):
       // solto, o registro morreria com o isolate junto com a resposta.
-      await registrarUsoIAAsync(admin, {
+      registrarUsoIA(admin, {
         feature: FEATURE.assistente, scope: "assistente", provider: "anthropic", model, clinicId,
         tokensIn: data?.usage?.input_tokens ?? 0, tokensOut: data?.usage?.output_tokens ?? 0,
         ok: true, durationMs: Date.now() - tPasso,
@@ -247,14 +247,14 @@ serve(async (req) => {
     // justamente a chamada de FECHAMENTO, que carrega a conversa inteira e costuma ser a maior.
     if (finalResp.ok) {
       const fd = await finalResp.json();
-      await registrarUsoIAAsync(admin, {
+      registrarUsoIA(admin, {
         feature: FEATURE.assistente, scope: "assistente-fechamento", provider: "anthropic", model, clinicId,
         tokensIn: fd?.usage?.input_tokens ?? 0, tokensOut: fd?.usage?.output_tokens ?? 0, ok: true,
       });
       const t = (fd.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n").trim();
       if (t) return jsonResponse({ reply: t });
     } else {
-      await registrarUsoIAAsync(admin, {
+      registrarUsoIA(admin, {
         feature: FEATURE.assistente, scope: "assistente-fechamento", provider: "anthropic", model, clinicId,
         ok: false, error: `anthropic ${finalResp.status}`,
       });

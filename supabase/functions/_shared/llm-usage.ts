@@ -58,7 +58,13 @@ export function limparSegredo(msg: string | null | undefined): string | null {
  * Nao retorna promessa que valha esperar — chame com `void`.
  */
 export function registrarUsoIA(supabase: any, u: UsoIA): void {
-  void registrarUsoIAAsync(supabase, u);
+  // `waitUntil` (padrao ja usado em ai-agent/ai-agent-worker/ai-sandbox/ai-scheduler) mantem a
+  // gravacao viva DEPOIS que a edge devolve a resposta, sem cobrar latencia de quem esta esperando.
+  // Sem ele restavam duas opcoes ruins: `await` (soma uma ida ao banco por passo — no assistente sao
+  // ate 15 por pergunta) ou soltar (o isolate morre no `return` e some justamente a chamada final,
+  // que carrega a conversa inteira e e a mais cara).
+  const p = registrarUsoIAAsync(supabase, u);
+  try { (globalThis as any).EdgeRuntime?.waitUntil?.(p); } catch { /* fora da edge: segue solto */ }
 }
 
 /**

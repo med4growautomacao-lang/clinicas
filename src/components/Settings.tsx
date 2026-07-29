@@ -287,12 +287,22 @@ export function Settings() {
     const isVendedor = userRole === 'vendedor';
     const restrictedIntegrations = isSecretaria || isVendedor;
 
+    // Cliente que não contratou o canal (clinics.has_whatsapp = false) não vê a aba nem
+    // consegue conectar. Ausente = tem (default do banco), então nada muda para os demais.
+    const hasWhatsapp = clinic?.has_whatsapp !== false;
+    const intTabs = useMemo(() => ([
+        ...(hasWhatsapp ? ['whatsapp' as const] : []),
+        ...(restrictedIntegrations ? [] : ['meta' as const, 'google' as const, 'external' as const]),
+    ]), [hasWhatsapp, restrictedIntegrations]);
+
+    // Aba escolhida some (role restrito, ou canal não contratado) → cai na primeira válida.
+    // Sem nenhuma válida, deixa como está: o corpo abaixo não renderiza nada e a tela
+    // mostra o aviso de "nenhuma integração".
     useEffect(() => {
-        if (restrictedIntegrations && (activeIntTab === 'meta' || activeIntTab === 'google' || activeIntTab === 'external')) {
-            setActiveIntTab('whatsapp');
-            localStorage.setItem('settingsIntTab', 'whatsapp');
-        }
-    }, [restrictedIntegrations, activeIntTab]);
+        if (intTabs.length === 0 || intTabs.includes(activeIntTab)) return;
+        setActiveIntTab(intTabs[0]);
+        localStorage.setItem('settingsIntTab', intTabs[0]);
+    }, [intTabs, activeIntTab]);
 
     // "Produtos" deixou de ser aba (virou card dentro de "Dados da Clínica").
     // Redireciona qualquer settingsTab='products' antigo do localStorage.
@@ -432,8 +442,9 @@ export function Settings() {
                 </div>
             </div>
 
-            {activeTab === "integrations" && (
+            {activeTab === "integrations" && intTabs.length > 0 && (
                 <div className="flex bg-slate-50 p-1 rounded-xl w-fit shadow-sm border border-slate-200/60">
+                    {hasWhatsapp && (
                     <button
                         onClick={() => { setActiveIntTab('whatsapp'); localStorage.setItem('settingsIntTab', 'whatsapp'); }}
                         className={cn(
@@ -446,6 +457,7 @@ export function Settings() {
                         <MessageCircle className={cn("w-4 h-4", activeIntTab === 'whatsapp' ? "text-white" : "text-emerald-500")} />
                         WhatsApp
                     </button>
+                    )}
                     {!restrictedIntegrations && (
                         <button
                             onClick={() => { setActiveIntTab('meta'); localStorage.setItem('settingsIntTab', 'meta'); }}
@@ -653,7 +665,16 @@ export function Settings() {
                             </Card>}
                             </>
                         )}
-                        {activeTab === "integrations" && (
+                        {activeTab === "integrations" && intTabs.length === 0 && (
+                            <Card className="border border-slate-200 shadow-sm max-w-4xl mx-auto">
+                                <CardContent className="py-10 text-center">
+                                    <Plug className="w-8 h-8 text-slate-200 mx-auto mb-3" />
+                                    <p className="text-sm font-semibold text-slate-600">Nenhuma integração disponível</p>
+                                    <p className="text-xs text-slate-400 mt-1">Fale com o suporte para contratar os canais de captação.</p>
+                                </CardContent>
+                            </Card>
+                        )}
+                        {activeTab === "integrations" && intTabs.length > 0 && (
                             <IntegrationSettings
                                 data={localWA}
                                 onChange={(updates) => setLocalWA(prev => ({ ...prev, ...updates }))}
@@ -2197,7 +2218,10 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
     return (
         <div className="max-w-4xl mx-auto space-y-6">
 
-            {activeIntTab === 'whatsapp' && (
+            {/* clinic?.has_whatsapp: guarda de renderização (a aba já some lá em cima; isto evita
+                o card piscar no render anterior ao redirecionamento de aba). O bloqueio de fato
+                é no whatsapp-orchestrator, que recusa o 'start' — inclusive pelo link público. */}
+            {activeIntTab === 'whatsapp' && clinic?.has_whatsapp !== false && (
                 <div className="space-y-6">
                     <Card className="border border-emerald-200 shadow-sm bg-white overflow-hidden">
                         <CardHeader className="bg-emerald-100 border-b border-emerald-200 pb-6 px-8">

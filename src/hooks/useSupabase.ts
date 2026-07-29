@@ -88,16 +88,9 @@ export interface Doctor {
   is_active: boolean;
   created_at: string;
   working_hours?: any;
-  /** @deprecated use ConsultationType */
+  /** Fallback do motor quando o tipo de consulta nao define duracao. NAO e letra morta:
+   *  book_appointment, reschedule_appointment e trg_appointment_inherit_doctor_duration leem daqui. */
   consultation_duration?: number;
-  /** @deprecated use ConsultationType */
-  slot_step?: number | null;
-  /** @deprecated use ConsultationType */
-  min_notice_minutes?: number;
-  /** @deprecated use ConsultationType */
-  buffer_before_minutes?: number;
-  /** @deprecated use ConsultationType */
-  buffer_after_minutes?: number;
   days_off?: string[];
   blocked_times?: { date: string; start: string; end: string }[];
 }
@@ -1932,6 +1925,9 @@ export interface Clinic {
   google_status?: 'none' | 'inactive' | 'active';
   site_status?: 'none' | 'inactive' | 'active';
   forms_status?: 'none' | 'inactive' | 'active';
+  // WhatsApp não tem status manual: o ativo/inativo é real (whatsapp_instances.status).
+  // Aqui só existe "tem / não tem" — false esconde o canal e bloqueia a conexão.
+  has_whatsapp?: boolean;
   quote_use_products?: boolean;
   quote_use_protocols?: boolean;
   quote_show_total?: boolean;  // mostra/envia o valor total da soma no orçamento (default true)

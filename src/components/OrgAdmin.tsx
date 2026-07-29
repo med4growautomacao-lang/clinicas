@@ -31,6 +31,9 @@ interface Clinic {
   google_status?: ChannelStatus;
   site_status?: ChannelStatus;
   forms_status?: ChannelStatus;
+  // WhatsApp não tem status manual: quem diz "ativo" é a conexão real (whatsapp_status,
+  // vindo de whatsapp_instances). Aqui só marcamos se o cliente TEM o canal conosco.
+  has_whatsapp?: boolean | null;
   is_active?: boolean | null;
 }
 
@@ -123,7 +126,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
 
   // Modal: nova clínica
   const [showClinicModal, setShowClinicModal] = useState(false);
-  const [clinicForm, setClinicForm] = useState<{ name: string; plan: string; category: string; ownerName: string; ownerEmail: string; ownerPassword: string; feature_followup: boolean; feature_ia: boolean; feature_chat_send: boolean; feature_conv_ai: boolean; meta_status: ChannelStatus; google_status: ChannelStatus; site_status: ChannelStatus; forms_status: ChannelStatus; trafficManagerId: string }>({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '', feature_followup: true, feature_ia: true, feature_chat_send: false, feature_conv_ai: false, meta_status: 'none', google_status: 'none', site_status: 'none', forms_status: 'none', trafficManagerId: '' });
+  const [clinicForm, setClinicForm] = useState<{ name: string; plan: string; category: string; ownerName: string; ownerEmail: string; ownerPassword: string; feature_followup: boolean; feature_ia: boolean; feature_chat_send: boolean; feature_conv_ai: boolean; meta_status: ChannelStatus; google_status: ChannelStatus; site_status: ChannelStatus; forms_status: ChannelStatus; has_whatsapp: boolean; trafficManagerId: string }>({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '', feature_followup: true, feature_ia: true, feature_chat_send: false, feature_conv_ai: false, meta_status: 'none', google_status: 'none', site_status: 'none', forms_status: 'none', has_whatsapp: true, trafficManagerId: '' });
   const [categoryFilter, setCategoryFilter] = useState('');
   const [memberFilters, setMemberFilters] = useState<Record<string, string>>({});
   const [inactiveFilter, setInactiveFilter] = useState<string>(''); // '' | 'any' | 'meta' | 'google' | 'site' | 'forms' | 'whatsapp'
@@ -187,7 +190,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
     if (canSeeAll) {
       const { data } = await supabase
         .from("clinics")
-        .select("id, name, plan, logo_url, organization_id, category, features, meta_status, google_status, site_status, forms_status, is_active")
+        .select("id, name, plan, logo_url, organization_id, category, features, meta_status, google_status, site_status, forms_status, has_whatsapp, is_active")
         .eq("organization_id", profile.organization_id)
         .order("name");
       clinicsData = data || [];
@@ -201,7 +204,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
       if (assignedIds.length > 0) {
         const { data } = await supabase
           .from("clinics")
-          .select("id, name, plan, logo_url, organization_id, category, features, meta_status, google_status, site_status, forms_status, is_active")
+          .select("id, name, plan, logo_url, organization_id, category, features, meta_status, google_status, site_status, forms_status, has_whatsapp, is_active")
           .in("id", assignedIds)
           .order("name");
         clinicsData = data || [];
@@ -345,7 +348,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
     setClinicSaving(false);
     if (error) { setClinicError(error.message); return; }
     setShowClinicModal(false);
-    setClinicForm({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '', feature_followup: true, feature_ia: true, feature_chat_send: false, feature_conv_ai: false, meta_status: 'none', google_status: 'none', site_status: 'none', forms_status: 'none', trafficManagerId: '' });
+    setClinicForm({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '', feature_followup: true, feature_ia: true, feature_chat_send: false, feature_conv_ai: false, meta_status: 'none', google_status: 'none', site_status: 'none', forms_status: 'none', has_whatsapp: true, trafficManagerId: '' });
     fetchClinics();
   };
 
@@ -364,6 +367,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
         google_status: clinicForm.google_status,
         site_status: clinicForm.site_status,
         forms_status: clinicForm.forms_status,
+        has_whatsapp: clinicForm.has_whatsapp,
       })
       .eq('id', editClinicTarget.id);
 
@@ -387,7 +391,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
     setClinicSaving(false);
     if (error) { setClinicError(error.message); return; }
     setEditClinicTarget(null);
-    setClinicForm({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '', feature_followup: true, feature_ia: true, feature_chat_send: false, feature_conv_ai: false, meta_status: 'none', google_status: 'none', site_status: 'none', forms_status: 'none', trafficManagerId: '' });
+    setClinicForm({ name: '', plan: 'free', category: '', ownerName: '', ownerEmail: '', ownerPassword: '', feature_followup: true, feature_ia: true, feature_chat_send: false, feature_conv_ai: false, meta_status: 'none', google_status: 'none', site_status: 'none', forms_status: 'none', has_whatsapp: true, trafficManagerId: '' });
     fetchClinics();
   };
 
@@ -682,9 +686,12 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                 onSelect={v => setCategoryFilter(v)}
               />
               {(() => {
+                // Cliente sem o canal contratado (has_whatsapp = false) nunca conta como
+                // "WhatsApp inativo": ele não está fora do ar, ele não tem WhatsApp conosco.
+                const waCaido = (c: Clinic) => c.has_whatsapp !== false && c.whatsapp_status !== 'connected';
                 const inactiveCounts = {
-                  any:      clinics.filter(c => c.whatsapp_status !== 'connected' || c.meta_status === 'inactive' || c.google_status === 'inactive' || c.site_status === 'inactive' || c.forms_status === 'inactive').length,
-                  whatsapp: clinics.filter(c => c.whatsapp_status !== 'connected').length,
+                  any:      clinics.filter(c => waCaido(c) || c.meta_status === 'inactive' || c.google_status === 'inactive' || c.site_status === 'inactive' || c.forms_status === 'inactive').length,
+                  whatsapp: clinics.filter(waCaido).length,
                   meta:     clinics.filter(c => c.meta_status === 'inactive').length,
                   google:   clinics.filter(c => c.google_status === 'inactive').length,
                   site:     clinics.filter(c => c.site_status === 'inactive').length,
@@ -794,8 +801,8 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                       (statusFilter === 'active'   && c.is_active !== false) ||
                       (statusFilter === 'disabled' && c.is_active === false)) &&
                     (inactiveFilter === '' ||
-                      (inactiveFilter === 'any'      && (c.whatsapp_status !== 'connected' || c.meta_status === 'inactive' || c.google_status === 'inactive' || c.site_status === 'inactive' || c.forms_status === 'inactive')) ||
-                      (inactiveFilter === 'whatsapp' && c.whatsapp_status !== 'connected') ||
+                      (inactiveFilter === 'any'      && ((c.has_whatsapp !== false && c.whatsapp_status !== 'connected') || c.meta_status === 'inactive' || c.google_status === 'inactive' || c.site_status === 'inactive' || c.forms_status === 'inactive')) ||
+                      (inactiveFilter === 'whatsapp' && c.has_whatsapp !== false && c.whatsapp_status !== 'connected') ||
                       (inactiveFilter === 'meta'     && c.meta_status === 'inactive') ||
                       (inactiveFilter === 'google'   && c.google_status === 'inactive') ||
                       (inactiveFilter === 'site'     && c.site_status === 'inactive') ||
@@ -805,7 +812,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                     const isOutro = clinic.category === 'outro';
                     const TypeIcon = isOutro ? Building : Stethoscope;
                     const channelsAll = [
-                      { key: 'whatsapp', label: 'WhatsApp', img: WhatsappLogo, has: true,                                                       active: clinic.whatsapp_status === 'connected' },
+                      { key: 'whatsapp', label: 'WhatsApp', img: WhatsappLogo, has: clinic.has_whatsapp !== false,                              active: clinic.whatsapp_status === 'connected' },
                       { key: 'meta',     label: 'Meta',     img: MetaLogo,     has: !!clinic.meta_status   && clinic.meta_status   !== 'none', active: clinic.meta_status   === 'active' },
                       { key: 'google',   label: 'Google',   img: GoogleLogo,   has: !!clinic.google_status && clinic.google_status !== 'none', active: clinic.google_status === 'active' },
                       { key: 'site',     label: 'Site',     Icon: Globe,       iconCls: 'text-teal-600',   bgCls: 'bg-teal-50 border-teal-100',     has: !!clinic.site_status   && clinic.site_status   !== 'none', active: clinic.site_status   === 'active' },
@@ -1070,6 +1077,7 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                                           google_status: clinic.google_status || 'none',
                                           site_status: clinic.site_status || 'none',
                                           forms_status: clinic.forms_status || 'none',
+                                          has_whatsapp: clinic.has_whatsapp !== false,
                                           trafficManagerId: trafficMember?.org_user_id || '',
                                         });
                                         setOpenMenuId(null);
@@ -1486,6 +1494,53 @@ export function OrgAdmin({ onEnterClinic }: OrgAdminProps) {
                     <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Integrações</p>
                     <p className="text-[10px] text-slate-400 mb-3">Indique quais integrações este cliente possui e quais estão ativas no momento.</p>
                     <div className="space-y-2">
+                      {/* WhatsApp é o único que NÃO tem ativo/inativo na mão: o estado real vem da
+                          conexão do aparelho (whatsapp_instances.status), em tempo real. Marcar
+                          "Não tem" esconde o canal do painel, tira o cliente do alerta de queda e
+                          bloqueia a conexão (a recusa de fato é no whatsapp-orchestrator). */}
+                      <div className="py-2 px-3 rounded-xl bg-slate-50 border border-slate-100">
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <div>
+                            <p className="text-xs font-bold text-slate-700">WhatsApp</p>
+                            <p className="text-[10px] text-slate-400">Atendimento pelo número do cliente</p>
+                          </div>
+                          {clinicForm.has_whatsapp && (
+                            <span className={cn(
+                              "px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider shrink-0",
+                              editClinicTarget.whatsapp_status === 'connected' ? 'bg-emerald-100 text-emerald-700' :
+                              editClinicTarget.whatsapp_status === 'connecting' ? 'bg-amber-100 text-amber-700' :
+                              'bg-slate-200 text-slate-600'
+                            )}>
+                              {editClinicTarget.whatsapp_status === 'connected' ? 'Conectado'
+                                : editClinicTarget.whatsapp_status === 'connecting' ? 'Conectando'
+                                : 'Desconectado'}
+                            </span>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {([
+                            { v: false, label: 'Não tem', cls: 'bg-slate-200 text-slate-600' },
+                            { v: true, label: 'Tem', cls: 'bg-emerald-600 text-white' },
+                          ] as const).map((o) => (
+                            <button
+                              key={String(o.v)}
+                              type="button"
+                              onClick={() => setClinicForm(f => ({ ...f, has_whatsapp: o.v }))}
+                              className={cn(
+                                "py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-wider transition-all",
+                                clinicForm.has_whatsapp === o.v ? o.cls + ' border-transparent shadow-sm' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+                              )}
+                            >
+                              {o.label}
+                            </button>
+                          ))}
+                        </div>
+                        <p className="text-[9px] text-slate-400 mt-1.5 leading-snug">
+                          {clinicForm.has_whatsapp
+                            ? 'Conectado ou não é a conexão real do aparelho, não se marca aqui.'
+                            : 'O canal some do painel do cliente, ele não consegue conectar e não recebe o aviso de reconexão.'}
+                        </p>
+                      </div>
                       {([
                         { key: 'meta_status', label: 'Meta Ads', desc: 'Facebook / Instagram Ads' },
                         { key: 'google_status', label: 'Google Ads', desc: 'Campanhas no Google' },

@@ -349,7 +349,31 @@ function isWithinCooldown(row: InstanceRow): boolean {
   return Date.now() - last < COOLDOWN_SECONDS * 1000;
 }
 
+// Cliente que nao contratou o canal (clinics.has_whatsapp = false) nao conecta.
+// Mora AQUI e nao na tela porque o link publico /connect?token=... nao passa por tela
+// nenhuma: esconder o botao no app deixaria o link antigo funcionando.
+// Fail-open de proposito: coluna ausente, erro de leitura ou instancia de ORG (row.clinic_id
+// nulo, o numero da agencia) seguem conectando. So o false explicito bloqueia.
+async function clinicHasWhatsapp(supa: SupabaseClient, clinic_id: string | null): Promise<boolean> {
+  if (!clinic_id) return true;
+  const { data, error } = await supa
+    .from('clinics')
+    .select('has_whatsapp')
+    .eq('id', clinic_id)
+    .maybeSingle();
+  if (error) return true;
+  return (data as { has_whatsapp?: boolean } | null)?.has_whatsapp !== false;
+}
+
 async function handleStart(supa: SupabaseClient, row: InstanceRow, source: string): Promise<Response> {
+  if (!(await clinicHasWhatsapp(supa, row.clinic_id))) {
+    await logEvent(supa, {
+      clinic_id: row.clinic_id, org_id: row.org_id, instance_id: row.id, source,
+      event_type: 'blocked', payload: { reason: 'clinic_has_whatsapp_false' },
+    });
+    return json({ success: false, error: 'whatsapp_nao_contratado', message: 'Este cliente não possui o canal WhatsApp.' }, 403);
+  }
+
   if (row.status === 'connected') {
     return json({ success: true, status: 'connected', message: 'ja conectado' });
   }

@@ -8,11 +8,14 @@ interface Props {
 
 // Faixa de aviso global quando a instancia WhatsApp da clinica ativa esta
 // desconectada. Aparece em todas as telas autenticadas, exceto para roles
-// que nao operam WhatsApp (medicos).
+// que nao operam WhatsApp (medicos) e para clientes que nao tem o canal.
 export function WhatsAppStatusBanner({ onReconnect, userRole }: Props) {
-  const { status, loading } = useWhatsappStatus();
+  const { status, hasWhatsapp, loading } = useWhatsappStatus();
 
   if (loading) return null;
+  // Cliente sem o canal contratado nunca esteve conectado: cobrar reconexao dele
+  // seria pedir para consertar algo que ele nao comprou.
+  if (!hasWhatsapp) return null;
   if (status !== 'disconnected') return null;
   if (userRole === 'medico') return null;
 

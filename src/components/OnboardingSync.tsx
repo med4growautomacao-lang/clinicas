@@ -264,16 +264,20 @@ function positionFor(offset: number) {
   return { x: 710, rotateY: -46, scale: 0.62, opacity: 0.12, zIndex: 10 };
 }
 
-// Puxa 90 dias de histórico em segundo plano (deep-sync) + barrinha de progresso.
-function DeepSyncProgress({ clinicId }: { clinicId: string }) {
+// Histórico do período em segundo plano (deep-sync) + barrinha de progresso. O disparo é
+// AUTOMÁTICO (no refazer e após o import); o botão fica só de fallback/repuxar.
+function DeepSyncProgress({ clinicId, onProgress }: { clinicId: string; onProgress?: () => void }) {
   const showToast = useToast();
   const [st, setSt] = useState<any>(null);
   const [starting, setStarting] = useState(false);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const onProgressRef = useRef(onProgress);
+  useEffect(() => { onProgressRef.current = onProgress; }, [onProgress]);
 
   const poll = useCallback(async () => {
     const { data } = await supabase.rpc('onboarding_deep_sync_status', { p_clinic_id: clinicId });
     setSt(data);
+    onProgressRef.current?.();
   }, [clinicId]);
 
   useEffect(() => { poll(); return () => { if (timer.current) { clearInterval(timer.current); timer.current = null; } }; }, [poll]);
@@ -300,7 +304,7 @@ function DeepSyncProgress({ clinicId }: { clinicId: string }) {
       {running ? (
         <>
           <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5"><History className="w-3.5 h-3.5 text-teal-600" /> Puxando histórico de 90 dias…</span>
+            <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5"><History className="w-3.5 h-3.5 text-teal-600" /> Puxando o histórico do período…</span>
             <span className="text-xs font-black text-teal-700">{st.percent}%</span>
           </div>
           <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
@@ -312,7 +316,7 @@ function DeepSyncProgress({ clinicId }: { clinicId: string }) {
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
             <p className="text-xs font-bold text-slate-600 flex items-center gap-1.5"><History className="w-3.5 h-3.5 text-teal-600" /> {done ? 'Histórico de 90 dias concluído' : 'Puxar histórico de 90 dias'}</p>
-            <p className="text-[10px] text-slate-400">{done ? 'As conversas antigas já foram trazidas.' : 'Traz conversas mais antigas em segundo plano (depende do celular estar online).'}</p>
+            <p className="text-[10px] text-slate-400">{done ? 'As conversas antigas já foram trazidas.' : 'Normalmente inicia sozinho; use o botão se precisar puxar de novo (depende do celular online).'}</p>
           </div>
           <button onClick={start} disabled={starting}
             className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold transition-all disabled:opacity-60">
@@ -350,29 +354,51 @@ export function OnboardingModal({ clinicId, onComplete }: { clinicId: string; on
 
   const [bulkSaving, setBulkSaving] = useState(false);
 
-  const fetchPending = useCallback(async () => {
-    setLoading(true);
+  const fetchPending = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     const { data, error } = await supabase.rpc('onboarding_pending_leads', { p_clinic_id: clinicId });
-    if (error) { setLoading(false); return null; } // sinaliza falha: quem decide fluxo não confunde com "vazio"
+    if (error) { if (!quiet) setLoading(false); return null; } // sinaliza falha: quem decide fluxo não confunde com "vazio"
     const rows: PendingLead[] = (data || []).map((r: any) => ({
       ticket_id: r.ticket_id, lead_id: r.lead_id, name: r.name, phone: r.phone,
       avatar_url: r.avatar_url, last_appt: r.last_appt, next_appt: r.next_appt, is_scheduled: r.is_scheduled,
     }));
     setLeads(rows);
     if (rows.length > 0) setSynced(true);
-    setLoading(false);
+    if (!quiet) setLoading(false);
     return rows;
   }, [clinicId]);
 
   useEffect(() => { fetchPending(); }, [fetchPending]);
 
+  // Enquanto o deep-sync roda e a pessoa ainda está na INTRO, a fila cresce sozinha (não mexe
+  // durante a auditoria para o Cover Flow não mudar debaixo do dedo).
+  const phaseRef = useRef(phase);
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
+  const refreshWhileIntro = useCallback(() => {
+    if (phaseRef.current === 'intro') fetchPending(true);
+  }, [fetchPending]);
+
   const runImport = async () => {
     setImporting(true);
     const { data, error } = await supabase.rpc('onboarding_import_conversations', { p_clinic_id: clinicId });
     setImporting(false);
-    if (error || !data?.success) { showToast('Falha ao sincronizar: ' + (error?.message || data?.error_code || 'erro'), 'error'); return; }
+    if (error || !data?.success) {
+      const msg = error?.message || data?.error_code || 'erro';
+      // Clínica grande estoura o teto de 8s do banco: cai para o caminho em segundo plano
+      // (deep-sync), que importa a mesma coisa via cron sem limite de tempo.
+      if (/timeout|57014/i.test(String(msg))) {
+        await supabase.rpc('onboarding_deep_sync_start', { p_clinic_id: clinicId });
+        setSynced(true);
+        showToast('Volume grande: a importação continuará em segundo plano. Acompanhe a barra abaixo.', 'info');
+        return;
+      }
+      showToast('Falha ao sincronizar: ' + msg, 'error');
+      return;
+    }
     showToast(`Sincronizado: ${data.new_leads} leads, ${data.new_messages} mensagens.`, 'success');
     setSynced(true);
+    // Dispara o histórico do período automaticamente (não depende de clique).
+    supabase.rpc('onboarding_deep_sync_start', { p_clinic_id: clinicId });
     await fetchPending();
   };
 
@@ -462,7 +488,7 @@ export function OnboardingModal({ clinicId, onComplete }: { clinicId: string; on
               Começar ({leads.length}) <ArrowRight className="w-4 h-4" />
             </button>
           )}
-          {synced && <DeepSyncProgress clinicId={clinicId} />}
+          {synced && <DeepSyncProgress clinicId={clinicId} onProgress={refreshWhileIntro} />}
           {existingPending > 0 && (
             <button onClick={confirmAllExisting} disabled={bulkSaving}
               className="mt-3 w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm transition-all disabled:opacity-60">

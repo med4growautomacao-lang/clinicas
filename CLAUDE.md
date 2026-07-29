@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 Instruções para o Claude Code neste repositório.
-Aqui mora só o que é **load-bearing** e **não-descobrível num grep rápido**. Se dá pra achar em 5 segundos, não entra.
+Aqui mora só o que é **load-bearing** e **não-descobrível num grep rápido**.
 
 ---
 
@@ -13,7 +13,7 @@ Contrato do produto. Módulo, função e tabela mudam toda semana; **isto não**
 
 - **Tudo em pt-BR**: telas, mensagens ao paciente, prompts, nomes de etapa, relatórios, erros da Central, comentário de código e resposta ao dono.
 - **Fuso do negócio: `America/Sao_Paulo`, único.** Dia de negócio é `(now() at time zone 'America/Sao_Paulo')::date`, nunca `now()::date` cru.
-- ⚠️ **Não existe coluna de idioma nem de fuso no banco** (conferido 28/07). Não invente `clinics.timezone` "para o futuro": internacionalizar é decisão de produto, e campo órfão vira bug.
+- ⚠️ **Não existe coluna de idioma nem de fuso no banco** (conferido 28/07/2026). Não invente `clinics.timezone` "para o futuro": internacionalizar é decisão de produto, e campo órfão vira bug.
 - 📌 **SP é o padrão em dado, cron, relatório e tela.** Achou algo fora do padrão, **avise em vez de converter por conta própria**: fora do padrão é candidato a defeito, e consertar no lugar errado empurra o deslocamento para outro ponto.
 - A armadilha real não é o fuso, é a **mistura de tipos** (§3).
 
@@ -25,11 +25,11 @@ Contrato do produto. Módulo, função e tabela mudam toda semana; **isto não**
 |---|---|---|
 | `clinica` | **MedDesk** (MED4GROW) | tem `clinicOnly`: Agendamentos, Prontuários, Corpo Clínico |
 | `outro` | **WakeDesk** (WAKEMARKETING) | tem `outroOnly`: Produção (estoque/PCP/manutenção), Orçamentos |
-| `meta_tester` | plano reduzido | barra cortada a 3 abas |
+| `meta_tester` | plano reduzido | barra cortada a poucas abas |
 
 **Boa parte dos tenants não é clínica** (loja, joalheria, metalúrgica, turismo, café), e isso **não é dado de teste**.
 
-⚠️ **Não existe camada de vocabulário, e é dívida conhecida.** `activeClinicCategory` é lido em **4 arquivos**, contra **~112 "paciente" fixos em 20 telas**: o cliente WakeDesk lê "paciente" e "consulta" no que é transversal.
+⚠️ **Não existe camada de vocabulário, e é dívida conhecida.** `activeClinicCategory` é lido em **pouquíssimos arquivos**, contra **"paciente" fixo espalhado por dezenas de telas**: o cliente WakeDesk lê "paciente" e "consulta" no que é transversal.
 
 - **Texto novo em tela transversal nasce neutro**: contato, atendimento, cliente, profissional. Não aumente a dívida.
 - Ramifique por `category` só quando o termo for incompatível (padrão em `DoctorScheduleSettings.tsx`).
@@ -48,9 +48,9 @@ Chave por clínica em `clinics.features` (jsonb), e **a semântica MUDA por flag
 | `feature_chat_send`, `feature_conv_ai` | opt-**in** (`=== true`) | `ChatComposer.tsx`, aba do Analista |
 | `agenda_via_funil` | opt-**in**, **só no banco** | `get_commercial_dashboard` |
 
-⚠️ Trocar `!== false` por `=== true` (ou o contrário) **liga ou desliga módulo em 34 clientes de uma vez**, sem erro nenhum. Copiar a linha de outra flag é como isso acontece.
+⚠️ Trocar `!== false` por `=== true` (ou o contrário) **liga ou desliga módulo em todos os clientes de uma vez**, sem erro nenhum. Copiar a linha de outra flag é como isso acontece.
 
-**`agenda_via_funil = true`** (1 clínica) = não usa `appointments`; Agendado/Realizado/Faltou saem das etapas do funil (`lead_stage_history`, slugs `agendado`/`ganho`/`faltou_cancelou`), por `changed_at`.
+**`agenda_via_funil = true`** (pouquíssimas clínicas) = não usa `appointments`; Agendado/Realizado/Faltou saem das etapas do funil (`lead_stage_history`, slugs `agendado`/`ganho`/`faltou_cancelou`), por `changed_at`.
 
 ⚠️ **Nenhum formulário edita `agenda_via_funil`.** Super Admin e OrgAdmin fazem `{ ...clinic.features, ... }` de propósito: reconstruir o jsonb apaga a flag e **zera o painel Comercial daquela clínica em silêncio**.
 
@@ -65,19 +65,18 @@ Receber e enviar passa pela **uazapi** (`https://med4growautomacao.uazapi.com`, 
 - **Receber:** 100% na edge `wa-inbound`. ⚠️ `whatsapp_instances.inbound_route` sobrou da migração e **não decide mais nada**: não conte linha dele como se fosse tráfego.
 - **Enviar:** **todo envio automático passa pelo Emissor** (`emit_message` → `outbound_messages` → `emissor-worker`), gateado por `fn_emissor_ativo`.
 
-📌 **Código novo que manda mensagem produz para a fila** (`emit_message`), nunca `fetch` direto nem `system_http_post` para a uazapi. É o que dá retry, DLQ e a garantia de só gravar em `chat_messages` depois do 200.
+📌 **Código novo que manda mensagem produz para a fila** (`emit_message`), nunca `fetch` direto nem `system_http_post` para a uazapi. As garantias de entrega moram no Emissor (§1).
 
-⚠️ **Os ramos `else` inline não são código morto, são o rollback.** Cada produtor é `if fn_emissor_ativo(clinic) then emit_message(...) else <envio antigo> end if`. Voltar `all` para `false` devolve os 34 tenants ao caminho antigo sem deploy.
+⚠️ **Os ramos `else` inline não são código morto, são o rollback.** Cada produtor é `if fn_emissor_ativo(clinic) then emit_message(...) else <envio antigo> end if`. Voltar `all` para `false` devolve todos os tenants ao caminho antigo sem deploy.
 
 - **Token nunca é constante nem variável de ambiente**: sai do gate `fn_clinic_send_token`, que exige instância `connected`.
-- **Telefone: normalizar os dois lados** antes de comparar, mas o endereço de entrega vai como a uazapi devolveu (§2).
-- Chamada HTTP saindo do **banco** usa `system_http_post`, nunca `net.http_post` cru.
+- **Telefone: normalizar os dois lados** antes de comparar (§2), mas o endereço de entrega vai como a uazapi devolveu.
 
 ## 0.5 Se falhar em silêncio, não existe
 
 **Não há Sentry.** O que não estiver em `system_errors` não aconteceu para ninguém.
 
-📌 **Toda função que importa registra erro na Central.** "Importa" = se falhar, alguém perde dado, dinheiro ou atendimento. Vale para edge (`registrarErro()`), RPC, trigger e cron (`log_system_error`). `catch` que só faz `console.error` é invisível. Mecânica em §2.
+📌 **Toda função que importa registra erro na Central.** "Importa" = se falhar, alguém perde dado, dinheiro ou atendimento. Vale para edge, RPC, trigger e cron. Mecânica em §2.
 
 **Critério de pronto:** feature sem caminho de erro na Central não está pronta, mesmo funcionando.
 
@@ -96,15 +95,23 @@ Receber e enviar passa pela **uazapi** (`https://med4growautomacao.uazapi.com`, 
 
 ## 0.7 "Está desligado" NÃO é diagnóstico. A pergunta é: ligado, funciona?
 
-O sistema está em teste, e chave off é o estado normal de quase tudo. O dono já sabe o que desligou.
+Chave off é o estado normal de quase tudo, e o dono desliga de propósito: ele já sabe o que está desligado.
 
-🚫 **NÃO relate chave desligada, texto em branco nem módulo off como se fosse problema.** Isso é o cenário, não achado. 📌 **Relate DEFEITO DE CÓDIGO, e só.**
+🚫 **NÃO relate chave desligada, texto em branco nem módulo off como se fosse problema.** 📌 **Relate DEFEITO DE CÓDIGO, e só.**
 
 - **Percorra o caminho inteiro** (gatilho → regra → envio → gravação → retorno), não o primeiro `if`. Elo quebrado no meio só aparece quando alguém liga, com paciente na frente.
 - **Teste com a chave ligada:** `begin; ... rollback;` com a flag ligada na transação e lead `is_simulation` (roteia para sandbox, não toca uazapi). Confira o efeito real: mudou o status, entrou na fila, gravou a conversa?
 - **Separe as três causas**, porque a solução de cada uma é outra: **desligado** (é só ligar), **falta configuração** (é preencher formulário), **defeito de código** (o único que é problema seu).
 - **Chave que a tela grava e o backend não lê é DEFEITO**, não configuração. Procure isso ao mexer em feature com toggle.
 - **Diga o que está provado e o que é palpite.** "Li o código e parece certo" é palpite.
+
+### 📌 Ao revisar (código, dado ou achado de outro agente)
+
+- **Todo achado vem com a prova executada** (query, grep, teste rodado). Sem prova, entra rotulado como palpite.
+- **Tente refutar cada achado antes de entregar**: só se reporta o que sobreviver.
+- **Zero achado é resposta válida.** Não preencha volume; achado inventado custa mais caro que ausência.
+- **Achado de terceiro é hipótese até ser confirmado** no código e no banco vivo (§3), nunca vira ação direta.
+- Entregue classificado: **provado**, **palpite** ou **descartado na verificação**.
 
 ## 0.8 Régua de decisão (rodar antes de mexer)
 
@@ -121,7 +128,7 @@ O sistema está em teste, e chave off é o estado normal de quase tudo. O dono j
 
 # 1. Onde as coisas moram
 
-**Três camadas.** Repo (React/TS): telas, hooks (`src/hooks/useSupabase.ts`), configuração. Banco (Postgres): RPCs, triggers, invariantes, RLS, crons. Edge Functions (`supabase/functions/`, ~42 + `_shared/`): integrações externas, agente IA, analista, Emissor, follow-ups, sandbox.
+**Três camadas.** Repo (React/TS): telas, hooks (`src/hooks/useSupabase.ts`), configuração. Banco (Postgres): RPCs, triggers, invariantes, RLS, crons. Edge Functions (`supabase/functions/` + `_shared/`): integrações externas, agente IA, analista, Emissor, follow-ups, sandbox.
 
 **Regra prática:** comportamento do agente → edge + prompt. Regra de negócio → banco. Integração externa → edge. Tela → repo.
 
@@ -157,7 +164,7 @@ wa-inbound → ai-agent (ingest) → ai_turn_buffer → ai-agent-worker (loop LL
 
 - **`wa-inbound`**: recebe webhook do uazapi, persiste `chat_messages`, encaminha ao agente.
 - **`ai-agent`**: ingest. Enfileira o turno em `ai_turn_buffer`, cutuca o worker, devolve 200.
-- **`ai-agent-worker`**: o cérebro. Claim atômico, loop LLM com tool-calling (9 tools, todas delegam para `ai-scheduler`), fan-out em bolhas, memória, transição de etapa. Stateless.
+- **`ai-agent-worker`**: o cérebro. Claim atômico, loop LLM com tool-calling (todas as tools delegam para `ai-scheduler`), fan-out em bolhas, memória, transição de etapa. Stateless.
 - **`emissor-worker`**: fila de saída. Token pelo gate `fn_clinic_send_token`, só grava em `chat_messages` após 200, retry + DLQ. Sabe `/send/text`, `/send/media` e `/send/menu` (botões, via `outbound_messages.menu_payload`).
 - **`ai-sandbox`**: teste do Super Admin. Mesmo pipeline, `transport='sandbox'`, nunca toca uazapi real.
 
@@ -167,8 +174,8 @@ Modelo padrão em `_shared/llm.ts` (multi-provider), com override por clínica e
 
 ## Analista Conversacional (conv-ai)
 
-- **`conv-ai-analyst`** (cron 5min): lê a conversa e decide etapa do funil e se houve venda. Etapa comum ele **aplica sozinho** (`source='ia_analise'`); etapa de conversão ele **nunca aplica**, vira sugestão pendente.
-- **`conv-ai-learn`** (1×/dia): gera o manual de análise **por clínica** (`conv_ai_prompt_versions`) a partir de conversas rotuladas ou de decisões humanas recentes.
+- **`conv-ai-analyst`** (cron): lê a conversa e decide etapa do funil e se houve venda. Etapa comum ele **aplica sozinho** (`source='ia_analise'`); etapa de conversão ele **nunca aplica**, vira sugestão pendente.
+- **`conv-ai-learn`** (cron): gera o manual de análise **por clínica** (`conv_ai_prompt_versions`) a partir de conversas rotuladas ou de decisões humanas recentes.
 
 Gates: `system_settings.conv_ai_config.mode` (`off`/`shadow`/`active`) + `conv_ai_clinic_config.enabled`. Em `shadow` nada é aplicado, só registra o que **teria** feito.
 
@@ -196,9 +203,9 @@ Tudo que marca horário passa por ela: app, Kanban, IA e `convert_lead_to_appoin
 
 Lead com `capture_channel='forms'` já nasce com ticket, porque `trg_auto_open_ticket_forms` é AFTER INSERT: quando a RPC chega na busca de etapa, **o ticket já existe**. Mexer no slug dentro da RPC é código morto.
 
-Quem precisa desviar usa a marca de transação **`app.crm_intake='1'`**, que muda o comportamento de três triggers. Quem a liga precisa setá-la em **toda** chamada, senão um lote na mesma transação herda o valor anterior.
+Quem precisa desviar usa a marca de transação **`app.crm_intake='1'`**, que muda o comportamento de várias triggers. Quem a liga precisa setá-la em **toda** chamada, senão um lote na mesma transação herda o valor anterior.
 
-⚠️ **`fn_reset_followup_on_new_ticket` NÃO é gateada, e isso é decisão.** Suprimi-la foi pior: o ticket novo herdaria `handoff_triggered_at`/`followup_count` do ciclo morto e o card nasceria **mudo** para IA e follow-up, para sempre e sem erro. **"Ticket novo = atendimento novo" vale para os cinco caminhos.**
+⚠️ **`fn_reset_followup_on_new_ticket` NÃO é gateada, e isso é decisão.** Suprimi-la foi pior: o ticket novo herdaria `handoff_triggered_at`/`followup_count` do ciclo morto e o card nasceria **mudo** para IA e follow-up, para sempre e sem erro. **"Ticket novo = atendimento novo" vale para todos os caminhos.**
 
 ⚠️ **A cascata de etapa mora em `fn_default_entry_stage(clinic_id, slug_preferido)`** (preferido → `whatsapp` → primeira por `position`). Todos os tenants têm `forms` e `whatsapp`, então trocar a ordem muda 100% deles de uma vez.
 
@@ -206,7 +213,7 @@ Quem precisa desviar usa a marca de transação **`app.crm_intake='1'`**, que mu
 
 ## Dashboards: fonte ÚNICA por conceito, divergência só de RECORTE
 
-Visão Geral (`get_dashboard_stats`), Comercial (`get_commercial_dashboard`) e Marketing (`marketing_*`). Desde 18/07 os três partem da mesma definição, nas **views canônicas `v_kpi_*`**:
+Visão Geral (`get_dashboard_stats`), Comercial (`get_commercial_dashboard`) e Marketing (`marketing_*`). Os três partem da mesma definição, nas **views canônicas `v_kpi_*`**:
 
 | conceito | fonte única | eixo de data |
 |---|---|---|
@@ -217,13 +224,13 @@ Visão Geral (`get_dashboard_stats`), Comercial (`get_commercial_dashboard`) e M
 
 ⚠️ **Divergência legítima é só de RECORTE, nunca de definição.** Fatiar por criação do lead, por conversão ou por realização da consulta dá números diferentes e ambos certos. **Confirme o eixo de cada lado antes de "corrigir".** Se as definições divergirem, aí é bug.
 
-⚠️ **Financeiro DESABILITADO nos painéis, POR ENQUANTO** (decisão do dono, 18/07, reconfirmada em 28/07): **não puxar de `financial_transactions`**, faturamento é sempre o valor lançado. É pausa, não aposentadoria, mas **religar não é descomentar a aba**: exige antes decidir qual dos dois faturamentos é a fonte única e alinhar as views a ela.
+⚠️ **Financeiro DESABILITADO nos painéis, POR ENQUANTO** (decisão do dono, 18/07/2026, reconfirmada em 28/07/2026): **não puxar de `financial_transactions`**, faturamento é sempre o valor lançado. É pausa, não aposentadoria, mas **religar não é descomentar a aba**: exige antes decidir qual dos dois faturamentos é a fonte única e alinhar as views a ela.
 
-**Atribuição IA × Humano:** régua canônica única, precomputada em `lead_kpi_attribution` (cron 10min) → `vw_lead_agent_class`. Não recalcule inline.
+**Atribuição IA × Humano:** régua canônica única, precomputada em `lead_kpi_attribution` (cron) → `vw_lead_agent_class`. Não recalcule inline.
 
 ### ⚠️ Toda RPC de painel é um PAR: wrapper (guard) + `_impl` (corpo)
 
-As 9 RPCs de painel têm nome público como wrapper fino `SECURITY DEFINER` que só chama `assert_clinic_access(p_clinic_id)` e delega. **A lógica mora no `_impl`.**
+As RPCs de painel têm nome público como wrapper fino `SECURITY DEFINER` que só chama `assert_clinic_access(p_clinic_id)` e delega. **A lógica mora no `_impl`.**
 
 - **Mexer na regra = mexer no `_impl`.** Reescrever o wrapper como se fosse a RPC **apaga o guard** e reabre vazamento entre clínicas.
 - `_impl` não tem EXECUTE para anon/authenticated: chamar direto pelo PostgREST dá erro de permissão, não é "a RPC sumiu".
@@ -231,7 +238,7 @@ As 9 RPCs de painel têm nome público como wrapper fino `SECURITY DEFINER` que 
 - **`assert_clinic_access` é fail-closed** e passa sem checar em dois casos só: sem `request.jwt.claims` (chamada de dentro do banco, é o que mantém o relatório automático) e role `service_role` (backend). **Não voltar para `if v_jwt_role in ('anon','authenticated')`**, que era fail-open, nem trocar por `has_clinic_access` cru, que depende de `auth.uid()` e mata o cron.
 - Guard **nunca** é `is_clinic_admin()` sozinho: deixa de fora o `gestor`, que é quem mais abre o painel.
 
-**Por que DEFINER e não RLS:** com RLS o painel paga a checagem **por linha** e estoura o `statement_timeout` de 8s do role `authenticated` (medido: 2.328 ms contra 44 ms numa clínica de 8 mil leads). O painel devolvia 500 e pintava "SEM DADOS". **Timeout se parece com lentidão:** confira os 500 no console antes de caçar query lenta.
+**Por que DEFINER e não RLS:** com RLS o painel paga a checagem **por linha** e estoura o `statement_timeout` do role `authenticated` (medido: 2.328 ms contra 44 ms numa clínica de 8 mil leads). O painel devolvia 500 e pintava "SEM DADOS". **Timeout se parece com lentidão:** confira os 500 no console antes de caçar query lenta.
 
 ---
 
@@ -254,7 +261,7 @@ Não confie na aplicação (vide o `insert` direto em `tickets`). **Não derrube
 
 O **9º dígito** é a razão: o mesmo contato aparece com e sem ele, e comparar cru gera "não encontrado" fantasma. Em RPC, normalize **os dois lados**, sem exceção.
 
-⚠️ **A base não é só celular brasileiro** (conferido 28/07): **1.296 leads com telefone fixo** e **~150 do exterior** (Argentina, Uruguai, Paraguai, Portugal, Espanha, EUA). Os dois funcionam hoje: fixo vira 12 dígitos sem passar pela regra do 9, e estrangeiro com DDI passa intacto porque a regra só dispara em `55`.
+⚠️ **A base não é só celular brasileiro** (conferido 28/07/2026): **leads com telefone fixo em volume relevante** e **uma minoria do exterior** (Argentina, Uruguai, Paraguai, Portugal, Espanha, EUA). Os dois funcionam hoje: fixo vira 12 dígitos sem passar pela regra do 9, e estrangeiro com DDI passa intacto porque a regra só dispara em `55`.
 
 ⚠️ **A armadilha é o estrangeiro sem DDI:** número de **10 ou 11 dígitos ganha `55` na marra**, porque a função assume Brasil, e vira um número brasileiro que nunca mais casa com a pessoa. **Ao cadastrar contato de fora, o DDI é obrigatório.**
 
@@ -283,9 +290,9 @@ Fixo e celular não colidem por sorte estrutural (celular sem o 9 começa em 6-9
 
 ### 📌 REGRA: `forms` é SÓ formulário. O resto entra como `whatsapp`
 
-Decisão do dono (28/07). `forms` significa formulário de verdade, nativo ou de site; nenhuma outra origem se pendura nesse canal para herdar o pipeline dele. **Lead que não veio de formulário nasce `whatsapp`.**
+Decisão do dono (28/07/2026). `forms` significa formulário de verdade, nativo ou de site; nenhuma outra origem se pendura nesse canal para herdar o pipeline dele.
 
-⚠️ **O caso aberto é o CRM externo** (`apply_external_crm_outcome`), que hoje cria lead como `forms` de propósito. Medido antes de mexer: só uma clínica usa CRM de verdade e **nenhum lead de CRM recebe boas-vindas hoje**, então a troca **não silencia mensagem nenhuma**; o que muda é o recorte do painel dessa clínica.
+⚠️ **O caso aberto é o CRM externo** (`apply_external_crm_outcome`), que hoje cria lead como `forms` de propósito. Na medição de 28/07/2026 a troca **não silenciava mensagem nenhuma** (nenhum lead de CRM recebia boas-vindas) e só mudava o recorte do painel da clínica afetada; **antes de trocar, meça de novo**.
 
 ### ⚠️ Canal e ETAPA DE ENTRADA são coisas separadas, e só a etapa é escolha do cliente
 
@@ -296,7 +303,7 @@ Confundir as duas é a armadilha desta parte, porque ambas usam as palavras "for
 | **canal** (`leads.capture_channel`) | **fato**: como o contato chegou | a origem, nunca uma preferência |
 | **etapa de entrada** | **escolha de fluxo**: em que coluna o card nasce | o cliente, em `clinic_external_integrations.entry_stage_slug` (default `forms`) |
 
-Desde 28/07 a etapa é configurável na aba Integração Externa ("Onde o card começa"), e vale para **os dois caminhos que criam card sem conversa**: formulário e CRM, ambos via **`fn_clinic_entry_stage_slug(clinic_id)`**.
+A etapa é configurável na aba Integração Externa ("Onde o card começa"), e vale para **os dois caminhos que criam card sem conversa**: formulário e CRM, ambos via **`fn_clinic_entry_stage_slug(clinic_id)`**.
 
 📌 **A chave NÃO toca o canal, e isso é deliberado.** Amarrar um no outro faria lead de formulário ser contado como WhatsApp nos painéis, que é a corrupção que a régua do canal existe para impedir.
 
@@ -304,7 +311,7 @@ Desde 28/07 a etapa é configurável na aba Integração Externa ("Onde o card c
 
 ### ⚠️ O canal é vocabulário FECHADO na prática, mesmo sem CHECK no banco
 
-Valor novo (`crm`, `parceiro`) entra sem erro e quebra de dois jeitos ao mesmo tempo: as views `v_kpi_*` e o Marketing usam `ELSE 'whatsapp'` e ele **vira WhatsApp**; a Visão Geral e o Comercial filtram por igualdade e ele **some dos chips**. Isso é divergência de definição entre painéis, que aqui é bug. Valor novo exige mexer em 5 views, 3 RPCs e 4 telas.
+Valor novo (`crm`, `parceiro`) entra sem erro e quebra de dois jeitos ao mesmo tempo: as views `v_kpi_*` e o Marketing usam `ELSE 'whatsapp'` e ele **vira WhatsApp**; a Visão Geral e o Comercial filtram por igualdade e ele **some dos chips**. Isso é divergência de definição entre painéis, que aqui é bug. Valor novo exige varrer todas as views, RPCs e telas que enumeram o canal.
 
 ## Nunca reconstruir JSONB do zero
 
@@ -312,11 +319,11 @@ Formulário que grava um JSONB inteiro sem reler **zera em silêncio** os campos
 
 ## RLS multi-tenant
 
-Usar `is_clinic_admin(clinic_id)` / `is_super_admin()`. ⚠️ `is_admin()` ainda existe mas está fora de todas as policies: **não reintroduzir**, dava bypass entre organizações.
+Usar `is_clinic_admin(clinic_id)` / `is_super_admin()`. ⚠️ `is_admin()` foi dropada em 27/07/2026 (fase1b do hardening): **não reintroduzir**, dava bypass entre organizações.
 
 ### ⚠️ Policy que passa a COLUNA roda POR LINHA (é o que derruba clínica grande)
 
-`is_clinic_active(clinic_id)` recebendo a **coluna** impede o planner de resolver uma vez. A régua nova, já em `leads`, `tickets`, `chat_messages` e ~25 tabelas, roda 1× por query:
+`is_clinic_active(clinic_id)` recebendo a **coluna** impede o planner de resolver uma vez. A régua nova, já em `leads`, `tickets`, `chat_messages` e em dezenas de outras tabelas, roda 1× por query:
 
 ```sql
 using (clinic_id in (select public.my_clinic_ids()) or (select public.is_super_admin()))
@@ -327,7 +334,7 @@ using (clinic_id in (select public.my_clinic_ids()) or (select public.is_super_a
 ⚠️ **O braço `or (select is_super_admin())` não é enfeite:** linha com `clinic_id` NULL ou órfão sai do alcance do super-admin, e como a policy é `FOR ALL` ele perde até o UPDATE para consertar.
 
 - ⚠️ **Sobrou um punhado de policies no padrão antigo, e migrar por cópia NÃO é seguro**: mudaria semântica ou **regrediria segurança** (`prontuario_passwords` perderia a trava de `gestor`, `clinic_enc_keys` ampliaria acesso às chaves). Migre só provando equivalência caso a caso.
-- ⚠️ **Não existe isolamento por médico, e NUNCA existiu.** `appointments_doctor_isolation` e `medical_records_doctor_isolation` foram removidas em 27/07 porque vazavam entre clínicas (staff com 0 consultas enxergava 234, todas alheias), mas elas eram **PERMISSIVE**, e policy permissiva só **soma** acesso, nunca subtrai: ao lado de `appointments_all`, jamais impediram um membro de ver a agenda de outro médico. Hoje o "médico só vê os próprios" é **só de UI**. Quem procurar "a regra que evitava isso" acha essas duas e conclui errado que havia proteção. **Impor de verdade exige policy `RESTRICTIVE`** (decisão de produto pendente).
+- ⚠️ **Não existe isolamento por médico, e NUNCA existiu.** `appointments_doctor_isolation` e `medical_records_doctor_isolation` foram removidas em 27/07/2026 porque vazavam entre clínicas (staff com 0 consultas enxergava 234, todas alheias), mas elas eram **PERMISSIVE**, e policy permissiva só **soma** acesso, nunca subtrai: ao lado de `appointments_all`, jamais impediram um membro de ver a agenda de outro médico. Hoje o "médico só vê os próprios" é **só de UI**. Quem procurar "a regra que evitava isso" acha essas duas e conclui errado que havia proteção. **Impor de verdade exige policy `RESTRICTIVE`** (decisão de produto pendente).
 - **Custo de RLS pode ser GLOBAL:** embed do PostgREST (`lead:leads(*)`) **não propaga o `clinic_id`**, então a RLS da tabela embutida varre o banco inteiro.
 - Antes de trocar qualquer policy, **prove equivalência** num `cross join` de todos os pares (usuário, clínica), conferindo que ninguém ganha nem perde acesso.
 
@@ -335,29 +342,29 @@ using (clinic_id in (select public.my_clinic_ids()) or (select public.is_super_a
 
 - **`chat_messages` é destrutivo:** `lead_id` é `ON DELETE CASCADE`, apagar um lead **apaga a conversa**. E **toda FK nova para `chat_messages` precisa de índice**, senão dá timeout ao resetar lead.
 - **Slug de tipo de consulta não é chave:** `consultation_types.slug` é texto livre digitado pela clínica. Use o `id`. Já gerou 3 bugs.
-- **KPI nunca nasce de array do client:** o PostgREST clampa toda resposta em `max_rows` (**5000**), **inclusive quando o código pede `.limit()` maior**, em silêncio. Agregar sobre um hook mente em clínica grande. **Agregação = RPC no banco**; lista grande = `.range()`. `POSTGREST_MAX_ROWS` em `useSupabase.ts` **tem que bater** com o teto real, senão o detector fica cego.
+- **KPI nunca nasce de array do client:** o PostgREST clampa toda resposta no `max_rows` do projeto, **inclusive quando o código pede `.limit()` maior**, em silêncio. Agregar sobre um hook mente em clínica grande. **Agregação = RPC no banco**; lista grande = `.range()`. `POSTGREST_MAX_ROWS` em `useSupabase.ts` **tem que bater** com o teto real, senão o detector fica cego.
 
 ## Observabilidade: a Central de Erros é o único olho que temos
 
 Quase todo bug grave deste sistema foi **perda silenciosa**, não exceção barulhenta.
 
-📌 **Toda função nova que importa registra erro na Central**, seja edge, RPC, trigger ou cron. Edge: copie o helper `registrarErro()` de qualquer edge existente. Banco: `log_system_error(...)`. HTTP saindo do banco: **`system_http_post`**, nunca `net.http_post` cru (é o que permite saber qual URL falhou). Hoje nenhuma função usa o cru: **mantenha assim.**
+📌 **Toda função nova que importa registra erro na Central**, seja edge, RPC, trigger ou cron. Edge: copie o helper `registrarErro()` de qualquer edge existente. Banco: `log_system_error(...)`. HTTP saindo do banco: **`system_http_post`**, nunca `net.http_post` cru (é o que permite saber qual URL falhou).
 
 ⚠️ **Não engula o erro no `catch`.** `console.error` sozinho é invisível: o log da edge some, a Central não vê, e o bug vira "sumiu o lead".
 
 ### 📌 REGRA: erro resolvido SAI do painel
 
-Decisão do dono (27/07). A Central mostra **só o que está aberto**, e a contagem da tela **é** a fila de trabalho. É **remoção, não filtro de UI**: o trigger `trg_system_error_arquiva_resolvido` copia para `system_errors_archive` e apaga de `system_errors`, nos três caminhos (botão, auto-resolve, `update` na mão).
+Decisão do dono (27/07/2026). A Central mostra **só o que está aberto**, e a contagem da tela **é** a fila de trabalho. É **remoção, não filtro de UI**: o trigger `trg_system_error_arquiva_resolvido` copia para `system_errors_archive` e apaga de `system_errors`, nos três caminhos (botão, auto-resolve, `update` na mão).
 
 - **Não restaure a aba de resolvidos** nem troque o trigger por um `where status <> 'resolved'`: o painel voltaria a acumular.
 - O histórico não se perde, está no arquivo. E como o `fingerprint` fica livre, problema que reincide entra como **episódio novo**, que para CONDIÇÃO é o certo.
 
 ### 📌 REGRA: toda chamada a provedor de IA passa pelo monitor de consumo
 
-Desde 28/07 existe **`llm_usage`**: uma linha por chamada a Gemini/Anthropic/OpenAI/ElevenLabs, com clínica, modelo, tokens e tempo. Painel em **Super Admin › Consumo de IA** (RPC `get_llm_usage_summary`, que agrega no banco; custo vem de `system_settings.llm_prices`, editável sem deploy).
+Desde 28/07/2026 existe **`llm_usage`**: uma linha por chamada a provedor de IA. Painel em **Super Admin › Consumo de IA** (RPC `get_llm_usage_summary`, que agrega no banco; custo vem de `system_settings.llm_prices`, editável sem deploy).
 
 - **Nunca chame provedor sem registrar.** Use `comMonitor()` ou `registrarUsoIA()` de **`_shared/llm-usage.ts`**. O agente já é coberto no ponto único (`runAgentTurn`); os demais registram no próprio call site.
-- **`feature` é a chave de `system_settings`** que o Super Admin edita (`agent_ai_config`, `conv_ai_config`, `ai_assistant_config`, `media_ai_config`, `elevenlabs_config`), e é o que faz o painel agrupar pelas mesmas funções que ele configura. Use as constantes `FEATURE.*`, não string solta: nome errado não dá erro, só some do grupo certo.
+- **`feature` é a chave de `system_settings`** que o Super Admin edita, e é o que faz o painel agrupar pelas mesmas funções que ele configura. Use as constantes `FEATURE.*` de `_shared/llm-usage.ts`, não string solta: nome errado não dá erro, só some do grupo certo.
 - **Falha também é registrada** (`ok=false`): chamada que falha consome cota, e pico de erro no painel é o sintoma mais barato de "acabou o crédito" ou "modelo fora do ar".
 - **O monitor é mudo por design**: `log_llm_usage` engole exceção e o chamador não dá `await`. Monitor que derruba a função monitorada é pior que não ter monitor.
 - ⚠️ **Modelo sem preço em `llm_prices` entra com custo ZERO** e aparece em `modelos_sem_preco`. Ao trocar de modelo, cadastre o preço junto, senão o total do painel encolhe em silêncio.
@@ -372,14 +379,17 @@ Desde 28/07 existe **`llm_usage`**: uma linha por chamada a Gemini/Anthropic/Ope
 - **project_id: `yzpclhuifquhfqpiwysh`**, exigido pelo MCP em toda chamada.
 - **Migrations:** via MCP `apply_migration`, **não rodar SQL solto** para mudança de schema.
 - **Nome de migration = timestamp real** (`YYYYMMDDHHMMSS_nome.sql`), **nunca sequencial**: sequencial **colide entre sessões paralelas** (já aconteceu) e faz a ordem dos arquivos mentir sobre a ordem real de aplicação.
+- 📌 **Migration é história, não estado.** `create or replace` posterior sobrescreve o anterior sem rastro no arquivo velho (um fix já foi revertido assim sem ninguém notar). **Afirmação sobre o banco se prova no banco vivo** (`to_regclass`, `pg_get_viewdef`, `has_function_privilege`, `cron.job`), nunca lendo migration; migration serve para arqueologia (intenção e data), não para estado atual.
 - **Deploy de edge:** Supabase CLI. O PAT está no `.mcp.json`, que é gitignored. ⚠️ **Nunca** commitar o token nem colá-lo em arquivo rastreado.
 
 ## Type-check e Windows
-- **`npm run lint` é `tsc --noEmit`**, não é ESLint, e **não existe** script `typecheck`.
+- **`npm run lint` é `tsc --noEmit`**, não é ESLint, e **não existe** script `typecheck`. ⚠️ **E não cobre as edge functions** (o tsconfig exclui `supabase/functions`): edge se confere com `deno check`.
 - Mensagem de commit: **`git commit -F <arquivo>`**. Here-string quebra com acento e aspas.
 - PowerShell 5.1 **não tem `&&`/`||`**: encadeie com `;` ou `if ($?) { }`.
 
-## ⚠️ Até 4 sessões editam este repo AO MESMO TEMPO
+## Várias sessões editam este repo AO MESMO TEMPO
+
+📌 **Não commitar nem dar push por conta própria**, só quando o dono pedir. ⚠️ **Push na `main` dispara o deploy da Vercel.**
 
 Você não enxerga as outras e elas não te avisam. **Nunca `git add -A`, `git add .` nem `git commit -a`:** rode `git status` e liste no `git add` **só os arquivos que ESTA sessão editou**, mesmo que outro pareça pronto. Já houve commit levando junto a frente de outra sessão.
 

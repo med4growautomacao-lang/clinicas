@@ -16,7 +16,9 @@ interface PendingLead {
   phone: string | null;
   avatar_url: string | null;
   last_appt: string | null;   // data do último atendimento (agenda)
+  last_appt_time: string | null; // hora do último atendimento (agenda)
   next_appt: string | null;   // data do próximo agendamento (agenda)
+  next_appt_time: string | null; // hora do próximo agendamento (agenda)
   is_scheduled: boolean;      // já tem consulta na agenda (paciente agendado) → não mexe no ticket
 }
 
@@ -117,6 +119,7 @@ function ActiveAuditCard({ lead, onApplied, onOpenChat }: { lead: PendingLead; o
   const [lastDate, setLastDate] = useState(lead.last_appt || '');
   const [resolvePast, setResolvePast] = useState(true);
   const [nextDate, setNextDate] = useState(lead.next_appt || '');
+  const [nextTime, setNextTime] = useState((lead.next_appt_time || '').slice(0, 5)); // HH:MM da agenda
   // Agendado (tem consulta na agenda): IA e follow-up ambos OFF por padrão (não assumir a conversa
   // nem re-enviar confirmação/lembrete). Contato novo: ambos ON.
   const [ai, setAi] = useState(!lead.is_scheduled);
@@ -136,6 +139,7 @@ function ActiveAuditCard({ lead, onApplied, onOpenChat }: { lead: PendingLead; o
       p_last_appt_date: category === 'paciente' && lastDate ? lastDate : null,
       p_resolve_past: resolvePast,
       p_next_appt_date: category === 'paciente' && nextDate ? nextDate : null,
+      p_next_appt_time: category === 'paciente' && nextDate && nextTime ? nextTime : null,
       p_ai_enabled: ai, p_followup_enabled: followup,
       p_scheduled: lead.is_scheduled,
       p_human_only: humanOnly,
@@ -224,8 +228,12 @@ function ActiveAuditCard({ lead, onApplied, onOpenChat }: { lead: PendingLead; o
               </label>
               <label className="flex flex-col gap-1">
                 <span className="text-[10px] font-bold text-white/60 uppercase tracking-wide">Próximo agend.</span>
-                <input type="date" value={nextDate} onChange={e => setNextDate(e.target.value)}
-                  className="px-2 py-1.5 text-xs bg-white/90 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300" />
+                <div className="flex gap-1">
+                  <input type="date" value={nextDate} onChange={e => setNextDate(e.target.value)}
+                    className="min-w-0 flex-1 px-2 py-1.5 text-xs bg-white/90 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300" />
+                  <input type="time" value={nextTime} onChange={e => setNextTime(e.target.value)} title="Horário do agendamento"
+                    className="w-[74px] shrink-0 px-1.5 py-1.5 text-xs bg-white/90 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300" />
+                </div>
               </label>
             </div>
             )}
@@ -383,7 +391,8 @@ export function OnboardingModal({ clinicId, onComplete }: { clinicId: string; on
     if (error) { if (!quiet) setLoading(false); return null; } // sinaliza falha: quem decide fluxo não confunde com "vazio"
     const rows: PendingLead[] = (data || []).map((r: any) => ({
       ticket_id: r.ticket_id, lead_id: r.lead_id, name: r.name, phone: r.phone,
-      avatar_url: r.avatar_url, last_appt: r.last_appt, next_appt: r.next_appt, is_scheduled: r.is_scheduled,
+      avatar_url: r.avatar_url, last_appt: r.last_appt, last_appt_time: r.last_appt_time,
+      next_appt: r.next_appt, next_appt_time: r.next_appt_time, is_scheduled: r.is_scheduled,
     }));
     setLeads(rows);
     if (rows.length > 0) setSynced(true);

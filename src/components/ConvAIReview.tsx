@@ -78,7 +78,8 @@ function PainelModo({ eixo, valor, onChange, disabled, mecanicoDisponivel }: {
 }) {
   const etapa = eixo === "etapa";
   const Icone = etapa ? MoveRight : TrendingUp;
-  const opcoes = etapa && mecanicoDisponivel ? [...MODOS, MECANICO] : MODOS;
+  // Mecânico entra logo depois do Manual (os dois "sem IA"), antes de Sugestão/Automático.
+  const opcoes = etapa && mecanicoDisponivel ? [MODOS[0], MECANICO, ...MODOS.slice(1)] : MODOS;
   return (
     <div className={cn(
       "bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col",

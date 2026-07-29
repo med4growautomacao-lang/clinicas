@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useChatMessages, Lead, useLeads, useFunnelStages, useConversions } from "../hooks/useSupabase";
 import { cn } from "@/src/lib/utils";
 import { ChatThread } from "./ChatThread";
+import { LeadFollowupOptouts } from "./LeadFollowupOptouts";
 import { ChatComposer } from "./ChatComposer";
 
 // Reexports — outros módulos importam daqui (ex.: AISecretary)
@@ -156,6 +157,11 @@ export function LeadChat({ lead, onClose, isDragging = false, ticketId, currentS
           </select>
         </div>
       )}
+
+      {/* Follow-ups desligados só para este contato. Fica aqui também (não só na Secretária IA)
+          porque este painel é o que o Kanban abre, a tela do dia a dia: esconder a exclusão aqui
+          seria esconder do operador. */}
+      <LeadFollowupOptouts leadId={lead.id} />
 
       <ChatThread
         messages={messages}

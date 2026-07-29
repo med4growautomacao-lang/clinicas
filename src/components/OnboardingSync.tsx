@@ -8,6 +8,7 @@ import {
   Bot, Bell, Check, MessagesSquare, X, ArrowRight, ArrowLeft, Sparkles, PartyPopper, CalendarCheck, History, Lock,
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
+import { extractMessageText } from './ChatThread';
 
 interface PendingLead {
   ticket_id: string;
@@ -45,10 +46,14 @@ function ChatViewer({ leadId, name, onClose }: { leadId: string; name: string; o
     let alive = true;
     (async () => {
       setLoading(true);
+      // ⚠️ Ordena DESC e inverte: com `ascending` + limit vinham as 500 mais ANTIGAS, e em conversa
+      // longa o operador classificava o lead vendo o começo, sem as mensagens recentes (o que decide).
       const { data } = await supabase.from('chat_messages').select('id, direction, message, created_at')
-        .eq('lead_id', leadId).order('created_at', { ascending: true }).limit(500);
+        .eq('lead_id', leadId).order('created_at', { ascending: false }).limit(500);
       if (!alive) return;
-      setMsgs((data || []).map((m: any) => ({ id: m.id, dir: m.direction, content: m.message?.content ?? '', at: m.created_at || '' })));
+      const rows = (data || []).slice().reverse();
+      // Reusa o parser do ChatThread: trata content/text/output, array e JSON duplo-codificado.
+      setMsgs(rows.map((m: any) => ({ id: m.id, dir: m.direction, content: extractMessageText(m.message), at: m.created_at || '' })));
       setLoading(false);
       setTimeout(() => endRef.current?.scrollIntoView(), 60);
     })();

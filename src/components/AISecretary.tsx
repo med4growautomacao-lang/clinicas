@@ -50,7 +50,9 @@ import { LeadKanban } from "./LeadKanban";
 import { ComercialDashboard } from "./ComercialDashboard";
 import { ChatThread } from "./ChatThread";
 import { ChatComposer } from "./ChatComposer";
-import { useLeads, useNotLeads, useChatMessages, useSettings, useFunnelStages, usePromptTemplates, FunnelStage, useFollowupSteps, FollowupStep, useConvAiInsights, Lead } from "../hooks/useSupabase";
+import { useLeads, useNotLeads, useChatMessages, useSettings, useFunnelStages, usePromptTemplates, FunnelStage, useFollowupSteps, FollowupStep, useConvAiInsights, Lead, logSystemError } from "../hooks/useSupabase";
+import { FOLLOWUP_LABELS, type FollowupKind } from "../lib/followupKinds";
+import { LeadFollowupOptouts } from "./LeadFollowupOptouts";
 import { LeadChat } from "./LeadChat";
 import { ConvAIReview } from "./ConvAIReview";
 import { NotLeadPanel, NotLeadButton } from "./NotLeadPanel";
@@ -1617,22 +1619,8 @@ function PaymentConfigView() {
  * 1000 linhas do PostgREST.
  * ---------------------------------------------------------------------------------------------- */
 
-type FollowupKind =
-  | "welcome" | "reengagement" | "confirmation" | "appt_reminder"
-  | "pos_ganho" | "pos_perdido"
-  | "finish_ganho" | "finish_perdido" | "finish_service";
-
-const FOLLOWUP_LABELS: Record<FollowupKind, string> = {
-  welcome: "Boas-vindas",
-  reengagement: "Reengajamento",
-  confirmation: "Confirmação",
-  appt_reminder: "Lembrete de Consulta",
-  pos_ganho: "Pós-Atendimento (Ganho)",
-  pos_perdido: "Pós-Atendimento (Perdido)",
-  finish_ganho: "Encerramento (Ganho)",
-  finish_perdido: "Encerramento (Perdido)",
-  finish_service: "Encerramento (Atendimento)",
-};
+// Tipos e rótulos moram em ../lib/followupKinds (o LeadChat também usa, e importar daqui criaria
+// dependência circular: AISecretary já importa LeadChat).
 
 interface FollowupPreview {
   kind: string;
@@ -1653,53 +1641,6 @@ interface FollowupPreview {
   escoamento_min: number;
   historico_7d: number | null;
   amostra: { lead_id: string | null; nome: string; telefone: string; detalhe: string; quando: string; balde: string }[];
-}
-
-/**
- * Follow-ups desligados ESPECIFICAMENTE para este contato (lead_followup_optout), com religar.
- * Sem isto, uma exclusão feita na tela de ativação ficaria invisível: ninguém saberia que aquele
- * contato deixou de receber confirmação, por exemplo, nem teria como voltar atrás depois de fechar
- * a janela. Não confundir com o toggle FOLLOW-UP do cabeçalho, que é o interruptor MESTRE do lead.
- */
-function LeadFollowupOptouts({ leadId }: { leadId: string }) {
-  const [kinds, setKinds] = useState<FollowupKind[]>([]);
-  const [busy, setBusy] = useState<string | null>(null);
-
-  const load = React.useCallback(async () => {
-    const { data } = await supabase.from("lead_followup_optout").select("kind").eq("lead_id", leadId);
-    setKinds((data || []).map((r: any) => r.kind as FollowupKind));
-  }, [leadId]);
-  useEffect(() => { load(); }, [load]);
-
-  const religar = async (k: FollowupKind) => {
-    setBusy(k);
-    const { data: r, error } = await supabase.rpc("set_lead_followup_optout", {
-      p_lead_id: leadId, p_kind: k, p_off: false,
-    });
-    setBusy(null);
-    if (!error && (r as any)?.success) setKinds(s => s.filter(x => x !== k));
-  };
-
-  if (kinds.length === 0) return null;
-  return (
-    <div className="px-6 py-2 border-b border-slate-100 shrink-0 flex items-center gap-2 flex-wrap">
-      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 shrink-0">
-        Não recebe
-      </span>
-      {kinds.map(k => (
-        <button
-          key={k}
-          onClick={() => religar(k)}
-          disabled={busy === k}
-          title={`${FOLLOWUP_LABELS[k] ?? k} está desligado só para este contato. Clique para religar.`}
-          className="inline-flex items-center gap-1 pl-2 pr-1.5 py-0.5 rounded-full bg-rose-50 border border-rose-200 text-rose-700 text-[10px] font-bold transition-all hover:bg-rose-100 disabled:opacity-40"
-        >
-          {FOLLOWUP_LABELS[k] ?? k}
-          {busy === k ? <Loader2 className="w-3 h-3 animate-spin" /> : <X className="w-3 h-3" />}
-        </button>
-      ))}
-    </div>
-  );
 }
 
 const ActivationGuardCtx = React.createContext<(kind: FollowupKind, activate: () => void) => void>(
@@ -1733,29 +1674,42 @@ function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
     if (!e && data) setChatLead(data as Lead);
   };
 
-  // Tirar UM lead da fila DESTE follow-up, sem cancelar a ativação e sem silenciar os outros tipos:
-  // grava uma exceção em lead_followup_optout (lead + kind) via RPC. NÃO mexe em
-  // leads.followup_enabled, que é o interruptor mestre ("não recebe nada") do painel da conversa.
-  // Os contadores do topo NÃO recalculam (a RPC de preview roda uma vez); por isso o aviso na tela
-  // em vez de número mentiroso.
-  const [removidos, setRemovidos] = useState<Set<string>>(new Set());
-  const [removendo, setRemovendo] = useState<Set<string>>(new Set());
-  const removerDaFila = async (leadId: string, k: FollowupKind) => {
-    setRemovendo(s => new Set(s).add(leadId));
-    const { data: r, error: e } = await supabase.rpc("set_lead_followup_optout", {
-      p_lead_id: leadId, p_kind: k, p_off: true, p_reason: "removido na tela de ativação",
-    });
-    setRemovendo(s => { const n = new Set(s); n.delete(leadId); return n; });
-    if (e || !(r as any)?.success) return;
-    setRemovidos(s => new Set(s).add(leadId));
-  };
-  const desfazerRemocoes = async (k: FollowupKind) => {
-    const ids = [...removidos];
-    setRemovendo(new Set(ids));
-    await Promise.all(ids.map(id =>
-      supabase.rpc("set_lead_followup_optout", { p_lead_id: id, p_kind: k, p_off: false })));
-    setRemovendo(new Set());
-    setRemovidos(new Set());
+  // Tirar UM lead da fila DESTE follow-up, sem silenciar os outros tipos dele.
+  // ⚠️ A remoção é LOCAL até o "Ativar": nada é gravado no clique do ✕. Antes gravávamos na hora, e
+  // isso criava três problemas: "Cancelar" deixava as exclusões aplicadas sem ter ligado nada,
+  // "Desfazer" que falhasse limpava a tela mentindo, e dava para clicar em Ativar com a gravação
+  // ainda em voo (o cron de 1 min podia enviar para quem acabou de ser excluído).
+  // NÃO mexe em leads.followup_enabled, que é o interruptor mestre do painel da conversa.
+  const [removidos, setRemovidos] = useState<Map<string, string>>(new Map()); // lead_id -> nome
+  const [salvandoOptouts, setSalvandoOptouts] = useState(false);
+  const removerDaFila = (leadId: string, nome: string) =>
+    setRemovidos(m => new Map(m).set(leadId, nome));
+  const restaurar = (leadId: string) =>
+    setRemovidos(m => { const n = new Map(m); n.delete(leadId); return n; });
+
+  // Grava as exclusões ANTES de ligar o follow-up, e só liga se todas passarem: ligar primeiro
+  // deixaria uma janela em que o cron envia para quem foi excluído.
+  const gravarOptouts = async (k: FollowupKind): Promise<boolean> => {
+    if (removidos.size === 0) return true;
+    setSalvandoOptouts(true);
+    const falhas: string[] = [];
+    for (const [leadId, nome] of removidos) {
+      const { data: r, error } = await supabase.rpc("set_lead_followup_optout", {
+        p_lead_id: leadId, p_kind: k, p_off: true, p_reason: "removido na tela de ativação",
+      });
+      const detalhe = error?.message ?? (r as any)?.error_code;
+      if (error || !(r as any)?.success) { falhas.push(nome || leadId); logSystemError(
+        'FOLLOWUP_OPTOUT_WRITE_FAIL',
+        `Não foi possível excluir um contato do follow-up ${FOLLOWUP_LABELS[k]} antes de ativar`,
+        activeClinicId, { lead_id: leadId, kind: k, detail: detalhe }, 'error'); }
+    }
+    setSalvandoOptouts(false);
+    if (falhas.length > 0) {
+      setError(`Não deu para excluir ${falhas.length} contato(s): ${falhas.slice(0, 3).join(', ')}. `
+        + 'Nada foi ativado, para não enviar para quem você removeu.');
+      return false;
+    }
+    return true;
   };
 
   const guard = React.useCallback((k: FollowupKind, activate: () => void) => {
@@ -1785,10 +1739,14 @@ function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
     reqId.current++;
     pending.current = null;
     setKind(null); setData(null); setError(null); setLoading(false);
-    setRemovidos(new Set()); setRemovendo(new Set());
+    setRemovidos(new Map()); setSalvandoOptouts(false);
   };
+  // Cancelar descarta as exclusões junto (elas só existiam na tela, nada foi gravado).
   const close = () => reset();
-  const confirm = () => {
+  const confirm = async () => {
+    const k = kind;
+    // Exclusões PRIMEIRO: se alguma falhar, não liga nada e o modal fica aberto com o erro.
+    if (k && !(await gravarOptouts(k))) return;
     const fn = pending.current;
     reset();
     fn?.();
@@ -1922,16 +1880,20 @@ function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
                     </div>
                   )}
 
-                  {data.amostra.length > 0 && (
+                  {data.amostra.length > 0 && (() => {
+                    // Um lead pode ocupar VÁRIAS linhas (confirmação devolve 1 por consulta, pós 1 por
+                    // ticket). Então desconta LINHAS removidas, não contatos, senão os dois números
+                    // discordam justamente na tela que existe para não mentir sobre o impacto.
+                    const visiveis = data.amostra.filter(p => !(p.lead_id && removidos.has(p.lead_id)));
+                    const linhasRemovidas = data.amostra.length - visiveis.length;
+                    return (
                     <div className="space-y-2">
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                        Quem entra na fila ({data.amostra.filter(p => !(p.lead_id && removidos.has(p.lead_id))).length} de {Math.max(0, data.total_7d - removidos.size)})
+                        Quem entra na fila ({visiveis.length} de {Math.max(0, data.total_7d - linhasRemovidas)})
                       </p>
                       <div className="border border-slate-100 rounded-xl divide-y divide-slate-50 max-h-64 overflow-y-auto custom-scrollbar">
-                        {data.amostra
-                          .filter(p => !(p.lead_id && removidos.has(p.lead_id)))
-                          .map((p, i) => (
-                          <div key={i} className="px-3 py-2 flex items-center gap-3 text-xs group">
+                        {visiveis.map((p, i) => (
+                          <div key={`${p.lead_id ?? 'sem'}:${p.quando}:${p.telefone}:${i}`} className="px-3 py-2 flex items-center gap-3 text-xs group">
                             <span className={cn(
                               "px-1.5 py-0.5 rounded text-[9px] font-bold uppercase shrink-0",
                               badge(p.balde)
@@ -1951,30 +1913,31 @@ function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
                             )}
                             {p.lead_id && (
                               <button
-                                onClick={() => removerDaFila(p.lead_id!, kind)}
-                                disabled={removendo.has(p.lead_id)}
-                                title={`Remover este contato da fila de ${FOLLOWUP_LABELS[kind]}. Os outros follow-ups dele continuam funcionando.`}
-                                className="shrink-0 p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all disabled:opacity-40"
+                                onClick={() => removerDaFila(p.lead_id!, p.nome)}
+                                title={`Não enviar ${FOLLOWUP_LABELS[kind]} para este contato. Vale para as próximas vezes também (não só esta), e os outros follow-ups dele continuam funcionando. Grava ao clicar em Ativar.`}
+                                className="shrink-0 p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all"
                               >
-                                {removendo.has(p.lead_id) ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
+                                <X className="w-3.5 h-3.5" />
                               </button>
                             )}
                           </div>
                         ))}
                       </div>
                       {removidos.size > 0 ? (
-                        <div className="flex items-center justify-between gap-2 text-[10px] bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
-                          <span className="text-amber-700 font-bold">
-                            {removidos.size} removido(s) da fila de {FOLLOWUP_LABELS[kind]}.
-                            Os outros follow-ups deles seguem normais. Os números acima não recalculam.
-                          </span>
-                          <button
-                            onClick={() => desfazerRemocoes(kind)}
-                            disabled={removendo.size > 0}
-                            className="shrink-0 font-bold text-amber-800 underline underline-offset-2 hover:text-amber-900 disabled:opacity-40"
-                          >
-                            Desfazer
-                          </button>
+                        <div className="space-y-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2">
+                          <p className="text-[10px] text-amber-800 font-bold">
+                            {removidos.size} contato(s) não vão receber {FOLLOWUP_LABELS[kind]} (nem nas próximas vezes).
+                            Os outros follow-ups deles seguem normais. Só é gravado quando você clicar em Ativar.
+                          </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {[...removidos].map(([id, nome]) => (
+                              <button key={id} onClick={() => restaurar(id)}
+                                title="Devolver este contato para a fila"
+                                className="inline-flex items-center gap-1 pl-2 pr-1.5 py-0.5 rounded-full bg-white border border-amber-300 text-amber-800 text-[10px] font-bold hover:bg-amber-100 transition-all">
+                                {nome || 'Sem nome'} <RotateCcw className="w-3 h-3" />
+                              </button>
+                            ))}
+                          </div>
                         </div>
                       ) : (
                         <p className="text-[10px] text-slate-400 font-medium italic">
@@ -1982,7 +1945,8 @@ function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
                         </p>
                       )}
                     </div>
-                  )}
+                    );
+                  })()}
 
                   {data.total_7d === 0 && (
                     <div className="p-4 rounded-xl bg-slate-50 border border-slate-100 text-xs text-slate-500 font-medium">
@@ -2002,10 +1966,13 @@ function ActivationGuardProvider({ children }: { children: React.ReactNode }) {
               </button>
               <button
                 onClick={confirm}
-                disabled={loading}
-                className="px-5 py-2.5 rounded-lg text-xs font-bold text-white bg-teal-600 hover:bg-teal-700 disabled:opacity-50 transition-all shadow-sm"
+                disabled={loading || salvandoOptouts}
+                className="px-5 py-2.5 rounded-lg text-xs font-bold text-white bg-teal-600 hover:bg-teal-700 disabled:opacity-50 transition-all shadow-sm inline-flex items-center gap-1.5"
               >
-                {error ? "Ativar sem conferir"
+                {salvandoOptouts && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                {salvandoOptouts ? "Salvando exclusões..."
+                  : removidos.size > 0 ? `Excluir ${removidos.size} e ativar`
+                  : error ? "Ativar sem conferir"
                   : data && !data.is_trigger && data.agora > 0 ? "Ativar mesmo assim"
                   : "Ativar"}
               </button>

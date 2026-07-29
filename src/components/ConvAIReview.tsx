@@ -58,12 +58,12 @@ type Motor = "manual" | "mecanico" | "sugestao" | "automatico";
 const MOTORES: Array<{ id: Motor; label: string; icon: typeof Hand; hint: string }> = [
   { id: "manual", label: "Manual", icon: Hand,
     hint: "Ninguém mexe: você move os cards e marca as vendas na mão." },
-  { id: "mecanico", label: "Mecânico", icon: Cog,
-    hint: "Sem IA e sem token: um motor de padrões de frase sugere a etapa. A venda você marca na mão." },
-  { id: "sugestao", label: "Sugestão", icon: ListChecks,
-    hint: "A IA lê a conversa e sugere etapa e venda para você aprovar na fila abaixo." },
-  { id: "automatico", label: "Automático", icon: Zap,
-    hint: "A IA move a etapa sozinha. A venda vira sugestão para você confirmar (ou fecha sozinha, se você ativar abaixo)." },
+  { id: "mecanico", label: "Sugestão sem IA", icon: Cog,
+    hint: "Sugere a etapa pelas frases que já aparecem nas conversas. De graça, sem ler com IA. Você confirma na fila abaixo. A venda você marca na mão." },
+  { id: "sugestao", label: "Sugestão com IA", icon: ListChecks,
+    hint: "A IA lê a conversa e sugere etapa e venda para você aprovar na fila abaixo. Custa token." },
+  { id: "automatico", label: "Automático com IA", icon: Zap,
+    hint: "A IA lê e move a etapa sozinha. A venda vira sugestão para você confirmar (ou fecha sozinha, se você ativar abaixo). Custa token." },
 ];
 
 // UM seletor de motor para a clínica inteira. Antes eram dois painéis (um por eixo);
@@ -207,10 +207,10 @@ function FilaConfirmar({ eixo, itens, vazioTexto, busy, onAprovar, onRecusar, on
                 <Confianca valor={ins.confidence} />
                 {ins.origin === "mecanico" && (
                   <span
-                    title="Sugestão por padrão de frases (sem IA). Confira a evidência antes de aprovar."
+                    title="Sugestão por padrão de frases, sem IA. Confira a evidência antes de aprovar."
                     className="text-[10px] font-black text-sky-700 bg-sky-50 border border-sky-200 rounded px-1.5 py-0.5 tracking-wider"
                   >
-                    MECÂNICA
+                    SEM IA
                   </span>
                 )}
                 {ins.sale_value != null && (
@@ -412,8 +412,8 @@ export function ConvAIReview({ iaDisponivel = true }: { iaDisponivel?: boolean }
               Análise por IA {desligada ? "desligada" : "ligada"}
             </p>
             <p className="text-xs text-slate-500 mt-0.5 max-w-2xl">
-              Escolha o motor abaixo. Manual e Mecânico não usam IA (o Mecânico sugere de graça).
-              Sugestão e Automático ligam a IA, que lê as conversas e afina o manual desta clínica.
+              Escolha o motor abaixo. Manual e Sugestão sem IA não gastam token (essa última sugere a etapa de graça).
+              Sugestão com IA e Automático com IA ligam a IA, que lê as conversas e afina o manual desta clínica.
             </p>
           </div>
         </div>
@@ -455,7 +455,7 @@ export function ConvAIReview({ iaDisponivel = true }: { iaDisponivel?: boolean }
           eixo="etapa"
           itens={pendingEtapas}
           vazioTexto={motor === "mecanico"
-            ? "O motor mecânico não encontrou nenhuma etapa para sugerir por enquanto."
+            ? "A Sugestão sem IA não encontrou nenhuma etapa para sugerir por enquanto."
             : (desligada && iaDisponivel)
               ? "Ative a análise para a IA começar a ler as conversas."
               : motor === "sugestao"

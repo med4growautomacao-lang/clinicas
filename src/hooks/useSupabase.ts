@@ -603,6 +603,7 @@ export interface Lead {
   session_id: string | null;
   ai_enabled: boolean;
   followup_enabled: boolean;
+  human_only?: boolean; // cadeado "Atendimento pessoal": IA/follow-up nunca assumem; nada religa sozinho
   converted_patient_id: string | null;
   sla_breach_count: number;
   last_message_at: string | null;

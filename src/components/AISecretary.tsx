@@ -41,6 +41,8 @@ import {
   Sparkles,
   ChevronDown,
   Instagram,
+  Lock,
+  Unlock,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -3001,9 +3003,31 @@ function ChatsView() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                {/* Cadeado "Atendimento pessoal": IA/follow-up nunca assumem e NADA religa sozinho
+                    (blindado por trigger no banco). Destravar não religa nada: religa-se na mão. */}
                 <button
-                  onClick={() => updateLead(selectedLead.id, { ai_enabled: selectedLead.ai_enabled === false ? true : false })}
-                  title={selectedLead.ai_enabled !== false ? "Clique para pausar a IA deste lead" : "Clique para reativar a IA deste lead"}
+                  onClick={() => {
+                    const lock = !selectedLead.human_only;
+                    updateLead(selectedLead.id, lock
+                      ? { human_only: true, ai_enabled: false, followup_enabled: false }
+                      : { human_only: false });
+                  }}
+                  title={selectedLead.human_only
+                    ? "Atendimento pessoal ATIVO: IA e follow-up nunca assumem este contato. Clique para destravar."
+                    : "Marcar como atendimento pessoal: IA e follow-up nunca assumem este contato (nada religa sozinho)."}
+                  className={cn(
+                    "flex items-center gap-1.5 px-2.5 py-1 rounded-full border transition-all cursor-pointer active:scale-95",
+                    selectedLead.human_only
+                      ? "bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100"
+                      : "bg-slate-50 border-slate-200 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                  )}
+                >
+                  {selectedLead.human_only ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                  <span className="text-[10px] font-bold uppercase tracking-wider">Pessoal</span>
+                </button>
+                <button
+                  onClick={() => { if (selectedLead.human_only) return; updateLead(selectedLead.id, { ai_enabled: selectedLead.ai_enabled === false ? true : false }); }}
+                  title={selectedLead.human_only ? "Destrave o cadeado Pessoal para mexer na IA" : (selectedLead.ai_enabled !== false ? "Clique para pausar a IA deste lead" : "Clique para reativar a IA deste lead")}
                   className={cn(
                     "flex items-center gap-2 px-2.5 py-1 rounded-full border transition-all cursor-pointer active:scale-95",
                     selectedLead.ai_enabled !== false
@@ -3028,8 +3052,8 @@ function ChatsView() {
                   </span>
                 </button>
                 <button
-                  onClick={() => updateLead(selectedLead.id, { followup_enabled: selectedLead.followup_enabled === false ? true : false })}
-                  title={selectedLead.followup_enabled !== false ? "Clique para pausar follow-up/lembrete deste lead" : "Clique para reativar follow-up/lembrete deste lead"}
+                  onClick={() => { if (selectedLead.human_only) return; updateLead(selectedLead.id, { followup_enabled: selectedLead.followup_enabled === false ? true : false }); }}
+                  title={selectedLead.human_only ? "Destrave o cadeado Pessoal para mexer no follow-up" : (selectedLead.followup_enabled !== false ? "Clique para pausar follow-up/lembrete deste lead" : "Clique para reativar follow-up/lembrete deste lead")}
                   className={cn(
                     "flex items-center gap-2 px-2.5 py-1 rounded-full border transition-all cursor-pointer active:scale-95",
                     selectedLead.followup_enabled !== false

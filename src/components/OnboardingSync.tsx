@@ -5,7 +5,7 @@ import { useToast } from './ui/toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Loader2, RefreshCw, UserX, MessageCircle, Stethoscope, HeartCrack,
-  Bot, Bell, Check, MessagesSquare, X, ArrowRight, ArrowLeft, Sparkles, PartyPopper, CalendarCheck, History,
+  Bot, Bell, Check, MessagesSquare, X, ArrowRight, ArrowLeft, Sparkles, PartyPopper, CalendarCheck, History, Lock,
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 
@@ -121,6 +121,12 @@ function ActiveAuditCard({ lead, onApplied, onOpenChat }: { lead: PendingLead; o
   // nem re-enviar confirmação/lembrete). Contato novo: ambos ON.
   const [ai, setAi] = useState(!lead.is_scheduled);
   const [followup, setFollowup] = useState(!lead.is_scheduled);
+  // Cadeado "Atendimento pessoal" (ex.: paciente que a dra atende no próprio WhatsApp):
+  // IA/follow-up nunca assumem e nada religa sozinho (blindado no banco).
+  const [humanOnly, setHumanOnly] = useState(false);
+  const toggleLock = () => setHumanOnly(v => { const nv = !v; if (nv) { setAi(false); setFollowup(false); } return nv; });
+  const guardAi = (fn: (v: boolean) => boolean) => { if (!humanOnly) setAi(fn); };
+  const guardFu = (fn: (v: boolean) => boolean) => { if (!humanOnly) setFollowup(fn); };
   const [saving, setSaving] = useState(false);
 
   const apply = async (category: Category) => {
@@ -132,6 +138,7 @@ function ActiveAuditCard({ lead, onApplied, onOpenChat }: { lead: PendingLead; o
       p_next_appt_date: category === 'paciente' && nextDate ? nextDate : null,
       p_ai_enabled: ai, p_followup_enabled: followup,
       p_scheduled: lead.is_scheduled,
+      p_human_only: humanOnly,
     });
     setSaving(false);
     if (error || !data?.success) {
@@ -190,7 +197,15 @@ function ActiveAuditCard({ lead, onApplied, onOpenChat }: { lead: PendingLead; o
               <Cat icon={HeartCrack} label="Lead perdido" accent="hover:bg-rose-400/25 hover:border-rose-300/40" onClick={() => apply('lead_perdido')} />
               <Cat icon={Stethoscope} label="Paciente" accent="hover:bg-teal-400/25 hover:border-teal-300/40" onClick={() => setPatientMode(true)} />
             </div>
-            <div className="flex gap-2"><Toggle on={ai} set={setAi} icon={Bot} label="IA" /><Toggle on={followup} set={setFollowup} icon={Bell} label="Follow-up" /></div>
+            <div className="flex gap-2">
+              <button onClick={toggleLock}
+                title={humanOnly ? 'Atendimento pessoal: IA e follow-up nunca assumem. Clique para destravar.' : 'Marcar como atendimento pessoal (IA nunca assume este contato)'}
+                className={cn('flex items-center justify-center px-2.5 py-2 rounded-xl text-xs font-bold border backdrop-blur-md transition-all',
+                  humanOnly ? 'bg-amber-400/30 border-amber-300/60 text-amber-100 shadow-[0_0_20px_rgba(251,191,36,0.3)]' : 'bg-white/5 border-white/15 text-white/40')}>
+                <Lock className="w-3.5 h-3.5" />
+              </button>
+              <Toggle on={ai} set={guardAi} icon={Bot} label="IA" /><Toggle on={followup} set={guardFu} icon={Bell} label="Follow-up" />
+            </div>
           </>
         ) : (
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-2.5">
@@ -220,7 +235,15 @@ function ActiveAuditCard({ lead, onApplied, onOpenChat }: { lead: PendingLead; o
                 Resolver o atendimento anterior (concluído)
               </label>
             )}
-            <div className="flex gap-2"><Toggle on={ai} set={setAi} icon={Bot} label="IA" /><Toggle on={followup} set={setFollowup} icon={Bell} label="Follow-up" /></div>
+            <div className="flex gap-2">
+              <button onClick={toggleLock}
+                title={humanOnly ? 'Atendimento pessoal: IA e follow-up nunca assumem. Clique para destravar.' : 'Marcar como atendimento pessoal (IA nunca assume este contato)'}
+                className={cn('flex items-center justify-center px-2.5 py-2 rounded-xl text-xs font-bold border backdrop-blur-md transition-all',
+                  humanOnly ? 'bg-amber-400/30 border-amber-300/60 text-amber-100 shadow-[0_0_20px_rgba(251,191,36,0.3)]' : 'bg-white/5 border-white/15 text-white/40')}>
+                <Lock className="w-3.5 h-3.5" />
+              </button>
+              <Toggle on={ai} set={guardAi} icon={Bot} label="IA" /><Toggle on={followup} set={guardFu} icon={Bell} label="Follow-up" />
+            </div>
             <button onClick={() => apply('paciente')} disabled={saving}
               className="flex items-center justify-center gap-2 py-2.5 rounded-2xl bg-teal-500 hover:bg-teal-400 text-white font-black transition-all disabled:opacity-60 shadow-[0_0_24px_rgba(45,212,191,0.4)]">
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Confirmar paciente

@@ -1,5 +1,15 @@
 -- refresh_lead_attribution: de full refresh a cada 10 min para incremental.
 --
+-- ⚠️ ESTE ARQUIVO FOI SUPERADO no mesmo dia. Ele registra o passo 1 de três; o corpo que está
+-- rodando é o de 20260729141245. Não copie a função daqui, e leia com ressalva o parágrafo
+-- "POR QUE O MARCO É VARIÁVEL E NÃO CTE" abaixo: a conclusão dele está ERRADA.
+--   * 20260729141121 -> marco vira `CTE as materialized`. Em variável plpgsql a query fica em
+--     859 ms, porque o plano preparado adota generic plan e descarta o índice; como CTE
+--     materializada, 59 ms.
+--   * 20260729141245 -> `p_full` passa a varrer mesmo TODOS os leads (aqui ele ainda saía da CTE
+--     `mudou` e cobria 23.956 dos 32.786).
+-- Resultado final da série: 5.082 ms -> 46,6 ms.
+--
 -- O PROBLEMA (medido em pg_stat_statements): era o maior consumidor de CPU do banco.
 --     mean 5.082 ms  x  1.307 chamadas  =  6.643 s de CPU (1h50)
 -- A cada 10 minutos ela agregava as **500 mil linhas** de `chat_messages`, varria `appointments`,

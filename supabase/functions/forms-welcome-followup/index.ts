@@ -243,9 +243,9 @@ serve(async (req) => {
   const token = instance?.api_token;
   if (!token) { await logFail("sem api_token (WhatsApp não conectado)", { reason: "no_token" }); return json({ ok: false, error: "no_token" }); }
 
-  // (3) telefones
+  // (3) telefones. O telefone da CLÍNICA não é mais lido aqui: ele só servia para montar a
+  // session_id em TS, e a chave de memória agora tem um dono só, que é o banco (30/07/2026).
   const leadNumber = normalizeBrazilianPhone(phone);
-  const clinicNumber = normalizeBrazilianPhone(clinic_phone);
   if (!leadNumber) { await logFail("telefone do lead inválido", { reason: "invalid_phone", phone }); return json({ ok: false, error: "invalid_phone" }); }
 
   // (3.1) resolve o número real no WhatsApp (testa sem-9 e com-9)
@@ -303,7 +303,6 @@ serve(async (req) => {
     let emitErr: string | null = null;
     for (let i = 0; i < bubbles.length; i++) {
       const isLast = i === bubbles.length - 1;
-      const session_id = `${clinicNumber ?? ""}${effectiveNumber}`;
       // Erro de emit NAO pode virar 'sent' fantasma: rastreia e reflete no automation_logs.
       const { error } = await supabase.rpc("emit_message", {
         p_clinic_id: clinic_id,
@@ -313,8 +312,11 @@ serve(async (req) => {
         p_lead_id: lead_id,
         p_delay_ms: TYPING_DELAY_MS,
         p_dedup_key: `welcome:${lead_id}:${i}`,
+        // Sem session_id de propósito: o outbound_register_chat NÃO grava essa coluna (a chave sai
+        // do trigger, que é o dono dela). Mandar aqui era campo morto convidando alguém a
+        // "consertar" o register para honrá-lo, e aí a memória partiria de novo.
         p_chat_payload: isLast
-          ? { session_id, sender: "system", message: { type: "system", content: joined, additional_kwargs: {}, response_metadata: {} } }
+          ? { sender: "system", message: { type: "system", content: joined, additional_kwargs: {}, response_metadata: {} } }
           : null,
       });
       if (error) emitErr = error.message;
@@ -357,12 +359,16 @@ serve(async (req) => {
     // limpa flag (caso estivesse marcada) e zera contador
     await supabase.from("leads").update({ whatsapp_invalid: false, welcome_attempts: 0 }).eq("id", lead_id);
     // memória/conversa — mesma escrita que o n8n fazia
-    // session_id pelo número EFETIVO (corrigido em 3.2): com o telefone incompleto a chave saía
-    // diferente da que o wa-inbound monta quando a pessoa responde, e a memória nascia partida.
-    const session_id = `${clinicNumber ?? ""}${effectiveNumber}`;
+    // ⚠️ NÃO montar a session_id aqui. Passamos o TELEFONE (que é fato) e o banco compõe a chave
+    // (trigger fn_fill_chat_session_id -> fn_chat_session_id, que normaliza). Montar em TS era
+    // reproduzir o defeito de 17/07 a 30/07/2026 por outro caminho: o normalizador local divergia
+    // do normalize_br_phone (ex.: DDD 55 sem DDI) e a memória nascia partida. Medido em 30/07:
+    // 2 leads da Vaz com a chave do welcome diferente da chave da conversa.
+    // O `phone` também é o que faz o trigger master achar o lead: sem phone e sem session_id ele
+    // zeraria o lead_id da linha.
     await supabase.from("chat_messages").insert({
       // sender/type 'system': automação não é fala do Agente IA (atribuição + memória + ícone próprio)
-      session_id, clinic_id, lead_id, sender: "system", direction: "outbound",
+      clinic_id, lead_id, phone: effectiveNumber, sender: "system", direction: "outbound",
       message: { type: "system", content: joined, additional_kwargs: {}, response_metadata: {} },
     });
     return json({ ok: true, sent: true, bubbles: bubbles.length, lead_id });

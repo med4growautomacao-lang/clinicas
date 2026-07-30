@@ -47,34 +47,45 @@ Deno.serve(async (req) => {
     const p = await req.json();
     clinicId = p.clinic_id ?? null;
 
-    const clinicPhone = String(p.clinic_phone ?? "");
     const leadPhone = String(p.lead_phone ?? "");
     const mensagem = String(p.mensagem ?? "").trim();
-    // ⚠️ CHAVE DA MEMORIA. Vem pronta de quem GRAVOU a conversa (ingest_wa_message devolve a
-    // mesma string que o trigger fn_fill_chat_session_id monta: clinic_phone || telefone
-    // NORMALIZADO). Telefone e chave, e chave tem um dono so, que e o banco.
+    // ⚠️ CHAVE DA MEMORIA. Vem PRONTA de quem gravou a conversa: ingest_wa_message devolve
+    // fn_chat_session_id(clinica, telefone NORMALIZADO), a mesma funcao que o trigger
+    // fn_fill_chat_session_id usa. Telefone e chave, e chave tem um dono so, que e o banco.
     //
-    // O fallback `clinicPhone + leadPhone` era o unico caminho ate 30/07/2026 e foi a causa da
-    // amnesia do agente: `leadPhone` vem CRU do chatid (13 digitos, COM o 9) e a conversa e
-    // gravada sem o 9, entao o agente lia e escrevia numa sessao onde so existiam as falas dele
-    // mesmo. O loadConversation descarta os 'assistant' do inicio, sobrava UMA mensagem sem
-    // historico, e o modelo se reapresentava e repergunta o nome no meio do atendimento.
-    // Ele fica como rede de seguranca para chamador antigo (payload sem session_id), NUNCA
-    // como caminho normal: quando cair aqui, a Central avisa.
-    const chaveRecebida = String(p.session_id ?? "").trim();
-    const sessionId = chaveRecebida || (clinicPhone + leadPhone);
+    // NAO EXISTE MAIS FALLBACK, e isso e decisao. Ate 30/07/2026 esta linha montava
+    // `clinic_phone + lead_phone` com o telefone CRU do chatid (13 digitos, COM o 9) enquanto a
+    // conversa era gravada sem o 9: o agente lia e escrevia numa sessao onde so existiam as falas
+    // dele mesmo, o loadConversation descartava os 'assistant' do inicio, sobrava UMA mensagem sem
+    // historico, e o modelo se reapresentava e repergunta o nome no meio do atendimento
+    // (Clinica Vaz: 49 de 59 leads com IA em 14 dias).
+    //
+    // Remontar aqui tinha um segundo risco, pior: quando a instancia da clinica esta sem
+    // phone_number (15 das 34 clinicas hoje, e toda clinica na janela entre conectar e o cron de
+    // deteccao preencher), `clinic_phone` vinha vazio e a chave virava SO o telefone do paciente.
+    // A unica de `ai_turn_buffer` e por session_id, e o ON CONFLICT sobrescreve clinic_id e
+    // context: o mesmo paciente falando com duas clinicas colapsaria numa linha de fila e o turno
+    // de uma seria respondido com o contexto e o token da outra. Silencio com alerta e melhor que
+    // atendimento cruzado entre clinicas.
+    const sessionId = String(p.session_id ?? "").trim();
 
-    if (!p.clinic_id || !leadPhone || !sessionId) {
+    if (!p.clinic_id || !leadPhone) {
       return json({ ok: false, error: "missing clinic_id/lead_phone" }, 400);
     }
     // Sem texto (ex.: midia sem transcricao) -> nada a responder; nao enfileira.
     if (!mensagem) return json({ ok: true, skipped: "empty_message" });
 
-    // Aviso DEPOIS das validacoes: payload invalido nao vira alerta na Central.
-    if (!chaveRecebida) {
-      await registrarErro(supabase, "sessao_montada_no_fallback",
-        "O turno chegou sem a chave de memoria e ela foi remontada aqui; se o telefone tiver o 9o digito, o agente atende SEM HISTORICO",
-        "warning", clinicId, { lead_phone: leadPhone, session_id: sessionId });
+    if (!sessionId) {
+      // bg(): o alerta e diagnostico e nao pode entrar no caminho critico do paciente. O
+      // wa-inbound espera esta resposta antes de devolver 200 a uazapi.
+      bg(registrarErro(supabase, "turno_sem_chave_de_memoria",
+        "O turno do paciente NAO foi processado: a clinica esta sem o telefone da instancia do WhatsApp, e sem ele nao existe chave de memoria",
+        "critical", clinicId, {
+          lead_phone: leadPhone,
+          obs: "Conferir whatsapp_instances.phone_number desta clinica (o cron de deteccao roda 09h/18h). "
+             + "O turno foi recusado de proposito: sem prefixo da clinica a chave colide entre clinicas na fila.",
+        }));
+      return json({ ok: true, skipped: "sem_chave_de_memoria" });
     }
 
     const waitSeconds = Number(p.response_wait_seconds) || 30;
@@ -84,7 +95,7 @@ Deno.serve(async (req) => {
       token: p.uazapi_token ?? null,
       contact_identifier: p.contact_identifier ?? leadPhone,
       lead_phone: leadPhone,
-      clinic_phone: clinicPhone,
+      clinic_phone: String(p.clinic_phone ?? ""),
       lead_id: p.lead_id ?? null,
       handoff_enabled: p.handoff_enabled ?? false,
       handoff_rules: p.handoff_rules ?? [],

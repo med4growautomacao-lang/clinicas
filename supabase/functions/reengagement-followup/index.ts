@@ -134,9 +134,10 @@ serve(async (req) => {
     });
   };
 
-  // (2) telefones (necessário nos dois caminhos)
+  // (2) telefones (necessário nos dois caminhos). O telefone da CLÍNICA não é mais lido aqui: ele
+  // só servia para montar a session_id em TS, e a chave de memória agora tem um dono só, que é o
+  // banco (30/07/2026).
   const leadNumber = normalizeBrazilianPhone(phone);
-  const clinicNumber = normalizeBrazilianPhone(clinic_phone);
   if (!leadNumber) { await logFail("telefone do lead inválido"); return json({ ok: false, error: "invalid_phone" }); }
 
   // (3) mensagem do passo (multi-balão por parágrafo)
@@ -209,9 +210,14 @@ serve(async (req) => {
       message_sent: joined, triggered_at: nowSP(), metadata: { step_no: step_no ?? null },
     });
     if (anySent) {
-      const session_id = `${clinicNumber ?? ""}${leadNumber}`;
+      // ⚠️ NÃO montar a session_id aqui. Passamos o TELEFONE (que é fato) e o banco compõe a chave
+      // (trigger fn_fill_chat_session_id -> fn_chat_session_id, que normaliza). Montar em TS era
+      // reproduzir o defeito de 17/07 a 30/07/2026 por outro caminho: o normalizador local divergia
+      // do normalize_br_phone (ex.: DDD 55 sem DDI) e a memória nascia partida.
+      // O `phone` também é o que faz o trigger master achar o lead: sem phone e sem session_id ele
+      // zeraria o lead_id da linha.
       await supabase.from("chat_messages").insert({
-        session_id, clinic_id, lead_id,
+        clinic_id, lead_id, phone: leadNumber,
         // sender/type 'system': automação não é fala do Agente IA (atribuição + memória + ícone próprio)
         sender: "system", direction: "outbound",
         message: { type: "system", content: joined, additional_kwargs: {}, response_metadata: {} },

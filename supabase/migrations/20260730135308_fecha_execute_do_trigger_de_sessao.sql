@@ -1,0 +1,13 @@
+-- Fecha o EXECUTE de PUBLIC na funcao de trigger da chave de memoria.
+--
+-- Ela estava aberta a anon/authenticated desde sempre (todo `create function` concede EXECUTE a
+-- PUBLIC, e `create or replace` PRESERVA o ACL, entao nenhuma das reescritas de hoje fechou).
+-- Na pratica nao era porta de entrada (funcao que devolve trigger nao e exposta pelo PostgREST e
+-- da erro fora do contexto de trigger), mas a regra da casa e a mesma para qualquer rotina interna:
+-- revogar dos DOIS caminhos, PUBLIC e nominal.
+--
+-- ⚠️ PROVADO ANTES DE APLICAR, em transacao desfeita: com o EXECUTE revogado o trigger continua
+-- disparando e a chave sai igual ('551189321666551188122571'). O privilegio de funcao de trigger e
+-- conferido na CRIACAO do trigger, nao a cada disparo. Se nao fosse assim, isto derrubaria a chave
+-- de memoria de TODA mensagem nova, que e exatamente o defeito que hoje foi consertar.
+revoke all on function public.fn_fill_chat_session_id() from public, anon, authenticated;

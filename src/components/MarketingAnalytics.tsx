@@ -1122,6 +1122,10 @@ function SyncInvestmentButton({ clinicId, onDone }: { clinicId: string | null; o
     const okLines: string[] = [];
     const errLines: string[] = [];
     let touched = false;
+    // Sessão revogada no servidor (o token ainda é aceito nas telas, porque o Postgres só confere a
+    // ASSINATURA; as edges conferem a SESSÃO e recusam com 401). Não é falha da sincronização, e
+    // insistir nos outros blocos e na outra plataforma só multiplica a mesma mensagem.
+    let sessaoMorta = false;
 
     for (const p of SYNC_PLATFORMS) {
       let dias = 0, gasto = 0, falhas = 0;
@@ -1136,8 +1140,11 @@ function SyncInvestmentButton({ clinicId, onDone }: { clinicId: string | null; o
           });
           if (error) {
             // status não-2xx: o corpo detalhado vem em error.context (Response), não em error.message.
+            // Ler o status ANTES do .json(), que consome o corpo.
+            const status = (error as any).context?.status as number | undefined;
             let detail = error.message;
             try { const bd = await (error as any).context?.json?.(); if (bd?.detail || bd?.error) detail = bd.detail || bd.error; } catch { /* usa message */ }
+            if (status === 401 || detail === 'unauthorized') { sessaoMorta = true; break; }
             // Identifica O BLOCO que falhou: sem isso o operador não sabe qual parte do período
             // ficou sem dado e teria que refazer tudo.
             errLines.push(`${p.label} (${b.since} a ${b.until}): ${detail}`);
@@ -1146,6 +1153,7 @@ function SyncInvestmentButton({ clinicId, onDone }: { clinicId: string | null; o
           }
           if (!data?.ok) {
             if (data?.error === p.notConfigured) { naoConfigurada = true; break; }  // não insiste nos demais blocos
+            if (data?.error === 'unauthorized') { sessaoMorta = true; break; }
             errLines.push(`${p.label} (${b.since} a ${b.until}): ${data?.detail || data?.error || 'falha'}`);
             falhas++;
             continue;
@@ -1159,6 +1167,7 @@ function SyncInvestmentButton({ clinicId, onDone }: { clinicId: string | null; o
         }
       }
 
+      if (sessaoMorta) break;                  // a outra plataforma recusaria pelo mesmo motivo
       if (naoConfigurada) continue;            // plataforma ausente nesta clínica: silêncio
       if (dias > 0 || falhas === 0) {
         okLines.push(`${p.label}: ${dias} dia(s) · ${fmtBRL(gasto)}${falhas > 0 ? ` (${falhas} bloco(s) com erro)` : ''}`);
@@ -1167,7 +1176,11 @@ function SyncInvestmentButton({ clinicId, onDone }: { clinicId: string | null; o
 
     setProgress(null);
     if (touched) onDone();
-    if (okLines.length === 0 && errLines.length === 0) {
+    if (sessaoMorta) {
+      // "unauthorized" na tela parecia defeito da sincronização de marketing e já custou um
+      // diagnóstico errado (30/07): o problema é o login, não a clínica nem a plataforma.
+      setResult({ ok: false, msg: 'Sua sessão expirou. Saia do sistema e entre de novo para sincronizar o investimento.' });
+    } else if (okLines.length === 0 && errLines.length === 0) {
       setResult({ ok: false, msg: 'Nenhuma plataforma de anúncios configurada nesta clínica.' });
     } else {
       setResult({ ok: errLines.length === 0, msg: [...okLines, ...errLines].join('\n') });

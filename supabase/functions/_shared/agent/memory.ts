@@ -19,6 +19,22 @@ function roleOf(msg: any): Role | null {
   return null;
 }
 
+/** Junta historico + turno atual num unico texto SEM repetir o trecho comum.
+ *
+ *  O ingest persiste a mensagem do paciente ANTES do agente rodar, entao o fim do historico e o
+ *  comeco do buffer se sobrepoem. Concatenar cru mandava a mesma frase duas vezes ao modelo (ele
+ *  passa a achar que o paciente repetiu); trocar um pelo outro apagava o historico. Aqui corta do
+ *  fim do historico o maior trecho que ja abre o buffer e emenda. */
+function fundirSemRepetir(historico: string, buffer: string): string {
+  if (!historico) return buffer;
+  if (buffer.includes(historico)) return buffer; // o turno do fim JA e o buffer inteiro
+  let corte = Math.min(historico.length, buffer.length);
+  while (corte > 0 && !historico.endsWith(buffer.slice(0, corte))) corte--;
+  return corte > 0
+    ? historico.slice(0, historico.length - corte) + buffer
+    : `${historico}\n${buffer}`;
+}
+
 /** Carrega a conversa (historico + turno atual), em turnos alternados prontos para o LLM.
  *  currentUserText = bufferFinal (concatenacao debounced), tratado como o turno atual autoritativo. */
 export async function loadConversation(
@@ -45,9 +61,15 @@ export async function loadConversation(
     else turns.push({ role, text: content });
   }
 
-  // Garante um unico turno de usuario no fim == bufferFinal autoritativo.
+  // Garante um unico turno de usuario no fim, terminando no bufferFinal autoritativo.
+  //
+  // ⚠️ NUNCA trocar direto (`last.text = currentUserText`). Isso era APAGAR HISTORICO: a fusao
+  // acima junta todos os 'user' consecutivos num turno so, e num historico sem resposta do agente
+  // no meio (sessao de memoria partida, ou lead que mandou varias mensagens antes da primeira
+  // resposta) esse turno unico carrega a conversa INTEIRA. O agente recebia so a mensagem atual e
+  // se reapresentava no meio do atendimento: e o sintoma de 30/07/2026 chegando por outra porta.
   const last = turns[turns.length - 1];
-  if (last && last.role === "user") last.text = currentUserText;
+  if (last && last.role === "user") last.text = fundirSemRepetir(last.text, currentUserText);
   else turns.push({ role: "user", text: currentUserText });
 
   // Anthropic exige comecar por 'user'; remove qualquer 'assistant' no inicio.

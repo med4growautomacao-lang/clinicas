@@ -120,3 +120,109 @@ enabled = true
 # Disparada pelo pg_cron (sem JWT) para re-hospedar avatares efêmeros do WhatsApp.
 verify_jwt = false
 entrypoint = "./functions/onboarding-rehost-avatars/index.ts"
+
+# ════════════════════════════════════════════════════════════════════════════════════════════
+# ⚠️ REGRA DESTE ARQUIVO, e não é burocracia: função que roda com verify_jwt = false em
+# produção e NÃO está declarada aqui é uma mina. O CLI usa `true` como default, então o
+# primeiro `supabase functions deploy` que a incluir liga o JWT e o chamador (uazapi, site do
+# cliente, pg_cron, CRM) passa a levar 401. Não aparece erro do nosso lado: simplesmente para
+# de entrar dado. Foi o motivo de registrar wa-inbound e ai-agent-worker em 28/07 e ai-agent em
+# 30/07 — e os 15 abaixo estavam na mesma situação, fechados em 30/07/2026 depois de conferir
+# o valor real de cada um pela API de gestão (nunca pelo que o arquivo dizia).
+#
+# Ao criar função nova: declare aqui NO MESMO commit, com o motivo do verify_jwt.
+# ════════════════════════════════════════════════════════════════════════════════════════════
+
+[functions.external-forms-ingest]
+enabled = true
+# ⚠️ CAPTAÇÃO DE LEAD DE FORMULÁRIO. O site do cliente chama com ?k=<token da clínica> e sem
+# Authorization. Com JWT ligado, nenhum lead de formulário entra.
+verify_jwt = false
+entrypoint = "./functions/external-forms-ingest/index.ts"
+
+[functions.site-script]
+enabled = true
+# ⚠️ Serve o script de rastreamento para TODOS os sites dos clientes, chamado pelo navegador do
+# visitante. Com JWT ligado, o rastreamento do site inteiro morre.
+verify_jwt = false
+entrypoint = "./functions/site-script/index.ts"
+
+[functions.site-tracking]
+enabled = true
+# Chamada pelo script do site (visitante anônimo) quando a pessoa clica no botão de WhatsApp.
+verify_jwt = false
+entrypoint = "./functions/site-tracking/index.ts"
+
+[functions.ctwa-tracking]
+enabled = true
+# Webhook da uazapi (clique em anúncio Click-to-WhatsApp); a uazapi não manda JWT.
+verify_jwt = false
+entrypoint = "./functions/ctwa-tracking/index.ts"
+
+[functions.ctwa-enrich]
+enabled = true
+# Disparada pelo pg_cron (sem JWT) para preencher o nome da campanha dos cliques.
+verify_jwt = false
+entrypoint = "./functions/ctwa-enrich/index.ts"
+
+[functions.uazapi-events]
+enabled = true
+# Webhook da uazapi (event=connection); a uazapi não manda JWT.
+verify_jwt = false
+entrypoint = "./functions/uazapi-events/index.ts"
+
+[functions.whatsapp-sync-status]
+enabled = true
+# Disparada pelo pg_cron (sem JWT) para reconciliar o estado das instâncias.
+verify_jwt = false
+entrypoint = "./functions/whatsapp-sync-status/index.ts"
+
+[functions.whatsapp-qr-public]
+enabled = true
+# Página pública de QR code: o cliente abre o link sem estar logado no app.
+verify_jwt = false
+entrypoint = "./functions/whatsapp-qr-public/index.ts"
+
+[functions.whatsapp-redirect]
+enabled = true
+# Link de redirecionamento para o WhatsApp, aberto pelo visitante anônimo.
+verify_jwt = false
+entrypoint = "./functions/whatsapp-redirect/index.ts"
+
+[functions.external-crm-status]
+enabled = true
+# ENTRADA de Lead/Ganho/Perdido do CRM do cliente (ex.: Clint), autenticada por ?k=<crm_token>.
+verify_jwt = false
+entrypoint = "./functions/external-crm-status/index.ts"
+
+[functions.meta-capi-conversions]
+enabled = true
+# Disparada pelo pg_cron / outbox (sem JWT) para enviar conversões à Meta.
+verify_jwt = false
+entrypoint = "./functions/meta-capi-conversions/index.ts"
+
+[functions.spend-sync-cron]
+enabled = true
+# Agendador do investimento (Meta + Google), disparado pelo pg_cron sem JWT.
+verify_jwt = false
+entrypoint = "./functions/spend-sync-cron/index.ts"
+
+[functions.conv-ai-mine]
+enabled = true
+# Curadoria de padrões do analista mecânico, disparada pelo pg_cron sem JWT.
+verify_jwt = false
+entrypoint = "./functions/conv-ai-mine/index.ts"
+
+[functions.webhook-proxy]
+enabled = true
+# Relay navegador -> servidor para contornar CORS nos webhooks da organização.
+verify_jwt = false
+entrypoint = "./functions/webhook-proxy/index.ts"
+
+[functions.setup-prontuario-password]
+enabled = true
+# Produção roda false (conferido pela API de gestão em 30/07). Registrado para um deploy NÃO
+# mudar o comportamento sem decisão. ⚠️ A função valida por dentro; se a intenção era exigir
+# login, isso é decisão de produto e não deve ser trocada por efeito colateral de deploy.
+verify_jwt = false
+entrypoint = "./functions/setup-prontuario-password/index.ts"

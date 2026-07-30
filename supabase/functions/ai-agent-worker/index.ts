@@ -253,7 +253,7 @@ async function processTurn(supabase: any, turn: { session_id: string; clinic_id:
     const authToken = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
     const session: SessionCtx = { clinic_id: clinicId, lead_phone: leadPhone, schedulerUrl, authToken };
 
-    const agentCtx = await fetchAgentContext(supabase, clinicId, turn.session_id, ctx.handoff_rules ?? [], !!ctx.handoff_enabled);
+    const agentCtx = await fetchAgentContext(supabase, clinicId, turn.session_id, ctx.handoff_rules ?? [], !!ctx.handoff_enabled, ctx.lead_id ?? null);
     const system = assembleSystemPrompt(agentCtx);
     const tools = agentToolSpecs();
 

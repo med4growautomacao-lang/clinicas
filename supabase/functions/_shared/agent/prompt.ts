@@ -77,14 +77,25 @@ export function assembleSystemPrompt(ctx: AgentContext): string {
   return parts.join("\n\n");
 }
 
-/** Le combined_prompt (v_clinic_ai_prompt) e ai_summary (leads) para a sessao. */
+/** Le combined_prompt (v_clinic_ai_prompt) e ai_summary (leads) para a sessao.
+ *
+ *  ⚠️ O lead e buscado por `leadId` quando ele existe. Buscar por `session_id` usava a CHAVE DE
+ *  MEMORIA como identidade do lead: qualquer produtor que gravasse a conversa com uma chave fora do
+ *  padrao (`leads.session_id` e sobrescrita por trigger a cada insert com session_id explicito)
+ *  fazia o `maybeSingle()` devolver null e o agente perdia o bloco "Dados do Lead" sem erro nenhum.
+ *  Medido em 30/07/2026: 151 leads com session_id fora do padrao canonico. O sessionId fica como
+ *  fallback para chamador que nao tem lead_id (sandbox). */
 export async function fetchAgentContext(
   supabase: any, clinicId: string, sessionId: string,
   handoffRules: HandoffRule[] | null, handoffEnabled: boolean,
+  leadId?: string | null,
 ): Promise<AgentContext> {
+  const leadQuery = leadId
+    ? supabase.from("leads").select("ai_summary").eq("id", leadId).maybeSingle()
+    : supabase.from("leads").select("ai_summary").eq("clinic_id", clinicId).eq("session_id", sessionId).maybeSingle();
   const [{ data: promptRow }, { data: leadRow }] = await Promise.all([
     supabase.from("v_clinic_ai_prompt").select("combined_prompt").eq("clinic_id", clinicId).maybeSingle(),
-    supabase.from("leads").select("ai_summary").eq("clinic_id", clinicId).eq("session_id", sessionId).maybeSingle(),
+    leadQuery,
   ]);
   return {
     combinedPrompt: promptRow?.combined_prompt || "",

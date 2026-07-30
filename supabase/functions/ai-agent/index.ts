@@ -50,13 +50,32 @@ Deno.serve(async (req) => {
     const clinicPhone = String(p.clinic_phone ?? "");
     const leadPhone = String(p.lead_phone ?? "");
     const mensagem = String(p.mensagem ?? "").trim();
-    const sessionId = clinicPhone + leadPhone;
+    // ⚠️ CHAVE DA MEMORIA. Vem pronta de quem GRAVOU a conversa (ingest_wa_message devolve a
+    // mesma string que o trigger fn_fill_chat_session_id monta: clinic_phone || telefone
+    // NORMALIZADO). Telefone e chave, e chave tem um dono so, que e o banco.
+    //
+    // O fallback `clinicPhone + leadPhone` era o unico caminho ate 30/07/2026 e foi a causa da
+    // amnesia do agente: `leadPhone` vem CRU do chatid (13 digitos, COM o 9) e a conversa e
+    // gravada sem o 9, entao o agente lia e escrevia numa sessao onde so existiam as falas dele
+    // mesmo. O loadConversation descarta os 'assistant' do inicio, sobrava UMA mensagem sem
+    // historico, e o modelo se reapresentava e repergunta o nome no meio do atendimento.
+    // Ele fica como rede de seguranca para chamador antigo (payload sem session_id), NUNCA
+    // como caminho normal: quando cair aqui, a Central avisa.
+    const chaveRecebida = String(p.session_id ?? "").trim();
+    const sessionId = chaveRecebida || (clinicPhone + leadPhone);
 
     if (!p.clinic_id || !leadPhone || !sessionId) {
       return json({ ok: false, error: "missing clinic_id/lead_phone" }, 400);
     }
     // Sem texto (ex.: midia sem transcricao) -> nada a responder; nao enfileira.
     if (!mensagem) return json({ ok: true, skipped: "empty_message" });
+
+    // Aviso DEPOIS das validacoes: payload invalido nao vira alerta na Central.
+    if (!chaveRecebida) {
+      await registrarErro(supabase, "sessao_montada_no_fallback",
+        "O turno chegou sem a chave de memoria e ela foi remontada aqui; se o telefone tiver o 9o digito, o agente atende SEM HISTORICO",
+        "warning", clinicId, { lead_phone: leadPhone, session_id: sessionId });
+    }
 
     const waitSeconds = Number(p.response_wait_seconds) || 30;
     const midiaType = ((p.midia_kind ?? "") + " " + (p.midia_mime ?? "")).trim();

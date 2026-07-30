@@ -67,6 +67,15 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/emissor-worker/index.ts"
 
+[functions.ai-agent]
+enabled = true
+# ⚠️ ENTRADA DO AGENTE. Chamada pelo wa-inbound, que manda SO o x-hub-secret, sem Authorization.
+# O valor real em produção é false (conferido pela API de gestão em 30/07); estava FORA deste
+# arquivo, então um deploy pelo CLI ligaria o JWT (default true) e nenhum turno de paciente
+# chegaria ao agente, sem erro visível. Mesmo motivo do wa-inbound e do ai-agent-worker.
+verify_jwt = false
+entrypoint = "./functions/ai-agent/index.ts"
+
 [functions.ai-agent-worker]
 enabled = true
 # ⚠️ O CEREBRO DO AGENTE. Disparado pelo pg_cron via system_http_post e "cutucado" pelo ai-agent,

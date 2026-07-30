@@ -553,6 +553,14 @@ serve(async (req) => {
           clinic_phone: r.clinic_phone,
           lead_id: r.lead_id,
           lead_phone: leadPhone,
+          // ⚠️ A CHAVE DA MEMORIA vem PRONTA da RPC, que e quem gravou a conversa. Nao montar
+          // aqui: `clinic_phone + leadPhone` usa o telefone CRU do chatid (13 digitos, COM o 9)
+          // enquanto a conversa e gravada com normalize_br_phone (12 digitos, SEM o 9). Davam
+          // duas sessoes para o mesmo paciente e o agente lia a vazia -> ele se reapresentava no
+          // meio da conversa e repergunta o nome (Vaz: 49 de 59 leads em 14 dias, 17/07 a 30/07).
+          // `lead_phone` continua CRU de proposito: dali sai ENDERECO DE ENTREGA nas tools de
+          // handoff/encerramento, e endereco vai como a uazapi devolveu (CLAUDE.md 0.4).
+          session_id: r.session_id ?? null,
           mensagem: content,
           uazapi_token: String(body.token || ""),
           instance_name: String(body.instanceName || r.clinic_id),

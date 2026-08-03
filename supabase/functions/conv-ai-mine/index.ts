@@ -61,9 +61,14 @@ async function llmKey(provider: string): Promise<string | null> {
   return key;
 }
 
-// A geração Opus 4.7+ da Anthropic removeu temperature/top_p/top_k (400 se mandar) e liga
-// "thinking" sozinha. Aqui só queremos o JSON dos padrões, sem gastar o teto pensando.
-const ANTHROPIC_NO_SAMPLING = /^claude-(opus-4-[78]|sonnet-5|fable-5|mythos-5)/;
+// A geração Opus 4.7+ da Anthropic (Opus 4.7/4.8/5, Sonnet 5, Fable 5, Mythos 5) removeu
+// temperature/top_p/top_k (400 se mandar) e liga "thinking" sozinha. Aqui só queremos o JSON
+// dos padrões, sem gastar o teto pensando.
+//
+// ⚠️ `opus-5` é escrito à parte porque `opus-4-[78]` NÃO o cobre: esta régua nasceu antes do
+// Opus 5 e deixava de fora justamente o modelo mais novo, que é o mais provável de alguém
+// escolher no Super Admin. Corrigido em 03/08 junto com as irmãs (analyst, learn, llm.ts).
+const ANTHROPIC_NO_SAMPLING = /^claude-(opus-4-[78]|opus-5|sonnet-5|fable-5|mythos-5)/;
 const ANTHROPIC_THINKING_ALWAYS_ON = /^claude-(fable-5|mythos-5)/;
 
 function anthropicBody(model: string, temperature: number, maxTokens: number, system: string, user: string) {

@@ -169,16 +169,39 @@ function anthropicMessages(messages: AgentMsg[]): unknown[] {
   return out;
 }
 
+// A geração Opus 4.7+ da Anthropic (Opus 4.7/4.8/5, Sonnet 5, Fable 5, Mythos 5) REMOVEU
+// temperature/top_p/top_k: mandar o campo devolve 400. Mesma régua que conv-ai-analyst,
+// conv-ai-mine e conv-ai-learn já usavam; o agente era o único caminho sem ela.
+//
+// ⚠️ Foi o defeito de 03/08 15:34 (Clínica Vaz): o modelo primário falhou, o worker caiu no
+// reserva `claude-opus-4-8` repassando a mesma temperatura e o RESERVA morreu com
+//   "`temperature` is deprecated for this model"
+// ou seja, a rede de proteção caiu junto com o que ela deveria salvar e o paciente ficou sem
+// resposta. Fallback que repete o corpo do primário herda os campos proibidos do modelo novo.
+//
+// ⚠️ `opus-5` entra aqui explicitamente porque `opus-4-[78]` NÃO o cobre: a régua original é de
+// antes do Opus 5 e deixaria o modelo mais novo (e mais provável de ser escolhido no painel)
+// justamente de fora. As outras três funções ainda têm esse furo.
+const ANTHROPIC_NO_SAMPLING = /^claude-(opus-4-[78]|opus-5|sonnet-5|fable-5|mythos-5)/;
+const ANTHROPIC_THINKING_ALWAYS_ON = /^claude-(fable-5|mythos-5)/;
+
 async function anthropicTurn(
   cfg: ModelConfig, key: string, system: string, messages: AgentMsg[], tools: AgentTool[],
 ): Promise<TurnOut> {
   const body: Record<string, unknown> = {
     model: cfg.model,
     max_tokens: 2048,
-    temperature: cfg.temperature,
     system,
     messages: anthropicMessages(messages),
   };
+  if (ANTHROPIC_NO_SAMPLING.test(cfg.model)) {
+    // ⚠️ Desligar o "thinking" aqui não é economia, é o que impede a resposta de sair truncada:
+    // no Opus 5 ele vem LIGADO por padrão e divide o mesmo teto de 2048 tokens com o texto que o
+    // paciente lê. Fable/Mythos não aceitam nem o disabled, por isso a segunda régua.
+    if (!ANTHROPIC_THINKING_ALWAYS_ON.test(cfg.model)) body.thinking = { type: "disabled" };
+  } else {
+    body.temperature = cfg.temperature;
+  }
   if (tools.length) {
     body.tools = tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters }));
   }

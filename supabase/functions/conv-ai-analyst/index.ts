@@ -90,11 +90,16 @@ async function llmKey(provider: string): Promise<string | null> {
 
 type LlmOut = { text: string; tokens_in: number; tokens_out: number };
 
-// A geração Opus 4.7+ da Anthropic (Opus 4.8/4.7, Sonnet 5, Fable 5) REMOVEU
+// A geração Opus 4.7+ da Anthropic (Opus 4.7/4.8/5, Sonnet 5, Fable 5, Mythos 5) REMOVEU
 // temperature/top_p/top_k: mandar o campo devolve 400. Nesses modelos o
 // "thinking" também liga sozinho, e aqui só queremos o JSON da análise — sem
 // gastar o teto de tokens pensando. Fable/Mythos não aceitam nem o disabled.
-const ANTHROPIC_NO_SAMPLING = /^claude-(opus-4-[78]|sonnet-5|fable-5|mythos-5)/;
+//
+// ⚠️ `opus-5` é escrito à parte porque `opus-4-[78]` NÃO o cobre: esta régua nasceu antes do
+// Opus 5 e deixava de fora justamente o modelo mais novo, que é o mais provável de alguém
+// escolher no Super Admin. O furo era silencioso: só apareceria como 400 na primeira análise
+// depois da troca de modelo. Corrigido em 03/08 junto com o mesmo furo no _shared/llm.ts.
+const ANTHROPIC_NO_SAMPLING = /^claude-(opus-4-[78]|opus-5|sonnet-5|fable-5|mythos-5)/;
 const ANTHROPIC_THINKING_ALWAYS_ON = /^claude-(fable-5|mythos-5)/;
 
 // Estrutura da análise. Com `tool_choice` forçado, a API da Anthropic VALIDA a resposta contra

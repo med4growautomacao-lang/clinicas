@@ -18,6 +18,7 @@ import {
   Factory,
   FileText,
   BadgeCheck,
+  GraduationCap,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -107,6 +108,8 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
     // Financeiro DESATIVADO por enquanto (jul/2026) — reativar removendo o comentário desta linha.
     // { id: "finance", label: "Financeiro", icon: CircleDollarSign, color: "text-emerald-700", roles: ['gestor', 'medico_gestor', 'secretaria', 'vendedor'] },
     { id: "settings", label: "Configurações", icon: Settings, color: "text-slate-500", roles: ['gestor', 'medico_gestor', 'secretaria', 'vendedor'] },
+    // Transversal: os vídeos ensinam a plataforma, que é a mesma nas duas marcas.
+    { id: "tutorials", label: "Tutoriais", icon: GraduationCap, color: "text-violet-600", roles: ['gestor', 'medico', 'medico_gestor', 'secretaria', 'vendedor', 'super-admin', 'org_owner', 'org_admin', 'org_team'] },
     { id: "super-admin", label: "Super Admin", icon: ShieldCheck, color: "text-orange-600", roles: ['super-admin'] },
     { id: "org-admin", label: "Organização", icon: Activity, color: "text-violet-600", roles: ['org_owner', 'org_admin', 'org_team'] },
   ];

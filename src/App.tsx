@@ -16,6 +16,7 @@ import { Production } from './components/production/Production';
 import { OrcamentosCentral } from './components/orcamentos/OrcamentosCentral';
 import { MetaOficial } from './components/metaoficial/MetaOficial';
 import { AIAssistant } from './components/AIAssistant';
+import { Tutorials } from './components/Tutorials';
 import { OnboardingGate } from './components/OnboardingSync';
 
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -79,8 +80,8 @@ function AppContent() {
   useEffect(() => {
     if (loading) return;
     const ROLE_ALLOWED_TABS: Record<string, string[]> = {
-      medico: ['appointments', 'medical-records', 'profile'],
-      vendedor: ['dashboard', 'marketing', 'ai-secretary', 'finance', 'settings', 'profile', 'orcamentos', 'meta-oficial'],
+      medico: ['appointments', 'medical-records', 'profile', 'tutorials'],
+      vendedor: ['dashboard', 'marketing', 'ai-secretary', 'finance', 'settings', 'profile', 'orcamentos', 'meta-oficial', 'tutorials'],
     };
     const allowed = ROLE_ALLOWED_TABS[userRole];
     if (allowed && !allowed.includes(activeTab)) {
@@ -117,6 +118,7 @@ function AppContent() {
     { id: 'production',      el: <Production /> },
     { id: 'orcamentos',      el: <OrcamentosCentral /> },
     { id: 'meta-oficial',    el: <MetaOficial /> },
+    { id: 'tutorials',       el: <Tutorials /> },
   ];
 
   return (

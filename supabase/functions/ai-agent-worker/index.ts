@@ -13,6 +13,7 @@ import { agentToolSpecs, executeToolCall, type SessionCtx } from "../_shared/age
 import { assembleSystemPrompt, fetchAgentContext } from "../_shared/agent/prompt.ts";
 import { splitIntoBubbles } from "../_shared/agent/split.ts";
 import { loadConversation, saveAiResponse } from "../_shared/agent/memory.ts";
+import { atualizarMemoriaLonga } from "../_shared/agent/long-memory.ts";
 import { looksTechnical, REPAIR_INSTRUCTION, sanitizeForPatient, stripCodeFences } from "../_shared/agent/guard.ts";
 
 const corsHeaders = {
@@ -20,7 +21,12 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-hub-secret",
 };
 const UAZAPI_BASE = "https://med4growautomacao.uazapi.com";
-const MEMORY_WINDOW = 10;
+// Linhas de conversa que o agente enxerga. ⚠️ Sao LINHAS de WhatsApp, nao perguntas: quem escreve
+// picado ("sim", "ok", "36 anos") gasta uma vaga por mensagem. Com 10, medido em 30/07/2026, a
+// resposta "33" de um paciente saiu da janela em 8 MINUTOS e o agente respondeu "ainda nao anotei
+// a sua idade". Subir para 20 custa pouco: a janela inteira e ~200 a 550 tokens, contra 10.800 a
+// 15.600 que o turno ja gasta (as instrucoes da clinica e que dominam a entrada, nao a conversa).
+const MEMORY_WINDOW = 20;
 const MAX_TOOL_ITERS = 8;
 
 const DEFAULT_CFG: ModelConfig = {
@@ -376,6 +382,22 @@ async function processTurn(supabase: any, turn: { session_id: string; clinic_id:
 
     await saveAiResponse(supabase, turn.session_id, finalText);
     await applyStageTransition(supabase, clinicId, ctx.lead_id ?? null, finalText);
+
+    // Memoria longa: guarda o FATO que a janela de conversa vai esquecer daqui a poucas trocas
+    // (MEMORY_WINDOW e curta de proposito). Roda aqui, no fim, por dois motivos: o paciente ja
+    // recebeu a resposta (nao paga a latencia da faxina) e a resposta ja esta na conversa.
+    //
+    // ⚠️ `await`, nao `bg()`. Perder esta gravacao devolve o sintoma que ela existe para curar, e
+    // o fire-and-forget morre junto com o isolate quando `EdgeRuntime.waitUntil` nao existe. O
+    // custo e segurar o worker por mais uma chamada curta, o que nao atrasa ninguem esperando.
+    // A funcao nunca lanca (rede de seguranca propria), entao nao contamina o catch de "turno_quebrou".
+    await atualizarMemoriaLonga(supabase, {
+      clinicId,
+      leadId: ctx.lead_id ?? null,
+      sessionId: turn.session_id,
+      falaDoContato: buffer,
+      respostaDoAgente: finalText,
+    });
   } catch (e) {
     await registrarErro(supabase, "turno_quebrou", "O turno do Agente IA quebrou no worker — paciente pode ter ficado sem resposta", "critical", clinicId, { session_id: turn.session_id, erro: (e as Error).message, stack: (e as Error).stack?.slice(0, 500) });
   }

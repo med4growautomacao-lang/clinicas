@@ -63,14 +63,30 @@ export function buildHandoffBlock(rules: HandoffRule[] | null | undefined, enabl
 export interface AgentContext {
   combinedPrompt: string;
   aiSummary: string;
+  /** memoria longa do agente (leads.ai_long_memory), escrita por _shared/agent/long-memory.ts */
+  longMemory: string;
   handoffRules: HandoffRule[] | null;
   handoffEnabled: boolean;
 }
 
+/** O bloco "Dados do Lead" tem DUAS fontes, e vao as DUAS.
+ *
+ *  `ai_long_memory` e a memoria do proprio agente: ficha de fatos que o contato informou, escrita
+ *  a cada turno. `ai_summary` e do `conv-ai-analyst`, que le a conversa INTEIRA de tempos em tempos
+ *  para decidir etapa de funil, e no caminho resume o contato.
+ *
+ *  ⚠️ Na primeira versao (30/07/2026) isto era `longMemory || aiSummary`, para economizar entrada e
+ *  evitar dois textos que se contradissessem. Foi REGRESSAO, pega no mesmo dia: a ficha do agente
+ *  so enxerga a ultima troca, entao ela nasce MAGRA e cresce devagar, enquanto o resumo do analista
+ *  ja nasce completo. Caso real (Lorena, lead Priscila): a ficha tinha nome e horario; o resumo
+ *  tinha idade, medicacao, diagnostico e CPF. Com o `||`, a ficha magra ganhava e o agente PERDIA o
+ *  que ja sabia. Custo de mandar as duas: ~375 tokens sobre os ~10.000 do turno. Barato demais para
+ *  arriscar perder contexto de paciente. */
 export function assembleSystemPrompt(ctx: AgentContext): string {
   const parts = [
     buildTemporalBlock(),
-    ctx.aiSummary || "",
+    (ctx.longMemory || "").trim(),
+    (ctx.aiSummary || "").trim(),
     ctx.combinedPrompt || "",
     buildHandoffBlock(ctx.handoffRules, ctx.handoffEnabled),
   ].filter((p) => p && p.trim());
@@ -90,9 +106,10 @@ export async function fetchAgentContext(
   handoffRules: HandoffRule[] | null, handoffEnabled: boolean,
   leadId?: string | null,
 ): Promise<AgentContext> {
+  const cols = "ai_summary, ai_long_memory";
   const leadQuery = leadId
-    ? supabase.from("leads").select("ai_summary").eq("id", leadId).maybeSingle()
-    : supabase.from("leads").select("ai_summary").eq("clinic_id", clinicId).eq("session_id", sessionId).maybeSingle();
+    ? supabase.from("leads").select(cols).eq("id", leadId).maybeSingle()
+    : supabase.from("leads").select(cols).eq("clinic_id", clinicId).eq("session_id", sessionId).maybeSingle();
   const [{ data: promptRow }, { data: leadRow }] = await Promise.all([
     supabase.from("v_clinic_ai_prompt").select("combined_prompt").eq("clinic_id", clinicId).maybeSingle(),
     leadQuery,
@@ -100,6 +117,7 @@ export async function fetchAgentContext(
   return {
     combinedPrompt: promptRow?.combined_prompt || "",
     aiSummary: leadRow?.ai_summary || "",
+    longMemory: leadRow?.ai_long_memory || "",
     handoffRules,
     handoffEnabled,
   };

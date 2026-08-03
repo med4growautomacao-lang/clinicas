@@ -29,21 +29,31 @@ const OPTIONS: Opt[] = [
 
 const DEFAULT_CONFIG: Config = { provider: "gemini", model: "gemini-3.1-pro-preview-customtools", temperature: 0.6, fallback: null };
 
+// Memoria do Contato: a ficha de fatos que o agente carrega entre um turno e outro
+// (system_settings id='long_memory_config', RPC set_long_memory_config). E um motor SEPARADO do
+// agente de proposito: o trabalho dela e extrair fato, nao raciocinar, entao roda num modelo
+// barato e aparece sozinha no painel de Consumo de IA.
+type MemConfig = { enabled: boolean; provider: Provider; model: string; temperature: number };
+const DEFAULT_MEM: MemConfig = { enabled: true, provider: "gemini", model: "gemini-3.1-flash-lite", temperature: 0.2 };
+
 function optOf(spec: Spec): Opt | undefined {
   return OPTIONS.find((o) => o.provider === spec.provider && o.model === spec.model);
 }
 
 export function AgentAIPanel() {
   const [config, setConfig] = useState<Config>(DEFAULT_CONFIG);
+  const [mem, setMem] = useState<MemConfig>(DEFAULT_MEM);
   const [status, setStatus] = useState<Record<Provider, boolean>>({ gemini: false, anthropic: false, openai: false });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingMem, setSavingMem] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "err" | "warn"; text: string } | null>(null);
 
   const load = async () => {
     setLoading(true);
-    const [{ data: row }, { data: st }] = await Promise.all([
+    const [{ data: row }, { data: memRow }, { data: st }] = await Promise.all([
       supabase.from("system_settings").select("value").eq("id", "agent_ai_config").maybeSingle(),
+      supabase.from("system_settings").select("value").eq("id", "long_memory_config").maybeSingle(),
       supabase.rpc("llm_secrets_status"),
     ]);
     if (row?.value) {
@@ -54,6 +64,18 @@ export function AgentAIPanel() {
           model: c.model ?? DEFAULT_CONFIG.model,
           temperature: Number(c.temperature ?? 0.6),
           fallback: c.fallback ?? null,
+        });
+      } catch { /* mantem default */ }
+    }
+    if (memRow?.value) {
+      try {
+        const m = JSON.parse(memRow.value);
+        setMem({
+          // ausente = ligada, igual ao backend: desligar exige dizer `false`.
+          enabled: m.enabled !== false,
+          provider: m.provider ?? DEFAULT_MEM.provider,
+          model: m.model ?? DEFAULT_MEM.model,
+          temperature: Number(m.temperature ?? DEFAULT_MEM.temperature),
         });
       } catch { /* mantem default */ }
     }
@@ -84,7 +106,20 @@ export function AgentAIPanel() {
     }
   };
 
+  const saveMem = async () => {
+    setSavingMem(true);
+    const { error } = await supabase.rpc("set_long_memory_config", { p_config: mem });
+    setSavingMem(false);
+    if (error) { flash("err", `Erro ao salvar a memória: ${error.message}`); return; }
+    if (!status[mem.provider]) {
+      flash("warn", `Memória salva, mas não há chave de ${PROVIDER_LABEL[mem.provider]} no Vault. Cadastre-a na aba "IA de Mídia" ou a ficha do contato deixará de ser atualizada.`);
+    } else {
+      flash("ok", mem.enabled ? "Memória do Contato salva." : "Memória do Contato DESLIGADA. O agente passa a depender só da janela de conversa.");
+    }
+  };
+
   const selected = optOf({ provider: config.provider, model: config.model });
+  const selectedMem = optOf({ provider: mem.provider, model: mem.model });
 
   if (loading) {
     return (
@@ -180,6 +215,70 @@ export function AgentAIPanel() {
           <button onClick={save} disabled={saving}
             className="bg-teal-600 hover:bg-teal-700 disabled:opacity-60 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2 text-sm transition-colors shadow-sm">
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Salvar
+          </button>
+        </div>
+      </div>
+
+      {/* Memória do Contato — motor separado do agente */}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 space-y-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <span className="text-sm font-bold text-slate-700 flex items-center gap-2">
+              Memória do Contato
+              <span className="text-[10px] font-black text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-md px-1.5 py-0.5 tracking-wider">GLOBAL</span>
+            </span>
+            <p className="text-xs text-slate-500 mt-1 max-w-xl leading-snug">
+              Guarda a <b>ficha do contato</b> (nome, idade, queixa, medicação, objeções) entre um
+              atendimento e outro. É o que impede o agente de repreguntar o que a pessoa já contou
+              quando a conversa passa da janela recente. Roda depois de cada resposta, sem atrasar o
+              paciente.
+            </p>
+          </div>
+          <button type="button" onClick={() => setMem((p) => ({ ...p, enabled: !p.enabled }))}
+            className={cn("shrink-0 px-3 py-1.5 rounded-xl text-xs font-black border transition-colors",
+              mem.enabled ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-slate-50 border-slate-200 text-slate-500")}>
+            {mem.enabled ? "LIGADA" : "DESLIGADA"}
+          </button>
+        </div>
+
+        {selectedMem === undefined && (
+          <span className="text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
+            personalizado: {mem.provider}/{mem.model}
+          </span>
+        )}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          {OPTIONS.map((o) => {
+            const isSel = selectedMem?.id === o.id;
+            const Icon = o.icon;
+            return (
+              <button key={o.id} type="button" disabled={!mem.enabled}
+                onClick={() => setMem((p) => ({ ...p, provider: o.provider, model: o.model }))}
+                className={cn("text-left rounded-xl border p-3 transition-all relative disabled:opacity-50",
+                  isSel ? "border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/40" : "border-slate-200 hover:border-slate-300 bg-white")}>
+                {isSel && <Check className="w-4 h-4 text-indigo-600 absolute top-2.5 right-2.5" />}
+                <span className={cn("inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded border", o.color)}>
+                  <Icon className="w-3 h-3" /> {o.label}
+                </span>
+                <p className="text-[11px] font-mono text-slate-500 truncate mt-1.5">{o.model}</p>
+                {!status[o.provider] && (
+                  <p className="text-[10px] font-bold text-amber-600 mt-1.5 flex items-center gap-1">
+                    <KeyRound className="w-3 h-3" /> sem chave no Vault
+                  </p>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[11px] text-slate-400">
+          O trabalho aqui é <b>anotar fato</b>, não raciocinar: um modelo rápido dá conta e custa
+          uma fração do modelo que conversa. Ao trocar, confirme que o modelo tem preço cadastrado,
+          senão o consumo dele aparece como zero no painel.
+        </p>
+
+        <div className="flex justify-end pt-1">
+          <button onClick={saveMem} disabled={savingMem}
+            className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2 text-sm transition-colors shadow-sm">
+            {savingMem ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Salvar memória
           </button>
         </div>
       </div>

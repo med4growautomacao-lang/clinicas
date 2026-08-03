@@ -8,13 +8,14 @@
 // cairia no clamp de max_rows do PostgREST (o total mentiria sem avisar).
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Bot, BrainCircuit, MessageSquare, Mic, Image as ImageIcon, RefreshCw, AlertTriangle, DollarSign, Activity } from "lucide-react";
+import { Bot, BrainCircuit, MessageSquare, Mic, Image as ImageIcon, NotebookPen, RefreshCw, AlertTriangle, DollarSign, Activity } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { cn } from "../lib/utils";
 
 // Mapeia a chave de system_settings para o nome que o dono reconhece na tela.
 const FUNCOES: Record<string, { label: string; desc: string; Icon: typeof Bot; cor: string }> = {
   agent_ai_config:     { label: "Agente IA",              desc: "Conversa com o paciente no WhatsApp", Icon: Bot,          cor: "text-teal-600 bg-teal-50" },
+  long_memory_config:  { label: "Memória do Contato",     desc: "Guarda o que o contato já informou",  Icon: NotebookPen,  cor: "text-indigo-600 bg-indigo-50" },
   conv_ai_config:      { label: "Analista de Conversas",  desc: "Move card e sugere venda sozinho",    Icon: BrainCircuit, cor: "text-violet-600 bg-violet-50" },
   ai_assistant_config: { label: "Assistente de Dados",    desc: "Perguntas sobre os números no app",   Icon: MessageSquare, cor: "text-blue-600 bg-blue-50" },
   media_ai_config:     { label: "Leitura de Mídia",       desc: "Transcreve áudio e lê imagem/PDF",    Icon: ImageIcon,    cor: "text-amber-600 bg-amber-50" },

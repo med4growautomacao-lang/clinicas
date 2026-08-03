@@ -12,7 +12,20 @@ import type { AgentMsg } from "../llm.ts";
 
 type Role = "user" | "assistant";
 
-function roleOf(msg: any): Role | null {
+/** Papel do turno. ⚠️ A DIRECAO MANDA, nao o `type`.
+ *
+ *  Mensagem que o ATENDENTE digita entra como direction='outbound' + sender='human' +
+ *  message.type='human' (16.072 linhas em 7 dias, medido em 30/07/2026). Decidir pelo `type`
+ *  sozinho fazia o agente ler a fala da PROPRIA CLINICA como se fosse do paciente: ele recebia
+ *  "Agendado para 04/08 as 14:30" como coisa que o paciente disse e respondia em cima disso. O
+ *  mesmo valia para o historico importado no onboarding, que tambem e outbound+human.
+ *
+ *  Regra: outbound e SEMPRE a nossa voz (agente ou atendente, tanto faz para o modelo: quem falou
+ *  foi a clinica). Inbound e o paciente. Sem `direction` na linha (registro antigo/malformado),
+ *  cai no `type` como antes. */
+function roleOf(msg: any, direction?: string | null): Role | null {
+  if (direction === "outbound") return "assistant";
+  if (direction === "inbound") return "user";
   const t = msg?.type ?? msg?.role;
   if (t === "ai" || t === "assistant" || t === "bot") return "assistant";
   if (t === "human" || t === "user") return "user";
@@ -27,12 +40,32 @@ function roleOf(msg: any): Role | null {
  *  fim do historico o maior trecho que ja abre o buffer e emenda. */
 function fundirSemRepetir(historico: string, buffer: string): string {
   if (!historico) return buffer;
-  if (buffer.includes(historico)) return buffer; // o turno do fim JA e o buffer inteiro
-  let corte = Math.min(historico.length, buffer.length);
-  while (corte > 0 && !historico.endsWith(buffer.slice(0, corte))) corte--;
+  // ⚠️ Compara SEM whitespace de borda. `ingest_wa_message` persiste `coalesce(p_content,'')` sem
+  // trim e o `ai-agent` enfileira `String(p.mensagem).trim()`: um dia em que a uazapi entregar
+  // "ok\n" o historico termina com a quebra, o buffer nao, nenhum dos dois testes casa e a
+  // mensagem do paciente ia DUPLICADA no prompt (o modelo passa a achar que ele insistiu).
+  // Medido em 30/07: 0 em 68.831 mensagens de 30 dias, ou seja, hoje nao acontece; o contrato
+  // entre as duas pontas e que nao esta escrito em lugar nenhum, e por isso a comparacao aqui
+  // nao depende dele.
+  const h = historico.trimEnd();
+  const b = buffer.trimStart();
+  if (b.includes(h)) return buffer; // o turno do fim JA e o buffer inteiro
+  let corte = Math.min(h.length, b.length);
+  while (corte > 0 && !h.endsWith(b.slice(0, corte))) corte--;
   return corte > 0
-    ? historico.slice(0, historico.length - corte) + buffer
-    : `${historico}\n${buffer}`;
+    ? h.slice(0, h.length - corte) + buffer
+    : `${h}\n${buffer}`;
+}
+
+/** "30/07 às 13:51" a partir do `created_at` da conversa.
+ *
+ *  ⚠️ NAO passa por `new Date()` de proposito. `chat_messages.created_at` e `timestamp SEM
+ *  timezone` e JA esta em America/Sao_Paulo (CLAUDE.md §3): o `Date` do JS leria a string sem fuso
+ *  como UTC e mostraria a hora 3h adiantada ao modelo, que entao erraria a conta de "ha quanto
+ *  tempo". Recorte de texto e a leitura fiel aqui. */
+export function quando(ts: unknown): string {
+  const m = String(ts ?? "").match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+  return m ? `${m[3]}/${m[2]} às ${m[4]}:${m[5]}` : "";
 }
 
 /** Carrega a conversa (historico + turno atual), em turnos alternados prontos para o LLM.
@@ -44,7 +77,7 @@ export async function loadConversation(
   try {
     const { data } = await supabase
       .from("vw_n8n_chat_memory")
-      .select("message")
+      .select("message, direction, sender, created_at")
       .eq("session_id", sessionId)
       .order("id", { ascending: false })
       .limit(Math.max(limit, 1));
@@ -53,9 +86,17 @@ export async function loadConversation(
 
   const turns: { role: Role; text: string }[] = [];
   for (const r of rows) {
-    const role = roleOf(r.message);
-    const content = (r.message?.content ?? "").toString();
+    const role = roleOf(r.message, r.direction);
+    let content = (r.message?.content ?? "").toString();
     if (!role || !content.trim()) continue;
+    // Follow-up/automacao (`sender='system'`: boas-vindas, reengajamento, lembrete de consulta,
+    // lembrete de confirmacao, encerramento) entra ROTULADO e COM HORA. Sem o rotulo o agente le
+    // como fala dele mesmo e responde "como eu disse antes"; sem a hora ele nao distingue
+    // "acabamos de te escrever" de "te escrevemos ha tres dias", e o tom certo depende disso.
+    if (r.direction === "outbound" && r.sender === "system") {
+      const q = quando(r.created_at);
+      content = `[mensagem automática enviada pela clínica${q ? ` em ${q}` : ""}]\n${content}`;
+    }
     const last = turns[turns.length - 1];
     if (last && last.role === role) last.text += "\n" + content; // funde mesmo-role consecutivo
     else turns.push({ role, text: content });
@@ -72,8 +113,35 @@ export async function loadConversation(
   if (last && last.role === "user") last.text = fundirSemRepetir(last.text, currentUserText);
   else turns.push({ role: "user", text: currentUserText });
 
-  // Anthropic exige comecar por 'user'; remove qualquer 'assistant' no inicio.
-  while (turns.length && turns[0].role === "assistant") turns.shift();
+  // A API exige comecar por 'user' (Anthropic recusa, e o `contents` do Gemini idem).
+  //
+  // ⚠️ Mas simplesmente DESCARTAR o inicio era perda de contexto real. Quando somos NOS que
+  // procuramos a pessoa (boas-vindas de formulario, reengajamento, lembrete de consulta), a nossa
+  // mensagem e a PRIMEIRA da conversa, entao ela caia aqui SEMPRE. Medido em 30/07/2026: 11
+  // conversas nas 3 clinicas com IA, e em 11 de 11 o agente se apresentou do zero, sem usar o nome
+  // e sem saber por que a clinica tinha procurado a pessoa. O paciente le "Oi Priscila, vi que voce
+  // preencheu nosso formulario", responde, e ouve "Ola! Eu sou a Paloma, secretaria...".
+  //
+  // Agora a abertura entra ROTULADA no primeiro turno do contato em vez de sumir. Nao vira turno
+  // 'assistant' proprio de proposito: isso reintroduziria o 'assistant' no inicio, que e justamente
+  // o que a API recusa.
+  const abertura: string[] = [];
+  while (turns.length && turns[0].role === "assistant") {
+    const t = turns.shift();
+    if (t?.text?.trim()) abertura.push(t.text.trim());
+  }
+  if (abertura.length && turns.length) {
+    // Teto para nao empurrar uma abertura enorme (mídia, texto longo de reengajamento) para dentro
+    // da fala do contato: o que importa aqui e o AGENTE saber que a clinica falou primeiro e o que
+    // ela disse, nao reproduzir o texto inteiro. Os rotulos "[mensagem automática ... em DD/MM às
+    // HH:MM]" ja vieram colados em cada linha la em cima, entao a hora sobrevive ao recorte.
+    const texto = abertura.join("\n").replace(/[ \t]+/g, " ").slice(0, 700);
+    turns[0] = {
+      role: "user",
+      text: `[Contexto: quem iniciou esta conversa foi a clínica, com isto:]\n${texto}\n` +
+        `[Fim do contexto. A partir daqui é a fala do contato:]\n${turns[0].text}`,
+    };
+  }
 
   return turns.map((t) =>
     t.role === "user" ? { role: "user", text: t.text } : { role: "assistant", text: t.text }

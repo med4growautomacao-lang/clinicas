@@ -15,6 +15,10 @@ export const FEATURE = {
   assistente: "ai_assistant_config",
   midia: "media_ai_config",
   voz: "elevenlabs_config",
+  // Memoria longa do agente. Chave PROPRIA de proposito: registrada sob `agente` ela sumia dentro
+  // do grupo do Agente no painel, e "quanto custa a memoria?" ficava sem resposta. Ela tambem tem
+  // modelo proprio (mais barato), entao misturar as duas escondia a economia.
+  memoriaLonga: "long_memory_config",
 } as const;
 
 export interface UsoIA {

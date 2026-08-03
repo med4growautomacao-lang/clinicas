@@ -221,8 +221,17 @@ entrypoint = "./functions/webhook-proxy/index.ts"
 
 [functions.setup-prontuario-password]
 enabled = true
-# Produção roda false (conferido pela API de gestão em 30/07). Registrado para um deploy NÃO
-# mudar o comportamento sem decisão. ⚠️ A função valida por dentro; se a intenção era exigir
-# login, isso é decisão de produto e não deve ser trocada por efeito colateral de deploy.
-verify_jwt = false
+# ⚠️ FECHADA EM 03/08/2026 (era false). A função NÃO autentica nada por dentro: lê
+# target_user_id, target_email e clinic_id do CORPO da requisição, sobrescreve
+# prontuario_passwords com SERVICE_ROLE e manda a senha nova por e-mail PARA O ENDEREÇO QUE VEIO
+# NO CORPO. Sem JWT, qualquer pessoa na internet trocava a senha do Prontuário de qualquer
+# usuário de qualquer clínica e recebia a senha na própria caixa de entrada. As irmãs
+# (setup-prontuario-pin, get-prontuario-pin) sempre foram true: esta ficou para trás.
+# Fechada só pela flag, sem republicar código, e nada quebrou: NINGUÉM chama esta função
+# (zero no src/, zero em pg_proc, zero em cron.job, zero em system_http_calls). Ela é resto do
+# fluxo antigo de senha, substituído pelo de PIN.
+# 📌 PENDENTE de decisão do dono: aposentar de vez (a rota certa) ou, se for reativar, ela precisa
+# checar QUEM chama (is_super_admin / is_clinic_admin da clínica alvo), porque JWT só prova que a
+# pessoa está logada, não que ela pode mexer no prontuário de outra clínica.
+verify_jwt = true
 entrypoint = "./functions/setup-prontuario-password/index.ts"

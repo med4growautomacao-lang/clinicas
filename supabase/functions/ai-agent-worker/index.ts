@@ -12,7 +12,7 @@ import { registrarUsoIA, FEATURE } from "../_shared/llm-usage.ts";
 import { agentToolSpecs, executeToolCall, type SessionCtx } from "../_shared/agent/tools.ts";
 import { assembleSystemPrompt, fetchAgentContext } from "../_shared/agent/prompt.ts";
 import { splitIntoBubbles } from "../_shared/agent/split.ts";
-import { loadConversation, saveAiResponse } from "../_shared/agent/memory.ts";
+import { loadConversation, MEMORY_WINDOW, saveAiResponse } from "../_shared/agent/memory.ts";
 import { atualizarMemoriaLonga } from "../_shared/agent/long-memory.ts";
 import { looksTechnical, REPAIR_INSTRUCTION, sanitizeForPatient, stripCodeFences } from "../_shared/agent/guard.ts";
 
@@ -21,12 +21,8 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-hub-secret",
 };
 const UAZAPI_BASE = "https://med4growautomacao.uazapi.com";
-// Linhas de conversa que o agente enxerga. ⚠️ Sao LINHAS de WhatsApp, nao perguntas: quem escreve
-// picado ("sim", "ok", "36 anos") gasta uma vaga por mensagem. Com 10, medido em 30/07/2026, a
-// resposta "33" de um paciente saiu da janela em 8 MINUTOS e o agente respondeu "ainda nao anotei
-// a sua idade". Subir para 20 custa pouco: a janela inteira e ~200 a 550 tokens, contra 10.800 a
-// 15.600 que o turno ja gasta (as instrucoes da clinica e que dominam a entrada, nao a conversa).
-const MEMORY_WINDOW = 20;
+// MEMORY_WINDOW vem de _shared/agent/memory.ts: a memoria longa precisa reler a MESMA janela, e
+// duas constantes soltas em arquivos diferentes divergiriam sem ninguem perceber.
 const MAX_TOOL_ITERS = 8;
 
 const DEFAULT_CFG: ModelConfig = {

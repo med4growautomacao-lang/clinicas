@@ -47,7 +47,8 @@
 
 import { runAgentTurn, type ModelConfig } from "../llm.ts";
 import { FEATURE } from "../llm-usage.ts";
-import { quando } from "./memory.ts";
+import { lerJanela, MEMORY_WINDOW, quando } from "./memory.ts";
+import { stripCodeFences } from "./guard.ts";
 
 /** Teto do texto guardado. Vai inteiro no prompt de todo turno, entao e teto de CUSTO, nao de disco. */
 const MEMORIA_MAX_CHARS = 3000;
@@ -55,18 +56,17 @@ const MEMORIA_MAX_CHARS = 3000;
 /** Abaixo disso nao vale a pena gastar um turno de modelo: nao ha fato novo em "ok"/"obrigado". */
 const FALA_MIN_CHARS = 2;
 
-/** Quantas linhas de conversa a memoria RELE a cada atualizacao.
+/** Quantas linhas de conversa a memoria RELE a cada atualizacao. Importada de `memory.ts`, que e a
+ *  dona da constante: a ficha guarda o que SAI da janela, entao ela precisa enxergar pelo menos o
+ *  que a janela enxerga, e duas constantes soltas ligadas por comentario divergiriam em silencio.
  *
  *  Ate 30/07/2026 ela via so a ultima troca, e isso deixava tres buracos: (a) conversa que ja
  *  existia nascia com ficha vazia e so acumulava dali para frente (caso real: a ficha da Priscila
  *  ficou sem idade, medicacao e diagnostico, tudo dito antes de a memoria existir); (b) nada era
  *  anotado enquanto a SECRETARIA atendia, porque a memoria so roda no turno do agente; (c) uma
  *  atualizacao que falhasse perdia aquele fato para sempre. Relendo a janela, os tres se curam
- *  sozinhos na proxima rodada.
- *
- *  Casado com MEMORY_WINDOW do worker de proposito: a ficha guarda o que sai da janela, entao ela
- *  precisa enxergar pelo menos o que a janela enxerga. */
-const LINHAS_JANELA = 20;
+ *  sozinhos na proxima rodada. */
+const LINHAS_JANELA = MEMORY_WINDOW;
 
 /** Teto de caracteres da janela relida. A janela e barata (~200 a 550 tokens medidos), mas conversa
  *  com texto longo (orcamento, endereco, lista de horarios) pode estourar sem isto. */
@@ -153,29 +153,20 @@ REGRAS (obrigatórias):
  *  Nunca lanca: sem janela, o chamador cai na ultima troca, que e o comportamento antigo. */
 async function carregarJanela(supabase: any, sessionId: string | null): Promise<string> {
   if (!sessionId) return "";
-  try {
-    const { data } = await supabase
-      .from("vw_n8n_chat_memory")
-      .select("message, direction, sender, created_at")
-      .eq("session_id", sessionId)
-      .order("id", { ascending: false })
-      .limit(LINHAS_JANELA);
-    const linhas = (data || []).slice().reverse().map((r: any) => {
-      const txt = (r.message?.content ?? "").toString().trim();
-      if (!txt) return "";
-      const quem = r.direction === "inbound" ? "CONTATO"
-        : r.sender === "system" ? "CLÍNICA (mensagem automática)"
-        : r.sender === "human" ? "CLÍNICA (atendente)"
-        : "CLÍNICA (assistente)";
-      const q = quando(r.created_at);
-      return `${q ? `[${q}] ` : ""}${quem}: ${txt}`;
-    }).filter(Boolean);
-    // Corta pelo COMECO: o fim da janela e o que acabou de acontecer, e e o que menos pode faltar.
-    const texto = linhas.join("\n");
-    return texto.length > JANELA_MAX_CHARS ? texto.slice(texto.length - JANELA_MAX_CHARS) : texto;
-  } catch {
-    return "";
-  }
+  const rows = await lerJanela(supabase, sessionId, LINHAS_JANELA);
+  const linhas = rows.map((r: any) => {
+    const txt = (r.message?.content ?? "").toString().trim();
+    if (!txt) return "";
+    const quem = r.direction === "inbound" ? "CONTATO"
+      : r.sender === "system" ? "CLÍNICA (mensagem automática)"
+      : r.sender === "human" ? "CLÍNICA (atendente)"
+      : "CLÍNICA (assistente)";
+    const q = quando(r.created_at);
+    return `${q ? `[${q}] ` : ""}${quem}: ${txt}`;
+  }).filter(Boolean);
+  // Corta pelo COMECO: o fim da janela e o que acabou de acontecer, e e o que menos pode faltar.
+  const texto = linhas.join("\n");
+  return texto.length > JANELA_MAX_CHARS ? texto.slice(texto.length - JANELA_MAX_CHARS) : texto;
 }
 
 async function registrar(
@@ -238,14 +229,27 @@ export async function atualizarMemoriaLonga(supabase: any, a: {
     const { cfg, ligada } = await carregarConfig(supabase);
     if (!ligada) return; // desligada no Super Admin: o agente segue so com a janela de conversa
 
+    // ⚠️ LER O `error`, nao so o `data`. O supabase-js NAO lanca quando o PostgREST falha (RLS,
+    // statement timeout, 5xx): devolve `{ data: null, error }`. A primeira versao (30/07) pegava so
+    // o `data`, entao falha de leitura virava `anterior = ""` em silencio — e com a ficha anterior
+    // vazia a trava de `vaiSubstituir` (que so age quando ha ficha de 200+ chars) ficava DESARMADA,
+    // deixando uma ficha magra sobrescrever a acumulada. Era exatamente o "NUNCA APAGA" do cabecalho
+    // deste arquivo falhando no unico momento em que ele importa.
+    //
+    // Agora falha de leitura ABORTA a atualizacao: nao gravar e sempre melhor que apagar.
     let anterior = "";
+    const falhaDeLeitura = async (erro: string) => {
+      await registrar(supabase, "memoria_longa_leitura_falhou",
+        "Não consegui ler a memória atual do contato, então não atualizei nada (a ficha anterior está preservada)",
+        "warning", a.clinicId, { lead_id: a.leadId, erro: erro.slice(0, 300) });
+    };
     try {
-      const { data } = await supabase.from("leads").select("ai_long_memory").eq("id", a.leadId).maybeSingle();
+      const { data, error } = await supabase.from("leads").select("ai_long_memory").eq("id", a.leadId).maybeSingle();
+      if (error) { await falhaDeLeitura(String(error.message ?? error)); return; }
       anterior = (data?.ai_long_memory ?? "").toString();
-    } catch {
-      // Leitura falhou: segue com memoria vazia. O modelo reconstroi a ficha a partir do turno, e a
-      // regra `vaiSubstituir` impede que uma ficha curta derrube uma ficha longa que ainda esta la.
-      anterior = "";
+    } catch (e) {
+      await falhaDeLeitura(String((e as Error)?.message ?? e));
+      return;
     }
 
     // A janela ja termina no que acabou de acontecer: a mensagem do contato foi persistida pelo
@@ -269,7 +273,11 @@ export async function atualizarMemoriaLonga(supabase: any, a: {
         supabase, cfg, PROMPT_ORGANIZADOR, [{ role: "user", text: entrada }], [],
         { feature: FEATURE.memoriaLonga, scope: "memoria-longa", clinicId: a.clinicId, leadId: a.leadId },
       );
-      saida = (out.text || "").trim();
+      // `stripCodeFences` e o mesmo helper que o worker usa na resposta ao paciente. A regra 6 do
+      // prompt pede "sem bloco de código", mas modelo embrulha markdown em cerca por habito, e
+      // `vaiSubstituir` deixaria passar (o corpo cercado ainda contem o cabecalho). A cerca ficaria
+      // gravada e seria injetada no prompt de TODO turno seguinte.
+      saida = stripCodeFences(out.text || "").trim();
     } catch (e) {
       await registrar(supabase, "memoria_longa_modelo_falhou",
         "A memória longa do contato não pôde ser atualizada (o agente segue respondendo, mas pode esquecer o que foi dito agora)",

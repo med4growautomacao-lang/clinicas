@@ -68,21 +68,48 @@ export function quando(ts: unknown): string {
   return m ? `${m[3]}/${m[2]} às ${m[4]}:${m[5]}` : "";
 }
 
-/** Carrega a conversa (historico + turno atual), em turnos alternados prontos para o LLM.
- *  currentUserText = bufferFinal (concatenacao debounced), tratado como o turno atual autoritativo. */
-export async function loadConversation(
-  supabase: any, sessionId: string, limit: number, currentUserText: string,
-): Promise<AgentMsg[]> {
-  let rows: any[] = [];
+/** Quantas LINHAS de conversa o agente enxerga, e quantas a memoria longa rele.
+ *
+ *  ⚠️ Mora aqui, num lugar so, de proposito. Sao LINHAS de WhatsApp, nao perguntas: quem escreve
+ *  picado ("sim", "ok", "36 anos") gasta uma vaga por mensagem. Com 10, medido em 30/07/2026, a
+ *  resposta "33" de um paciente saiu da janela em 8 MINUTOS e o agente respondeu "ainda nao anotei
+ *  a sua idade". Subir para 20 custa pouco: a janela inteira e ~200 a 550 tokens contra 10.800 a
+ *  15.600 do turno (quem domina a entrada e o prompt da clinica, nao a conversa).
+ *
+ *  A memoria longa PRECISA reler pelo menos o que a janela enxerga, porque ela existe para guardar
+ *  o que sai da janela. Enquanto isso era uma constante em cada arquivo, so um comentario ligava as
+ *  duas e quem ajustasse uma esqueceria a outra, em silencio. */
+export const MEMORY_WINDOW = 20;
+
+/** Le a janela recente da conversa, mais antiga primeiro. UMA definicao para os dois leitores
+ *  (`loadConversation` e a memoria longa): as duas leituras precisam ser identicas no formato, e
+ *  duplicar o `select` deixava as duas livres para divergir na proxima mudanca de schema.
+ *
+ *  Roda DUAS vezes por turno de proposito, e nao e desperdicio: a segunda (memoria longa) acontece
+ *  depois do `saveAiResponse`, entao ela precisa enxergar a resposta que o agente acabou de dar. */
+export async function lerJanela(supabase: any, sessionId: string, limit: number): Promise<any[]> {
   try {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("vw_n8n_chat_memory")
       .select("message, direction, sender, created_at")
       .eq("session_id", sessionId)
       .order("id", { ascending: false })
       .limit(Math.max(limit, 1));
-    rows = (data || []).slice().reverse(); // mais antigo primeiro
-  } catch { rows = []; }
+    if (error) return [];
+    return (data || []).slice().reverse(); // mais antigo primeiro
+  } catch {
+    return [];
+  }
+}
+
+/** Carrega a conversa (historico + turno atual), em turnos alternados prontos para o LLM.
+ *  currentUserText = bufferFinal (concatenacao debounced), tratado como o turno atual autoritativo. */
+export async function loadConversation(
+  supabase: any, sessionId: string, limit: number, currentUserText: string,
+): Promise<AgentMsg[]> {
+  const rows = await lerJanela(supabase, sessionId, limit);
+  // A janela alcancou o COMECO da conversa? So sabemos que sim quando veio menos que o teto.
+  const janelaAlcancaOInicio = rows.length < Math.max(limit, 1);
 
   const turns: { role: Role; text: string }[] = [];
   for (const r of rows) {
@@ -125,12 +152,20 @@ export async function loadConversation(
   // Agora a abertura entra ROTULADA no primeiro turno do contato em vez de sumir. Nao vira turno
   // 'assistant' proprio de proposito: isso reintroduziria o 'assistant' no inicio, que e justamente
   // o que a API recusa.
+  //
+  // ⚠️ SO quando a janela alcanca o COMECO da conversa. A primeira versao (30/07) rotulava sempre, e
+  // em conversa longa a janela comeca no MEIO: medido em 03/08, 245 de 442 conversas com mais de 20
+  // mensagens (55%) tem uma fala nossa na primeira posicao da janela. Nesses casos o rotulo afirmava
+  // que a conversa comecou com um texto do meio, e ate 700 chars de fala da CLINICA (inclusive do
+  // atendente humano) iam para dentro do turno do CONTATO — o modelo podia ler "nao precisa pagar
+  // antes nao" como se o paciente tivesse dito. E a mesma familia do bug do `roleOf` por direcao.
+  // Janela cheia => volta a descartar, que e o comportamento seguro para o meio da conversa.
   const abertura: string[] = [];
   while (turns.length && turns[0].role === "assistant") {
     const t = turns.shift();
     if (t?.text?.trim()) abertura.push(t.text.trim());
   }
-  if (abertura.length && turns.length) {
+  if (janelaAlcancaOInicio && abertura.length && turns.length) {
     // Teto para nao empurrar uma abertura enorme (mídia, texto longo de reengajamento) para dentro
     // da fala do contato: o que importa aqui e o AGENTE saber que a clinica falou primeiro e o que
     // ela disse, nao reproduzir o texto inteiro. Os rotulos "[mensagem automática ... em DD/MM às

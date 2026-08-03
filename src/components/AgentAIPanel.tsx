@@ -111,10 +111,15 @@ export function AgentAIPanel() {
     const { error } = await supabase.rpc("set_long_memory_config", { p_config: mem });
     setSavingMem(false);
     if (error) { flash("err", `Erro ao salvar a memória: ${error.message}`); return; }
-    if (!status[mem.provider]) {
+    // Desligada vem PRIMEIRO: avisar de chave faltando para quem acabou de desligar esconde a
+    // confirmação que a pessoa precisa ver, e ainda sugere um problema que não existe (memória
+    // desligada não chama provedor nenhum).
+    if (!mem.enabled) {
+      flash("ok", "Memória do Contato DESLIGADA. O agente passa a depender só da janela de conversa.");
+    } else if (!status[mem.provider]) {
       flash("warn", `Memória salva, mas não há chave de ${PROVIDER_LABEL[mem.provider]} no Vault. Cadastre-a na aba "IA de Mídia" ou a ficha do contato deixará de ser atualizada.`);
     } else {
-      flash("ok", mem.enabled ? "Memória do Contato salva." : "Memória do Contato DESLIGADA. O agente passa a depender só da janela de conversa.");
+      flash("ok", "Memória do Contato salva.");
     }
   };
 
@@ -230,8 +235,8 @@ export function AgentAIPanel() {
             <p className="text-xs text-slate-500 mt-1 max-w-xl leading-snug">
               Guarda a <b>ficha do contato</b> (nome, idade, queixa, medicação, objeções) entre um
               atendimento e outro. É o que impede o agente de repreguntar o que a pessoa já contou
-              quando a conversa passa da janela recente. Roda depois de cada resposta, sem atrasar o
-              paciente.
+              quando a conversa passa da janela recente. Roda depois de cada resposta, sem atrasar
+              quem está esperando.
             </p>
           </div>
           <button type="button" onClick={() => setMem((p) => ({ ...p, enabled: !p.enabled }))}
@@ -250,10 +255,14 @@ export function AgentAIPanel() {
           {OPTIONS.map((o) => {
             const isSel = selectedMem?.id === o.id;
             const Icon = o.icon;
+            // Escolher modelo continua liberado com a memória desligada: quem quisesse trocar o
+            // modelo E religar precisava salvar duas vezes, sem motivo. O estado desligado já fica
+            // claro pelo botão LIGADA/DESLIGADA e pela opacidade dos cartões.
             return (
-              <button key={o.id} type="button" disabled={!mem.enabled}
+              <button key={o.id} type="button"
                 onClick={() => setMem((p) => ({ ...p, provider: o.provider, model: o.model }))}
-                className={cn("text-left rounded-xl border p-3 transition-all relative disabled:opacity-50",
+                className={cn("text-left rounded-xl border p-3 transition-all relative",
+                  !mem.enabled && "opacity-60",
                   isSel ? "border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/40" : "border-slate-200 hover:border-slate-300 bg-white")}>
                 {isSel && <Check className="w-4 h-4 text-indigo-600 absolute top-2.5 right-2.5" />}
                 <span className={cn("inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded border", o.color)}>

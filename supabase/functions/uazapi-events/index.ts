@@ -36,6 +36,9 @@ interface UazapiInstance {
 
 interface UazapiConnectionEvent {
   event?: string;
+  // A uazapi entrega a chave como 'EventType' (E maiusculo). Ver
+  // https://docs.uazapi.com/ -> openapi-bundled.json, GET /webhook/errors.
+  EventType?: string;
   instance?: string | UazapiInstance;
   data?: UazapiInstance | Record<string, any>;
   // alguns provedores entregam direto no root
@@ -49,6 +52,22 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
   });
+}
+
+// Central de Erros: sem isto a falha desta edge nao existe para ninguem.
+// O `instance_not_found` era `console.warn` + 200, ou seja, invisivel.
+async function registrarErro(
+  supa: SupabaseClient, code: string, title: string, level: string,
+  clinicId: string | null, ctx: unknown,
+) {
+  try {
+    await supa.rpc('log_system_error', {
+      p_scope: 'whatsapp', p_code: code, p_title: title, p_level: level,
+      p_clinic_id: clinicId, p_context: ctx,
+    });
+  } catch (e) {
+    console.error('[uazapi-events] log falhou:', e);
+  }
 }
 
 function extractInstanceData(payload: UazapiConnectionEvent): UazapiInstance & { id?: string; status?: string; qrcode?: string; owner?: string } {
@@ -153,17 +172,28 @@ serve(async (req) => {
   let payload: UazapiConnectionEvent;
   try { payload = await req.json(); } catch { return json({ success: false, error: 'invalid_json' }, 400); }
 
-  // Soft validacao: aceita event=connection ou ausencia (alguns clientes nao enviam)
-  const event = payload.event ?? 'connection';
+  // Soft validacao: aceita 'connection' ou ausencia (alguns clientes nao enviam).
+  // A uazapi manda 'EventType'; ler so 'event' fazia este guard ser letra morta e
+  // qualquer evento entrava como se fosse conexao.
+  const event = String(payload.EventType ?? payload.event ?? 'connection').toLowerCase();
   if (event !== 'connection') {
-    // Eventos que nao sejam de conexao sao ignorados aqui (messages vao para n8n)
+    // Eventos que nao sejam de conexao sao ignorados aqui (mensagem vai para wa-inbound)
     return json({ success: true, ignored: true, event });
   }
 
   const data = extractInstanceData(payload);
   const row = await findInstanceRow(supa, data);
   if (!row) {
+    // Caminho MUDO ate 04/08/2026: webhook de conexao chegando e sendo descartado
+    // sem linha em whatsapp_events e sem Central. Se a instancia deixa de casar,
+    // a clinica perde a deteccao em tempo real e ninguem fica sabendo.
     console.warn('[uazapi-events] instance nao encontrada', { id: data.id, name: data.name });
+    await registrarErro(
+      supa, 'uazapi_evento_sem_instancia',
+      'Webhook de conexao da uazapi nao casou com nenhuma instancia',
+      'error', null,
+      { api_id: data.id ?? null, name: data.name ?? null, uazapi_status: data.status ?? null },
+    );
     return json({ success: false, error: 'instance_not_found' }, 200); // 200 evita retry da uazapi
   }
 
@@ -176,10 +206,23 @@ serve(async (req) => {
     let phone = ownerToPhone(data.owner);
     // O webhook de 'connected' costuma vir sem 'owner'. Se o numero ainda nao
     // esta salvo, busca na uazapi agora para preencher imediatamente.
+    //
+    // Isto ficou CRITICO: a queda anula phone_number, entao toda volta chega com
+    // row.phone_number nulo. Sem reencontrar o numero aqui, a instancia volta em
+    // estado meio-vivo (envio liberado, agente recusando todo turno) -- que agora
+    // acende o monitor whatsapp_sem_numero na Central.
     if (!phone && row.api_token && !row.phone_number) {
       phone = await fetchOwnerPhone(row.api_token);
     }
     if (phone) updates.phone_number = phone;
+    if (!phone && !row.phone_number) {
+      await registrarErro(
+        supa, 'whatsapp_volta_sem_numero',
+        'Instancia reconectou mas a uazapi nao informou o numero',
+        'error', row.clinic_id,
+        { instance_id: row.id, de: row.status },
+      );
+    }
   } else if (uazStatus === 'connecting' || uazStatus === 'qrcode' || uazStatus === 'connectingphone') {
     nextStatus = row.status === 'connected' ? null : 'connecting'; // nao volta de connected p/ connecting
     if (data.qrcode) {
@@ -196,8 +239,19 @@ serve(async (req) => {
 
   const { error } = await supa.from('whatsapp_instances').update(updates).eq('id', row.id);
   if (error) {
-    // Provavel violacao de state machine. Loga mas retorna 200 (nao queremos retry)
+    // Ate 04/08/2026 este ramo comia a recuperacao: a maquina de estados recusava
+    // 'disconnected -> connected' e o sinal de volta morria aqui, com registro so
+    // em whatsapp_events (tabela sem painel e sem alerta). Aconteceu na clinica
+    // Tyago em 28/06: a volta chegou 2 minutos depois da queda e a clinica ficou
+    // muda ate as 09h do dia seguinte. A aresta foi liberada no banco; este ramo
+    // agora acende a Central para qualquer outra recusa.
     console.error('[uazapi-events] update error', error);
+    await registrarErro(
+      supa, 'whatsapp_update_recusado',
+      'Banco recusou a atualizacao de estado vinda do webhook da uazapi',
+      'critical', row.clinic_id,
+      { erro: error.message, tentativa: updates, de: row.status, uazapi: data.status ?? null },
+    );
     await supa.from('whatsapp_events').insert({
       clinic_id: row.clinic_id,
       org_id: row.org_id,

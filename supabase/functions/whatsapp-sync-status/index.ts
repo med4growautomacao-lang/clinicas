@@ -2,9 +2,17 @@
 //
 // Reconciliacao periodica entre o estado local em whatsapp_instances e o estado
 // real reportado pela uazapi via GET /instance/all (admintoken). Tambem limpa
-// webhooks duplicados em cada instancia.
+// webhooks duplicados em cada instancia (so na passada completa, ?dedupe=1).
 //
-// Agendamento: pg_cron 09:00 e 18:00 BRT (12:00 e 21:00 UTC).
+// Agendamento (a partir de 04/08/2026):
+//   - a cada 5 min: so a Parte 1 (reconciliacao). Barata: 1 chamada /instance/all
+//     para todas as instancias, mais 1 leitura individual por instancia suspeita.
+//   - 09:00 BRT: passada completa, com ?dedupe=1 (a Parte 2 leva ~15s).
+//
+// Antes eram 2 passadas por dia (09h e 18h) e a queda podia durar ate ~15h. Pior:
+// a condenacao saia de UMA amostra, entao uma piscada de menos de um minuto da
+// uazapi congelava a clinica ate a passada seguinte. Foi o que aconteceu com a
+// clinica Tyago em 03/08/2026 (4h de envio automatico parado).
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -43,6 +51,53 @@ function normalizeBrazilianPhone(raw: string | null | undefined): string | null 
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } });
+}
+
+// Central de Erros. Esta edge nao registrava NADA: o cron marca 'succeeded' porque
+// system_http_post so mede o enfileiramento, e a resposta do pg_net vinha
+// timed_out=true, que o monitor de edge exclui de proposito. Resultado: ela podia
+// derrubar todas as clinicas sem ninguem ver.
+async function registrarErro(
+  supa: SupabaseClient, code: string, title: string, level: string,
+  clinicId: string | null, ctx: unknown,
+) {
+  try {
+    await supa.rpc('log_system_error', {
+      p_scope: 'whatsapp', p_code: code, p_title: title, p_level: level,
+      p_clinic_id: clinicId, p_context: ctx,
+    });
+  } catch (e) {
+    console.error('[sync-status] log falhou:', e);
+  }
+}
+
+// Motivo de desconexao que indica recuperacao INTERNA da uazapi, nao logout real.
+// Foi o que derrubou a clinica Tyago em 03/08/2026: uma reconexao de menos de um
+// minuto as 17h59:13 que o cron fotografou 51 segundos depois e congelou por 4h.
+// Logout de verdade se apresenta como '401: logged out from another device',
+// 'QR Code timeout' ou 'connection attempt canceled by API'.
+function motivoTransitorio(reason: string | null | undefined): boolean {
+  return String(reason ?? '').toLowerCase().startsWith('health_');
+}
+
+// Segunda leitura, individual, da instancia suspeita. O /instance/all e UMA foto;
+// condenar na primeira amostra e o defeito que este cron tinha.
+async function lerStatusIndividual(api_token: string): Promise<{ status: string; owner: string | null; reason: string | null } | null> {
+  try {
+    const res = await fetchWithTimeout(`${UAZAPI_BASE}/instance/status`, {
+      method: 'GET',
+      headers: { Accept: 'application/json', token: api_token },
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    return {
+      status: String(body?.instance?.status ?? '').toLowerCase(),
+      owner: body?.instance?.owner ?? null,
+      reason: body?.instance?.lastDisconnectReason ?? null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
@@ -138,7 +193,16 @@ serve(async (req) => {
   // === Parte 1: Reconciliacao de status ===
   let uazapiList: any[];
   try { uazapiList = await fetchUazapiAll(); }
-  catch (e: any) { return json({ success: false, error: e?.message ?? 'uazapi_fetch_failed' }, 502); }
+  catch (e: any) {
+    // Sem isto a checagem de conexao de TODAS as clinicas podia estar morta ha dias
+    // sem nenhum sinal: o cron reporta sucesso e o monitor de edge ignora timeout.
+    await registrarErro(
+      supa, 'whatsapp_sync_sem_uazapi',
+      'Checagem de conexao do WhatsApp nao conseguiu falar com a uazapi',
+      'critical', null, { erro: e?.message ?? 'uazapi_fetch_failed' },
+    );
+    return json({ success: false, error: e?.message ?? 'uazapi_fetch_failed' }, 502);
+  }
 
   const uazById = new Map<string, any>();
   const uazByName = new Map<string, any>();
@@ -161,6 +225,10 @@ serve(async (req) => {
   type Reconcile = { instance_id: string; clinic_id: string | null; from: string; to: string; reason: string };
   const reconciled: Reconcile[] = [];
   const notFoundOnUazapi: string[] = [];
+  // Instancias que a 1a leitura acusou e a confirmacao poupou. Sem isto a melhoria
+  // seria invisivel: um cron que nao derruba ninguem parece um cron que nao roda.
+  type NaoCondenado = { instance_id: string; clinic_id: string | null; motivo: string };
+  const naoCondenados: NaoCondenado[] = [];
 
   for (const local of locals ?? []) {
     let remote = uazById.get(local.api_id);
@@ -185,6 +253,14 @@ serve(async (req) => {
     if (!remote) {
       notFoundOnUazapi.push(local.id);
       if (local.status !== 'disconnected') {
+        // Mesma regra do outro caminho: uma resposta parcial ou truncada de
+        // /instance/all nao pode derrubar clinica. Reconfere individualmente.
+        const confirmacao = local.api_token ? await lerStatusIndividual(local.api_token) : null;
+        if (confirmacao && confirmacao.status === 'connected') {
+          naoCondenados.push({ instance_id: local.id, clinic_id: local.clinic_id, motivo: 'ausente_no_all_mas_conectada' });
+          await supa.from('whatsapp_events').insert({ clinic_id: local.clinic_id, org_id: local.org_id ?? null, instance_id: local.id, event_type: 'sync_falso_alarme', source: 'sync_cron', payload: { reason: 'ausente_no_all_mas_conectada' } });
+          continue;
+        }
         const { error } = await supa.from('whatsapp_instances').update({ status: 'disconnected', last_error: 'sync_cron: instancia nao encontrada na uazapi' }).eq('id', local.id);
         if (!error) {
           reconciled.push({ instance_id: local.id, clinic_id: local.clinic_id, from: local.status, to: 'disconnected', reason: 'missing_on_uazapi' });
@@ -217,22 +293,68 @@ serve(async (req) => {
       }
     }
     if ((remoteStatus === 'disconnected' || remoteStatus === 'loggedout') && local.status !== 'disconnected') {
+      // === CONFIRMAR ANTES DE CONDENAR ===
+      // Marcar 'disconnected' nao e barato: a trigger APAGA phone_number, sem numero
+      // o fn_chat_session_id devolve NULL e o agente recusa todo turno, e o
+      // fn_clinic_send_token exige 'connected', entao TODO envio automatico para.
+      // Uma amostra unica nao justifica esse estrago.
+      const confirmacao = local.api_token ? await lerStatusIndividual(local.api_token) : null;
+
+      // 2a leitura discorda: era piscada. Nao condena.
+      if (confirmacao && confirmacao.status === 'connected') {
+        naoCondenados.push({ instance_id: local.id, clinic_id: local.clinic_id, motivo: 'segunda_leitura_diz_conectado' });
+        await supa.from('whatsapp_events').insert({ clinic_id: local.clinic_id, org_id: local.org_id ?? null, instance_id: local.id, event_type: 'sync_falso_alarme', source: 'sync_cron', payload: { reason: 'segunda_leitura_diz_conectado', remote_reason: remote.lastDisconnectReason ?? null } });
+        continue;
+      }
+
+      // Nao consegui reconferir: na duvida, NAO derruba a clinica.
+      if (!confirmacao) {
+        naoCondenados.push({ instance_id: local.id, clinic_id: local.clinic_id, motivo: 'segunda_leitura_falhou' });
+        await supa.from('whatsapp_events').insert({ clinic_id: local.clinic_id, org_id: local.org_id ?? null, instance_id: local.id, event_type: 'sync_suspeita', source: 'sync_cron', payload: { reason: 'segunda_leitura_falhou', remote_reason: remote.lastDisconnectReason ?? null } });
+        continue;
+      }
+
+      // 2a leitura confirma a queda. Se o motivo for recuperacao interna da uazapi,
+      // exige DUAS passadas seguidas antes de condenar: e o padrao que se conserta
+      // sozinho em menos de um minuto. Com o cron de 5 min isso custa ~5 min de
+      // atraso numa queda real, contra as ate 15h que custava antes.
+      const motivo = confirmacao.reason ?? remote.lastDisconnectReason ?? null;
+      if (motivoTransitorio(motivo)) {
+        const desde = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+        const { data: suspeitaAnterior } = await supa
+          .from('whatsapp_events')
+          .select('id')
+          .eq('instance_id', local.id)
+          .eq('event_type', 'sync_suspeita')
+          .gte('created_at', desde)
+          .limit(1);
+
+        if (!suspeitaAnterior?.length) {
+          naoCondenados.push({ instance_id: local.id, clinic_id: local.clinic_id, motivo: 'primeira_suspeita_motivo_transitorio' });
+          await supa.from('whatsapp_events').insert({ clinic_id: local.clinic_id, org_id: local.org_id ?? null, instance_id: local.id, event_type: 'sync_suspeita', source: 'sync_cron', payload: { reason: 'motivo_transitorio', remote_reason: motivo } });
+          continue;
+        }
+      }
+
       const { error } = await supa.from('whatsapp_instances').update({ status: 'disconnected', last_error: 'sync_cron: uazapi reportou desconectado' }).eq('id', local.id);
       if (!error) {
         reconciled.push({ instance_id: local.id, clinic_id: local.clinic_id, from: local.status, to: 'disconnected', reason: 'uazapi_says_disconnected' });
-        await supa.from('whatsapp_events').insert({ clinic_id: local.clinic_id, org_id: local.org_id ?? null, instance_id: local.id, attempt_id: local.attempt_id, event_type: 'sync_correction', source: 'sync_cron', payload: { from: local.status, to: 'disconnected', reason: 'uazapi_says_disconnected', remote_reason: remote.lastDisconnectReason ?? null } });
+        await supa.from('whatsapp_events').insert({ clinic_id: local.clinic_id, org_id: local.org_id ?? null, instance_id: local.id, attempt_id: local.attempt_id, event_type: 'sync_correction', source: 'sync_cron', payload: { from: local.status, to: 'disconnected', reason: 'uazapi_says_disconnected', remote_reason: motivo, confirmado_por: 'segunda_leitura' } });
       }
       continue;
     }
   }
 
   // === Parte 2: Dedup de webhooks por instancia ===
-  // Roda em sequencia (30 instancias × ~500ms = ~15s, dentro do budget da edge)
+  // Roda em sequencia (30 instancias × ~500ms = ~15s) e e a razao de esta edge
+  // estourar o timeout de 5s do chamador. Como a Parte 1 agora roda de 5 em 5 min,
+  // a limpeza fica so na passada completa (1x/dia), via ?dedupe=1.
   type WhSummary = { instance_id: string; clinic_id: string; removed: number; total_before: number };
   const webhookCleanups: WhSummary[] = [];
   let webhookErrors = 0;
+  const comDedupe = new URL(req.url).searchParams.get('dedupe') === '1';
 
-  for (const local of locals ?? []) {
+  for (const local of comDedupe ? (locals ?? []) : []) {
     if (!local.api_token) continue;
     // Pula instancias que nao existem na uazapi (ja apagadas)
     if (!uazById.has(local.api_id)) continue;
@@ -257,7 +379,10 @@ serve(async (req) => {
     uazapi_total: uazapiList.length,
     reconciled_count: reconciled.length,
     not_found_on_uazapi: notFoundOnUazapi.length,
+    nao_condenados_count: naoCondenados.length,
     reconciled,
+    nao_condenados: naoCondenados,
+    dedupe: comDedupe,
     webhook_cleanups: webhookCleanups,
     webhook_errors: webhookErrors,
   };

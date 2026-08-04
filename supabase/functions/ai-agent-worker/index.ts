@@ -85,15 +85,35 @@ function kickEmissor(supabase: any, clinicId: string | null): void {
   } catch { /* cron backstop cobre */ }
 }
 
-async function loadModelConfig(supabase: any): Promise<ModelConfig> {
+/** Modelo do turno: a escolha da CLINICA vem primeiro, o system_settings e o padrao.
+ *
+ *  So `provider` e `model` sao por clinica. `temperature` e o `fallback` continuam globais de
+ *  proposito: sao regulagem de operacao (como o agente amostra, e para quem ele corre quando o
+ *  principal cai), nao decisao comercial de qual modelo aquele cliente usa. Espalhar isso por
+ *  clinica multiplicaria por N os lugares onde um campo proibido de modelo novo pode entrar, que e
+ *  exatamente o defeito que ja derrubou o reserva da Anthropic uma vez.
+ *
+ *  ⚠️ Falha ao ler o override NAO pode virar silencio: sem clinica ou sem tabela, cai no global e o
+ *  agente responde. Piorar a escolha do modelo e ruim; nao responder ao paciente e pior. */
+async function loadModelConfig(supabase: any, clinicId: string | null): Promise<ModelConfig> {
+  let base: ModelConfig = DEFAULT_CFG;
   try {
     const { data } = await supabase.from("system_settings").select("value").eq("id", "agent_ai_config").maybeSingle();
     if (data?.value) {
       const c = JSON.parse(data.value);
-      if (c?.provider && c?.model) return { provider: c.provider, model: c.model, temperature: Number(c.temperature ?? 0.6), fallback: c.fallback ?? null };
+      if (c?.provider && c?.model) {
+        base = { provider: c.provider, model: c.model, temperature: Number(c.temperature ?? 0.6), fallback: c.fallback ?? null };
+      }
     }
-  } catch { /* default */ }
-  return DEFAULT_CFG;
+  } catch { /* fica no DEFAULT_CFG */ }
+
+  if (!clinicId) return base;
+  try {
+    const { data: ov } = await supabase
+      .from("clinic_llm_config").select("provider, model").eq("clinic_id", clinicId).maybeSingle();
+    if (ov?.provider && ov?.model) return { ...base, provider: ov.provider, model: ov.model };
+  } catch { /* sem override: segue o padrao do sistema */ }
+  return base;
 }
 
 // delay 6000 = uazapi mostra "digitando..." antes de entregar (igual n8n). Retry 1x apos 5s.
@@ -250,7 +270,7 @@ async function processTurn(supabase: any, turn: { session_id: string; clinic_id:
   if (!clinicId || !buffer) return;
 
   try {
-    const cfg = await loadModelConfig(supabase);
+    const cfg = await loadModelConfig(supabase, clinicId);
     const schedulerUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/ai-scheduler`;
     const authToken = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
     const session: SessionCtx = { clinic_id: clinicId, lead_phone: leadPhone, schedulerUrl, authToken };
@@ -272,7 +292,9 @@ async function processTurn(supabase: any, turn: { session_id: string; clinic_id:
       if (out.toolCalls.length === 0) { finalText = out.text; break; }
 
       // registra o passo do assistente (texto + tool_calls) e executa as tools em paralelo
-      messages.push({ role: "assistant", text: out.text || undefined, toolCalls: out.toolCalls });
+      // `raw` carrega os itens nativos do provider (o bloco de raciocinio da OpenAI, que precisa
+      // voltar no proximo passo). Inerte para Gemini e Anthropic, que nao devolvem o campo.
+      messages.push({ role: "assistant", text: out.text || undefined, toolCalls: out.toolCalls, raw: out.raw });
       const results = await Promise.all(out.toolCalls.map((c) => executeToolCall(c, session)));
       out.toolCalls.forEach((c, i) => {
         toolsExecutadas.push(c.name);

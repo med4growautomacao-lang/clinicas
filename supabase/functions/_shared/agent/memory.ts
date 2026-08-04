@@ -87,7 +87,9 @@ export const MEMORY_WINDOW = 20;
  *
  *  Roda DUAS vezes por turno de proposito, e nao e desperdicio: a segunda (memoria longa) acontece
  *  depois do `saveAiResponse`, entao ela precisa enxergar a resposta que o agente acabou de dar. */
-export async function lerJanela(supabase: any, sessionId: string, limit: number): Promise<any[]> {
+export async function lerJanela(
+  supabase: any, sessionId: string, limit: number, maxSeq?: number | null,
+): Promise<any[]> {
   // ⚠️ Janela vazia por FALHA e indistinguivel de conversa nova, e o agente se apresenta do zero no
   // meio do atendimento. E o incidente de 23 a 28/07/2026 (23 pacientes, 86 reapresentacoes) por
   // outra porta. Antes daqui o erro era engolido: nem alarme, nem rastro.
@@ -107,10 +109,15 @@ export async function lerJanela(supabase: any, sessionId: string, limit: number)
     } catch { /* Central fora do ar nao pode derrubar o turno */ }
   };
   try {
-    const { data, error } = await supabase
+    // `maxSeq` NAO e usado em producao (fica undefined): existe para a bancada de modelos, que
+    // precisa reconstruir a janela COMO ELA ERA no instante de um turno passado. Sem o corte, o
+    // replay leria a conversa ja com a resposta que o agente deu depois e o teste ficaria viciado.
+    let q = supabase
       .from("vw_n8n_chat_memory")
       .select("message, direction, sender, created_at")
-      .eq("session_id", sessionId)
+      .eq("session_id", sessionId);
+    if (maxSeq != null) q = q.lte("id", maxSeq);
+    const { data, error } = await q
       .order("id", { ascending: false })
       .limit(Math.max(limit, 1));
     if (error) { await acusar(String(error.message ?? error)); return []; }
@@ -124,9 +131,9 @@ export async function lerJanela(supabase: any, sessionId: string, limit: number)
 /** Carrega a conversa (historico + turno atual), em turnos alternados prontos para o LLM.
  *  currentUserText = bufferFinal (concatenacao debounced), tratado como o turno atual autoritativo. */
 export async function loadConversation(
-  supabase: any, sessionId: string, limit: number, currentUserText: string,
+  supabase: any, sessionId: string, limit: number, currentUserText: string, maxSeq?: number | null,
 ): Promise<AgentMsg[]> {
-  const rows = await lerJanela(supabase, sessionId, limit);
+  const rows = await lerJanela(supabase, sessionId, limit, maxSeq);
   // A janela alcancou o COMECO da conversa? So sabemos que sim quando veio menos que o teto.
   const janelaAlcancaOInicio = rows.length < Math.max(limit, 1);
 

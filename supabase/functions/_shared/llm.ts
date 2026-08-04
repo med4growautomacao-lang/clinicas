@@ -32,7 +32,14 @@ export interface ToolCall {
 
 export type AgentMsg =
   | { role: "user"; text: string }
-  | { role: "assistant"; text?: string; toolCalls?: ToolCall[] }
+  /** `raw`: itens NATIVOS que o provider devolveu neste turno do assistente.
+   *
+   *  ⚠️ Existe pela mesma razao do `signature` do Gemini, so que para a OpenAI: na Responses API o
+   *  turno vem com um bloco de `reasoning` (cifrado) que PRECISA voltar junto na proxima chamada.
+   *  O loop de tool-calling e stateless (remonta o corpo a cada iteracao a partir de AgentMsg), e
+   *  sem guardar o item nativo aqui o raciocinio se perderia entre um passo e outro: o modelo
+   *  reabriria a analise do zero depois de cada tool, mais caro e menos coerente. */
+  | { role: "assistant"; text?: string; toolCalls?: ToolCall[]; raw?: unknown[] }
   | { role: "tool"; callId: string; name: string; result: string };
 
 export interface TurnOut {
@@ -40,6 +47,8 @@ export interface TurnOut {
   toolCalls: ToolCall[];
   /** uso de tokens quando o provider devolve, para observabilidade/custo */
   usage?: { input?: number; output?: number };
+  /** itens nativos da resposta, para o chamador ecoar no proximo passo (ver AgentMsg.raw) */
+  raw?: unknown[];
 }
 
 export interface ModelConfig {
@@ -232,6 +241,87 @@ async function anthropicTurn(
   };
 }
 
+// ── OpenAI (/v1/responses, function calling) ─────────────────────────────────
+//
+// ⚠️ E a Responses API, NAO /v1/chat/completions, e isso foi MEDIDO em 04/08/2026, nao deduzido: o
+// `gpt-5.6-luna` recusa function tools no endpoint antigo com
+//   400 "Function tools with reasoning_effort are not supported ... use /v1/responses or set
+//        reasoning_effort to 'none'"
+// e desligar o raciocinio para caber la seria trocar o modelo por uma versao capada. O
+// `gpt-5.4-mini` aceita os dois; um caminho so evita duas regras para manter.
+//
+// ⚠️ NAO manda `temperature`. Modelo de raciocinio da OpenAI rejeita, e este e exatamente o defeito
+// que derrubou o fallback da Anthropic em 03/08 (o reserva herdava o corpo do primario com um campo
+// proibido e morria justamente quando era acionado). Aqui o campo simplesmente nao existe.
+function openaiInput(messages: AgentMsg[]): unknown[] {
+  const out: unknown[] = [];
+  for (const m of messages) {
+    if (m.role === "user") {
+      out.push({ role: "user", content: m.text });
+    } else if (m.role === "assistant") {
+      // Itens nativos preservam o bloco de raciocinio; so quando nao houver, remonta na mao.
+      if (m.raw && m.raw.length) { out.push(...m.raw); continue; }
+      if (m.text) out.push({ role: "assistant", content: m.text });
+      for (const tc of m.toolCalls || []) {
+        out.push({ type: "function_call", call_id: tc.id, name: tc.name, arguments: JSON.stringify(tc.args) });
+      }
+    } else {
+      out.push({ type: "function_call_output", call_id: m.callId, output: m.result });
+    }
+  }
+  return out;
+}
+
+async function openaiTurn(
+  cfg: ModelConfig, key: string, system: string, messages: AgentMsg[], tools: AgentTool[],
+): Promise<TurnOut> {
+  const body: Record<string, unknown> = {
+    model: cfg.model,
+    instructions: system,
+    input: openaiInput(messages),
+    store: false,
+    include: ["reasoning.encrypted_content"],
+  };
+  if (tools.length) {
+    body.tools = tools.map((t) => ({
+      type: "function", name: t.name, description: t.description, parameters: t.parameters,
+    }));
+  }
+  const resp = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    signal: AbortSignal.timeout(60000),
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    const t = (await resp.text()).slice(0, 400);
+    throw new Error(`openai ${resp.status}: ${t}`);
+  }
+  const data = await resp.json();
+  const saida: any[] = data?.output ?? [];
+  let text = "";
+  const toolCalls: ToolCall[] = [];
+  for (const o of saida) {
+    if (o?.type === "message") {
+      for (const c of (o.content ?? [])) if (c?.type === "output_text") text += c.text ?? "";
+    }
+    if (o?.type === "function_call") {
+      let args: Record<string, unknown> = {};
+      // Argumento malformado NAO derruba o turno: vira {} e a tool responde o erro de negocio,
+      // que o modelo sabe tratar. Lancar aqui deixaria o paciente sem resposta nenhuma.
+      try { args = JSON.parse(o.arguments || "{}"); } catch { /* fica {} */ }
+      toolCalls.push({ id: o.call_id, name: o.name, args });
+    }
+  }
+  const u = data?.usage;
+  return {
+    text: text.trim(),
+    toolCalls,
+    usage: u ? { input: u.input_tokens, output: u.output_tokens } : undefined,
+    raw: saida,
+  };
+}
+
 // ── Dispatch ─────────────────────────────────────────────────────────────────
 /**
  * Contexto do monitor de consumo. Opcional para nao quebrar chamador antigo, mas SEM ele a linha
@@ -280,8 +370,14 @@ export async function runAgentTurn(
       clinicId: uso.clinicId ?? null,
       leadId: uso.leadId ?? null,
     },
+    // ⚠️ Ternario de DOIS ramos aqui era um bug silencioso: o tipo aceita "openai" e `llmKey` ja
+    // buscava OPENAI_API_KEY, mas qualquer provider != anthropic caia no Gemini. Escolher OpenAI
+    // mandava o corpo do Google com a chave da OpenAI, e o agente parava. Provider desconhecido
+    // continua caindo no Gemini de proposito (e o padrao da casa), mas os tres tem caminho proprio.
     () => cfg.provider === "anthropic"
       ? anthropicTurn(cfg, key, system, messages, tools)
+      : cfg.provider === "openai"
+      ? openaiTurn(cfg, key, system, messages, tools)
       : geminiTurn(cfg, key, system, messages, tools),
     (out) => ({ input: out.usage?.input, output: out.usage?.output }),
   );

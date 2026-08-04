@@ -20,9 +20,16 @@ const PROVIDER_LABEL: Record<Provider, string> = {
 
 // Opcoes curadas (provider+model). O "Atual" e o modelo que a Lorena usa hoje no n8n (paridade).
 type Opt = { id: string; label: string; provider: Provider; model: string; hint: string; icon: typeof Bot; color: string };
+// Os "hint" de Gemini 3.5 Flash, GPT-5.6 Luna e GPT-5.4 Mini nao sao propaganda do fabricante: sao
+// o resultado da bancada de 04/08/2026, que replayou 20 atendimentos reais nos seis modelos e
+// julgou as cegas (nota 0-10, disciplina de ferramenta e resposta insegura). Quem escolhe aqui
+// precisa ver o numero medido, nao a promessa.
 const OPTIONS: Opt[] = [
-  { id: "gemini-pro", label: "Gemini Pro (atual)", provider: "gemini", model: "gemini-3.1-pro-preview-customtools", hint: "O que a Lorena usa hoje. Bom raciocinio + tool-calling.", icon: Sparkles, color: "text-violet-600 bg-violet-50 border-violet-200" },
-  { id: "gemini-flash", label: "Gemini Flash", provider: "gemini", model: "gemini-3.1-flash-lite", hint: "Mais rapido e barato. Conversas simples.", icon: DollarSign, color: "text-emerald-600 bg-emerald-50 border-emerald-200" },
+  { id: "gemini-pro", label: "Gemini Pro (atual)", provider: "gemini", model: "gemini-3.1-pro-preview-customtools", hint: "Padrao de hoje. Bancada: nota 6,9, zero resposta insegura. O mais lento (22s).", icon: Sparkles, color: "text-violet-600 bg-violet-50 border-violet-200" },
+  { id: "gemini-35-flash", label: "Gemini 3.5 Flash", provider: "gemini", model: "gemini-3.5-flash", hint: "Melhor da bancada (7,4) e mais rapido que o atual, porem ~30% mais caro.", icon: Gauge, color: "text-sky-600 bg-sky-50 border-sky-200" },
+  { id: "gpt-luna", label: "GPT-5.6 Luna", provider: "openai", model: "gpt-5.6-luna", hint: "Bancada 6,7 sem nenhuma resposta insegura, por 1/8 do custo e 3x mais rapido.", icon: DollarSign, color: "text-emerald-600 bg-emerald-50 border-emerald-200" },
+  { id: "gemini-flash", label: "Gemini Flash Lite", provider: "gemini", model: "gemini-3.1-flash-lite", hint: "Mais rapido e barato. Conversas simples.", icon: DollarSign, color: "text-lime-600 bg-lime-50 border-lime-200" },
+  { id: "gpt-mini", label: "GPT-5.4 Mini", provider: "openai", model: "gpt-5.4-mini", hint: "NAO recomendado: pior da bancada (4,1), errou dia da semana em atendimento real.", icon: Bot, color: "text-rose-600 bg-rose-50 border-rose-200" },
   { id: "claude-sonnet", label: "Claude Sonnet 5", provider: "anthropic", model: "claude-sonnet-5", hint: "Equilibrio forte de qualidade e custo.", icon: Gauge, color: "text-teal-600 bg-teal-50 border-teal-200" },
   { id: "claude-opus", label: "Claude Opus 4.8", provider: "anthropic", model: "claude-opus-4-8", hint: "O mais capaz para casos dificeis.", icon: Bot, color: "text-amber-600 bg-amber-50 border-amber-200" },
 ];
@@ -48,14 +55,24 @@ export function AgentAIPanel() {
   const [saving, setSaving] = useState(false);
   const [savingMem, setSavingMem] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "err" | "warn"; text: string } | null>(null);
+  // Override por clinica: a escolha daqui GANHA do modelo global no ai-agent-worker.
+  const [clinics, setClinics] = useState<{ id: string; name: string }[]>([]);
+  const [overrides, setOverrides] = useState<Record<string, Spec>>({});
+  const [savingClinic, setSavingClinic] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
-    const [{ data: row }, { data: memRow }, { data: st }] = await Promise.all([
+    const [{ data: row }, { data: memRow }, { data: st }, { data: cls }, { data: ovs }] = await Promise.all([
       supabase.from("system_settings").select("value").eq("id", "agent_ai_config").maybeSingle(),
       supabase.from("system_settings").select("value").eq("id", "long_memory_config").maybeSingle(),
       supabase.rpc("llm_secrets_status"),
+      supabase.from("clinics").select("id, name").eq("is_active", true).order("name"),
+      supabase.from("clinic_llm_config").select("clinic_id, provider, model"),
     ]);
+    setClinics((cls ?? []) as { id: string; name: string }[]);
+    setOverrides(Object.fromEntries(
+      ((ovs ?? []) as any[]).map((o) => [o.clinic_id, { provider: o.provider, model: o.model } as Spec]),
+    ));
     if (row?.value) {
       try {
         const c = JSON.parse(row.value);
@@ -120,6 +137,33 @@ export function AgentAIPanel() {
       flash("warn", `Memória salva, mas não há chave de ${PROVIDER_LABEL[mem.provider]} no Vault. Cadastre-a na aba "IA de Mídia" ou a ficha do contato deixará de ser atualizada.`);
     } else {
       flash("ok", "Memória do Contato salva.");
+    }
+  };
+
+  // Salva DIRETO ao escolher (sem botao proprio): a linha e uma decisao so, e um "Salvar" por
+  // clinica numa lista de 28 vira o campo que o operador esquece de clicar.
+  const saveClinic = async (clinicId: string, optId: string) => {
+    const o = OPTIONS.find((x) => x.id === optId) ?? null;
+    setSavingClinic(clinicId);
+    const { error } = await supabase.rpc("set_clinic_llm_config", {
+      p_clinic_id: clinicId,
+      p_provider: o?.provider ?? null,
+      p_model: o?.model ?? null,
+      p_nota: null,
+    });
+    setSavingClinic(null);
+    if (error) { flash("err", `Erro ao salvar a clinica: ${error.message}`); return; }
+    setOverrides((prev) => {
+      const next = { ...prev };
+      if (o) next[clinicId] = { provider: o.provider, model: o.model };
+      else delete next[clinicId];
+      return next;
+    });
+    const nome = clinics.find((c) => c.id === clinicId)?.name ?? "clinica";
+    if (o && !status[o.provider]) {
+      flash("warn", `${nome} salva em ${o.label}, mas nao ha chave de ${PROVIDER_LABEL[o.provider]} no Vault. Cadastre-a na aba "IA de Mídia" ou o agente dessa clinica nao respondera.`);
+    } else {
+      flash("ok", o ? `${nome} agora usa ${o.label}.` : `${nome} voltou para o modelo padrao do sistema.`);
     }
   };
 
@@ -222,6 +266,53 @@ export function AgentAIPanel() {
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Salvar
           </button>
         </div>
+      </div>
+
+      {/* Modelo por clínica — ganha do global */}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 space-y-3">
+        <div>
+          <span className="text-sm font-bold text-slate-700 flex items-center gap-2">
+            Modelo por clínica
+            <span className="text-[10px] font-black text-fuchsia-700 bg-fuchsia-50 border border-fuchsia-200 rounded-md px-1.5 py-0.5 tracking-wider">GANHA DO GLOBAL</span>
+          </span>
+          <p className="text-xs text-slate-500 mt-1">
+            Serve para testar um modelo em <b>uma clínica só</b> antes de mudar todo mundo. Quem ficar em
+            <b> Padrão do sistema</b> segue o modelo de cima ({selected?.label ?? `${config.provider}/${config.model}`}).
+            A temperatura e o fallback continuam globais.
+          </p>
+        </div>
+
+        <div className="divide-y divide-slate-100 border border-slate-100 rounded-xl overflow-hidden">
+          {clinics.map((c) => {
+            const ov = overrides[c.id];
+            const ovOpt = ov ? optOf(ov) : undefined;
+            return (
+              <div key={c.id} className="flex items-center gap-3 px-3 py-2 hover:bg-slate-50/60">
+                <span className="text-sm font-medium text-slate-700 flex-1 truncate">{c.name}</span>
+                {ov && (
+                  <span className="text-[10px] font-black text-fuchsia-700 bg-fuchsia-50 border border-fuchsia-200 rounded px-1.5 py-0.5 shrink-0">
+                    {ovOpt?.label ?? `${ov.provider}/${ov.model}`}
+                  </span>
+                )}
+                {savingClinic === c.id && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400 shrink-0" />}
+                <select
+                  value={ovOpt?.id ?? ""}
+                  onChange={(e) => saveClinic(c.id, e.target.value)}
+                  disabled={savingClinic === c.id}
+                  className="w-56 shrink-0 px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500">
+                  <option value="">Padrão do sistema</option>
+                  {OPTIONS.map((o) => (
+                    <option key={o.id} value={o.id}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+            );
+          })}
+        </div>
+        <p className="text-[11px] text-slate-400">
+          Salva ao escolher. Modelo sem preço cadastrado entra no painel de Consumo de IA com custo
+          zero, então confira o preço antes de deixar rodando.
+        </p>
       </div>
 
       {/* Memória do Contato — motor separado do agente */}

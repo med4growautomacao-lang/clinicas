@@ -4342,25 +4342,30 @@ export function LeadKanban() {
                 <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
               </div>
               <div className="p-6 space-y-4">
-                {selectedLead?.ai_summary && selectedLead.ai_summary.trim() && (
-                  <details className="group/aisum rounded-lg border border-teal-100 bg-teal-50/50 p-3">
-                    <summary className="flex items-center gap-1.5 cursor-pointer list-none [&::-webkit-details-marker]:hidden text-teal-700 hover:text-teal-800">
-                      <Sparkles className="w-3.5 h-3.5 shrink-0" />
-                      <span className="text-[10px] font-bold uppercase tracking-wider">Resumo da IA</span>
-                      <ChevronDown className="w-3 h-3 ml-auto transition-transform group-open/aisum:rotate-180" />
-                    </summary>
-                    <p className="mt-2 text-xs text-slate-600 leading-relaxed whitespace-pre-wrap max-h-60 overflow-y-auto pr-1">{selectedLead.ai_summary}</p>
-                  </details>
-                )}
-                {/* Ficha que o agente carrega entre atendimentos. Estava invisível para a clínica. */}
-                {selectedLead?.ai_long_memory && selectedLead.ai_long_memory.trim() && (
+                {/* UM bloco só, igual às Conversas: a ficha (do agente, escrita a cada turno) e o
+                    resumo (do analista, por cron) respondem a mesma pergunta para quem atende. */}
+                {((selectedLead?.ai_long_memory && selectedLead.ai_long_memory.trim()) ||
+                  (selectedLead?.ai_summary && selectedLead.ai_summary.trim())) && (
                   <details className="group/aimem rounded-lg border border-indigo-100 bg-indigo-50/50 p-3">
                     <summary className="flex items-center gap-1.5 cursor-pointer list-none [&::-webkit-details-marker]:hidden text-indigo-700 hover:text-indigo-800">
                       <Sparkles className="w-3.5 h-3.5 shrink-0" />
-                      <span className="text-[10px] font-bold uppercase tracking-wider">Memória do Contato</span>
+                      <span className="text-[10px] font-bold uppercase tracking-wider">O que a IA sabe deste contato</span>
                       <ChevronDown className="w-3 h-3 ml-auto transition-transform group-open/aimem:rotate-180" />
                     </summary>
-                    <p className="mt-2 text-xs text-slate-600 leading-relaxed whitespace-pre-wrap max-h-60 overflow-y-auto pr-1">{selectedLead.ai_long_memory}</p>
+                    <div className="mt-2 space-y-3 max-h-72 overflow-y-auto pr-1">
+                      {selectedLead?.ai_long_memory && selectedLead.ai_long_memory.trim() && (
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-600">Ficha: o que ele informou</p>
+                          <p className="mt-1 text-xs text-slate-600 leading-relaxed whitespace-pre-wrap">{selectedLead.ai_long_memory}</p>
+                        </div>
+                      )}
+                      {selectedLead?.ai_summary && selectedLead.ai_summary.trim() && (
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-teal-600">Resumo da conversa</p>
+                          <p className="mt-1 text-xs text-slate-600 leading-relaxed whitespace-pre-wrap">{selectedLead.ai_summary}</p>
+                        </div>
+                      )}
+                    </div>
                   </details>
                 )}
                 {/* O bloco "UTMs capturadas" foi removido: a jornada já mostra a mesma campanha, com

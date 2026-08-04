@@ -3153,28 +3153,33 @@ function ChatsView() {
 
             <LeadFollowupOptouts leadId={selectedLead.id} />
 
-            {selectedLead.ai_summary && selectedLead.ai_summary.trim() && (
-              <details className="group/aisum px-6 py-2 border-b border-slate-100 shrink-0">
-                <summary className="flex items-center gap-1.5 cursor-pointer list-none [&::-webkit-details-marker]:hidden text-teal-700 hover:text-teal-800 w-max">
-                  <Sparkles className="w-3.5 h-3.5 shrink-0" />
-                  <span className="text-[10px] font-bold uppercase tracking-wider">Resumo da IA</span>
-                  <ChevronDown className="w-3 h-3 transition-transform group-open/aisum:rotate-180" />
-                </summary>
-                <p className="mt-2 text-xs text-slate-600 leading-relaxed whitespace-pre-wrap max-h-60 overflow-y-auto pr-2">{selectedLead.ai_summary}</p>
-              </details>
-            )}
-
-            {/* A ficha que o agente carrega entre um atendimento e outro. Ficava INVISÍVEL: era o
-                único texto que entra no prompt do agente e que ninguém da clínica conseguia ver
-                nem conferir, apesar de nascer do que o próprio contato escreveu. */}
-            {selectedLead.ai_long_memory && selectedLead.ai_long_memory.trim() && (
+            {/* UM bloco só. São duas coisas de origens diferentes (a ficha é do agente, escrita a
+                cada turno; o resumo é do analista de conversas, escrito por cron), e o agente recebe
+                as DUAS no prompt. Mas para quem atende isso não importa: são duas portas com nomes
+                parecidos respondendo a mesma pergunta, "o que a IA sabe desta pessoa". Fica um
+                acordeão só, com as duas seções dentro e rotuladas. */}
+            {((selectedLead.ai_long_memory && selectedLead.ai_long_memory.trim()) ||
+              (selectedLead.ai_summary && selectedLead.ai_summary.trim())) && (
               <details className="group/aimem px-6 py-2 border-b border-slate-100 shrink-0">
                 <summary className="flex items-center gap-1.5 cursor-pointer list-none [&::-webkit-details-marker]:hidden text-indigo-700 hover:text-indigo-800 w-max">
                   <Sparkles className="w-3.5 h-3.5 shrink-0" />
-                  <span className="text-[10px] font-bold uppercase tracking-wider">Memória do Contato</span>
+                  <span className="text-[10px] font-bold uppercase tracking-wider">O que a IA sabe deste contato</span>
                   <ChevronDown className="w-3 h-3 transition-transform group-open/aimem:rotate-180" />
                 </summary>
-                <p className="mt-2 text-xs text-slate-600 leading-relaxed whitespace-pre-wrap max-h-60 overflow-y-auto pr-2">{selectedLead.ai_long_memory}</p>
+                <div className="mt-2 space-y-3 max-h-72 overflow-y-auto pr-2">
+                  {selectedLead.ai_long_memory && selectedLead.ai_long_memory.trim() && (
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-600">Ficha: o que ele informou</p>
+                      <p className="mt-1 text-xs text-slate-600 leading-relaxed whitespace-pre-wrap">{selectedLead.ai_long_memory}</p>
+                    </div>
+                  )}
+                  {selectedLead.ai_summary && selectedLead.ai_summary.trim() && (
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-teal-600">Resumo da conversa</p>
+                      <p className="mt-1 text-xs text-slate-600 leading-relaxed whitespace-pre-wrap">{selectedLead.ai_summary}</p>
+                    </div>
+                  )}
+                </div>
               </details>
             )}
 

@@ -26,6 +26,7 @@
   "exclude": [
     "node_modules",
     "supabase/functions",
+    "supabase/tests",
     "data-analysis",
     "old_bridge.ts"
   ]

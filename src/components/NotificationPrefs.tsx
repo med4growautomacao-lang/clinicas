@@ -33,7 +33,7 @@ const ROLE_LABEL: Record<string, string> = {
 // ligados —, então honrá-los deixaria o aviso mudo justo em quem precisa dele.
 // ⚠️ Se algum dia o backend voltar a respeitar group_all/sino_all, TIRE o `servico`
 // daqui junto: tela e backend discordando é o defeito que esta flag existe para evitar.
-const EVENTS: { key: NotificationEventKey; label: string; desc: string; Icon: typeof CalendarDays; servico?: boolean }[] = [
+const EVENTS: { key: NotificationEventKey; label: string; desc: string; Icon: typeof CalendarDays; servico?: boolean; grupoPadrao?: boolean }[] = [
   { key: 'handoff',          label: 'Transbordo',              desc: 'IA pede ajuda humana',        Icon: MessageSquareWarning },
   { key: 'agendamento_novo', label: 'Novo agendamento',        desc: 'Consulta marcada pela IA',    Icon: CalendarDays },
   { key: 'confirmacao',      label: 'Consulta confirmada',     desc: 'Paciente confirmou',          Icon: CalendarCheck },
@@ -42,7 +42,7 @@ const EVENTS: { key: NotificationEventKey; label: string; desc: string; Icon: ty
   { key: 'comprovante',      label: 'Comprovante de pagamento', desc: 'Paciente enviou comprovante', Icon: Receipt },
   { key: 'venda',            label: 'Venda realizada',         desc: 'Ticket ganho',                Icon: PartyPopper },
   { key: 'nao_atendido',     label: 'Lead não atendido (SLA)', desc: 'Ninguém respondeu no prazo',  Icon: AlertTriangle },
-  { key: 'whatsapp_desconectado', label: 'WhatsApp desconectado', desc: 'A conexão do WhatsApp caiu', Icon: WifiOff, servico: true },
+  { key: 'whatsapp_desconectado', label: 'WhatsApp desconectado', desc: 'A conexão do WhatsApp caiu', Icon: WifiOff, servico: true, grupoPadrao: false },
 ];
 
 // Largura/alinhamento ÚNICOS das colunas de toggle — a MESMA constante no cabeçalho e nas
@@ -91,7 +91,10 @@ export function NotificationPrefs({ clinicId, hasGroup, initialPrefs, onSaved }:
   const slaEnabled = prefs.sla?.enabled ?? hasGroup;
   const slaMinutes = prefs.sla?.minutes ?? 15;
   const evSino = (ev: NotificationEventKey) => prefs.events?.[ev]?.sino ?? true;
-  const evGrupo = (ev: NotificationEventKey) => prefs.events?.[ev]?.grupo ?? true;
+  // `padrao` existe por causa do aviso de serviço, que nasce DESLIGADO no grupo
+  // (opt-in) enquanto os avisos de negócio nascem ligados (opt-out). O default aqui
+  // TEM que espelhar o da função avisar_queda_whatsapp, senão a tela mente.
+  const evGrupo = (ev: NotificationEventKey, padrao = true) => prefs.events?.[ev]?.grupo ?? padrao;
   const evRoles = (ev: NotificationEventKey) => prefs.events?.[ev]?.roles ?? [];
 
   const groupUsable = hasGroup && groupAll;
@@ -233,10 +236,11 @@ export function NotificationPrefs({ clinicId, hasGroup, initialPrefs, onSaved }:
             </div>
 
             <div className="space-y-2">
-              {EVENTS.map(({ key, label, desc, Icon, servico }) => {
+              {EVENTS.map(({ key, label, desc, Icon, servico, grupoPadrao }) => {
                 const roles = evRoles(key);
                 const isAll = roles.length === 0;
                 const sinoOn = evSino(key);
+                const grupoOn = evGrupo(key, grupoPadrao ?? true);
                 // Aviso de serviço ignora as chaves gerais, exatamente como o backend.
                 const sinoLiberado = sinoAll || !!servico;
                 const grupoLiberado = groupAll || !!servico;
@@ -253,7 +257,8 @@ export function NotificationPrefs({ clinicId, hasGroup, initialPrefs, onSaved }:
                         <p className="text-[11px] text-slate-400 truncate">{desc}</p>
                         {servico && (
                           <p className="text-[11px] text-amber-600 font-semibold mt-0.5">
-                            Aviso de serviço: não obedece às chaves gerais acima.
+                            Aviso de serviço: não obedece às chaves gerais acima. Já aparece na faixa
+                            do topo do app; o grupo é opcional e nasce desligado.
                           </p>
                         )}
                       </div>
@@ -275,9 +280,9 @@ export function NotificationPrefs({ clinicId, hasGroup, initialPrefs, onSaved }:
                       <span className="md:hidden text-[11px] font-semibold text-slate-500 w-12">Grupo</span>
                       {hasGroup ? (
                         <Toggle
-                          on={evGrupo(key)}
+                          on={grupoOn}
                           disabled={!grupoLiberado}
-                          onClick={() => setEventField(key, 'grupo', !evGrupo(key))}
+                          onClick={() => setEventField(key, 'grupo', !grupoOn)}
                           title={grupoLiberado ? 'Enviar ao grupo do WhatsApp' : 'O grupo geral está desligado (acima)'}
                         />
                       ) : (

@@ -1881,7 +1881,12 @@ export function useMedicalRecords(patientId: string | null) {
 // Vazio = tudo ligado (default seguro do notify_ops). roles vazio/ausente = todos os cargos.
 export type NotificationEventKey =
   | 'handoff' | 'agendamento_novo' | 'confirmacao' | 'remarcacao'
-  | 'cancelamento' | 'comprovante' | 'venda' | 'nao_atendido';
+  | 'cancelamento' | 'comprovante' | 'venda' | 'nao_atendido'
+  // Aviso de SERVIÇO, não de negócio: por isso é o único que NÃO obedece a
+  // group_all/sino_all (avisar_queda_whatsapp lê só a chave do próprio evento).
+  // Medido em 03/08/2026: 1 de 28 clínicas tinha os gerais ligados, então
+  // respeitá-los deixaria o aviso morto em 27 delas.
+  | 'whatsapp_desconectado';
 
 export interface NotificationEventPref {
   sino?: boolean;   // notificação in-app (sino)

@@ -7,7 +7,7 @@ import type { NotificationPrefs as Prefs, NotificationEventKey } from '../hooks/
 import {
   BellRing, MessageSquareWarning, CalendarDays, CalendarCheck, CalendarClock,
   CalendarX, Receipt, PartyPopper, AlertTriangle, Clock, Users, Save,
-  Loader2, CheckCircle2, Smartphone, Info,
+  Loader2, CheckCircle2, Smartphone, Info, WifiOff,
 } from 'lucide-react';
 
 // UI de Configuração de Notificações (Configurações › Notificações, abaixo do Grupo).
@@ -27,7 +27,13 @@ const ROLE_LABEL: Record<string, string> = {
   gestor: 'Gestor', secretaria: 'Secretária', vendedor: 'Vendedor', medico: 'Médico',
 };
 
-const EVENTS: { key: NotificationEventKey; label: string; desc: string; Icon: typeof CalendarDays }[] = [
+// `servico: true` = aviso de INFRAESTRUTURA, não de negócio. Só ele escapa das chaves
+// gerais Sino/Grupo, porque o backend (avisar_queda_whatsapp) também escapa: lê apenas
+// events.whatsapp_desconectado. Medido em 03/08/2026 — 1 de 28 clínicas tinha os gerais
+// ligados —, então honrá-los deixaria o aviso mudo justo em quem precisa dele.
+// ⚠️ Se algum dia o backend voltar a respeitar group_all/sino_all, TIRE o `servico`
+// daqui junto: tela e backend discordando é o defeito que esta flag existe para evitar.
+const EVENTS: { key: NotificationEventKey; label: string; desc: string; Icon: typeof CalendarDays; servico?: boolean }[] = [
   { key: 'handoff',          label: 'Transbordo',              desc: 'IA pede ajuda humana',        Icon: MessageSquareWarning },
   { key: 'agendamento_novo', label: 'Novo agendamento',        desc: 'Consulta marcada pela IA',    Icon: CalendarDays },
   { key: 'confirmacao',      label: 'Consulta confirmada',     desc: 'Paciente confirmou',          Icon: CalendarCheck },
@@ -36,6 +42,7 @@ const EVENTS: { key: NotificationEventKey; label: string; desc: string; Icon: ty
   { key: 'comprovante',      label: 'Comprovante de pagamento', desc: 'Paciente enviou comprovante', Icon: Receipt },
   { key: 'venda',            label: 'Venda realizada',         desc: 'Ticket ganho',                Icon: PartyPopper },
   { key: 'nao_atendido',     label: 'Lead não atendido (SLA)', desc: 'Ninguém respondeu no prazo',  Icon: AlertTriangle },
+  { key: 'whatsapp_desconectado', label: 'WhatsApp desconectado', desc: 'A conexão do WhatsApp caiu', Icon: WifiOff, servico: true },
 ];
 
 // Largura/alinhamento ÚNICOS das colunas de toggle — a MESMA constante no cabeçalho e nas
@@ -226,18 +233,29 @@ export function NotificationPrefs({ clinicId, hasGroup, initialPrefs, onSaved }:
             </div>
 
             <div className="space-y-2">
-              {EVENTS.map(({ key, label, desc, Icon }) => {
+              {EVENTS.map(({ key, label, desc, Icon, servico }) => {
                 const roles = evRoles(key);
                 const isAll = roles.length === 0;
                 const sinoOn = evSino(key);
+                // Aviso de serviço ignora as chaves gerais, exatamente como o backend.
+                const sinoLiberado = sinoAll || !!servico;
+                const grupoLiberado = groupAll || !!servico;
                 return (
-                  <div key={key} className="flex flex-col md:flex-row md:items-center gap-x-4 gap-y-3 px-4 py-3 bg-white border border-slate-100 rounded-xl">
+                  <div key={key} className={cn(
+                    'flex flex-col md:flex-row md:items-center gap-x-4 gap-y-3 px-4 py-3 bg-white border rounded-xl',
+                    servico ? 'border-amber-200 bg-amber-50/40' : 'border-slate-100',
+                  )}>
                     {/* Evento */}
                     <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <Icon className="w-4 h-4 text-slate-400 shrink-0" />
+                      <Icon className={cn('w-4 h-4 shrink-0', servico ? 'text-amber-500' : 'text-slate-400')} />
                       <div className="min-w-0">
                         <p className="text-xs font-bold text-slate-700 truncate">{label}</p>
                         <p className="text-[11px] text-slate-400 truncate">{desc}</p>
+                        {servico && (
+                          <p className="text-[11px] text-amber-600 font-semibold mt-0.5">
+                            Aviso de serviço: não obedece às chaves gerais acima.
+                          </p>
+                        )}
                       </div>
                     </div>
 
@@ -246,9 +264,9 @@ export function NotificationPrefs({ clinicId, hasGroup, initialPrefs, onSaved }:
                       <span className="md:hidden text-[11px] font-semibold text-slate-500 w-12">Sino</span>
                       <Toggle
                         on={sinoOn}
-                        disabled={!sinoAll}
+                        disabled={!sinoLiberado}
                         onClick={() => setEventField(key, 'sino', !sinoOn)}
-                        title={sinoAll ? 'Notificar no sino do app' : 'O sino geral está desligado (acima)'}
+                        title={sinoLiberado ? 'Notificar no sino do app' : 'O sino geral está desligado (acima)'}
                       />
                     </div>
 
@@ -258,9 +276,9 @@ export function NotificationPrefs({ clinicId, hasGroup, initialPrefs, onSaved }:
                       {hasGroup ? (
                         <Toggle
                           on={evGrupo(key)}
-                          disabled={!groupAll}
+                          disabled={!grupoLiberado}
                           onClick={() => setEventField(key, 'grupo', !evGrupo(key))}
-                          title={groupAll ? 'Enviar ao grupo do WhatsApp' : 'O grupo geral está desligado (acima)'}
+                          title={grupoLiberado ? 'Enviar ao grupo do WhatsApp' : 'O grupo geral está desligado (acima)'}
                         />
                       ) : (
                         <span className="text-slate-300 font-bold" title="Crie o Grupo de Notificações no quadro acima">—</span>
@@ -269,7 +287,7 @@ export function NotificationPrefs({ clinicId, hasGroup, initialPrefs, onSaved }:
 
                     {/* Cargos (só fazem sentido com o sino do evento ligado) */}
                     <div className="md:w-[340px]">
-                      {sinoOn && sinoAll ? (
+                      {sinoOn && sinoLiberado ? (
                         <div className="flex flex-wrap gap-1.5">
                           <button
                             type="button"

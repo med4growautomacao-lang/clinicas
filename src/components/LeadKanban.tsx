@@ -4352,6 +4352,17 @@ export function LeadKanban() {
                     <p className="mt-2 text-xs text-slate-600 leading-relaxed whitespace-pre-wrap max-h-60 overflow-y-auto pr-1">{selectedLead.ai_summary}</p>
                   </details>
                 )}
+                {/* Ficha que o agente carrega entre atendimentos. Estava invisível para a clínica. */}
+                {selectedLead?.ai_long_memory && selectedLead.ai_long_memory.trim() && (
+                  <details className="group/aimem rounded-lg border border-indigo-100 bg-indigo-50/50 p-3">
+                    <summary className="flex items-center gap-1.5 cursor-pointer list-none [&::-webkit-details-marker]:hidden text-indigo-700 hover:text-indigo-800">
+                      <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                      <span className="text-[10px] font-bold uppercase tracking-wider">Memória do Contato</span>
+                      <ChevronDown className="w-3 h-3 ml-auto transition-transform group-open/aimem:rotate-180" />
+                    </summary>
+                    <p className="mt-2 text-xs text-slate-600 leading-relaxed whitespace-pre-wrap max-h-60 overflow-y-auto pr-1">{selectedLead.ai_long_memory}</p>
+                  </details>
+                )}
                 {/* O bloco "UTMs capturadas" foi removido: a jornada já mostra a mesma campanha, com
                     data e no contexto de cada contato. Manter os dois era repetir a mesma linha. */}
                 {selectedLead?.id && (

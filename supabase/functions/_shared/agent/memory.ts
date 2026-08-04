@@ -88,6 +88,24 @@ export const MEMORY_WINDOW = 20;
  *  Roda DUAS vezes por turno de proposito, e nao e desperdicio: a segunda (memoria longa) acontece
  *  depois do `saveAiResponse`, entao ela precisa enxergar a resposta que o agente acabou de dar. */
 export async function lerJanela(supabase: any, sessionId: string, limit: number): Promise<any[]> {
+  // ⚠️ Janela vazia por FALHA e indistinguivel de conversa nova, e o agente se apresenta do zero no
+  // meio do atendimento. E o incidente de 23 a 28/07/2026 (23 pacientes, 86 reapresentacoes) por
+  // outra porta. Antes daqui o erro era engolido: nem alarme, nem rastro.
+  //
+  // A escolha deliberada e ACUSAR E SEGUIR, nao abortar: o turno ja foi APAGADO da fila no claim
+  // (`claim_due_ai_turns`), entao levantar aqui deixaria o paciente sem NENHUMA resposta e sem
+  // retentativa. Responder mal e ruim; nao responder e pior. O alarme e critical porque o sintoma
+  // que chega ao paciente e exatamente o que o dono ja reconhece ("a IA esqueceu tudo").
+  const acusar = async (erro: string) => {
+    try {
+      await supabase.rpc("log_system_error", {
+        p_scope: "agente-memoria", p_code: "janela_ilegivel",
+        p_title: "Não consegui ler o histórico da conversa: o agente respondeu SEM memória (pode ter se reapresentado)",
+        p_level: "critical", p_clinic_id: null,
+        p_context: { session_id: sessionId, limite: limit, erro: erro.slice(0, 300) },
+      });
+    } catch { /* Central fora do ar nao pode derrubar o turno */ }
+  };
   try {
     const { data, error } = await supabase
       .from("vw_n8n_chat_memory")
@@ -95,9 +113,10 @@ export async function lerJanela(supabase: any, sessionId: string, limit: number)
       .eq("session_id", sessionId)
       .order("id", { ascending: false })
       .limit(Math.max(limit, 1));
-    if (error) return [];
+    if (error) { await acusar(String(error.message ?? error)); return []; }
     return (data || []).slice().reverse(); // mais antigo primeiro
-  } catch {
+  } catch (e) {
+    await acusar(String((e as Error)?.message ?? e));
     return [];
   }
 }
@@ -116,13 +135,23 @@ export async function loadConversation(
     const role = roleOf(r.message, r.direction);
     let content = (r.message?.content ?? "").toString();
     if (!role || !content.trim()) continue;
-    // Follow-up/automacao (`sender='system'`: boas-vindas, reengajamento, lembrete de consulta,
-    // lembrete de confirmacao, encerramento) entra ROTULADO e COM HORA. Sem o rotulo o agente le
-    // como fala dele mesmo e responde "como eu disse antes"; sem a hora ele nao distingue
-    // "acabamos de te escrever" de "te escrevemos ha tres dias", e o tom certo depende disso.
-    if (r.direction === "outbound" && r.sender === "system") {
+    // Fala da clinica que NAO foi o agente entra ROTULADA e COM HORA.
+    //
+    // - `system` = automacao (boas-vindas, reengajamento, lembrete de consulta, de confirmacao,
+    //   encerramento).
+    // - `human`  = atendente de verdade digitando.
+    //
+    // Fundir todo outbound como "assistant" e deliberado e costuma AJUDAR (medido em 03/08: a IA
+    // aproveitou a triagem que a recepcionista ja tinha feito e nao repetiu a pergunta). O que
+    // faltava era a HORA: a fala do atendente chegava sem data, e em 11 de 20 turnos expostos a
+    // linha mais antiga tinha MAIS DE UM DIA (uma delas 20 dias), entrando como se fosse conversa
+    // de agora. Dai sai "como combinamos" sobre algo que ninguem combinou. A justificativa ja
+    // escrita para carimbar a automatica ("nao distingue 'acabamos de te escrever' de 'te
+    // escrevemos ha tres dias'") vale igual para o atendente.
+    if (r.direction === "outbound" && (r.sender === "system" || r.sender === "human")) {
       const q = quando(r.created_at);
-      content = `[mensagem automática enviada pela clínica${q ? ` em ${q}` : ""}]\n${content}`;
+      const quem = r.sender === "system" ? "mensagem automática enviada pela clínica" : "atendente da clínica escreveu";
+      content = `[${quem}${q ? ` em ${q}` : ""}]\n${content}`;
     }
     const last = turns[turns.length - 1];
     if (last && last.role === role) last.text += "\n" + content; // funde mesmo-role consecutivo

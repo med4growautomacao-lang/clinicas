@@ -600,6 +600,10 @@ export interface Lead {
   estimated_value: number | null;
   notes: string | null;
   ai_summary: string | null;
+  /** Ficha de fatos que o agente carrega entre atendimentos (_shared/agent/long-memory.ts).
+   *  Exibida somente leitura ao lado do resumo: é texto gerado a partir da fala do contato e
+   *  entra no prompt do agente, então a clínica precisa conseguir conferir o que foi gravado. */
+  ai_long_memory: string | null;
   session_id: string | null;
   ai_enabled: boolean;
   followup_enabled: boolean;

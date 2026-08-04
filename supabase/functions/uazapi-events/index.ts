@@ -276,5 +276,15 @@ serve(async (req) => {
     payload: { uazapi_status: uazStatus, has_qr: !!data.qrcode, has_owner: !!data.owner, phone_set: !!updates.phone_number },
   });
 
+  // Caiu de verdade e a uazapi avisou: este e o caminho MAIS RAPIDO de todos, chega
+  // em segundos, sem esperar o cron. Avisa o grupo com o link de reconexao.
+  // A propria funcao trava repeticao (3h) para instancia instavel nao virar spam.
+  // Instancia da ORG nao tem clinica nem grupo, por isso o guard.
+  if (nextStatus === 'disconnected' && row.status !== 'disconnected' && row.clinic_id) {
+    await supa.rpc('avisar_queda_whatsapp', {
+      p_clinic_id: row.clinic_id, p_origem: 'uazapi_webhook', p_motivo: uazStatus,
+    });
+  }
+
   return json({ success: true, next_status: nextStatus ?? row.status });
 });

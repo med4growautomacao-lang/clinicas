@@ -265,6 +265,10 @@ serve(async (req) => {
         if (!error) {
           reconciled.push({ instance_id: local.id, clinic_id: local.clinic_id, from: local.status, to: 'disconnected', reason: 'missing_on_uazapi' });
           await supa.from('whatsapp_events').insert({ clinic_id: local.clinic_id, org_id: local.org_id ?? null, instance_id: local.id, attempt_id: local.attempt_id, event_type: 'sync_correction', source: 'sync_cron', payload: { from: local.status, to: 'disconnected', reason: 'missing_on_uazapi' } });
+          // Instancia da ORG nao tem clinica nem grupo: nao ha quem avisar.
+          if (local.clinic_id) {
+            await supa.rpc('avisar_queda_whatsapp', { p_clinic_id: local.clinic_id, p_origem: 'sync_cron', p_motivo: 'missing_on_uazapi' });
+          }
         }
       }
       continue;
@@ -340,6 +344,11 @@ serve(async (req) => {
       if (!error) {
         reconciled.push({ instance_id: local.id, clinic_id: local.clinic_id, from: local.status, to: 'disconnected', reason: 'uazapi_says_disconnected' });
         await supa.from('whatsapp_events').insert({ clinic_id: local.clinic_id, org_id: local.org_id ?? null, instance_id: local.id, attempt_id: local.attempt_id, event_type: 'sync_correction', source: 'sync_cron', payload: { from: local.status, to: 'disconnected', reason: 'uazapi_says_disconnected', remote_reason: motivo, confirmado_por: 'segunda_leitura' } });
+        // So aqui, DEPOIS da confirmacao: avisar o grupo a cada piscada seria pior
+        // que nao avisar. Instancia da ORG nao tem clinica nem grupo.
+        if (local.clinic_id) {
+          await supa.rpc('avisar_queda_whatsapp', { p_clinic_id: local.clinic_id, p_origem: 'sync_cron', p_motivo: motivo });
+        }
       }
       continue;
     }

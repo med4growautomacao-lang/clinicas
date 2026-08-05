@@ -219,6 +219,25 @@ export const TOOL_DEFS: Record<string, ToolDef> = {
     body: (a, ctx) => ({ clinic_id: ctx.clinic_id, lead_phone: ctx.lead_phone, trigger_keyword: s(a.trigger_keyword) }),
   },
 
+  SOLICITAR_LINK_CARTAO: {
+    action: "request_card_link",
+    spec: {
+      name: "SOLICITAR_LINK_CARTAO",
+      description:
+        "Avisa a equipe que este paciente quer pagar no CARTAO e precisa receber o link de pagamento. " +
+        "Use no momento em que ele pedir o link ou escolher cartao. Voce NUNCA envia link de pagamento " +
+        "nem informa valor com taxa: quem envia e a equipe. A IA continua a conversa normalmente; " +
+        "leia o next_step da resposta e siga literalmente.",
+      parameters: {
+        type: "object",
+        properties: {
+          detail: { type: "string", description: "Opcional: o que o paciente pediu (valor, parcelamento, urgencia)." },
+        },
+      },
+    },
+    body: (a, ctx) => ({ clinic_id: ctx.clinic_id, lead_phone: ctx.lead_phone, detail: s(a.detail) }),
+  },
+
   ENCERRAR_FORA_PERFIL: {
     action: "close_as_lost",
     spec: {

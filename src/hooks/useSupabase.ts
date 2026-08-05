@@ -1882,6 +1882,9 @@ export function useMedicalRecords(patientId: string | null) {
 export type NotificationEventKey =
   | 'handoff' | 'agendamento_novo' | 'confirmacao' | 'remarcacao'
   | 'cancelamento' | 'comprovante' | 'venda' | 'nao_atendido'
+  // Paciente pediu para pagar no cartão: a IA não envia link (esse dado não existe no
+  // sistema), ela chama SOLICITAR_LINK_CARTAO e quem envia é a equipe.
+  | 'link_cartao'
   // Aviso de SERVIÇO, não de negócio: por isso é o único que NÃO obedece a
   // group_all/sino_all (avisar_queda_whatsapp lê só a chave do próprio evento).
   // Medido em 03/08/2026: 1 de 28 clínicas tinha os gerais ligados, então

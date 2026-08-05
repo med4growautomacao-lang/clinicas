@@ -1225,6 +1225,98 @@ serve(async (req) => {
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
       );
+    } else if (action === "request_card_link") {
+      // Paciente quer pagar no CARTÃO. A IA nunca manda link nem valor com taxa (esse dado não
+      // mora em lugar nenhum do sistema): ela avisa a equipe e segue a conversa. O aviso sai
+      // pelos dois canais do notify_ops (sino do app + grupo do WhatsApp), respeitando as
+      // preferências da clínica. Diferente do handoff, NÃO pausa a IA nem mexe na etapa.
+      const { lead_phone, detail } = payload;
+      if (!lead_phone) {
+        return new Response(JSON.stringify({ success: false, error: "lead_phone is required" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+      }
+
+      // Lookup por telefone NORMALIZADO (a sessão pode vir com/sem o 9º dígito) — mesmo
+      // padrão do trigger_handoff e do close_as_lost.
+      const { data: cLookup } = await supabaseClient.rpc("find_patient_by_phone", { p_clinic_id: clinic_id, p_phone: lead_phone });
+      const canonicalLeadPhone = (cLookup as any)?.canonical_phone || lead_phone;
+      const { data: lead } = await supabaseClient.from("leads")
+        .select("id, name, phone").eq("clinic_id", clinic_id).eq("phone", canonicalLeadPhone).maybeSingle();
+      if (!lead) {
+        return new Response(JSON.stringify({ success: false, error_code: "lead_not_found", error: "Lead não encontrado para esse telefone" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+      }
+
+      const { data: cardTickets } = await supabaseClient.from("tickets")
+        .select("id").eq("lead_id", lead.id).eq("status", "open")
+        .order("created_at", { ascending: false }).limit(1);
+      const cardTicket = cardTickets && cardTickets.length > 0 ? cardTickets[0] : null;
+
+      const quem = lead.name || lead.phone;
+      const oQue = String(detail || "").trim();
+
+      // Diagnóstico ANTES de notificar: com sino_all e group_all desligados o notify_ops não
+      // entrega em canal nenhum e não reclama. Sem esta checagem o pedido do paciente sumiria
+      // em silêncio, que é o modo de falha que este sistema mais paga caro. Não é defeito de
+      // código, é chave desligada — por isso entra como warning, e a IA não promete ao paciente
+      // que "a equipe foi avisada": ela diz que o link vem por aqui, que é o que a equipe faz.
+      const { data: prefClinic } = await supabaseClient.from("clinics")
+        .select("notification_prefs, notification_group_id").eq("id", clinic_id).maybeSingle();
+      const prefs = (prefClinic?.notification_prefs ?? {}) as Record<string, any>;
+      const ev = prefs?.events?.link_cartao ?? {};
+      const sinoOn = (prefs.sino_all ?? true) !== false && (ev.sino ?? true) !== false;
+      const grupoOn = (prefs.group_all ?? true) !== false && (ev.grupo ?? true) !== false
+        && !!prefClinic?.notification_group_id;
+      if (!sinoOn && !grupoOn) {
+        await registrarErro(
+          "link_cartao_sem_canal",
+          "Paciente pediu o link do cartão e o aviso não tem para onde ir — sino e grupo desligados nesta clínica",
+          "warning", clinic_id,
+          { lead_id: lead.id, telefone: lead.phone, sino_all: prefs.sino_all ?? true, group_all: prefs.group_all ?? true },
+        );
+      }
+
+      let avisado = false;
+      try {
+        // p_notify_group=true: o notify_ops decide o envio ao grupo pelas prefs da clínica e
+        // já ignora lead de simulação (sandbox não vaza para o grupo real).
+        await supabaseClient.rpc("notify_ops", {
+          p_clinic_id: clinic_id,
+          p_event: "link_cartao",
+          p_title: "Link do cartão pendente",
+          p_body: `${quem} quer pagar no cartão e está esperando o link${oQue ? ` — ${oQue}` : ""}.`,
+          p_level: "warning",
+          p_lead_id: lead.id,
+          p_ticket_id: cardTicket?.id ?? null,
+          p_notify_group: true,
+          p_group_text: `💳 *Link do cartão pendente*\n${quem} (${lead.phone}) pediu para pagar no cartão e está esperando o link.${oQue ? `\n${oQue}` : ""}`,
+        });
+        avisado = true;
+      } catch (e) {
+        // Falha muda aqui = paciente esperando um link que ninguém sabe que foi pedido.
+        await registrarErro(
+          "aviso_link_cartao_falhou",
+          "Não deu para avisar a equipe que o paciente pediu o link do cartão — ele pode ficar esperando",
+          "critical", clinic_id,
+          { lead_id: lead.id, telefone: lead.phone, erro: (e as Error)?.message ?? String(e) },
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          applied: avisado,
+          notified: avisado,
+          canais: { sino: sinoOn, grupo: grupoOn },
+          // A redação é a MESMA nos dois casos de propósito: o que a IA promete ao paciente é o
+          // link chegando por aqui (a equipe lê a conversa), nunca "fulano já foi avisado".
+          next_step:
+            "Diga ao paciente que o link do cartão vem por aqui pela equipe, sem prometer prazo. " +
+            "NÃO envie link, NÃO informe valor de taxa nem de parcela, NÃO ofereça outra chave de " +
+            "pagamento. Depois siga a conversa normalmente.",
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
+      );
     } else if (action === "close_as_lost") {
       // Encerra o ticket aberto do lead como PERDIDO quando ele está fora do perfil
       // (ex.: pede cirurgia ou quer tratar uma dor que a clínica não atende).

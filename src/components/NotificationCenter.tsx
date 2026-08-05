@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bell, CheckCheck, CalendarDays, CalendarCheck, CalendarClock, CalendarX, Receipt, AlertTriangle, MessageSquareWarning, PartyPopper, Dot } from 'lucide-react';
+import { Bell, CheckCheck, CalendarDays, CalendarCheck, CalendarClock, CalendarX, Receipt, AlertTriangle, MessageSquareWarning, PartyPopper, CreditCard, Dot } from 'lucide-react';
 import { useNotifications, OpsNotification } from '../hooks/useSupabase';
 
 // Sino de notificações no rodapé da Sidebar. Espelho in-app do grupo do WhatsApp
@@ -25,6 +25,7 @@ function eventIcon(event: string) {
   if (event === 'comprovante') return Receipt;
   if (event === 'nao_atendido') return AlertTriangle;
   if (event === 'handoff') return MessageSquareWarning;
+  if (event === 'link_cartao') return CreditCard;
   return Bell;
 }
 

@@ -1241,11 +1241,12 @@ serve(async (req) => {
       const { data: cLookup } = await supabaseClient.rpc("find_patient_by_phone", { p_clinic_id: clinic_id, p_phone: lead_phone });
       const canonicalLeadPhone = (cLookup as any)?.canonical_phone || lead_phone;
       const { data: lead } = await supabaseClient.from("leads")
-        .select("id, name, phone").eq("clinic_id", clinic_id).eq("phone", canonicalLeadPhone).maybeSingle();
+        .select("id, name, phone, is_simulation").eq("clinic_id", clinic_id).eq("phone", canonicalLeadPhone).maybeSingle();
       if (!lead) {
         return new Response(JSON.stringify({ success: false, error_code: "lead_not_found", error: "Lead não encontrado para esse telefone" }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
       }
+      const cardIsSim = !!(lead as any).is_simulation;
 
       const { data: cardTickets } = await supabaseClient.from("tickets")
         .select("id").eq("lead_id", lead.id).eq("status", "open")
@@ -1267,7 +1268,9 @@ serve(async (req) => {
       const sinoOn = (prefs.sino_all ?? true) !== false && (ev.sino ?? true) !== false;
       const grupoOn = (prefs.group_all ?? true) !== false && (ev.grupo ?? true) !== false
         && !!prefClinic?.notification_group_id;
-      if (!sinoOn && !grupoOn) {
+      // Lead de simulação não acende a Central: o notify_ops já ignora simulação, então "não
+      // chegou a ninguém" ali é o comportamento correto do sandbox, não um alerta de verdade.
+      if (!sinoOn && !grupoOn && !cardIsSim) {
         await registrarErro(
           "link_cartao_sem_canal",
           "Paciente pediu o link do cartão e o aviso não tem para onde ir — sino e grupo desligados nesta clínica",

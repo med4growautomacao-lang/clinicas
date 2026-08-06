@@ -1,0 +1,15 @@
+-- O desempate do tempo de resposta (20260806182508) so funciona porque chat_messages.seq e unico.
+-- Isso era OBSERVACAO sobre o dado de hoje (541.520 valores distintos em 541.520 linhas), nao
+-- invariante: nao havia unique nenhum, so o indice composto (session_id, seq), que nao garante.
+-- Se um dia dois registros do mesmo lead nascerem com o mesmo seq, o LAG(... ORDER BY created_at,
+-- seq) volta a depender do plano e a metrica passa a mudar sozinha de novo, sem erro e sem sinal.
+--
+-- Conferido antes de criar: 0 duplicados, coluna NOT NULL com default nextval('chat_messages_seq'),
+-- e nenhuma funcao do banco nem edge grava seq na mao (so o default). Entao o unique nao pode
+-- quebrar insert de mensagem.
+--
+-- 🚫 Em banco de cliente NO AR, nao aplique este arquivo direto: CREATE UNIQUE INDEX comum pega
+-- lock de escrita e trava o wa-inbound. Em producao foi criado FORA de transacao com:
+--   create unique index concurrently uq_chat_messages_seq on public.chat_messages (seq);
+-- Aqui fica a forma comum + IF NOT EXISTS: no-op no banco atual, correta num banco novo.
+create unique index if not exists uq_chat_messages_seq on public.chat_messages using btree (seq);

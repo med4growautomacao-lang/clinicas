@@ -645,6 +645,14 @@ export function ComercialDashboard() {
 
   useEffect(() => { fetchLeads(); }, [fetchLeads]);
 
+  // Clínica com agenda_via_funil não tem "Marcados": para ela o painel só devolve realizado e
+  // faltou (não existe pendente/confirmado, porque ela não usa a agenda). O chip sumiria da barra
+  // (ver leadMetricOptions abaixo), mas se ele já estivesse selecionado quando o usuário troca de
+  // clínica a lista abriria vazia sem chip aceso para explicar. Aqui volta para "Todos".
+  useEffect(() => {
+    if (data?.agendaViaFunil && leadsMetric === "marcados") setLeadsMetric("todos");
+  }, [data?.agendaViaFunil, leadsMetric]);
+
   // Persistência de verdade é o useEffect de sessionStorage acima — estes só repassam.
   const setAgentPersist = (v: AgentFilter) => setAgent(v);
   const setOriginPersist = (v: OriginFilter[]) => setOrigin(v);
@@ -1087,6 +1095,12 @@ export function ComercialDashboard() {
   // ===== Seção: Leads do filtro (drill-down da população do KPI "Leads") =====
   const leadsTotalPages = Math.max(1, Math.ceil(leadsTotal / LEADS_PAGE_SIZE));
   const leadsScopeLabel = agent === "ia" ? "atendidos pela IA" : agent === "humano" ? "atendidos por humano" : "na coorte de entrada";
+  // "Marcados" (pendente/confirmado) só existe para quem usa a agenda. Na clínica que agenda pelo
+  // funil o card correspondente nem é calculado, então o chip abriria uma lista vazia sem nada no
+  // topo para comparar — que é o "card mostrando 0 onde o módulo nem foi vendido" do CLAUDE.md.
+  const leadMetricOptions = data.agendaViaFunil
+    ? LEAD_METRIC_OPTIONS.filter((o) => o.id !== "marcados")
+    : LEAD_METRIC_OPTIONS;
   const sectionLeads = (
     <Card key="leads" className="border border-slate-200 shadow-sm overflow-hidden">
       <CardHeader className="bg-slate-50 border-b border-slate-100 py-3 space-y-3">
@@ -1099,14 +1113,14 @@ export function ComercialDashboard() {
             {leadsTotal} {leadsTotal === 1 ? "lead" : "leads"}
             {leadsMetric === "todos"
               ? ` · ${leadsScopeLabel}`
-              : ` · ${leadsMetricCount} ${LEAD_METRIC_OPTIONS.find((o) => o.id === leadsMetric)?.label.toLowerCase()}`}
+              : ` · ${leadsMetricCount} ${leadMetricOptions.find((o) => o.id === leadsMetric)?.label.toLowerCase()}`}
           </span>
         </div>
         {/* Recorte por métrica de agendamento (drill-down das métricas do topo) */}
         <FilterChips
           value={leadsMetric}
           onChange={(id) => setLeadsMetric(id as LeadMetricFilter)}
-          options={LEAD_METRIC_OPTIONS}
+          options={leadMetricOptions}
         />
       </CardHeader>
       <CardContent className="p-0">

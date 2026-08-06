@@ -26,8 +26,16 @@ begin
       from pg_proc p where p.pronamespace='public'::regnamespace and p.proname=f;
     if src is null then raise exception 'Funcao % nao encontrada', f; end if;
 
-    n := (length(src) - length(replace(src, 'CURRENT_DATE', ''))) / 12;
-    if n = 0 then raise exception 'CURRENT_DATE nao encontrado em %', f; end if;
+    -- Idempotente: reaplicar a cadeia num banco que ja passou por aqui nao pode ABORTAR, senao
+    -- as migrations seguintes nem chegam a rodar.
+    n := (length(src) - length(replace(src, 'CURRENT_DATE', ''))) / length('CURRENT_DATE');
+    if n = 0 then
+      if position('now() at time zone ''America/Sao_Paulo''' in src) > 0 then
+        raise notice 'ja aplicado em %, pulando', f;
+        continue;
+      end if;
+      raise exception 'CURRENT_DATE nao encontrado em %', f;
+    end if;
 
     novo := replace(src, 'CURRENT_DATE', '(now() at time zone ''America/Sao_Paulo'')::date');
 

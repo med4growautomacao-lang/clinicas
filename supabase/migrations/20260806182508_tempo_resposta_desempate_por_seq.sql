@@ -22,6 +22,13 @@ begin
   foreach f in array array['get_dashboard_stats_impl','get_commercial_dashboard_impl'] loop
     select pg_get_functiondef(p.oid) into src
       from pg_proc p where p.pronamespace='public'::regnamespace and p.proname=f;
+
+    -- Idempotente: reaplicar a cadeia num banco que ja passou por aqui nao pode ABORTAR, senao
+    -- as migrations seguintes nem chegam a rodar.
+    if position('ORDER BY created_at, seq) AS prev_kind' in src) > 0 then
+      raise notice 'ja aplicado em %, pulando', f;
+      continue;
+    end if;
     novo := src;
 
     novo := replace(novo,
@@ -55,8 +62,13 @@ begin
     if novo = src then
       raise exception 'Nenhuma substituicao aplicada em %; texto da funcao mudou, revisar a mao', f;
     end if;
+    -- ⚠️ 'seq AS out_seq' PRECISA estar na lista: e a projecao que CRIA a coluna consumida pelo
+    -- ORDER BY logo abaixo. Sem esta checagem, se so a ancora do bloco cyc falhasse, a funcao
+    -- seria criada referenciando uma coluna inexistente (plpgsql nao resolve nome de coluna no
+    -- CREATE) e o painel so quebraria no primeiro acesso, com 42703 e a migration "aplicada".
     if position('ORDER BY created_at, seq) AS prev_kind' in novo) = 0
        or position('ORDER BY created_at, seq) AS prev_at' in novo) = 0
+       or position('seq AS out_seq' in novo) = 0
        or position('ORDER BY lead_id, in_at, out_seq' in novo) = 0
        or position('cm.seq, cm.sender' in novo) = 0 then
       raise exception 'Substituicao incompleta em %', f;

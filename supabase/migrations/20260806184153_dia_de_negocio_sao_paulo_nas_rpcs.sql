@@ -28,6 +28,11 @@ declare
                         'get_commercial_leads_impl','get_org_clinics_metrics'];
   -- (velho, novo) aplicados a todas; os que nao existirem na funcao sao ignorados,
   -- mas o total de trocas por funcao e conferido no fim.
+  -- ⚠️ A ORDEM IMPORTA e os padroes nao tem fronteira de palavra: 'c.converted_at::date' vem
+  -- antes de 'cv.converted_at::date' e so e seguro porque nenhum alias destas 4 funcoes termina
+  -- em 'c'. Se um dia existir um alias assim (ex.: 'ac.'), este replace o corta no meio e gera
+  -- SQL invalido ou, pior, valido e com outro significado. Ao acrescentar par novo, confira o
+  -- caractere anterior a cada ocorrencia antes de confiar no contador de trocas.
   pares text[][] := array[
     -- ancoras de janela criadas na correcao de performance de hoje
     array['at time zone ''UTC''', 'at time zone ''America/Sao_Paulo'''],
@@ -72,7 +77,13 @@ begin
       '-- Trocar para America/Sao_Paulo aqui desloca 3h e muda venda da madrugada de dia, em silencio.',
       '-- Voltar para UTC aqui desloca 3h e faz o painel discordar da view canonica, em silencio.');
 
+    -- Idempotente: reaplicar a cadeia num banco que ja passou por aqui nao pode ABORTAR, senao
+    -- as migrations seguintes nem chegam a rodar. Zero trocas + zero ancora UTC = ja aplicado.
     if trocas = 0 then
+      if position('at time zone ''UTC''' in src) = 0 and position('America/Sao_Paulo' in src) > 0 then
+        raise notice 'ja aplicado em %, pulando', f;
+        continue;
+      end if;
       raise exception 'Nenhuma troca aplicada em % (texto mudou, revisar a mao)', f;
     end if;
     if position('at time zone ''UTC''' in novo) > 0 then

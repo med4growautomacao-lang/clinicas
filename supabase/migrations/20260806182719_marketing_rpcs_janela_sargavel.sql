@@ -9,7 +9,14 @@ begin
   foreach f in array array['marketing_campaign_investment_impl','marketing_loss_reasons_impl'] loop
     select pg_get_functiondef(p.oid) into src
       from pg_proc p where p.pronamespace='public'::regnamespace and p.proname=f;
+    -- Idempotente: reaplicar a cadeia num banco que ja passou por aqui nao pode ABORTAR, senao
+    -- as migrations seguintes nem chegam a rodar. Se o resultado ja esta no lugar, segue adiante;
+    -- so grita quando nao acha nem o trecho velho nem o novo, que ai o texto mudou de verdade.
     if position(trecho in src) = 0 then
+      if position('and l.created_at >= p_start::timestamp' in src) > 0 then
+        raise notice 'ja aplicado em %, pulando', f;
+        continue;
+      end if;
       raise exception 'Trecho esperado nao encontrado em %', f;
     end if;
     novo := replace(src, trecho,

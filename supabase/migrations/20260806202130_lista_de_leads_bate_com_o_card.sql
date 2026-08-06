@@ -17,6 +17,13 @@ declare src text; novo text; n int;
 begin
   select pg_get_functiondef(p.oid) into src
     from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='get_commercial_leads_impl';
+
+  -- Idempotente: reaplicar a cadeia num banco que ja passou por aqui nao pode ABORTAR, senao as
+  -- migrations seguintes nem chegam a rodar.
+  if position('v_agenda_funil boolean' in src) > 0 then
+    raise notice 'ja aplicado em get_commercial_leads_impl, pulando';
+    return;
+  end if;
   novo := src;
 
   -- (a) Descobrir se a clinica agenda pelo funil, igual o painel faz.
@@ -68,7 +75,11 @@ BEGIN
       )');
 
   -- (d) Contar a MESMA coisa que o card: atendimento/consulta, nao pessoa.
-  n := (length(novo) - length(replace(novo,'SELECT COUNT(DISTINCT l.id) INTO v_metric_count',''))) / 46;
+  -- length() do proprio literal, nao um numero digitado: escrito na mao dava 46 para um texto de
+  -- 47 caracteres e so acertava a conta por truncamento da divisao inteira (n*47/46 = n enquanto
+  -- n < 46). Qualquer edicao no literal mudava em silencio o que esta guarda mede.
+  n := (length(novo) - length(replace(novo,'SELECT COUNT(DISTINCT l.id) INTO v_metric_count','')))
+       / length('SELECT COUNT(DISTINCT l.id) INTO v_metric_count');
   if n <> 2 then raise exception 'Esperava 2 contagens por lead, achei %', n; end if;
   novo := replace(novo,'SELECT COUNT(DISTINCT l.id) INTO v_metric_count','SELECT COUNT(*) INTO v_metric_count');
   novo := regexp_replace(novo,

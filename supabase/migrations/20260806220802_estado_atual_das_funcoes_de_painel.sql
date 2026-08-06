@@ -1,26 +1,34 @@
--- ⚠️ ARQUIVO SUPERADO por 20260806220802_estado_atual_das_funcoes_de_painel.sql.
--- Ficou sem: filtro de agente nas clinicas com agenda_via_funil, Novos Pacientes sem duplicar
--- pessoa, fn_lead_origin_bucket e o curto-circuito de fn_lead_matches_agent. NAO EDITE ESTE.
-
 -- ============================================================================================
 -- ESTADO ATUAL das funcoes de painel, em 06/08/2026. Este arquivo NAO introduz mudanca nenhuma:
--- ele foi gerado a partir do que ja esta rodando em producao e reaplica exatamente o mesmo texto.
+-- foi gerado a partir do que ja esta rodando em producao e reaplica exatamente o mesmo texto.
 --
--- POR QUE ELE EXISTE. As migrations 20260806182508, 20260806184153, 20260806202130 e a de
--- CURRENT_DATE alteraram estas funcoes por SUBSTITUICAO DE TEXTO (pg_get_functiondef + replace).
--- Isso deixou os arquivos 20260806175316 e 20260806180927, que trazem o corpo completo, mais
--- velhos que o banco: eles nao tem o desempate por seq, nem o dia de Sao Paulo, nem o ramo de
--- agenda_via_funil. Quem abrisse um daqueles arquivos, editasse e reaplicasse, apagaria as tres
--- correcoes DE UMA VEZ, sem erro e sem diff para revisar. E o risco que o CLAUDE.md secao 3
--- descreve com todas as letras: "create or replace posterior sobrescreve o anterior sem rastro
--- no arquivo velho (um fix ja foi revertido assim sem ninguem notar)".
+-- 📌 SEMPRE EDITE O ARQUIVO estado_atual_das_funcoes_de_painel MAIS RECENTE. Varias migrations
+-- de 06/08/2026 alteraram estas funcoes por SUBSTITUICAO DE TEXTO (pg_get_functiondef + replace),
+-- entao os arquivos que trazem corpo completo envelhecem a cada nova cirurgia. Quem editar um
+-- arquivo antigo e reaplicar apaga as correcoes posteriores DE UMA VEZ, sem erro e sem diff para
+-- revisar. E o risco que o CLAUDE.md secao 3 descreve: "create or replace posterior sobrescreve
+-- o anterior sem rastro no arquivo velho (um fix ja foi revertido assim sem ninguem notar)".
 --
--- 📌 A PARTIR DAQUI, ESTE E O ARQUIVO A EDITAR. Os anteriores viraram arqueologia: servem para
--- saber o QUE mudou e QUANDO, nao para saber o que esta no ar hoje.
+-- Este arquivo supera 20260806212628, que ficou sem: filtro de agente nas clinicas com
+-- agenda_via_funil, Novos Pacientes sem duplicar pessoa, fn_lead_origin_bucket e o
+-- curto-circuito de fn_lead_matches_agent.
 --
--- ⚠️ Continua valendo a regra de sempre: afirmacao sobre o banco se prova NO BANCO VIVO
--- (pg_get_functiondef, has_function_privilege), nunca lendo migration.
+-- ⚠️ Continua valendo: afirmacao sobre o banco se prova NO BANCO VIVO (pg_get_functiondef,
+-- has_function_privilege), nunca lendo migration.
 -- ============================================================================================
+CREATE OR REPLACE FUNCTION public.fn_lead_origin_bucket(p_source text)
+ RETURNS text
+ LANGUAGE sql
+ IMMUTABLE PARALLEL SAFE
+AS $function$
+  select case p_source
+           when 'meta_ads'   then 'meta'
+           when 'google_ads' then 'google'
+           when 'balcao'     then 'balcao'
+           else 'sem_origem'
+         end
+$function$;
+
 CREATE OR REPLACE FUNCTION public.close_sale_from_orcamento(p_orcamento_id uuid, p_payment_method text DEFAULT 'pix'::text, p_payment_status text DEFAULT 'pago'::text, p_payment_date date DEFAULT ((now() AT TIME ZONE 'America/Sao_Paulo'::text))::date, p_category text DEFAULT 'Venda de produto'::text, p_data_entrega date DEFAULT NULL::date, p_line_keys text[] DEFAULT NULL::text[], p_total numeric DEFAULT NULL::numeric)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -228,7 +236,7 @@ BEGIN
     AND (p_entry_to   IS NULL OR l.created_at <  v_ent_f)
     AND COALESCE(l.is_not_lead, false) = false
     AND (p_origin = 'todos'
-      OR (CASE WHEN source = 'meta_ads' THEN 'meta' WHEN source = 'google_ads' THEN 'google' WHEN source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR capture_channel = ANY(string_to_array(p_channel, ',')));
+      OR public.fn_lead_origin_bucket(source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR capture_channel = ANY(string_to_array(p_channel, ',')));
 
   -- ===== Eixo AGENDADO (atividade operacional: mensagens/SLA/handoffs/automações/
   -- CSAT/investimento/agendamento gerado) — era o antigo p_conv (pill "Agenda"),
@@ -241,7 +249,7 @@ BEGIN
     AND (p_entry_to   IS NULL OR l.created_at <  v_ent_f)
     AND COALESCE(l.is_not_lead, false) = false
     AND (p_origin = 'todos'
-      OR (CASE WHEN source = 'meta_ads' THEN 'meta' WHEN source = 'google_ads' THEN 'google' WHEN source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR capture_channel = ANY(string_to_array(p_channel, ',')));
+      OR public.fn_lead_origin_bucket(source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR capture_channel = ANY(string_to_array(p_channel, ',')));
 
   SELECT sla_minutes, business_hours, csat_type, default_ticket_value
     INTO v_sla_minutes, v_bh, v_csat_type, v_default_ticket
@@ -274,7 +282,7 @@ BEGIN
       AND (p_entry_to   IS NULL OR l.created_at <  v_ent_f)
       AND COALESCE(l.is_not_lead, false) = false
       AND (p_origin = 'todos'
-        OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
+        OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
   ),
   lagged AS (
     SELECT lead_id, created_at, seq, sender, kind,
@@ -308,7 +316,7 @@ BEGIN
     AND (p_entry_to   IS NULL OR l.created_at <  v_ent_f)
     AND COALESCE(l.is_not_lead, false) = false
     AND (p_origin = 'todos'
-      OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
+      OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     AND (p_agent = 'todos' OR (p_agent = 'ia' AND sb.sender = 'ai') OR (p_agent = 'humano' AND sb.sender = 'human'))
     AND NOT (sb.sender = 'ai' AND sb.wait_raw_min > 60);
 
@@ -326,7 +334,7 @@ BEGIN
     AND (p_entry_to   IS NULL OR l.created_at <  v_ent_f)
     AND COALESCE(l.is_not_lead, false) = false
     AND (p_origin = 'todos'
-      OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
+      OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
 
   WITH cohort AS (
     SELECT l.id AS lead_id
@@ -336,7 +344,7 @@ BEGIN
       AND (p_entry_to   IS NULL OR l.created_at <  v_ent_f)
       AND COALESCE(l.is_not_lead, false) = false
       AND (p_origin = 'todos'
-        OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
+        OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
   )
   -- Atribuicao IA x Humano: regua canonica precomputada (vw_lead_agent_class ->
   -- lead_kpi_attribution), MESMA fonte da Visao Geral.
@@ -361,7 +369,7 @@ BEGIN
   SELECT
     COUNT(*) FILTER (WHERE a.source = 'ia'),
     COUNT(*) FILTER (WHERE a.source = 'manual'),
-    COUNT(*) FILTER (WHERE public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent))
+    COUNT(*) FILTER (WHERE (p_agent = 'todos' OR public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)))
   INTO v_appt_ia, v_appt_manual, v_appt_total
   FROM appointments a
   JOIN tickets t ON t.id = a.ticket_id
@@ -375,7 +383,7 @@ BEGIN
     AND (p_entry_to   IS NULL OR l.created_at <  v_ent_f)
     AND COALESCE(l.is_not_lead, false) = false
     AND (p_origin = 'todos'
-      OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
+      OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
 
   -- Agendamento GERADO — precisa bater os 3 calendários AO MESMO TEMPO (E, não
   -- OU): criado dentro de Agendado, consulta marcada pra dentro de Conversão,
@@ -398,8 +406,8 @@ BEGIN
     AND (p_entry_from IS NULL OR l.created_at >= v_ent_i)
     AND (p_entry_to   IS NULL OR l.created_at <  v_ent_f)
     AND COALESCE(l.is_not_lead, false) = false
-    AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
-    AND (p_origin = 'todos' OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ',')))
+    AND (p_agent = 'todos' OR public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent))
+    AND (p_origin = 'todos' OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ',')))
     AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
 
   SELECT COALESCE(jsonb_object_agg(type, cnt), '{}'::jsonb) INTO v_auto
@@ -412,7 +420,7 @@ BEGIN
       AND (p_entry_to   IS NULL OR l.created_at <  v_ent_f)
       AND COALESCE(l.is_not_lead, false) = false
       AND (p_origin = 'todos'
-        OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
+        OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     GROUP BY al.type
   ) a;
 
@@ -425,7 +433,7 @@ BEGIN
     AND (p_entry_to   IS NULL OR created_at <  v_ent_f)
     AND COALESCE(is_not_lead, false) = false
     AND (p_origin = 'todos'
-      OR (CASE WHEN source = 'meta_ads' THEN 'meta' WHEN source = 'google_ads' THEN 'google' WHEN source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR capture_channel = ANY(string_to_array(p_channel, ',')));
+      OR public.fn_lead_origin_bucket(source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR capture_channel = ANY(string_to_array(p_channel, ',')));
 
   SELECT COALESCE(jsonb_agg(jsonb_build_object('score', score, 'count', cnt) ORDER BY score DESC), '[]'::jsonb) INTO v_csat_dist
   FROM (
@@ -437,7 +445,7 @@ BEGIN
       AND (p_entry_to   IS NULL OR created_at <  v_ent_f)
       AND COALESCE(is_not_lead, false) = false
       AND (p_origin = 'todos'
-        OR (CASE WHEN source = 'meta_ads' THEN 'meta' WHEN source = 'google_ads' THEN 'google' WHEN source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR capture_channel = ANY(string_to_array(p_channel, ',')))
+        OR public.fn_lead_origin_bucket(source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR capture_channel = ANY(string_to_array(p_channel, ',')))
     GROUP BY csat_score
   ) d;
 
@@ -475,9 +483,9 @@ BEGIN
       OR COALESCE(NULLIF(t.loss_reason, ''), '(sem motivo registrado)') = ANY(string_to_array(p_loss_reasons, ',')))
     -- Faltava filtro de Agente aqui (achado de code-review 21/07) — Ganho/
     -- Perdido não respeitavam o filtro enquanto revenueScoped ao lado sim.
-    AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
+    AND (p_agent = 'todos' OR public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent))
     AND (p_origin = 'todos'
-      OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
+      OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
 
   -- Motivo de perda (novo — reaproveita v_kpi_outcomes, fonte única do dia de
   -- desfecho, em vez de recalcular COALESCE(outcome_at,closed_at) de novo).
@@ -493,9 +501,9 @@ BEGIN
         AND (p_conv_to   IS NULL OR o.day <= p_conv_to)
         AND (p_entry_from IS NULL OR l.created_at >= v_ent_i)
         AND (p_entry_to   IS NULL OR l.created_at <  v_ent_f)
-        AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
+        AND (p_agent = 'todos' OR public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent))
         AND (p_origin = 'todos'
-          OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
+          OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
       GROUP BY 1
     ) r;
   ELSE
@@ -526,9 +534,9 @@ BEGIN
     AND (p_entry_from IS NULL OR l.created_at >= v_ent_i)
     AND (p_entry_to   IS NULL OR l.created_at <  v_ent_f)
     AND (l.id IS NULL OR COALESCE(l.is_not_lead, false) = false)
-    AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
+    AND (p_agent = 'todos' OR public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent))
     AND (p_origin = 'todos'
-      OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
+      OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
 
   -- Ciclo: até o Ganho por padrão; até a Perda quando o toggle está em 'perdido'.
   SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (t.outcome_at - l.created_at)) / 86400.0), 0) INTO v_sales_cycle
@@ -542,9 +550,9 @@ BEGIN
     AND (p_loss_reasons IS NULL OR btrim(p_loss_reasons) = '' OR t.outcome <> 'perdido'
       OR COALESCE(NULLIF(t.loss_reason, ''), '(sem motivo registrado)') = ANY(string_to_array(p_loss_reasons, ',')))
     -- Faltava filtro de Agente aqui tambem (achado de code-review 21/07).
-    AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
+    AND (p_agent = 'todos' OR public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent))
     AND (p_origin = 'todos'
-      OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
+      OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
 
   -- Consultas realizadas: mesma regra de "casamento" dos 3 calendários do bloco
   -- acima (Agendado + Conversão + Entrada, todos ao mesmo tempo) + mesmos
@@ -564,9 +572,9 @@ BEGIN
     AND (p_entry_from IS NULL OR l.created_at >= v_ent_i)
     AND (p_entry_to   IS NULL OR l.created_at <  v_ent_f)
     AND COALESCE(l.is_not_lead, false) = false
-    AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
+    AND (p_agent = 'todos' OR public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent))
     AND (p_origin = 'todos'
-      OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
+      OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
 
   SELECT COALESCE(jsonb_object_agg(status, cnt), '{}'::jsonb) INTO v_appt_status
   FROM (
@@ -585,9 +593,9 @@ BEGIN
       -- Mesma régua canônica de "Agendamentos Gerados" (lead como um todo, via
       -- vw_lead_agent_class) — era por a.source (quem marcou ESSA consulta),
       -- que divergia de "Gerados" quando o lead é da IA mas um humano marcou.
-      AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
+      AND (p_agent = 'todos' OR public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent))
       AND (p_origin = 'todos'
-        OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
+        OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     GROUP BY 1
   ) s;
 
@@ -600,8 +608,9 @@ BEGIN
       AND (p_entry_from IS NULL OR l.created_at >= v_ent_i)
       AND (p_entry_to   IS NULL OR l.created_at <  v_ent_f)
       AND COALESCE(l.is_not_lead, false) = false
+      AND (p_agent = 'todos' OR public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent))
       AND (p_origin = 'todos'
-        OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
+        OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
     v_appt_ia := 0; v_appt_manual := v_appt_total;
     -- appointments.generated ficava hard-travado em 0 pra clínicas com
     -- agenda_via_funil=true, já que o bloco padrão (acima) lê de `appointments`,
@@ -619,8 +628,9 @@ BEGIN
       AND (p_entry_from IS NULL OR l.created_at >= v_ent_i)
       AND (p_entry_to   IS NULL OR l.created_at <  v_ent_f)
       AND COALESCE(l.is_not_lead, false) = false
+      AND (p_agent = 'todos' OR public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent))
       AND (p_origin = 'todos'
-        OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
+        OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
 
     v_appt_status := jsonb_build_object('realizado', COALESCE(v_attended_consults, 0), 'faltou', COALESCE(v_falta_cnt, 0));
   END IF;
@@ -639,9 +649,9 @@ BEGIN
     AND (p_entry_from IS NULL OR l.created_at >= v_ent_i)
     AND (p_entry_to   IS NULL OR l.created_at <  v_ent_f)
     AND COALESCE(l.is_not_lead, false) = false
-    AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
+    AND (p_agent = 'todos' OR public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent))
     AND (p_origin = 'todos'
-      OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
+      OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
 
   -- ===== Funil por etapa — eixo Entrada (sem mudança) =====
   WITH entries AS (
@@ -652,7 +662,7 @@ BEGIN
       AND (p_entry_to   IS NULL OR l.created_at <  v_ent_f)
       AND COALESCE(l.is_not_lead, false) = false
       AND (p_origin = 'todos'
-        OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
+        OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     GROUP BY h.ticket_id, h.new_stage_id
   ),
   counts AS (SELECT stage_id, COUNT(*)::int AS leads FROM entries GROUP BY stage_id)
@@ -674,7 +684,7 @@ BEGIN
       AND (p_entry_to   IS NULL OR l.created_at <  v_ent_f)
       AND COALESCE(l.is_not_lead, false) = false
       AND (p_origin = 'todos'
-        OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
+        OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     GROUP BY 1
   ),
   ld AS (
@@ -684,7 +694,7 @@ BEGIN
       AND (p_entry_to   IS NULL OR created_at <  v_ent_f)
       AND COALESCE(is_not_lead, false) = false
       AND (p_origin = 'todos'
-        OR (CASE WHEN source = 'meta_ads' THEN 'meta' WHEN source = 'google_ads' THEN 'google' WHEN source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR capture_channel = ANY(string_to_array(p_channel, ',')))
+        OR public.fn_lead_origin_bucket(source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR capture_channel = ANY(string_to_array(p_channel, ',')))
     GROUP BY 1
   ),
   ap AS (
@@ -702,9 +712,9 @@ BEGIN
       AND (p_entry_from IS NULL OR l.created_at >= v_ent_i)
       AND (p_entry_to   IS NULL OR l.created_at <  v_ent_f)
       AND COALESCE(l.is_not_lead, false) = false
-      AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
+      AND (p_agent = 'todos' OR public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent))
       AND (p_origin = 'todos'
-        OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
+        OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     GROUP BY 1
   ),
   rz AS (
@@ -716,9 +726,9 @@ BEGIN
       AND (p_entry_from IS NULL OR l.created_at >= v_ent_i)
       AND (p_entry_to   IS NULL OR l.created_at <  v_ent_f)
       AND COALESCE(l.is_not_lead, false) = false
-      AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
+      AND (p_agent = 'todos' OR public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent))
       AND (p_origin = 'todos'
-        OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
+        OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     GROUP BY 1
   ),
   rev AS (
@@ -730,9 +740,9 @@ BEGIN
       AND (p_entry_from IS NULL OR l.created_at >= v_ent_i)
       AND (p_entry_to   IS NULL OR l.created_at <  v_ent_f)
       AND COALESCE(l.is_not_lead, false) = false
-      AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
+      AND (p_agent = 'todos' OR public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent))
       AND (p_origin = 'todos'
-        OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ','))) GROUP BY 1
+        OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ','))) GROUP BY 1
   ),
   apf AS (
     SELECT h.changed_at::date AS d, COUNT(DISTINCT h.ticket_id) AS appts
@@ -742,8 +752,9 @@ BEGIN
       AND (p_entry_from IS NULL OR l.created_at >= v_ent_i)
       AND (p_entry_to   IS NULL OR l.created_at <  v_ent_f)
       AND COALESCE(l.is_not_lead, false) = false
+      AND (p_agent = 'todos' OR public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent))
       AND (p_origin = 'todos'
-        OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
+        OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     GROUP BY 1
   ),
   rzf AS (
@@ -754,8 +765,9 @@ BEGIN
       AND (p_entry_from IS NULL OR l.created_at >= v_ent_i)
       AND (p_entry_to   IS NULL OR l.created_at <  v_ent_f)
       AND COALESCE(l.is_not_lead, false) = false
+      AND (p_agent = 'todos' OR public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent))
       AND (p_origin = 'todos'
-        OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
+        OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     GROUP BY 1
   ),
   wg AS (
@@ -766,9 +778,9 @@ BEGIN
       AND (p_entry_from IS NULL OR l.created_at >= v_ent_i)
       AND (p_entry_to   IS NULL OR l.created_at <  v_ent_f)
       AND COALESCE(l.is_not_lead, false) = false
-      AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
+      AND (p_agent = 'todos' OR public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent))
       AND (p_origin = 'todos'
-        OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
+        OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     GROUP BY 1
   ),
   mkt AS (
@@ -786,7 +798,7 @@ BEGIN
       AND (p_entry_to   IS NULL OR created_at <  v_ent_f)
       AND COALESCE(is_not_lead, false) = false
       AND (p_origin = 'todos'
-        OR (CASE WHEN source = 'meta_ads' THEN 'meta' WHEN source = 'google_ads' THEN 'google' WHEN source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR capture_channel = ANY(string_to_array(p_channel, ',')))
+        OR public.fn_lead_origin_bucket(source) = ANY(string_to_array(p_origin, ','))) AND (p_channel = 'todos' OR capture_channel = ANY(string_to_array(p_channel, ',')))
     GROUP BY 1
   ),
   fu AS (
@@ -899,13 +911,13 @@ BEGIN
       AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
       AND COALESCE(l.is_not_lead, false) = false
       AND (p_origin = 'todos'
-        OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ',')))
+        OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ',')))
       AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
       -- Agente: mesma régua canônica de get_commercial_dashboard (lead como um
       -- todo, via vw_lead_agent_class) — era EXISTS em chat_messages dentro da
       -- janela Agendado, que divergia da régua do dashboard e da lista mesmo
       -- depois do card "Gerados" já estar corrigido (achado ao validar 22/07).
-      AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
+      AND (p_agent = 'todos' OR public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent))
       -- Toggle Ganho/Perdido/Ambos — eixo Conversão (outcome_at). Seletor de
       -- motivo (só ativo com p_outcome='perdido') recorta ainda mais.
       AND (p_outcome = 'ambos' OR EXISTS (
@@ -1016,14 +1028,17 @@ BEGIN
       AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
       AND COALESCE(l.is_not_lead, false) = false
       AND (p_origin = 'todos'
-        OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ',')))
+        OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ',')))
       AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
-      AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
+      AND (p_agent = 'todos' OR public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent))
       AND (p_conv_from IS NULL OR (COALESCE(t4.outcome_at, t4.closed_at) at time zone 'America/Sao_Paulo')::date >= p_conv_from)
       AND (p_conv_to   IS NULL OR (COALESCE(t4.outcome_at, t4.closed_at) at time zone 'America/Sao_Paulo')::date <= p_conv_to)
       AND (p_loss_reasons IS NULL OR btrim(p_loss_reasons) = ''
         OR COALESCE(NULLIF(t4.loss_reason, ''), '(sem motivo registrado)') = ANY(string_to_array(p_loss_reasons, ',')));
-  ELSE
+  ELSIF NOT (v_agenda_funil AND p_metric IN ('gerados', 'realizadas')) THEN
+    -- ⚠️ A guarda nao e enfeite: clinica que agenda pelo funil e resolvida no bloco de
+    -- ETAPA logo abaixo. Sem ela, esta consulta de 3 tabelas roda no caminho quente da
+    -- lista e o resultado e sobrescrito na linha seguinte.
     -- COUNT(*), nao COUNT(DISTINCT lead): este numero fica ao lado da lista e tem que bater
     -- com o CARD clicado, que conta atendimento/consulta. A tela mostra os dois: "143 leads
     -- . 145 perdidos". Voltar para DISTINCT faz o card e a lista discordarem de novo.
@@ -1036,9 +1051,9 @@ BEGIN
       AND (p_entry_to   IS NULL OR l.created_at::date <= p_entry_to)
       AND COALESCE(l.is_not_lead, false) = false
       AND (p_origin = 'todos'
-        OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ',')))
+        OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ',')))
       AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
-      AND public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent)
+      AND (p_agent = 'todos' OR public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent))
       AND (p_conv_from   IS NULL OR a.date >= p_conv_from)
       AND (p_conv_to     IS NULL OR a.date <= p_conv_to)
       AND (p_agenda_from IS NULL OR a.created_at::date >= p_agenda_from)
@@ -1048,9 +1063,9 @@ BEGIN
         OR (p_metric = 'marcados'   AND a.status IN ('pendente','confirmado')));
   END IF;
 
-  -- Espelha o bloco IF v_agenda_funil de get_commercial_dashboard_impl, inclusive na ausencia
-  -- de filtro de agente: la o card dessas clinicas nao aplica fn_lead_matches_agent, e o total
-  -- aqui tem que bater com o card, nao com a regua da lista.
+  -- Espelha o bloco IF v_agenda_funil de get_commercial_dashboard_impl, INCLUSIVE o filtro de
+  -- agente: desde 06/08/2026 o card dessas clinicas tambem chama fn_lead_matches_agent, entao
+  -- os dois usam a mesma regua e o rodape volta a bater com a lista.
   IF v_agenda_funil AND p_metric IN ('gerados', 'realizadas') THEN
     SELECT COUNT(DISTINCT h.ticket_id) INTO v_metric_count
     FROM lead_stage_history h JOIN leads l ON l.id = h.lead_id
@@ -1064,8 +1079,9 @@ BEGIN
       AND (p_entry_from IS NULL OR l.created_at >= p_entry_from::timestamp)
       AND (p_entry_to   IS NULL OR l.created_at <  (p_entry_to + 1)::timestamp)
       AND COALESCE(l.is_not_lead, false) = false
+      AND (p_agent = 'todos' OR public.fn_lead_matches_agent(l.id, p_clinic_id, p_agent))
       AND (p_origin = 'todos'
-        OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ',')))
+        OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ',')))
       AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')));
   END IF;
 
@@ -1112,7 +1128,7 @@ BEGIN
   WHERE sc.clinic_id = p_clinic_id AND sc.day BETWEEN p_date_from AND p_date_to
     AND COALESCE(l.is_not_lead, false) = false
     AND (p_origin = 'todos'
-      OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ',')))
+      OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ',')))
     AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     AND (p_agent = 'todos' OR EXISTS (SELECT 1 FROM public.vw_lead_agent_class v WHERE v.lead_id = l.id AND v.clinic_id = p_clinic_id AND v.agent = p_agent));
 
@@ -1127,7 +1143,7 @@ BEGIN
             AND a.status IN ('pendente','confirmado','compareceu')
             AND COALESCE(l.is_not_lead, false) = false
             AND (p_origin = 'todos'
-              OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ',')))
+              OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ',')))
     AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     AND (p_agent = 'todos' OR EXISTS (SELECT 1 FROM public.vw_lead_agent_class v WHERE v.lead_id = l.id AND v.clinic_id = p_clinic_id AND v.agent = p_agent)))
     INTO v_pending_revenue;
@@ -1139,7 +1155,7 @@ BEGIN
     AND c.description IS DISTINCT FROM 'Orçamento Enviado'
     AND COALESCE(l.is_not_lead, false) = false
     AND (p_origin = 'todos'
-      OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ',')))
+      OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ',')))
     AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     AND (p_agent = 'todos' OR EXISTS (SELECT 1 FROM public.vw_lead_agent_class v WHERE v.lead_id = l.id AND v.clinic_id = p_clinic_id AND v.agent = p_agent));
 
@@ -1147,17 +1163,19 @@ BEGIN
   WHERE l.clinic_id = p_clinic_id AND l.created_at >= v_ini AND l.created_at < v_fim
     AND COALESCE(l.is_not_lead, false) = false
     AND (p_origin = 'todos'
-      OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ',')))
+      OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ',')))
     AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     AND (p_agent = 'todos' OR EXISTS (SELECT 1 FROM public.vw_lead_agent_class v WHERE v.lead_id = l.id AND v.clinic_id = p_clinic_id AND v.agent = p_agent));
 
-  SELECT COUNT(*) INTO v_new_patients
+  -- COUNT(DISTINCT pt.id): o LEFT JOIN com leads emite uma linha por lead, e paciente
+  -- alcancado por dois leads apareceria duas vezes no card.
+  SELECT COUNT(DISTINCT pt.id) INTO v_new_patients
   FROM patients pt
   LEFT JOIN leads l ON l.converted_patient_id = pt.id AND l.clinic_id = pt.clinic_id
   WHERE pt.clinic_id = p_clinic_id AND pt.created_at >= v_ini AND pt.created_at < v_fim
     AND COALESCE(l.is_not_lead, false) = false
     AND (p_origin = 'todos'
-      OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ',')))
+      OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ',')))
     AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     AND (p_agent = 'todos' OR EXISTS (SELECT 1 FROM public.vw_lead_agent_class v WHERE v.lead_id = l.id AND v.clinic_id = p_clinic_id AND v.agent = p_agent));
 
@@ -1167,7 +1185,7 @@ BEGIN
     AND COALESCE(t.outcome_at, t.closed_at) >= v_tzini AND COALESCE(t.outcome_at, t.closed_at) < v_tzfim
     AND COALESCE(l.is_not_lead, false) = false
     AND (p_origin = 'todos'
-      OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ',')))
+      OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ',')))
     AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     AND (p_agent = 'todos' OR EXISTS (SELECT 1 FROM public.vw_lead_agent_class v WHERE v.lead_id = l.id AND v.clinic_id = p_clinic_id AND v.agent = p_agent));
 
@@ -1188,7 +1206,7 @@ BEGIN
     AND NOT (sb.sender = 'ai' AND sb.wait_raw_min > 60)
     AND COALESCE(l.is_not_lead, false) = false
     AND (p_origin = 'todos'
-      OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ',')))
+      OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ',')))
     AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     AND (p_agent = 'todos' OR EXISTS (SELECT 1 FROM public.vw_lead_agent_class v WHERE v.lead_id = l.id AND v.clinic_id = p_clinic_id AND v.agent = p_agent));
 
@@ -1199,7 +1217,7 @@ BEGIN
     AND t.outcome_at >= v_tzini AND t.outcome_at < v_tzfim
     AND COALESCE(l.is_not_lead, false) = false
     AND (p_origin = 'todos'
-      OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ',')))
+      OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ',')))
     AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     AND (p_agent = 'todos' OR EXISTS (SELECT 1 FROM public.vw_lead_agent_class v WHERE v.lead_id = l.id AND v.clinic_id = p_clinic_id AND v.agent = p_agent));
 
@@ -1217,7 +1235,7 @@ BEGIN
       AND cm.created_at >= v_ini AND cm.created_at < v_fim
       AND COALESCE(l.is_not_lead, false) = false
       AND (p_origin = 'todos'
-        OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ',')))
+        OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ',')))
     AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     AND (p_agent = 'todos' OR EXISTS (SELECT 1 FROM public.vw_lead_agent_class v WHERE v.lead_id = l.id AND v.clinic_id = p_clinic_id AND v.agent = p_agent))
   ),
@@ -1243,7 +1261,7 @@ BEGIN
     WHERE sc.clinic_id = p_clinic_id AND sc.day BETWEEN p_date_from AND p_date_to
       AND COALESCE(l.is_not_lead, false) = false
       AND (p_origin = 'todos'
-        OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ',')))
+        OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ',')))
     AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     AND (p_agent = 'todos' OR EXISTS (SELECT 1 FROM public.vw_lead_agent_class v WHERE v.lead_id = l.id AND v.clinic_id = p_clinic_id AND v.agent = p_agent))
     GROUP BY sc.day),
@@ -1253,7 +1271,7 @@ BEGIN
       AND c.converted_at >= v_tzini AND c.converted_at < v_tzfim
       AND COALESCE(l.is_not_lead, false) = false
       AND (p_origin = 'todos'
-        OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ',')))
+        OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ',')))
     AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     AND (p_agent = 'todos' OR EXISTS (SELECT 1 FROM public.vw_lead_agent_class v WHERE v.lead_id = l.id AND v.clinic_id = p_clinic_id AND v.agent = p_agent))
     GROUP BY (c.converted_at at time zone 'America/Sao_Paulo')::date),
@@ -1261,7 +1279,7 @@ BEGIN
     WHERE l.clinic_id = p_clinic_id AND l.created_at >= v_ini AND l.created_at < v_fim
       AND COALESCE(l.is_not_lead, false) = false
       AND (p_origin = 'todos'
-        OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ',')))
+        OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ',')))
     AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     AND (p_agent = 'todos' OR EXISTS (SELECT 1 FROM public.vw_lead_agent_class v WHERE v.lead_id = l.id AND v.clinic_id = p_clinic_id AND v.agent = p_agent))
     GROUP BY l.created_at::date),
@@ -1271,7 +1289,7 @@ BEGIN
       AND COALESCE(t.outcome_at, t.closed_at) >= v_tzini AND COALESCE(t.outcome_at, t.closed_at) < v_tzfim
       AND COALESCE(l.is_not_lead, false) = false
       AND (p_origin = 'todos'
-        OR (CASE WHEN l.source = 'meta_ads' THEN 'meta' WHEN l.source = 'google_ads' THEN 'google' WHEN l.source = 'balcao' THEN 'balcao' ELSE 'sem_origem' END) = ANY(string_to_array(p_origin, ',')))
+        OR public.fn_lead_origin_bucket(l.source) = ANY(string_to_array(p_origin, ',')))
     AND (p_channel = 'todos' OR l.capture_channel = ANY(string_to_array(p_channel, ',')))
     AND (p_agent = 'todos' OR EXISTS (SELECT 1 FROM public.vw_lead_agent_class v WHERE v.lead_id = l.id AND v.clinic_id = p_clinic_id AND v.agent = p_agent))
     GROUP BY (COALESCE(t.outcome_at, t.closed_at) at time zone 'America/Sao_Paulo')::date),
@@ -1727,10 +1745,11 @@ BEGIN
 END;
 $function$;
 
--- O grant vem por DOIS caminhos e revogar um so nao fecha nada (CLAUDE.md secao 1). As funcoes
--- _impl nunca podem ser chamaveis pelo PostgREST: quem carrega o assert_clinic_access e o wrapper.
--- As demais funcoes acima nao aparecem aqui de proposito: create or replace preserva o ACL que a
--- migration original definiu, e mexer nisso as escondidas e como o vazamento de 17h aconteceu.
+-- O grant vem por DOIS caminhos e revogar um so nao fecha nada (CLAUDE.md secao 1). As _impl e o
+-- helper nunca sao chamados pelo PostgREST: quem carrega o assert_clinic_access e o wrapper. As
+-- demais funcoes nao aparecem aqui de proposito: create or replace preserva o ACL da migration
+-- que as criou, e mexer nisso as escondidas e como o vazamento de 17h aconteceu.
+revoke all on function public.fn_lead_origin_bucket(text) from public, anon, authenticated;
 revoke all on function public.get_commercial_dashboard_impl(uuid,date,date,date,date,text,text,text,date,date,text,text) from public, anon, authenticated;
 revoke all on function public.get_commercial_leads_impl(uuid,date,date,date,date,text,text,integer,integer,text,text,date,date,text,text,text,text) from public, anon, authenticated;
 revoke all on function public.get_dashboard_stats_impl(uuid,date,date,text,text,text) from public, anon, authenticated;

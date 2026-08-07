@@ -81,7 +81,7 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
       : defaultHours
   );
 
-  const { data: consultationTypes, refetch: refetchTypes, create: createType, update: updateType, remove: removeType } = useConsultationTypes(doctor.id);
+  const { data: consultationTypes, refetch: refetchTypes, create: createType, update: updateType, remove: removeType, lastError: typesLastError } = useConsultationTypes(doctor.id);
   const [editingType, setEditingType] = useState<ConsultationType | 'new' | null>(null);
   const [daysOff, setDaysOff] = useState<string[]>(doctor.days_off || []);
   const [newDayOff, setNewDayOff] = useState('');
@@ -193,7 +193,10 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4"
-      onClick={onClose}
+      // Só fecha em clique NA PRÓPRIA área escura. Sem esta checagem, o clique no fundo do editor
+      // de tipo de consulta (que é renderizado DENTRO desta div) borbulhava até aqui e derrubava
+      // as duas telas de uma vez, jogando fora o que estava sendo editado, sem aviso.
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -382,7 +385,13 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
                               type="checkbox"
                               className="sr-only peer"
                               checked={ct.is_active}
-                              onChange={(e) => { e.stopPropagation(); updateType(ct.id, { is_active: e.target.checked }); }}
+                              onChange={async (e) => {
+                                e.stopPropagation();
+                                // Mesma doença do editor: sem olhar o retorno, a chavinha voltava
+                                // sozinha e ninguém sabia por quê. Agora o motivo aparece.
+                                const ok = await updateType(ct.id, { is_active: e.target.checked });
+                                if (!ok) setError(typesLastError() || 'Não foi possível alterar o status deste modelo.');
+                              }}
                             />
                             <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-teal-500"></div>
                           </label>
@@ -591,10 +600,16 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
           doctorWorkingHours={workingHours}
           onClose={() => setEditingType(null)}
           onSaved={async (input) => {
-            if (editingType === 'new') {
-              await createType(input as any);
-            } else {
-              await updateType(editingType.id, input);
+            // ⚠️ Este `throw` é o conserto de 07/08/2026. Antes o retorno era ignorado e o editor
+            // fechava igualzinho a um salvamento bem-sucedido: recusa do banco, queda de rede ou
+            // sessão expirada davam o MESMO resultado visual, e a clínica ficava com o valor
+            // antigo achando que tinha salvado. O editor tem try/catch e mostra o motivo, então
+            // lançar aqui é o que segura a tela aberta com o dado dela na frente.
+            const ok = editingType === 'new'
+              ? await createType(input as any)
+              : await updateType(editingType.id, input);
+            if (!ok) {
+              throw new Error(typesLastError() || 'Não foi possível salvar. Confira a conexão e tente de novo.');
             }
             setEditingType(null);
             refetchTypes();
@@ -783,7 +798,8 @@ function ConsultationTypeEditor({ doctorId, clinicId, existing, doctorWorkingHou
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4"
-      onClick={onClose}
+      // Idem: fecha só o editor, e só em clique na própria área escura dele.
+      onClick={(e) => { if (e.target === e.currentTarget) { e.stopPropagation(); onClose(); } }}
     >
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 20 }}

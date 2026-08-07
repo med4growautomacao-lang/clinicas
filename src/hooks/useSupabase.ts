@@ -188,30 +188,48 @@ export function useConsultationTypes(doctorId: string | null | undefined) {
 
   useEffect(() => { fetch(); }, [fetch]);
 
+  // ⚠️ O motivo do ref: `error` é estado, e estado do React NÃO está legível no mesmo tick em que
+  // o await volta. Quem chama precisa decidir na hora se fecha o formulário ou segura a tela com o
+  // dado do usuário, e para isso o motivo tem que estar disponível SÍNCRONO. Apurado em 07/08/2026:
+  // a tela de tipos de consulta fechava como se tivesse salvado quando o banco recusava.
+  const lastErrorRef = useRef<string | null>(null);
+  const lastError = () => lastErrorRef.current;
+
   const create = async (input: Omit<ConsultationType, 'id' | 'created_at'>) => {
+    lastErrorRef.current = null;
     const { data: row, error: err } = await supabase
       .from('consultation_types').insert(input).select().single();
-    if (err) { setError(err.message); return null; }
+    if (err) { lastErrorRef.current = err.message; setError(err.message); return null; }
     setData(prev => [...prev, row as ConsultationType]);
     return row as ConsultationType;
   };
 
   const update = async (id: string, patch: Partial<ConsultationType>) => {
-    const { error: err } = await supabase
-      .from('consultation_types').update(patch).eq('id', id);
-    if (err) { setError(err.message); return false; }
+    lastErrorRef.current = null;
+    // count: 'exact' + head: false devolve quantas linhas o update REALMENTE atingiu. Update que
+    // não acha a linha (id errado, RLS barrando) volta sem erro nenhum: sem esta contagem, "não
+    // gravou nada" seria indistinguível de "gravou".
+    const { error: err, count } = await supabase
+      .from('consultation_types').update(patch, { count: 'exact' }).eq('id', id);
+    if (err) { lastErrorRef.current = err.message; setError(err.message); return false; }
+    if (count === 0) {
+      lastErrorRef.current = 'A alteração não foi gravada (nenhuma linha foi atingida). Recarregue a página e tente de novo.';
+      setError(lastErrorRef.current);
+      return false;
+    }
     setData(prev => prev.map(ct => ct.id === id ? { ...ct, ...patch } as ConsultationType : ct));
     return true;
   };
 
   const remove = async (id: string) => {
+    lastErrorRef.current = null;
     const { error: err } = await supabase.from('consultation_types').delete().eq('id', id);
-    if (err) { setError(err.message); return false; }
+    if (err) { lastErrorRef.current = err.message; setError(err.message); return false; }
     setData(prev => prev.filter(ct => ct.id !== id));
     return true;
   };
 
-  return { data, loading, error, refetch: fetch, create, update, remove };
+  return { data, loading, error, lastError, refetch: fetch, create, update, remove };
 }
 
 export function useDoctors() {

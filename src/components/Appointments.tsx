@@ -112,6 +112,10 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
   const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
   const [formData, setFormData] = useState({ patient_id: '', doctor_id: '', date: '', time: '', notes: '', status: 'pendente' as any, consultation_type_id: '' as string });
   const [submitting, setSubmitting] = useState(false);
+  // Aviso de encaixe sem folga. O ref (e não estado) porque o "confirmar mesmo assim" precisa
+  // valer JÁ na chamada seguinte de handleSubmit, e estado do React só chega no próximo render.
+  const [gapAviso, setGapAviso] = useState<string | null>(null);
+  const gapConfirmadoRef = useRef(false);
   const [showScheduleSettings, setShowScheduleSettings] = useState(false);
   const [doctorToConfigure, setDoctorToConfigure] = useState<any>(null);
   const [showDoctorSchedulePicker, setShowDoctorSchedulePicker] = useState(false);
@@ -582,6 +586,26 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
     setSubmitting(true);
     setError(null);
 
+    // ENCAIXE COLADO: a recepção pode encaixar por cima do intervalo configurado (é flexibilidade
+    // comprada de propósito, o p_force logo abaixo), mas a médica não pode descobrir isso só no dia.
+    // Decisão do dono em 07/08/2026: avisar antes de confirmar, não bloquear. A conta vem do banco
+    // (fn_conferir_folga_agenda), com a MESMA régua da oferta automática, para tela e motor nunca
+    // discordarem. Sem tipo de consulta escolhido não há como calcular, e aí segue sem aviso.
+    if (!gapConfirmadoRef.current && formData.consultation_type_id) {
+      const { data: folga } = await supabase.rpc('fn_conferir_folga_agenda', {
+        p_doctor_id: formData.doctor_id,
+        p_date: formData.date,
+        p_time: formData.time,
+        p_consultation_type_id: formData.consultation_type_id,
+        p_appointment_id: selectedAppointment?.id ?? null,
+      });
+      if ((folga as any)?.colado) {
+        setGapAviso((folga as any).mensagem || 'Este horário fica colado na consulta vizinha.');
+        setSubmitting(false);
+        return;
+      }
+    }
+
     if (selectedAppointment) {
       const sa = selectedAppointment;
       const curTime = sa.time ? sa.time.toString().substring(0, 5) : '';
@@ -644,6 +668,9 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
     setSelectedAppointment(null);
     setShowModal(false);
     setSubmitting(false);
+    // O "encaixar mesmo assim" vale para UM agendamento só; o próximo volta a ser conferido.
+    gapConfirmadoRef.current = false;
+    setGapAviso(null);
   };
 
   const handlePatientSuccess = (patient: any) => {
@@ -1081,7 +1108,7 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
       </Card>
 
       {/* Create Appointment Modal */}
-      <Modal open={showModal} onClose={() => setShowModal(false)} size="md">
+      <Modal open={showModal} onClose={() => { setShowModal(false); gapConfirmadoRef.current = false; setGapAviso(null); }} size="md">
         {() => (<>
         <ModalHeader
           title={selectedAppointment ? 'Editar Consulta' : 'Nova Consulta'}
@@ -1265,10 +1292,34 @@ export function Appointments({ isActive = true }: { isActive?: boolean }) {
                     {error}
                   </div>
                 )}
+
+                {gapAviso && (
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg space-y-2">
+                    <div className="flex items-start gap-2 text-amber-800 text-xs font-medium">
+                      <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                      <span>{gapAviso}</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        className="flex-1 h-8 text-xs"
+                        onClick={() => setGapAviso(null)}
+                      >
+                        Escolher outro horário
+                      </Button>
+                      <Button
+                        className="flex-1 h-8 text-xs bg-amber-600 hover:bg-amber-700 text-white"
+                        onClick={() => { gapConfirmadoRef.current = true; setGapAviso(null); handleSubmit(); }}
+                      >
+                        Encaixar mesmo assim
+                      </Button>
+                    </div>
+                  </div>
+                )}
         </ModalBody>
 
         <ModalFooter>
-          <Button variant="outline" className="flex-1" onClick={() => setShowModal(false)}>Cancelar</Button>
+          <Button variant="outline" className="flex-1" onClick={() => { setShowModal(false); gapConfirmadoRef.current = false; setGapAviso(null); }}>Cancelar</Button>
           <Button className="flex-1" onClick={handleSubmit} disabled={!formData.patient_id || !formData.doctor_id || !formData.date || !formData.time || submitting}>
             {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : selectedAppointment ? <Edit2 className="w-4 h-4 mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
             {selectedAppointment ? 'Atualizar' : 'Agendar'}

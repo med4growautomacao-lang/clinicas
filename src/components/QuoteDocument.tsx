@@ -234,18 +234,19 @@ export function QuoteDocument({ docRef, clinicName, clinicLegalName, clinicPhone
               <td style={{ padding: "16px 14px", fontWeight: 800, fontSize: 15, lineHeight: 1.3, color: "#0f172a", verticalAlign: "top", width: "30%" }}>{it.name}</td>
               <td style={{ padding: "16px 14px", fontSize: 13, color: "#1e293b", lineHeight: 1.5, verticalAlign: "top" }}>
                 {it.description ? <div style={{ marginBottom: 5, fontWeight: 700, color: "#0f172a" }}>{it.description}</div> : null}
-                {/* Especificações (Malha, Fio...) e medidas (Comprimento, Altura) saem no MESMO
-                    formato: uma por linha, rótulo e valor, em negrito. Antes as specs vinham como
-                    lista numerada, o que numerava atributo de produto sem motivo e destoava das
-                    medidas logo abaixo. */}
-                {it.specs.length > 0 ? (
+                {/* MEDIDA PRIMEIRO (Comprimento, Altura), depois as especificações (Malha, Fio...).
+                    É a ordem em que o cliente confere: primeiro o tamanho que ele pediu, depois o
+                    detalhe técnico do produto. As duas saem no mesmo formato, uma por linha, rótulo
+                    e valor, em negrito. As specs eram lista numerada e numeravam atributo de
+                    produto sem motivo. */}
+                {it.dims && it.dims.length > 0 ? (
                   <div style={{ fontWeight: 700, color: "#0f172a" }}>
-                    {it.specs.map((s, j) => <div key={j} style={{ marginBottom: 1 }}>{s}</div>)}
+                    {it.dims.map((d, k) => <div key={k} style={{ marginBottom: 1 }}>{d}</div>)}
                   </div>
                 ) : null}
-                {it.dims && it.dims.length > 0 ? (
-                  <div style={{ marginTop: it.specs.length > 0 ? 4 : (it.description ? 6 : 0), fontWeight: 700, color: "#0f172a" }}>
-                    {it.dims.map((d, k) => <div key={k} style={{ marginBottom: 1 }}>{d}</div>)}
+                {it.specs.length > 0 ? (
+                  <div style={{ marginTop: it.dims && it.dims.length > 0 ? 4 : (it.description ? 6 : 0), fontWeight: 700, color: "#0f172a" }}>
+                    {it.specs.map((s, j) => <div key={j} style={{ marginBottom: 1 }}>{s}</div>)}
                   </div>
                 ) : null}
                 {it.qtyLine ? <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>{it.qtyLine}</div> : null}

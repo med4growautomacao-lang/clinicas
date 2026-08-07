@@ -42,7 +42,11 @@ export const formatValidade = (v: string | null | undefined) => {
   return s && /^\d+$/.test(s) ? `${s} dias` : s;
 };
 
-export type QuoteDocItem = { name: string; description: string | null; specs: string[]; qtyLine: string; value: number };
+// `dims` são as medidas do item, uma por linha ("Comprimento: 100 metros", "Altura: 1,8 metros").
+// Vêm SEPARADAS e não num texto só porque o cliente confere medida item a item, e "100m × 1,8m"
+// numa linha só obriga ele a adivinhar qual número é qual. `qtyLine` ficou para o resto
+// (desconto, frete), que é informação secundária e sai em cinza.
+export type QuoteDocItem = { name: string; description: string | null; specs: string[]; dims?: string[]; qtyLine: string; value: number };
 
 // Bloco de seção com traço curto na cor da clínica + título + conteúdo (pagamento, termos, obs...).
 export function SectionBlock({ accent, title, children, align = "left" }: { accent: string; title: string; children: React.ReactNode; align?: "left" | "center" | "right" }) {
@@ -229,11 +233,20 @@ export function QuoteDocument({ docRef, clinicName, clinicLegalName, clinicPhone
             <tr key={i} style={{ background: i % 2 === 0 ? rowLight : rowAlt }}>
               <td style={{ padding: "16px 14px", fontWeight: 800, fontSize: 15, lineHeight: 1.3, color: "#0f172a", verticalAlign: "top", width: "30%" }}>{it.name}</td>
               <td style={{ padding: "16px 14px", fontSize: 13, color: "#1e293b", lineHeight: 1.5, verticalAlign: "top" }}>
-                {it.description ? <div style={{ marginBottom: 4, fontWeight: 600 }}>{it.description}</div> : null}
+                {it.description ? <div style={{ marginBottom: 5, fontWeight: 700, color: "#0f172a" }}>{it.description}</div> : null}
+                {/* Especificações (Malha, Fio...) e medidas (Comprimento, Altura) saem no MESMO
+                    formato: uma por linha, rótulo e valor, em negrito. Antes as specs vinham como
+                    lista numerada, o que numerava atributo de produto sem motivo e destoava das
+                    medidas logo abaixo. */}
                 {it.specs.length > 0 ? (
-                  <ol style={{ margin: 0, paddingLeft: 18 }}>
-                    {it.specs.map((s, j) => <li key={j} style={{ marginBottom: 2 }}>{s}</li>)}
-                  </ol>
+                  <div style={{ fontWeight: 700, color: "#0f172a" }}>
+                    {it.specs.map((s, j) => <div key={j} style={{ marginBottom: 1 }}>{s}</div>)}
+                  </div>
+                ) : null}
+                {it.dims && it.dims.length > 0 ? (
+                  <div style={{ marginTop: it.specs.length > 0 ? 4 : (it.description ? 6 : 0), fontWeight: 700, color: "#0f172a" }}>
+                    {it.dims.map((d, k) => <div key={k} style={{ marginBottom: 1 }}>{d}</div>)}
+                  </div>
                 ) : null}
                 {it.qtyLine ? <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>{it.qtyLine}</div> : null}
               </td>

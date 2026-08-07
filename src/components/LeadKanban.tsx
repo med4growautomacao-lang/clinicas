@@ -1582,14 +1582,21 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
       const q = Number(String(l.qty).replace(',', '.'));
       const isArea = isAreaItem(p);
       // Sem o valor por m²/unitário no documento: só a quantidade/dimensões (o total vai na coluna VALOR).
-      const dims = isArea ? `${formatQty(q)}m × ${formatQty(lineAltura(l))}m` : `${formatQty(q)} ${p.unit}`;
-      const meta = [dims];
+      // Medida sai NOMEADA e uma por linha ("Comprimento: 100 metros"), não "100m × 1,8m": é o que o
+      // cliente confere antes de aprovar, e num par de números soltos ele tem que adivinhar a ordem.
+      const metro = (v: number) => `${formatQty(v)} ${v === 1 ? 'metro' : 'metros'}`;
+      const alturaLinha = lineAltura(l);
+      const dims = isArea
+        ? [`Comprimento: ${metro(q)}`, `Altura: ${metro(alturaLinha)}`]
+        : [`Quantidade: ${formatQty(q)} ${p.unit}`];
+      const meta: string[] = [];
       if (linePct(l) > 0) meta.push(`desc ${formatQty(linePct(l))}%`);
       if (lineFeeValue(l) > 0) meta.push(`frete ${formatBRL(lineFeeValue(l))}`);
       return {
         name: p.name,
         description: p.description || null,
         specs: includeSpecs ? (p.attributes ?? []).map(a => `${a.label}${a.value ? `: ${a.value}` : ''}`) : [],
+        dims,
         qtyLine: meta.join(' · '),
         value: lineTotal(l),
       };

@@ -1379,8 +1379,8 @@ function QuoteTemplateModal({ initial, clinic, onClose, onSave }: {
     const saudPreview = saudacao.split('{nome}').join(sampleName).replace(/\s+([!?.,])/g, '$1');
     const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     const sampleDocItems = [
-        { name: 'Produto exemplo', description: null, specs: includeSpecs ? ['malha: 18', 'fio: 0,30 mm'] : [], qtyLine: '10 metro × R$ 27,00', value: 270 },
-        { name: 'Instalação', description: null, specs: [], qtyLine: '1 serviço × R$ 150,00', value: 150 },
+        { name: 'Produto exemplo', description: null, specs: includeSpecs ? ['Malha: 18', 'Fio: 0,30 mm'] : [], dims: ['Comprimento: 10 metros', 'Altura: 1,5 metros'], qtyLine: '', value: 270 },
+        { name: 'Instalação', description: null, specs: [], dims: ['Quantidade: 1 serviço'], qtyLine: '', value: 150 },
     ];
     const sampleTotal = 420;
     const sampleDocProps = {

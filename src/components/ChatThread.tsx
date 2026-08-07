@@ -355,11 +355,26 @@ export function ChatThread({
   const scrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
-  // Scroll robusto: observa mutações no DOM e força o fundo (cobre slide-in do modal)
+  // ⚠️ `colado` é o conserto de 07/08/2026. O scroll automático continua existindo (ele resolve o
+  // slide-in do modal, que abria a conversa no topo), mas agora ele SÓ age enquanto o usuário está
+  // no rodapé. Antes o MutationObserver forçava o fim a cada mudança no DOM, sem perguntar onde a
+  // pessoa estava: quem subia para ler mensagem antiga era devolvido ao rodapé na hora. E quem
+  // provocava a mudança era a própria rolagem, porque a mídia só é assinada quando entra na tela.
+  const coladoRef = useRef(true);
+
+  const perto = (el: HTMLDivElement) => el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (el) coladoRef.current = perto(el);
+  };
+
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const scrollDown = () => { el.scrollTop = el.scrollHeight; };
+    // Abrir conversa (ou trocar de lead) sempre começa no fim, que é a mensagem mais recente.
+    coladoRef.current = true;
+    const scrollDown = () => { if (coladoRef.current) el.scrollTop = el.scrollHeight; };
     scrollDown();
     const observer = new MutationObserver(scrollDown);
     observer.observe(el, { childList: true, subtree: true, characterData: true });
@@ -384,6 +399,7 @@ export function ChatThread({
   return (
     <div
       ref={scrollRef}
+      onScroll={handleScroll}
       className={cn(
         "flex-1 overflow-y-auto overflow-x-hidden p-6 bg-slate-50/50 custom-scrollbar relative block",
         className

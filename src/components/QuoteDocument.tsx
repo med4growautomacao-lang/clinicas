@@ -58,7 +58,7 @@ export function SectionBlock({ accent, title, children, align = "left" }: { acce
 
 // Esqueleto A4: formas decorativas, cabeçalho (nome + contatos c/ ícones), título e A/C; o
 // corpo (tabela, total, seções) vem como children.
-export function DocumentChrome({ docRef, clinicName, clinicLegalName, clinicPhone, clinicEmail, clinicInstagram, clinicAddress, clinicCnpj, logoDataUrl, clientName, clientPhone, title, number, dateStr, accent, hideClient, children }: {
+export function DocumentChrome({ docRef, clinicName, clinicLegalName, clinicPhone, clinicEmail, clinicInstagram, clinicAddress, clinicCnpj, logoDataUrl, clientName, clientPhone, title, number, dateStr, accent, hideClient, titleSize = 32, children }: {
   docRef?: React.RefObject<HTMLDivElement | null>;
   clinicName: string;
   clinicLegalName?: string | null;
@@ -75,6 +75,9 @@ export function DocumentChrome({ docRef, clinicName, clinicLegalName, clinicPhon
   dateStr: string;
   accent: string;
   hideClient?: boolean;
+  /** Tamanho do título do documento. Default 32 (ordem de produção). O orçamento pede menor:
+   *  ali o protagonista é o produto, não o cabeçalho. */
+  titleSize?: number;
   children: React.ReactNode;
 }) {
   const P_PHONE = <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />;
@@ -90,6 +93,9 @@ export function DocumentChrome({ docRef, clinicName, clinicLegalName, clinicPhon
       </span>
     </div>
   );
+  // Modo enxuto: quem pede título menor está dizendo que o cabeçalho não é o assunto do
+  // documento. Data e A/C acompanham. Default (32) = comportamento antigo, intocado.
+  const compact = titleSize <= 26;
   const igText = clinicInstagram ? (clinicInstagram.trim().startsWith("@") || clinicInstagram.includes("/") ? clinicInstagram.trim() : `@${clinicInstagram.trim()}`) : "";
   const addrText = clinicAddress ? clinicAddress.replace(/\s*\n+\s*/g, ", ").trim() : "";
   const companyName = (clinicLegalName || clinicName || "").trim();
@@ -130,18 +136,28 @@ export function DocumentChrome({ docRef, clinicName, clinicLegalName, clinicPhon
           </div>
         </div>
 
-        {/* título */}
-        <div style={{ marginTop: 36 }}>
-          <div style={{ fontSize: 32, fontWeight: 800, color: accent }}>{title} #{number}</div>
-          <div style={{ fontSize: 12, fontWeight: 700, marginTop: 3 }}>Data: {dateStr}</div>
+        {/* título. No modo enxuto (orçamento) o NÚMERO sai menor que a palavra e em tom mais leve:
+            ele é referência de arquivo, não o que o cliente precisa ler primeiro. A Ordem de
+            Produção continua exatamente como estava, porque lá o cabeçalho é a identificação da
+            ordem no chão de fábrica. */}
+        <div style={{ marginTop: compact ? 30 : 36 }}>
+          {compact ? (
+            <div style={{ fontSize: titleSize, fontWeight: 800, color: accent, lineHeight: 1.15 }}>
+              {title}
+              <span style={{ fontSize: Math.round(titleSize * 0.6), fontWeight: 700, opacity: 0.6, marginLeft: 8 }}>#{number}</span>
+            </div>
+          ) : (
+            <div style={{ fontSize: titleSize, fontWeight: 800, color: accent }}>{title} #{number}</div>
+          )}
+          <div style={{ fontSize: compact ? 11 : 12, fontWeight: compact ? 600 : 700, marginTop: 3, color: compact ? "#475569" : undefined }}>Data: {dateStr}</div>
         </div>
 
         {/* A/C */}
         {!hideClient ? (
-          <div style={{ marginTop: 26 }}>
-            <div style={{ fontSize: 13, fontWeight: 800, color: accent }}>A/C:</div>
-            <div style={{ fontSize: 13, marginTop: 5, lineHeight: 1.6 }}>
-              <div style={{ fontWeight: 600 }}>{clientName || "—"}</div>
+          <div style={{ marginTop: compact ? 20 : 26 }}>
+            <div style={{ fontSize: compact ? 11 : 13, fontWeight: 800, color: accent, letterSpacing: compact ? 0.4 : undefined }}>A/C:</div>
+            <div style={{ fontSize: compact ? 12 : 13, marginTop: compact ? 4 : 5, lineHeight: compact ? 1.5 : 1.6, color: compact ? "#334155" : undefined }}>
+              <div style={{ fontWeight: compact ? 700 : 600, color: compact ? "#0f172a" : undefined }}>{clientName || "—"}</div>
               {clientPhone ? <div>{clientPhone}</div> : null}
             </div>
           </div>
@@ -193,29 +209,35 @@ export function QuoteDocument({ docRef, clinicName, clinicLegalName, clinicPhone
       number={number}
       dateStr={dateStr}
       accent={accent}
+      titleSize={22}
     >
-      <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 30 }}>
+      {/* A tabela é o assunto do documento: produto, descrição e valor são os maiores tipos da
+          página. O cabeçalho (título, número, data, A/C) foi reduzido de propósito para não
+          disputar atenção com o que o cliente precisa conferir. */}
+      <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 26 }}>
         <thead>
           <tr style={{ borderBottom: `3px solid ${accent}` }}>
-            <th style={{ textAlign: "left", color: accent, fontSize: 13, fontWeight: 800, padding: "0 14px 9px" }}>SERVIÇO</th>
-            <th style={{ textAlign: "center", color: accent, fontSize: 13, fontWeight: 800, padding: "0 14px 9px" }}>DESCRIÇÃO</th>
+            <th style={{ textAlign: "left", color: accent, fontSize: 13, fontWeight: 800, padding: "0 14px 9px" }}>PRODUTO</th>
+            {/* alinhado à ESQUERDA, igual ao conteúdo da coluna: título centralizado sobre texto
+                corrido fazia o cabeçalho parecer de outra coluna. */}
+            <th style={{ textAlign: "left", color: accent, fontSize: 13, fontWeight: 800, padding: "0 14px 9px" }}>DESCRIÇÃO</th>
             <th style={{ textAlign: "right", color: accent, fontSize: 13, fontWeight: 800, padding: "0 14px 9px" }}>VALOR</th>
           </tr>
         </thead>
         <tbody>
           {items.map((it, i) => (
             <tr key={i} style={{ background: i % 2 === 0 ? rowLight : rowAlt }}>
-              <td style={{ padding: "14px", fontWeight: 700, fontSize: 12.5, verticalAlign: "top", width: "26%" }}>{it.name}</td>
-              <td style={{ padding: "14px", fontSize: 12, color: "#334155", verticalAlign: "top" }}>
-                {it.description ? <div style={{ marginBottom: 4 }}>{it.description}</div> : null}
+              <td style={{ padding: "16px 14px", fontWeight: 800, fontSize: 15, lineHeight: 1.3, color: "#0f172a", verticalAlign: "top", width: "30%" }}>{it.name}</td>
+              <td style={{ padding: "16px 14px", fontSize: 13, color: "#1e293b", lineHeight: 1.5, verticalAlign: "top" }}>
+                {it.description ? <div style={{ marginBottom: 4, fontWeight: 600 }}>{it.description}</div> : null}
                 {it.specs.length > 0 ? (
                   <ol style={{ margin: 0, paddingLeft: 18 }}>
                     {it.specs.map((s, j) => <li key={j} style={{ marginBottom: 2 }}>{s}</li>)}
                   </ol>
                 ) : null}
-                {it.qtyLine ? <div style={{ marginTop: 6, fontSize: 11.5, color: "#64748b" }}>{it.qtyLine}</div> : null}
+                {it.qtyLine ? <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>{it.qtyLine}</div> : null}
               </td>
-              <td style={{ padding: "14px", textAlign: "right", fontWeight: 700, fontSize: 12.5, verticalAlign: "top", width: "20%", whiteSpace: "nowrap" }}>{formatBRL(it.value)}</td>
+              <td style={{ padding: "16px 14px", textAlign: "right", fontWeight: 800, fontSize: 15, color: "#0f172a", verticalAlign: "top", width: "20%", whiteSpace: "nowrap" }}>{formatBRL(it.value)}</td>
             </tr>
           ))}
         </tbody>

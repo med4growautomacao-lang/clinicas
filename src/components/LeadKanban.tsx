@@ -1464,10 +1464,13 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   }, [quoteImages, products, productUuids]);
 
   const selectedImages = quoteImages.filter(i => imgChecked[i.id] ?? i.send_by_default);
-  const allImagesOn = quoteImages.length > 0 && quoteImages.every(i => imgChecked[i.id] ?? i.send_by_default);
+  // O atalho olha se há ALGUMA marcada, não se estão TODAS: as fotos já chegam marcadas pela
+  // configuração do produto, então o caminho comum é limpar tudo e escolher poucas. Pelo "todas"
+  // isso custava dois cliques (marcar todas, depois desmarcar todas).
+  const anyImagesOn = selectedImages.length > 0;
   const toggleAllImages = () => {
     imgTouchedRef.current = true;
-    const next = !allImagesOn;
+    const next = !anyImagesOn;
     const map: Record<string, boolean> = {};
     quoteImages.forEach(i => { map[i.id] = next; });
     setImgChecked(map);
@@ -2170,7 +2173,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Fotos que vão junto</label>
                     <button type="button" onClick={toggleAllImages} className="text-[11px] font-bold text-blue-600 hover:text-blue-700">
-                      {allImagesOn ? 'Desmarcar todas' : 'Marcar todas'}
+                      {anyImagesOn ? 'Desmarcar todas' : 'Marcar todas'}
                     </button>
                   </div>
                   <div className="flex flex-wrap gap-2">

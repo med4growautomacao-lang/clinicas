@@ -1376,7 +1376,15 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   // Simulação de disponibilidade/prazo (read-only) para sugerir a data de entrega.
   const [eta, setEta] = useState<any>(null);
   const [etaLoading, setEtaLoading] = useState(false);
+  // Especificações (malha, fio…) não têm mais chave AQUI: seguem o padrão da clínica
+  // (Configurações › Modelo do Orçamento). Só um orçamento salvo antes disso pode trazer valor próprio.
   const [includeSpecs, setIncludeSpecs] = useState<boolean>(iq?.includeSpecs ?? (tpl.include_specs ?? true));
+  // Texto de acompanhamento = a legenda que vai junto do documento no WhatsApp, LOGO ABAIXO do
+  // orçamento. Nasce de Saudação + Rodapé e é editável aqui (editar não altera aqueles campos).
+  // Só existe em imagem/PDF: no formato texto a mensagem inteira já é editável mais abaixo.
+  const [includeAccomp, setIncludeAccomp] = useState<boolean>(iq?.includeAccomp ?? true);
+  const [accompText, setAccompText] = useState<string>(iq?.accompText ?? '');
+  const [accompTouched, setAccompTouched] = useState<boolean>(!!iq?.accompText);
   const [messageText, setMessageText] = useState('');
   const [msgTouched, setMsgTouched] = useState(false);
   const [sending, setSending] = useState(false);
@@ -1575,6 +1583,11 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   // Enquanto o usuário não editar manualmente, o preview acompanha os campos.
   useEffect(() => { if (!msgTouched) setMessageText(generatedMessage); }, [generatedMessage, msgTouched]);
 
+  // Legenda do documento (imagem/PDF): mesma composição de sempre (saudação + rodapé), agora
+  // visível e editável. Enquanto ninguém editar, acompanha os campos.
+  const generatedAccomp = [saudacao.trim(), rodape.trim()].filter(Boolean).join('\n\n');
+  useEffect(() => { if (!accompTouched) setAccompText(generatedAccomp); }, [generatedAccomp, accompTouched]);
+
   // Itens do documento formal (imagem/PDF).
   const docItems = lines
     .filter(l => itemById[l.productId] && lineBase(l) > 0)
@@ -1645,7 +1658,9 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   } as Record<string, string>)[code] || 'Não foi possível enviar. Tente novamente.');
 
   // Snapshot estruturado p/ reabrir o orçamento depois (persistido em tickets.quote_data).
-  const buildQuoteSnapshot = () => ({ lines, manualValue, notes, saudacao, rodape, validade, pagamento, dataEntrega, includeSpecs, format, imageIds: selectedImages.map(i => i.id) });
+  // `accompText` só entra quando foi editado à mão: assim, ao reabrir, o texto volta a acompanhar
+  // saudação/rodapé em vez de congelar a versão antiga.
+  const buildQuoteSnapshot = () => ({ lines, manualValue, notes, saudacao, rodape, validade, pagamento, dataEntrega, includeSpecs, includeAccomp, ...(accompTouched ? { accompText } : {}), format, imageIds: selectedImages.map(i => i.id) });
 
   // Linhas de produto com quantidade > 0 (base p/ simular disponibilidade/prazo).
   const telaLines = useMemo(
@@ -1762,7 +1777,8 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
         blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(new Error('blob')), 'image/jpeg', 0.92));
         ext = 'jpg'; contentType = 'image/jpeg';
       }
-      const caption = [saudacao.trim(), rodape.trim()].filter(Boolean).join('\n\n');
+      // Sem texto de acompanhamento o documento vai sozinho: a send-quote aceita mídia sem legenda.
+      const caption = includeAccomp ? accompText.trim() : '';
       const filename = `Orcamento-${quoteMeta.number}.${ext}`;
       const mediaType: 'document' | 'image' = isPdf ? 'document' : 'image';
       // Blob pronto → o resto (subir no Storage, esperar propagar, enviar) vai pro background.
@@ -2118,10 +2134,36 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
                   className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                 />
               </div>
-              <label className="flex items-center gap-2 text-sm font-medium text-slate-600 cursor-pointer select-none">
-                <input type="checkbox" checked={includeSpecs} onChange={e => setIncludeSpecs(e.target.checked)} className="w-4 h-4 accent-blue-600" />
-                Incluir especificações dos produtos (malha, fio…)
-              </label>
+              {/* Em "texto" a mensagem inteira já é editável logo abaixo: um segundo campo com o
+                  mesmo conteúdo só confundiria. */}
+              {format !== 'texto' && (
+                <div className="space-y-1.5">
+                  <label className="flex items-center gap-2 text-sm font-medium text-slate-600 cursor-pointer select-none">
+                    <input type="checkbox" checked={includeAccomp} onChange={e => setIncludeAccomp(e.target.checked)} className="w-4 h-4 accent-blue-600" />
+                    Incluir texto de acompanhamento
+                  </label>
+                  {includeAccomp && (<>
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Texto</label>
+                      {accompTouched && (
+                        <button type="button" onClick={() => setAccompTouched(false)} className="text-[11px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1">
+                          <RotateCcw className="w-3 h-3" /> Regenerar
+                        </button>
+                      )}
+                    </div>
+                    <textarea
+                      value={accompText}
+                      onChange={e => { setAccompText(e.target.value); setAccompTouched(true); }}
+                      rows={4}
+                      placeholder="Texto que vai junto do orçamento…"
+                      className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-[13px] leading-relaxed font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none"
+                    />
+                    <p className="text-[10px] text-slate-400">
+                      Vai logo abaixo {format === 'pdf' ? 'do PDF' : 'da imagem'} no WhatsApp. Sai da Saudação + Rodapé; editar aqui não altera esses campos.
+                    </p>
+                  </>)}
+                </div>
+              )}
 
               {quoteImages.length > 0 && (
                 <div className="space-y-1.5">

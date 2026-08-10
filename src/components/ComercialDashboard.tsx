@@ -278,7 +278,8 @@ const CHART_METRICS: { label: string; value: ChartMetric; icon: any; type?: stri
   { label: "Novos Leads", value: "leads", icon: Users },
   { label: "Agendamentos", value: "appointments", icon: CalendarCheck },
   { label: "Consultas Realizadas", value: "realizadas", icon: CheckCircle2 },
-  { label: "Vendas (ganhos)", value: "ganhos", icon: Trophy },
+  // Conta CARDS ganhos (cliente que comprou), não vendas lançadas. O `value` é chave de dado.
+  { label: "Clientes que compraram", value: "ganhos", icon: Trophy },
   { label: "Conversão Lead → Agend.", value: "convAgend", icon: Percent, type: "percent" },
   { label: "Conversão Lead → Consulta", value: "convConsulta", icon: Percent, type: "percent" },
   { label: "Custo por Agendamento", value: "custoAgend", icon: Target, type: "currency" },

@@ -110,14 +110,16 @@ const METRICS_CONFIG = [
   { id: 'leads', label: 'Leads', color: '#0d9488', type: 'number', icon: Users, bgColor: 'bg-teal-50 text-teal-600' },
   { id: 'cpl', label: 'CPL', color: '#f59e0b', type: 'currency', icon: Target, bgColor: 'bg-amber-50 text-amber-600' },
   { id: 'appointments', label: 'Agendamentos', color: '#8b5cf6', type: 'number', icon: Calendar, bgColor: 'bg-violet-50 text-violet-600' },
-  { id: 'convs', label: 'Conversões', color: '#10b981', type: 'number', icon: CheckCircle2, bgColor: 'bg-emerald-50 text-emerald-600' },
+  // Vem de marketing_kpis.wins, que conta CARDS ganhos. "Conversões" virou palavra ambígua depois
+  // que o mesmo card passou a aceitar várias vendas lançadas. O id é chave de dado e não muda.
+  { id: 'convs', label: 'Clientes que compraram', color: '#10b981', type: 'number', icon: CheckCircle2, bgColor: 'bg-emerald-50 text-emerald-600' },
   { id: 'cpapt', label: 'Custo p/ Agend.', color: '#ec4899', type: 'currency', icon: Target, bgColor: 'bg-pink-50 text-pink-600' },
   { id: 'cpa', label: 'CAC', color: '#f43f5e', type: 'currency', icon: Activity, bgColor: 'bg-rose-50 text-rose-600' },
-  { id: 'conv_value', label: 'Valor Conv.', color: '#059669', type: 'currency', icon: DollarSign, bgColor: 'bg-green-50 text-green-600' },
+  { id: 'conv_value', label: 'Vendas lançadas', color: '#059669', type: 'currency', icon: DollarSign, bgColor: 'bg-green-50 text-green-600' },
   { id: 'roas', label: 'ROAS', color: '#ea580c', type: 'ratio', icon: TrendingUp, bgColor: 'bg-orange-50 text-orange-600' },
   { id: 'lead_to_apt_rate', label: 'Lead p/ Agend.', color: '#0ea5e9', type: 'percent', icon: Activity, bgColor: 'bg-sky-50 text-sky-600' },
-  { id: 'lead_to_conv_rate', label: 'Lead p/ Conv.', color: '#06b6d4', type: 'percent', icon: Activity, bgColor: 'bg-cyan-50 text-cyan-600' },
-  { id: 'apt_to_conv_rate', label: 'Agend. p/ Conv.', color: '#8b5cf6', type: 'percent', icon: Activity, bgColor: 'bg-purple-50 text-purple-600' },
+  { id: 'lead_to_conv_rate', label: 'Lead p/ Cliente', color: '#06b6d4', type: 'percent', icon: Activity, bgColor: 'bg-cyan-50 text-cyan-600' },
+  { id: 'apt_to_conv_rate', label: 'Agend. p/ Cliente', color: '#8b5cf6', type: 'percent', icon: Activity, bgColor: 'bg-purple-50 text-purple-600' },
 ];
 
 // --- Persistência da config de exibição (cards de métricas + Funil de Vendas) POR CLÍNICA ---
@@ -167,7 +169,7 @@ const CAMPAIGN_COLUMNS = [
   { id: 'investimento', label: 'Investimento' },
   { id: 'instagram',    label: '% Instagram' },
   { id: 'leads',        label: 'Leads' },
-  { id: 'ganho',        label: 'Ganho' },
+  { id: 'ganho',        label: 'Clientes' },
   { id: 'perdido',      label: 'Perdido' },
   { id: 'cpl',          label: 'CPL' },
   { id: 'cac',          label: 'CAC' },
@@ -2264,7 +2266,7 @@ function CampaignInvestmentSection({ rows, platformSplit, conversionCatalog, cam
               {vis('investimento') && <th className="text-right px-2 py-2">Investimento</th>}
               {vis('instagram') && <th className="text-right px-2 py-2">% Instagram</th>}
               {vis('leads') && <th className="text-right px-2 py-2">Leads</th>}
-              {vis('ganho') && <th className="text-right px-2 py-2">Ganho</th>}
+              {vis('ganho') && <th className="text-right px-2 py-2">Clientes</th>}
               {vis('perdido') && <th className="text-right px-2 py-2">Perdido</th>}
               {vis('cpl') && <th className="text-right px-2 py-2">CPL</th>}
               {vis('cac') && <th className="text-right px-2 py-2">CAC</th>}

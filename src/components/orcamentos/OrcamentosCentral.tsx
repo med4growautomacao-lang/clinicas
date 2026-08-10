@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence } from "framer-motion";
-import { FileText, Send, CheckCircle2, XCircle, Search, ExternalLink, Printer, Download, Receipt } from "lucide-react";
+import { FileText, Send, CheckCircle2, XCircle, Search, ExternalLink, Printer, Download, Receipt, Truck } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useOrcamentos, useSettings, useProducts, useProtocols, Orcamento, OrcamentoStatus } from "../../hooks/useSupabase";
 import { supabase } from "../../lib/supabase";
@@ -51,12 +51,13 @@ function mapApproveError(code?: string) {
 
 export function OrcamentosCentral() {
   const showToast = useToast();
-  const { data: orcamentos, loading, approve, updateStatus } = useOrcamentos();
+  const { data: orcamentos, loading, approve, updateStatus, markDelivered } = useOrcamentos();
   const [filter, setFilter] = useState<OrcamentoStatus | "todos">("todos");
   const [search, setSearch] = useState("");
   const [approveTarget, setApproveTarget] = useState<Orcamento | null>(null);
   const [rejectTarget, setRejectTarget] = useState<Orcamento | null>(null);
   const [printTarget, setPrintTarget] = useState<Orcamento | null>(null);
+  const [deliverTarget, setDeliverTarget] = useState<Orcamento | null>(null);
 
   const abertos = orcamentos.filter(o => o.status === "rascunho" || o.status === "enviado");
   const aprovados = orcamentos.filter(o => o.status === "aprovado");
@@ -128,6 +129,7 @@ export function OrcamentosCentral() {
               onApprove={() => setApproveTarget(o)}
               onReject={() => setRejectTarget(o)}
               onPrint={() => setPrintTarget(o)}
+              onDeliver={() => setDeliverTarget(o)}
               onMarkSent={async () => {
                 const res = await updateStatus(o.id, "enviado");
                 showToast(res.success ? "Marcado como enviado." : "Erro ao atualizar.", res.success ? "success" : "error");
@@ -145,12 +147,10 @@ export function OrcamentosCentral() {
             onConfirm={async opts => {
               const res = await approve(approveTarget.id, opts);
               if (res.success) {
-                showToast(
-                  (res as any).already_sold
-                    ? `Orçamento #${approveTarget.number} aprovado (venda já existente, sem duplicar receita).`
-                    : `Orçamento #${approveTarget.number} aprovado — venda registrada.`,
-                  "success"
-                );
+                // Desde 10/08 todo orçamento aprovado lança a SUA venda, com a sua data, mesmo que
+                // o cliente já tenha comprado antes no mesmo card. O aviso antigo de "venda já
+                // existente, sem duplicar receita" descrevia o atalho que sumia com o dinheiro.
+                showToast(`Orçamento #${approveTarget.number} aprovado — venda registrada.`, "success");
               } else {
                 showToast(mapApproveError(res.error_code), "error");
               }
@@ -172,16 +172,33 @@ export function OrcamentosCentral() {
         {printTarget && (
           <GerarReciboModal orcamento={printTarget} onClose={() => setPrintTarget(null)} />
         )}
+        {deliverTarget && (
+          <EntregaModal
+            orcamento={deliverTarget}
+            onClose={() => setDeliverTarget(null)}
+            onConfirm={async data => {
+              const res = await markDelivered(deliverTarget.id, data);
+              showToast(
+                res.success
+                  ? `Entrega do #${deliverTarget.number} registrada, estoque baixado.`
+                  : "Não foi possível registrar a entrega.",
+                res.success ? "success" : "error"
+              );
+              setDeliverTarget(null);
+            }}
+          />
+        )}
       </AnimatePresence>
     </div>
   );
 }
 
-function OrcamentoRow({ o, onApprove, onReject, onPrint, onMarkSent }: {
+function OrcamentoRow({ o, onApprove, onReject, onPrint, onDeliver, onMarkSent }: {
   o: Orcamento;
   onApprove: () => void;
   onReject: () => void;
   onPrint: () => void;
+  onDeliver: () => void;
   onMarkSent: () => void;
 }) {
   const clientName = o.client_name || o.lead?.name || "—";
@@ -214,6 +231,15 @@ function OrcamentoRow({ o, onApprove, onReject, onPrint, onMarkSent }: {
         )}
         {o.status === "aprovado" && (
           <Button size="sm" variant="outline" onClick={onPrint}><Receipt className="w-3.5 h-3.5 mr-1" /> Recibo</Button>
+        )}
+        {/* A entrega é o que baixa o estoque, por PEDIDO. Antes a baixa só acontecia quando o card
+            era arquivado, e no modelo novo o card fica aberto de propósito para receber a próxima
+            venda: a mercadoria saía da fábrica e o estoque nunca baixava. */}
+        {o.status === "aprovado" && !o.entregue_at && (
+          <Button size="sm" variant="outline" onClick={onDeliver}><Truck className="w-3.5 h-3.5 mr-1" /> Marcar entregue</Button>
+        )}
+        {o.entregue_at && (
+          <span className="text-[10px] font-bold text-emerald-600 px-1.5">Entregue em {fmtDate(o.entregue_at)}</span>
         )}
         <button title="Ver no Kanban" onClick={goToLeadKanban} className="p-2 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded-lg"><ExternalLink className="w-4 h-4" /></button>
       </div>
@@ -423,6 +449,38 @@ function RejectModal({ orcamento, onClose, onConfirm }: {
     >
       <Field label="Motivo (opcional)">
         <textarea className={cn(inputCls, "min-h-[72px] resize-y")} value={reason} onChange={e => setReason(e.target.value)} placeholder="Ex.: preço alto, escolheu concorrente…" autoFocus />
+      </Field>
+    </Modal>
+  );
+}
+
+// Registrar a entrega é o que dá baixa no estoque, e a baixa é gravada na DATA da entrega, não na
+// do clique: a fábrica costuma registrar no dia seguinte, e o razão de estoque tem que refletir o
+// dia em que a mercadoria saiu. Por isso a data é editável em vez de assumir "hoje" em silêncio.
+function EntregaModal({ orcamento, onClose, onConfirm }: {
+  orcamento: Orcamento;
+  onClose: () => void;
+  onConfirm: (data: string) => Promise<void>;
+}) {
+  const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+  const [data, setData] = useState(hoje);
+  const [saving, setSaving] = useState(false);
+  return (
+    <Modal
+      title={`Registrar entrega do pedido #${orcamento.number}`}
+      onClose={onClose}
+      footer={<>
+        <Button variant="outline" size="sm" onClick={onClose}>Cancelar</Button>
+        <Button size="sm" onClick={async () => { setSaving(true); await onConfirm(data); setSaving(false); }} disabled={saving || !data}>
+          {saving ? "Registrando…" : "Confirmar entrega"}
+        </Button>
+      </>}
+    >
+      <p className="text-xs text-slate-500 mb-3">
+        A baixa do estoque é lançada nesta data, só para os itens deste pedido.
+      </p>
+      <Field label="Data da entrega">
+        <input type="date" className={inputCls} value={data} onChange={e => setData(e.target.value)} autoFocus />
       </Field>
     </Modal>
   );

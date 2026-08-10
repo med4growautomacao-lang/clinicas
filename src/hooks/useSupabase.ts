@@ -2977,14 +2977,33 @@ export function useConversions() {
     return !error;
   };
 
-  // Agrupa por lead_id para uso no Kanban
+  // Dois recortes, os dois legítimos: por lead_id é a ficha da PESSOA (Conversas), por ticket_id
+  // é o ATENDIMENTO (Kanban). O mesmo contato pode ter vários cards, cada um com suas vendas, e
+  // o valor do card tem que ser o do card.
   const byLead = data.reduce<Record<string, Conversion[]>>((acc, c) => {
     if (!acc[c.lead_id]) acc[c.lead_id] = [];
     acc[c.lead_id].push(c);
     return acc;
   }, {});
 
-  return { data, loading, byLead, create, remove, update, refetch: fetch };
+  const byTicket = data.reduce<Record<string, Conversion[]>>((acc, c) => {
+    if (!c.ticket_id) return acc;
+    if (!acc[c.ticket_id]) acc[c.ticket_id] = [];
+    acc[c.ticket_id].push(c);
+    return acc;
+  }, {});
+
+  // Vendas antigas sem ticket_id (15 linhas em 10/08/2026, a última criada em 01/07): saem
+  // separadas para o quadro pendurá-las em UM card só. Sem isso, elas sumiriam da tela no dia
+  // em que o valor passar a sair do ticket.
+  const semTicketByLead = data.reduce<Record<string, Conversion[]>>((acc, c) => {
+    if (c.ticket_id) return acc;
+    if (!acc[c.lead_id]) acc[c.lead_id] = [];
+    acc[c.lead_id].push(c);
+    return acc;
+  }, {});
+
+  return { data, loading, byLead, byTicket, semTicketByLead, create, remove, update, refetch: fetch };
 }
 
 // ==========================================
@@ -3940,7 +3959,9 @@ export interface Orcamento {
   total: number;
   validade: string | null;
   vencimento: string | null;
-  data_entrega_prevista: string | null;  // data prometida de entrega do pedido (fábrica)
+  data_entrega_prevista: string | null;  // data PROMETIDA de entrega (preenchida na aprovação)
+  entregue_at: string | null;            // entrega REAL: é o que dispara a baixa de estoque
+  entregue_por: string | null;
   approved_line_keys?: string[] | null;  // itens aprovados ('L1','L2'…); null = todos do snapshot
   pagamento: string | null;
   notes: string | null;
@@ -4093,7 +4114,20 @@ export function useOrcamentos() {
     return res as RpcResult;
   };
 
-  return { data, loading, refetch: fetch, save, approve, updateStatus, setPrintInfo };
+  // Entrega real do pedido = baixa de estoque POR ORÇAMENTO (não mais por card). A data vem da
+  // tela porque a entrega às vezes é registrada no dia seguinte, e o razão de estoque tem que
+  // gravar o dia da entrega, não o do clique.
+  const markDelivered = async (id: string, data: string): Promise<RpcResult> => {
+    const { data: res, error } = await supabase.rpc('marcar_orcamento_entregue', {
+      p_orcamento_id: id,
+      p_data: data,
+    });
+    await fetch(true);
+    if (error) return { success: false, error_code: error.message };
+    return res as RpcResult;
+  };
+
+  return { data, loading, refetch: fetch, save, approve, updateStatus, setPrintInfo, markDelivered };
 }
 
 // Equipamento/maquina (Manutencao).

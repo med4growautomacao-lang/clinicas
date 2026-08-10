@@ -68,17 +68,21 @@ function formatMetric(v: number | null, fmt: Fmt): string {
 const METRICS: MetricDef[] = [
   { id: "leads",       label: "Leads Captados",                Icon: Users,          color: "text-violet-600 bg-violet-50",   format: "number",   get: r => r.leads },
   { id: "patients",    label: "Pacientes Captados",             Icon: CalendarCheck, color: "text-sky-600 bg-sky-50",         format: "number",   get: r => r.patientsCaptured },
-  { id: "sales",       label: "Novas Consultas Realizadas",     Icon: Trophy,        color: "text-emerald-600 bg-emerald-50", valueColor: "text-emerald-600", format: "number", get: r => r.sales },
+  // ⚠️ `r.sales` vem de get_org_clinics_metrics e conta CARDS com desfecho ganho, sem nenhuma
+  // relação com a agenda. O rótulo antigo ("Consultas Realizadas") já mentia antes disto.
+  { id: "sales",       label: "Clientes que compraram",         Icon: Trophy,        color: "text-emerald-600 bg-emerald-50", valueColor: "text-emerald-600", format: "number", get: r => r.sales },
   { id: "lost",        label: "Perdidos",                       Icon: XCircle,       color: "text-rose-600 bg-rose-50",       valueColor: "text-rose-500",    format: "number", get: r => r.lost },
   { id: "schedulingRate", label: "Taxa de Agendamento",         Icon: Percent,       color: "text-emerald-600 bg-emerald-50", format: "percent",  get: r => r.leads > 0 ? (r.patientsCaptured / r.leads) * 100 : null },
-  { id: "conversion",  label: "Taxa de Conversão",              Icon: Percent,       color: "text-indigo-600 bg-indigo-50",   format: "percent",  get: r => r.leads > 0 ? (r.sales / r.leads) * 100 : null },
+  { id: "conversion",  label: "Conversão Lead → Cliente",       Icon: Percent,       color: "text-indigo-600 bg-indigo-50",   format: "percent",  get: r => r.leads > 0 ? (r.sales / r.leads) * 100 : null },
   { id: "revenue",     label: "Faturamento",                    Icon: Wallet,        color: "text-teal-600 bg-teal-50",       format: "currency", get: r => r.revenue },
   { id: "investment",  label: "Investimento Geral (Google/Meta)", Icon: Megaphone,   color: "text-amber-600 bg-amber-50",     format: "currency", get: r => r.investment },
   { id: "roas",        label: "ROAS",                           Icon: TrendingUp,    color: "text-fuchsia-600 bg-fuchsia-50", format: "ratio",    get: r => r.investment > 0 ? r.revenue / r.investment : null },
   { id: "ticketMedio", label: "Ticket Médio",                   Icon: DollarSign,    color: "text-blue-600 bg-blue-50",       format: "currency", get: r => r.ticketMedio },
   { id: "cpl",         label: "Custo por Lead",                 Icon: Coins,         color: "text-cyan-600 bg-cyan-50",       format: "currency", get: r => r.leads > 0 ? r.investment / r.leads : null },
   { id: "custoAgendamento", label: "Custo por Agendamento",     Icon: CalendarClock, color: "text-lime-600 bg-lime-50",       format: "currency", get: r => r.patientsCaptured > 0 ? r.investment / r.patientsCaptured : null },
-  { id: "cpa",         label: "Custo por Conversão",            Icon: Target,        color: "text-orange-600 bg-orange-50",   format: "currency", get: r => r.sales > 0 ? r.investment / r.sales : null },
+  // Investimento dividido por CLIENTES que compraram: é a definição de CAC, e por isso continua
+  // certo mesmo com o mesmo cliente fechando vários negócios.
+  { id: "cpa",         label: "Custo por Cliente (CAC)",        Icon: Target,        color: "text-orange-600 bg-orange-50",   format: "currency", get: r => r.sales > 0 ? r.investment / r.sales : null },
 ];
 
 const DEFAULT_VISIBLE = METRICS.map(m => m.id);
@@ -314,7 +318,7 @@ export function OrgMetrics() {
   const motivation = useMemo(() => {
     const { leads, patients, sales } = todayTotals;
     if (sales > 0) {
-      return { emoji: "🔥", text: `Dia forte! ${leads} leads, ${patients} pacientes agendados e ${sales} consultas fechadas até agora. Continue assim! 🚀` };
+      return { emoji: "🔥", text: `Dia forte! ${leads} leads, ${patients} pacientes agendados e ${sales} clientes fechados até agora. Continue assim! 🚀` };
     }
     if (leads > 0) {
       return { emoji: "💪", text: `Bom ritmo hoje! ${leads} leads captados até agora.` };
@@ -435,7 +439,7 @@ export function OrgMetrics() {
               <div className="w-7 h-7 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center shrink-0">
                 <Trophy className="w-3.5 h-3.5 text-emerald-600" />
               </div>
-              <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">Consultas Realizadas</span>
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">Clientes que compraram</span>
             </div>
             <span className="text-3xl font-black text-emerald-600">{todayLoading ? "…" : todayTotals.sales.toLocaleString("pt-BR")}</span>
           </div>

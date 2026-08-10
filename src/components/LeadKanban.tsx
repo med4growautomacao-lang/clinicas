@@ -704,6 +704,20 @@ const formatBRL = (val: number | string) => {
   }).format(n || 0);
 };
 
+// Vendas do card sempre da mais recente para a mais antiga: é a ordem que a tela mostra e a
+// que faz `vendas[0]` significar "última venda". A consulta já vem DESC, mas create() empilha
+// no topo e update() pode mudar a data, então a ordem se garante aqui.
+const porVendaRecente = (a: Conversion, b: Conversion) =>
+  (b.converted_at || '').localeCompare(a.converted_at || '');
+
+const somaVendas = (vendas: Conversion[]) => vendas.reduce((s, c) => s + Number(c.value || 0), 0);
+
+// Dia do negócio (America/Sao_Paulo) de um timestamptz, no formato do filtro (AAAA-MM-DD).
+// converted_at é timestamptz: cortar a string do ISO dá o dia em UTC, e venda das 21h30 daqui
+// cairia no dia seguinte do filtro. 'en-CA' é o atalho que devolve AAAA-MM-DD.
+const diaSP = (iso: string | null) =>
+  iso ? new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }) : '';
+
 function CurrencyInput({ value, onChange, className, placeholder, autoFocus }: {
   value: string | number;
   onChange: (val: string) => void;
@@ -2916,7 +2930,9 @@ export function LeadKanban() {
   const { data: leads, create, createWithTicket, update, markNotLead } = useLeads({ pageSize: 150 });
   const { data: notLeads, restore: restoreNotLead } = useNotLeads();
   const { tickets, loading: ticketsLoading, refetch: refetchTickets, moveTicket, reopenTicket, moveTicketKeepOutcome, openTicket, closeTicket, finalizeTicket, removeTicket } = useTickets();
-  const { byLead: conversionsByLead, create: createConversion, update: updateConversion } = useConversions();
+  // Por TICKET: a venda pertence ao atendimento, não ao contato. `semTicketByLead` carrega o
+  // legado sem vínculo, que o quadro pendura num card só (ver `vendasPorTicket`).
+  const { byTicket: conversionsByTicket, semTicketByLead: conversionsSemTicket, create: createConversion } = useConversions();
   const { aiConfig, updateAI } = useSettings();
   const { data: orcamentos, save: saveOrcamento } = useOrcamentos();
   const [ganhoLead, setGanhoLead] = useState<{ id: string; name: string; phone: string | null; patientId: string | null; prevStageId: string | null; ticketId: string; ctwaClid?: string | null; email?: string | null } | null>(null);
@@ -3180,14 +3196,10 @@ export function LeadKanban() {
       if (selectedLead) {
         const ok = await update(selectedLead.id, payload);
         if (!ok) return;
-        // Se o lead já tem conversão (venda registrada), o card mostra o valor DA CONVERSÃO
-        // (tem prioridade sobre estimated_value). Então editar o valor precisa atualizar a
-        // conversão também — senão a edição não aparece no card.
-        const convs = conversionsByLead[selectedLead.id];
-        const lastConv = convs?.[convs.length - 1];
-        if (lastConv && payload.estimated_value !== Number(lastConv.value)) {
-          await updateConversion(lastConv.id, { value: payload.estimated_value });
-        }
+        // Editar o valor do orçamento NÃO mexe em venda já lançada (decisão do dono, 10/08).
+        // Este bloco reescrevia a venda mais ANTIGA do contato (podia ser de outro card e de
+        // outro mês), alterando faturamento já contabilizado sem ninguém pedir. Venda se corrige
+        // na própria venda (Ganho / Cancelar venda), nunca por este campo.
         if (targetStageId && selectedLead._ticketId) {
           const openT = tickets.find(t => t.id === selectedLead._ticketId);
           if (openT && targetStageId !== openT.stage_id) {
@@ -3232,17 +3244,17 @@ export function LeadKanban() {
   const openEditModal = (ticket: Ticket) => {
     const lead = ticket.lead!;
     setSelectedLead({ ...lead, _ticketId: ticket.id });
-    const conversions = conversionsByLead[lead.id];
-    const lastConversion = conversions?.[conversions.length - 1];
-    const realValue = lastConversion ? lastConversion.value : (lead.estimated_value || '');
-
+    // O campo se chama "Valor do orçamento" e passa a carregar SÓ o orçamento do contato.
+    // Venda lançada não entra aqui: o card pode ter várias, cada uma com sua data, e um campo
+    // único não representa isso (antes ele trazia a venda mais antiga do CONTATO, que podia
+    // nem ser deste card, e regravava essa venda ao salvar).
     setFormData({
       name: lead.name,
       phone: lead.phone || '',
       source: lead.source || '',
       capture_channel: lead.capture_channel || 'whatsapp',
       stage_id: ticket.stage_id || '',
-      estimated_value: realValue.toString(),
+      estimated_value: (lead.estimated_value ?? '').toString(),
       loss_reason: lead.loss_reason || '',
       avatar_url: lead.avatar_url || ''
     });
@@ -3309,6 +3321,43 @@ export function LeadKanban() {
     return () => { cancelled = true; clearTimeout(handle); };
   }, [searchQuery, activeClinicId]);
 
+  // Vendas POR CARD. A venda pertence ao ticket (conversions.ticket_id): o mesmo contato pode
+  // ter vários atendimentos e cada um com as suas vendas. Somar por lead misturava card fechado
+  // com card aberto (o contato com 4 vendas em 4 tickets mostrava a mesma nos quatro).
+  // Cada venda entra em UM card só, então o total da coluna não conta duas vezes.
+  const vendasPorTicket = React.useMemo(() => {
+    const porTicket: Record<string, Conversion[]> = {};
+    for (const [ticketId, vendas] of Object.entries(conversionsByTicket)) {
+      porTicket[ticketId] = [...vendas].sort(porVendaRecente);
+    }
+    // Legado sem ticket_id (nenhuma criada desde 01/07/2026): pendura no card ganho mais antigo
+    // do contato e, na falta dele, no card mais antigo. É arbitrário de propósito, o dado não diz
+    // a qual atendimento pertence, mas escolhe UM só, senão o valor reapareceria em cada card da
+    // pessoa, que é exatamente o defeito que estamos tirando.
+    const noQuadro = [...tickets, ...searchTickets];
+    const maisAntigo = (a: Ticket, b: Ticket) => a.opened_at.localeCompare(b.opened_at);
+    for (const [leadId, orfas] of Object.entries(conversionsSemTicket)) {
+      const doContato = noQuadro.filter(t => t.lead_id === leadId).sort(maisAntigo);
+      const dono = doContato.find(t => t.outcome === 'ganho') ?? doContato[0];
+      if (!dono) continue;
+      porTicket[dono.id] = [...(porTicket[dono.id] || []), ...orfas].sort(porVendaRecente);
+    }
+    return porTicket;
+  }, [conversionsByTicket, conversionsSemTicket, tickets, searchTickets]);
+
+  // O valor do card respeita o filtro "Ganho" ativo: sem filtro, soma tudo; com período, soma só
+  // o que foi ganho dentro dele. Mesma régua que decide se o card aparece, para o número da tela
+  // e a lista de cards nunca contarem coisas diferentes.
+  const vendasNoFiltro = React.useCallback((vendas: Conversion[]) => {
+    if (!convDateFrom && !convDateTo) return vendas;
+    return vendas.filter(c => {
+      const d = diaSP(c.converted_at);
+      if (convDateFrom && d < convDateFrom) return false;
+      if (convDateTo && d > convDateTo) return false;
+      return true;
+    });
+  }, [convDateFrom, convDateTo]);
+
   // Predicado de facetas (origem + canal + datas + UTM, podendo ignorar uma dimensão UTM).
   // Reaproveitado na filtragem do board e na CONTAGEM dos valores de UTM, p/ que os números
   // reflitam os filtros ativos (período, origem, canal e combinação de UTMs).
@@ -3329,14 +3378,9 @@ export function LeadKanban() {
       if (entryDateTo && opened > entryDateTo) return false;
     }
     if (convDateFrom || convDateTo) {
-      const convs = conversionsByLead[lead.id] || [];
-      const inRange = convs.some((c: any) => {
-        const d = (c.converted_at || '').slice(0, 10);
-        if (convDateFrom && d < convDateFrom) return false;
-        if (convDateTo && d > convDateTo) return false;
-        return true;
-      });
-      if (!inRange) return false;
+      // Por TICKET, não por contato: com o filtro "Ganho" o quadro mostra o card que teve venda
+      // no período, não todos os cards de quem já comprou alguma vez.
+      if (vendasNoFiltro(vendasPorTicket[ticket.id] || []).length === 0) return false;
     }
     for (const d of Object.keys(utmFilters)) {
       if (d === skipUtmDim) continue;
@@ -3344,7 +3388,7 @@ export function LeadKanban() {
       if (vals.length && !vals.includes(leadUtmKey(lead, d))) return false;
     }
     return true;
-  }, [sourceFilter, channelFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo, conversionsByLead, utmFilters]);
+  }, [sourceFilter, channelFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo, vendasPorTicket, vendasNoFiltro, utmFilters]);
 
   // Valores da dimensão UTM ativa + contagem, refletindo os filtros ativos (período/origem/
   // canal/combinação). Faceta: ignora a própria dimensão em edição p/ mostrar o universo.
@@ -3942,11 +3986,10 @@ export function LeadKanban() {
                 return av < bv ? 1 : av > bv ? -1 : 0;
               });
             const stageTotal = stageTickets.reduce((sum, t) => {
-              const conversions = t.lead ? conversionsByLead[t.lead.id] : undefined;
-              const lastConversion = conversions?.[conversions.length - 1];
-              const realValue = lastConversion ? Number(lastConversion.value || 0) : 0;
-              const valueToAdd = realValue > 0 ? realValue : Number(t.lead?.estimated_value || 0);
-              return sum + valueToAdd;
+              // Todas as vendas DESTE card (uma por orçamento aprovado), já no recorte do filtro.
+              const vendido = somaVendas(vendasNoFiltro(vendasPorTicket[t.id] || []));
+              // Card sem venda no recorte continua valendo o orçamento do contato, como antes.
+              return sum + (vendido > 0 ? vendido : Number(t.lead?.estimated_value || 0));
             }, 0);
             const visibleCount = (columnPages[stage.id] || 1) * COLUMN_PAGE_SIZE;
             const visibleTickets = stageTickets.slice(0, visibleCount);
@@ -3999,6 +4042,10 @@ export function LeadKanban() {
                     const isSyncStage = stage.slug === 'sincronizacao' && !isClosed;
                     const semMotivo = isPerdido && !lead.loss_reason && !ticket.loss_reason && !isClosed;
                     const lastContact = lead.last_activity_at ?? lead.created_at;
+                    // Vendas DESTE card, da mais recente para a mais antiga e já no recorte do
+                    // filtro "Ganho". O card aceita várias, uma por orçamento aprovado.
+                    const vendas = vendasNoFiltro(vendasPorTicket[ticket.id] || []);
+                    const totalVendido = somaVendas(vendas);
                     const frozen = isClosed || !!lead.converted_patient_id || isPerdido;
                     // Arrastável pelo DESFECHO, não pela etapa nem por converted_patient_id.
                     //  - Card RESOLVIDO (ganho/perdido) sempre arrasta, em qualquer coluna e mesmo
@@ -4327,20 +4374,41 @@ export function LeadKanban() {
                         )}
 
 
+                        {/* Vendas deste card: uma por orçamento aprovado, cada uma com sua data.
+                            Só aparece quando há venda lançada, e some junto com o recorte do filtro. */}
+                        {vendas.length > 0 && (
+                          <div className="mt-2 rounded border border-emerald-100 bg-emerald-50/60 px-2 py-1 space-y-0.5">
+                            {vendas.slice(0, 3).map((v, i) => (
+                              <div key={v.id} className="flex items-center justify-between text-[9px] font-bold text-emerald-700">
+                                <span className="text-emerald-600/80">{vendas.length - i}ª · {format(parseISO(v.converted_at), 'dd/MM/yy')}</span>
+                                <span>{formatBRL(v.value)}</span>
+                              </div>
+                            ))}
+                            {vendas.length > 3 && (
+                              <div className="text-[9px] font-bold text-emerald-600/80">+{vendas.length - 3} anterior{vendas.length - 3 > 1 ? 'es' : ''}</div>
+                            )}
+                          </div>
+                        )}
+
                         {/* Footer: valor | tempo + chat */}
                         {(() => {
-                          const conversions = conversionsByLead[lead.id];
-                          const lastConversion = conversions?.[conversions.length - 1];
-                          const realValue = lastConversion ? Number(lastConversion.value || 0) : 0;
-                          const displayValue = realValue > 0 ? realValue : Number(lead.estimated_value || 0);
-                          const isReal = realValue > 0;
+                          // Valor do card = soma das vendas DESTE atendimento (vindas do ticket,
+                          // não do contato). Sem venda, continua valendo o orçamento estimado.
+                          const displayValue = totalVendido > 0 ? totalVendido : Number(lead.estimated_value || 0);
+                          const isReal = totalVendido > 0;
+                          const ultimaVenda = vendas[0];
                           return (
                             <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-100 gap-2">
-                              <div className={cn(
-                                "text-[9px] font-bold px-1.5 py-0.5 rounded border shrink-0",
-                                isReal ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-teal-50 text-teal-700 border-teal-100"
-                              )}>
-                                {formatBRL(displayValue)}
+                              <div
+                                title={isReal
+                                  ? `${vendas.length} venda${vendas.length > 1 ? 's' : ''} neste card: ${vendas.map(v => `${format(parseISO(v.converted_at), 'dd/MM')} ${formatBRL(v.value)}`).join(' + ')}`
+                                  : 'Valor do orçamento, nenhuma venda lançada neste card'}
+                                className={cn(
+                                  "text-[9px] font-bold px-1.5 py-0.5 rounded border shrink-0",
+                                  isReal ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-teal-50 text-teal-700 border-teal-100"
+                                )}
+                              >
+                                {formatBRL(displayValue)}{vendas.length > 1 ? ` (${vendas.length}x)` : ''}
                               </div>
                               <span className={cn(
                                 "text-[9px] font-medium truncate text-right flex-1",
@@ -4350,8 +4418,11 @@ export function LeadKanban() {
                               )}>
                                 {(() => {
                                   if (!ticket.outcome) return formatDistanceToNow(parseISO(lastContact), { addSuffix: true, locale: ptBR });
-                                  // Data de ganho = data da venda (conversão) quando houver; senão, quando o desfecho foi marcado.
-                                  const d = (ticket.outcome === 'ganho' ? lastConversion?.converted_at : null) ?? ticket.outcome_at;
+                                  // Data de ganho = data da venda MAIS RECENTE do card (vendas[0], a lista
+                                  // é ordenada do mais novo para o mais antigo); sem venda, quando o desfecho
+                                  // foi marcado. Antes mostrava a venda mais antiga do contato, que podia ser
+                                  // de outro card e de meses atrás.
+                                  const d = (ticket.outcome === 'ganho' ? ultimaVenda?.converted_at : null) ?? ticket.outcome_at;
                                   const label = ticket.outcome === 'ganho' ? 'Ganho' : 'Perdido';
                                   return d ? `${label} ${format(parseISO(d), 'dd/MM/yy')}` : label;
                                 })()}
@@ -4481,6 +4552,19 @@ export function LeadKanban() {
                       onChange={val => setFormData(p => ({ ...p, estimated_value: val }))}
                       className="bg-slate-50 focus:ring-teal-200 border-slate-200"
                     />
+                    {/* Venda lançada é só leitura aqui: o card pode ter várias e este campo é o
+                        orçamento, não o faturamento. Sem esta linha, quem edita não entende por
+                        que o valor do card continua diferente do que ele digitou. */}
+                    {(() => {
+                      const vendasCard = vendasPorTicket[selectedLead?._ticketId ?? ''] || [];
+                      if (vendasCard.length === 0) return null;
+                      return (
+                        <p className="mt-1.5 text-[10px] font-bold text-emerald-700">
+                          {vendasCard.length} venda{vendasCard.length > 1 ? 's' : ''} lançada{vendasCard.length > 1 ? 's' : ''} neste card · {formatBRL(somaVendas(vendasCard))}
+                          <span className="block font-medium text-slate-400">Alterar este campo não muda venda já lançada.</span>
+                        </p>
+                      );
+                    })()}
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">URL da Foto</label>
@@ -4582,20 +4666,24 @@ export function LeadKanban() {
                   const delTicket = tickets.find(t => t.id === selectedLead._ticketId);
                   const outros = tickets.filter(t => t.lead_id === selectedLead.id && t.id !== selectedLead._ticketId).length;
                   const etapa = stages.find(s => s.id === delTicket?.stage_id)?.name;
+                  const vendasDoCard = vendasPorTicket[selectedLead._ticketId] || [];
                   return (
                     <>
                       <div className="mt-4 p-3 bg-slate-50 rounded-lg text-sm text-left border border-slate-100">
                         <p className="font-semibold text-slate-700">{selectedLead.name}</p>
                         {etapa && <p className="text-slate-500 text-xs">Etapa: {etapa}</p>}
-                        <p className="text-slate-500 text-xs">
-                          Valor do orçamento: {
-                            formatBRL(
-                              conversionsByLead[selectedLead.id]?.[conversionsByLead[selectedLead.id].length - 1]?.value ??
-                              selectedLead.estimated_value ??
-                              0
-                            )
-                          }
-                        </p>
+                        <p className="text-slate-500 text-xs">Valor do orçamento: {formatBRL(selectedLead.estimated_value ?? 0)}</p>
+                        {/* Excluir o card apaga a venda junto (trg_cascade_delete_ticket_ganho no
+                            banco leva conversions e financial_transactions). Dizer isso ANTES é a
+                            diferença entre uma exclusão consciente e receita sumindo sem aviso. */}
+                        {vendasDoCard.length > 0 && (
+                          <p className="text-xs font-bold text-rose-700 mt-1">
+                            {vendasDoCard.length} venda{vendasDoCard.length > 1 ? 's' : ''} lançada{vendasDoCard.length > 1 ? 's' : ''} · {formatBRL(somaVendas(vendasDoCard))}
+                            {delTicket?.outcome === 'ganho' && (
+                              <span className="block font-medium text-rose-500">Excluir o card apaga essas vendas e a receita lançada com elas.</span>
+                            )}
+                          </p>
+                        )}
                       </div>
                       <p className="mt-3 text-xs text-slate-400">
                         {outros > 0

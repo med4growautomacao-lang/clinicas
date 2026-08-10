@@ -138,12 +138,14 @@ export function Dashboard() {
   const [selectedMetric, setSelectedMetric] = useState<string>('vendas');
 
   const chartMetrics = [
-    { id: 'faturamento', label: 'VENDAS (R$)', type: 'currency', color: '#0d9488' },
+    { id: 'faturamento', label: 'VENDAS LANÇADAS (R$)', type: 'currency', color: '#0d9488' },
     { id: 'investimento', label: 'INVESTIMENTO', type: 'currency', color: '#f59e0b' },
     { id: 'roas', label: 'ROAS', type: 'number', color: '#8b5cf6' },
     { id: 'leads', label: 'LEADS', type: 'number', color: '#4f46e5' },
     { id: 'agendamentos', label: 'AGENDADOS', type: 'number', color: '#0ea5e9' },
-    { id: 'vendas', label: 'VENDAS', type: 'number', color: '#10b981' },
+    // ⚠️ O id NÃO muda: é a chave de stats.chartData vinda da RPC. Só o rótulo, porque a contagem
+    // é por CARD (cliente que comprou), não por venda lançada.
+    { id: 'vendas', label: 'CLIENTES', type: 'number', color: '#10b981' },
   ];
 
   const processedChartData = useMemo(() => {
@@ -178,8 +180,11 @@ export function Dashboard() {
     // Funil
     { title: "Leads", value: `${stats.totalLeads}`, trend: "Novos no período", icon: MessageSquare, color: "bg-indigo-50 text-indigo-600" },
     { title: "Agendados", value: `${stats.totalAppointments}`, trend: "Gerados (agenda ∪ funil)", icon: CalendarCheck, color: "bg-sky-50 text-sky-600" },
-    { title: "Vendas", value: `${stats.totalSales}`, trend: "Ganhos no período", icon: ShoppingCart, color: "bg-rose-50 text-rose-600" },
-    { title: "Conversão Lead → Venda", value: conversionRate > 0 ? `${conversionRate.toFixed(1).replace('.', ',')}%` : "—", trend: "Vendas ÷ Leads", icon: TrendingUp, color: "bg-cyan-50 text-cyan-600" },
+    // ⚠️ Este número conta CARDS ganhos, ou seja, clientes que compraram, não vendas lançadas: o
+    // mesmo cliente pode fechar vários negócios no mesmo card e continua contando 1. Faturamento
+    // (acima) sai de conversions e soma todas. Não "corrigir" a conta: o rótulo é que estava velho.
+    { title: "Clientes que compraram", value: `${stats.totalSales}`, trend: "1 por cliente, não por venda", icon: ShoppingCart, color: "bg-rose-50 text-rose-600" },
+    { title: "Conversão Lead → Cliente", value: conversionRate > 0 ? `${conversionRate.toFixed(1).replace('.', ',')}%` : "—", trend: "Clientes ÷ Leads", icon: TrendingUp, color: "bg-cyan-50 text-cyan-600" },
   ];
 
   return (

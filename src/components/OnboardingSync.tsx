@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { useToast } from './ui/toast';
+import { Button } from './ui/button';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Loader2, RefreshCw, UserX, MessageCircle, Stethoscope, HeartCrack,
@@ -678,6 +679,42 @@ export function OnboardingModal({ clinicId, onComplete }: { clinicId: string; on
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Porta de entrada SOB DEMANDA: ícone pequeno na barra do CRM (ao lado de "Não Leads"), não mais
+// pílula flutuante sobre o Comercial inteiro. O botão mora no Kanban e o modal mora no
+// OnboardingGate (irmão do AISecretary em App.tsx), então a ligação é por evento global, mesmo
+// padrão já usado em `app-navigate` e `settings-deeplink`.
+export const ONBOARDING_OPEN_EVENT = 'onboarding-organizar';
+
+// Só quem PODE organizar enxerga o botão. `fn_can_onboard` é a mesma trava que as RPCs usam
+// (super admin, admin da clínica, gestor/medico_gestor, dono/admin da organização), e é barata:
+// sem isto a recepção clicaria num botão que abre um modal vazio e recusa tudo com "forbidden".
+export function OrganizarContatosButton({ className }: { className?: string }) {
+  const { activeClinicId } = useAuth();
+  const [can, setCan] = useState(false);
+
+  useEffect(() => {
+    let vivo = true;
+    if (!activeClinicId) { setCan(false); return; }
+    supabase.rpc('fn_can_onboard', { p_clinic_id: activeClinicId })
+      .then(({ data }) => { if (vivo) setCan(data === true); });
+    return () => { vivo = false; };
+  }, [activeClinicId]);
+
+  if (!can) return null;
+
+  return (
+    <Button
+      variant="outline"
+      size="icon"
+      title="Organizar contatos: retoma a organização dos contatos de onde você parou"
+      className={cn('h-8 w-8 text-slate-400 hover:text-teal-600', className)}
+      onClick={() => window.dispatchEvent(new CustomEvent(ONBOARDING_OPEN_EVENT))}
+    >
+      <Sparkles className="w-3.5 h-3.5" />
+    </Button>
+  );
+}
+
 export function OnboardingGate() {
   const { activeClinicId } = useAuth();
   const [status, setStatus] = useState<{ should: boolean; pending: number; pendingTotal: number } | null>(null);
@@ -696,6 +733,15 @@ export function OnboardingGate() {
   }, [activeClinicId]);
 
   useEffect(() => { check(); }, [check]);
+
+  // O botão vive na barra do Kanban (OrganizarContatosButton) e pede a abertura por evento.
+  // Reabrir é estado LOCAL de propósito: limpar `onboarding_completed_at` faria o modal voltar a
+  // abrir sozinho para TODOS os usuários da clínica, não só para quem clicou.
+  useEffect(() => {
+    const abrir = () => setForceOpen(true);
+    window.addEventListener(ONBOARDING_OPEN_EVENT, abrir);
+    return () => window.removeEventListener(ONBOARDING_OPEN_EVENT, abrir);
+  }, []);
 
   if (!activeClinicId || !status) return null;
 
@@ -728,17 +774,12 @@ export function OnboardingGate() {
     );
   }
 
-  // Porta de entrada SOB DEMANDA, discreta e sem contador.
-  // Sem isto o cliente ficava sem caminho de volta: o modal só abre no 1º ciclo, a pílula acima só
-  // conta os importados (zero para quem já estava no funil) e o "Refazer" mora em Organizações e
+  // Sem pendência, o gate não desenha nada: a porta de entrada sob demanda é o ícone
+  // `OrganizarContatosButton` na barra do Kanban (ao lado de "Não Leads"). Ele fica SÓ no CRM
+  // porque este componente cobre o módulo Comercial inteiro, e uma pílula flutuante em cima de
+  // Conversas era ruído permanente para um trabalho que ninguém pediu.
+  // Sem essa porta o cliente fica sem caminho de volta: o modal só abre no 1º ciclo, a pílula acima
+  // só conta os importados (zero para quem já estava no funil) e o "Refazer" mora em Organizações e
   // APAGA a auditoria. Medido na Lorena: 123 contatos na fila e nenhuma forma de alcançá-los.
-  // Não mostra número de propósito: contar a fila inteira a cada abertura do Comercial seria caro
-  // em clínica grande (milhares de leads) e viraria alarme para um trabalho que ninguém pediu.
-  return (
-    <button onClick={() => setForceOpen(true)}
-      title="Retomar a organização dos contatos de onde você parou"
-      className="absolute bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/90 hover:bg-white border border-slate-200 text-slate-500 hover:text-teal-700 text-xs font-bold shadow-sm transition-all">
-      <Sparkles className="w-3.5 h-3.5" /> Organizar contatos
-    </button>
-  );
+  return null;
 }

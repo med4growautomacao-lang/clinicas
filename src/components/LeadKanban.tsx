@@ -53,6 +53,7 @@ import { DateRangePicker } from "./DateRangePicker";
 import { UtmLeadFilter, leadUtmKey, NO_UTM_KEY } from "./filters/UtmLeadFilter";
 import { QuoteDocument, formatValidade, useImageDataUrl } from "./QuoteDocument";
 import { ProductionOrderDocument } from "./ProductionOrderDocument";
+import { OrganizarContatosButton } from "./OnboardingSync";
 
 const SOURCE_LABELS: Record<string, string> = {
   'meta_ads': 'Meta Ads',
@@ -3847,6 +3848,9 @@ export function LeadKanban() {
         )}
 
         <div className="flex items-center gap-1.5 ml-auto">
+          {/* Porta de entrada da organização de contatos (onboarding). Só aparece para quem pode
+              organizar; o modal mora no OnboardingGate e é aberto por evento global. */}
+          <OrganizarContatosButton />
           <Button variant="outline" size="icon" title={`Não Leads${notLeads.length ? ` (${notLeads.length})` : ''}`} className="relative h-8 w-8 text-slate-400 hover:text-slate-700" onClick={() => setShowNotLeadPanel(true)}>
             <UserX className="w-3.5 h-3.5" />
             {notLeads.length > 0 && (

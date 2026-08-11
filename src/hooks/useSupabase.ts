@@ -2029,12 +2029,19 @@ export interface Clinic {
   quote_use_protocols?: boolean;
   quote_show_total?: boolean;  // mostra/envia o valor total da soma no orçamento (default true)
   quote_template?: {
+    // `saudacao` + `rodape` compõem a mensagem que vai ANTES do orçamento. A tela mostra os dois
+    // como UM campo só (o envio é uma mensagem só); `rodape` segue existindo para não quebrar o
+    // que já está gravado nas clínicas.
     saudacao?: string;
     rodape?: string;
     validade?: string;
     pagamento?: string;
     include_specs?: boolean;
     format?: 'texto' | 'imagem' | 'pdf';
+    // Mensagem enviada DEPOIS de tudo (orçamento + fotos). Padrão da clínica; dá para ligar,
+    // desligar e editar em cada envio.
+    mensagem_final?: string;
+    enviar_mensagem_final?: boolean;
   } | null;
   production_order_template?: {
     responsavel?: string;

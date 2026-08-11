@@ -1463,10 +1463,10 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
   const [includeAccomp, setIncludeAccomp] = useState<boolean>(iq?.includeAccomp ?? true);
   const [accompText, setAccompText] = useState<string>(iq?.accompText ?? '');
   const [accompTouched, setAccompTouched] = useState<boolean>(!!iq?.accompText);
-  // Mensagem de fechamento: sai DEPOIS de tudo (documento + fotos). Nasce desligada porque é a
-  // única mensagem que o cliente recebe sem ter pedido nada; quem quiser, liga e escreve.
-  const [includeClosing, setIncludeClosing] = useState<boolean>(iq?.includeClosing ?? false);
-  const [closingText, setClosingText] = useState<string>(iq?.closingText ?? '');
+  // Mensagem de fechamento: sai DEPOIS de tudo (documento + fotos). O padrão vem do Modelo do
+  // Orçamento (Configurações); o orçamento salvo, quando tem valor próprio, ganha dele.
+  const [includeClosing, setIncludeClosing] = useState<boolean>(iq?.includeClosing ?? (tpl.enviar_mensagem_final ?? false));
+  const [closingText, setClosingText] = useState<string>(iq?.closingText ?? String(tpl.mensagem_final ?? ''));
   const [messageText, setMessageText] = useState('');
   const [msgTouched, setMsgTouched] = useState(false);
   const [sending, setSending] = useState(false);
@@ -1501,6 +1501,9 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
     if (qt.pagamento != null) setPagamento(String(qt.pagamento));
     if (qt.include_specs != null) setIncludeSpecs(!!qt.include_specs);
     if (qt.format != null) setFormat(qt.format);
+    // Mensagem final: só semeia o que o usuário ainda não digitou nesta sessão.
+    if (qt.mensagem_final != null && !closingText) setClosingText(String(qt.mensagem_final));
+    if (qt.enviar_mensagem_final != null) setIncludeClosing(!!qt.enviar_mensagem_final);
   }, [clinic]);
 
   // Produtos (uuid, sem prefixo) presentes nas linhas do orçamento.

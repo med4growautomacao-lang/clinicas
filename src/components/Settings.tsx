@@ -1361,8 +1361,16 @@ function QuoteTemplateModal({ initial, clinic, onClose, onSave }: {
     onSave: (tpl: QuoteTemplate) => Promise<void>;
 }) {
     const t = initial || {};
-    const [saudacao, setSaudacao] = useState<string>(t.saudacao ?? 'Olá {nome}! 👋');
-    const [rodape, setRodape] = useState<string>(t.rodape ?? 'Qualquer dúvida, estou à disposição! 😊');
+    // Saudação e Rodapé eram DOIS campos para montar UMA mensagem. Agora a tela mostra um campo só
+    // (é uma mensagem só que chega ao cliente, antes do orçamento). O que já estava gravado nos
+    // dois aparece junto aqui, e ao salvar tudo vai para `saudacao` com `rodape` vazio.
+    const [saudacao, setSaudacao] = useState<string>(
+        [t.saudacao ?? 'Olá {nome}! 👋', t.rodape ?? ''].map(s => String(s).trim()).filter(Boolean).join('\n\n')
+    );
+    const rodape = '';
+    // Mensagem que sai DEPOIS de tudo (orçamento + fotos).
+    const [mensagemFinal, setMensagemFinal] = useState<string>(t.mensagem_final ?? '');
+    const [enviarFinal, setEnviarFinal] = useState<boolean>(t.enviar_mensagem_final ?? false);
     const [validade, setValidade] = useState<string>(t.validade ?? '');
     const [pagamento, setPagamento] = useState<string>(t.pagamento ?? '');
     const [includeSpecs, setIncludeSpecs] = useState<boolean>(t.include_specs ?? true);
@@ -1428,7 +1436,12 @@ function QuoteTemplateModal({ initial, clinic, onClose, onSave }: {
 
     const handleSave = async () => {
         setSaving(true);
-        await onSave({ saudacao, rodape, validade, pagamento, include_specs: includeSpecs, format });
+        // `rodape: ''` de propósito: o campo virou um só e o texto inteiro mora em `saudacao`.
+        // Não removo a chave para não quebrar leitura antiga que espere ela existir.
+        await onSave({
+            saudacao, rodape, validade, pagamento, include_specs: includeSpecs, format,
+            mensagem_final: mensagemFinal, enviar_mensagem_final: enviarFinal,
+        });
         setSaving(false);
     };
 
@@ -1446,13 +1459,19 @@ function QuoteTemplateModal({ initial, clinic, onClose, onSave }: {
                     {/* Campos */}
                     <div className="space-y-3">
                         <div>
-                            <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Saudação</label>
-                            <input type="text" value={saudacao} onChange={e => setSaudacao(e.target.value)} className={inputCls} placeholder="Olá {nome}! 👋" />
-                            <p className="text-[10px] text-slate-400 mt-1"><span className="font-mono">{'{nome}'}</span> é trocado pelo primeiro nome do lead.</p>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Mensagem antes do orçamento</label>
+                            <textarea value={saudacao} onChange={e => setSaudacao(e.target.value)} rows={4} className={cn(inputCls, "resize-none leading-relaxed")} placeholder={'Olá {nome}! 👋\n\nSegue o orçamento solicitado.'} />
+                            <p className="text-[10px] text-slate-400 mt-1">
+                                Chega como mensagem separada, antes do arquivo. <span className="font-mono">{'{nome}'}</span> é trocado pelo primeiro nome do lead.
+                            </p>
                         </div>
                         <div>
-                            <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Rodapé</label>
-                            <input type="text" value={rodape} onChange={e => setRodape(e.target.value)} className={inputCls} placeholder="Qualquer dúvida, estou à disposição!" />
+                            <label className="flex items-center gap-2 text-sm font-medium text-slate-600 cursor-pointer select-none">
+                                <input type="checkbox" checked={enviarFinal} onChange={e => setEnviarFinal(e.target.checked)} className="w-4 h-4 accent-teal-600" />
+                                Enviar mensagem no final por padrão
+                            </label>
+                            <textarea value={mensagemFinal} onChange={e => setMensagemFinal(e.target.value)} rows={3} className={cn(inputCls, "resize-none leading-relaxed mt-1.5")} placeholder="Ex.: Qualquer dúvida sobre a proposta, é só me chamar por aqui!" />
+                            <p className="text-[10px] text-slate-400 mt-1">Sai por último, depois do orçamento e das fotos.</p>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                             <div>

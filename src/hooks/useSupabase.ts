@@ -4006,7 +4006,11 @@ export function useProductionOrders() {
 // ==========================================
 // ORÇAMENTOS (Central de Orçamentos, WakeDesk/category='outro')
 // ==========================================
-export type OrcamentoStatus = 'rascunho' | 'enviado' | 'aprovado' | 'recusado' | 'expirado';
+// 'substituido' = você trocou a proposta por outra do mesmo negócio. Não é resposta do cliente
+// (isso é 'recusado'), então fica FORA da taxa de aprovação, e sai do "em aberto" porque ninguém
+// está esperando resposta dele. Marcação MANUAL: com vários negócios possíveis por cliente, o
+// sistema não sabe se o orçamento novo substitui o anterior ou é outro negócio.
+export type OrcamentoStatus = 'rascunho' | 'enviado' | 'aprovado' | 'recusado' | 'expirado' | 'substituido';
 
 export interface Orcamento {
   id: string;
@@ -4155,7 +4159,7 @@ export function useOrcamentos() {
     return res as RpcResult;
   };
 
-  const updateStatus = async (id: string, status: 'enviado' | 'recusado' | 'expirado', reason?: string | null): Promise<RpcResult> => {
+  const updateStatus = async (id: string, status: 'enviado' | 'recusado' | 'expirado' | 'substituido', reason?: string | null): Promise<RpcResult> => {
     const { data: res, error } = await supabase.rpc('update_orcamento_status', {
       p_orcamento_id: id,
       p_status: status,

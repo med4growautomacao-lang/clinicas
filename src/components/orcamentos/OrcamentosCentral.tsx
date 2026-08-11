@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence } from "framer-motion";
-import { FileText, Send, CheckCircle2, XCircle, Search, ExternalLink, Printer, Download, Receipt, Truck } from "lucide-react";
+import { FileText, Send, CheckCircle2, XCircle, Search, ExternalLink, Printer, Download, Receipt, Truck, Archive } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useOrcamentos, useSettings, useProducts, useProtocols, Orcamento, OrcamentoStatus } from "../../hooks/useSupabase";
 import { supabase } from "../../lib/supabase";
@@ -19,6 +19,7 @@ const STATUS_META: Record<OrcamentoStatus, { label: string; tone: "slate" | "amb
   aprovado: { label: "Aprovado", tone: "emerald" },
   recusado: { label: "Recusado", tone: "rose" },
   expirado: { label: "Expirado", tone: "amber" },
+  substituido: { label: "Substituído", tone: "slate" },
 };
 
 const FILTERS: { id: OrcamentoStatus | "todos"; label: string }[] = [
@@ -27,6 +28,7 @@ const FILTERS: { id: OrcamentoStatus | "todos"; label: string }[] = [
   { id: "enviado", label: "Enviado" },
   { id: "aprovado", label: "Aprovado" },
   { id: "recusado", label: "Recusado" },
+  { id: "substituido", label: "Substituído" },
 ];
 
 // A construção/edição do orçamento continua no Kanban comercial (OrcamentoModal já é um
@@ -72,6 +74,26 @@ export function OrcamentosCentral() {
     if (q) list = list.filter(o => (o.client_name || o.lead?.name || "").toLowerCase().includes(q) || String(o.number).includes(q));
     return list;
   }, [orcamentos, filter, search]);
+
+  // Agrupa por CLIENTE. Com o mesmo card aceitando vários orçamentos, a lista corrida por número
+  // deixou de ser legível: um cliente só chegou a ter 9 linhas soltas, e não dava para saber qual
+  // proposta estava de pé. A chave é o lead (a pessoa), com o nome digitado como reserva para os
+  // orçamentos antigos sem vínculo. A ordem dos grupos segue a ordem em que o cliente aparece na
+  // lista filtrada, então nada muda de lugar para quem tem um orçamento só.
+  const grupos = useMemo(() => {
+    const mapa = new Map<string, { key: string; cliente: string; itens: Orcamento[] }>();
+    for (const o of filtered) {
+      // Sem lead E sem nome, cada um fica sozinho: agrupar "sem nome" com "sem nome" juntaria
+      // clientes diferentes na mesma pilha, que é pior que não agrupar.
+      const nome = (o.client_name || "").trim().toLowerCase();
+      const key = o.lead_id || (nome ? `nome:${nome}` : `id:${o.id}`);
+      const g = mapa.get(key);
+      if (g) g.itens.push(o);
+      else mapa.set(key, { key, cliente: o.client_name || o.lead?.name || "Sem nome", itens: [o] });
+    }
+    // Dentro do cliente, do mais novo para o mais antigo: o número é sequencial por clínica.
+    return [...mapa.values()].map(g => ({ ...g, itens: [...g.itens].sort((a, b) => b.number - a.number) }));
+  }, [filtered]);
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -121,20 +143,41 @@ export function OrcamentosCentral() {
           action={<Button size="sm" variant="outline" onClick={goToLeadKanban}><ExternalLink className="w-4 h-4 mr-1.5" /> Ir para o Kanban</Button>}
         />
       ) : (
-        <div className="space-y-2.5">
-          {filtered.map(o => (
-            <OrcamentoRow
-              key={o.id}
-              o={o}
-              onApprove={() => setApproveTarget(o)}
-              onReject={() => setRejectTarget(o)}
-              onPrint={() => setPrintTarget(o)}
-              onDeliver={() => setDeliverTarget(o)}
-              onMarkSent={async () => {
-                const res = await updateStatus(o.id, "enviado");
-                showToast(res.success ? "Marcado como enviado." : "Erro ao atualizar.", res.success ? "success" : "error");
-              }}
-            />
+        <div className="space-y-4">
+          {grupos.map(g => (
+            <div key={g.key} className="space-y-2.5">
+              {/* Cabeçalho só quando o cliente tem mais de um: com um só ele seria ruído. Sem isto,
+                  9 orçamentos do mesmo cliente viram 9 linhas soltas e ninguém sabe qual vale. */}
+              {g.itens.length > 1 && (
+                <div className="flex items-baseline justify-between gap-3 px-1">
+                  <p className="text-xs font-black text-slate-500 uppercase tracking-wider truncate">{g.cliente}</p>
+                  <p className="text-[11px] font-bold text-slate-400 shrink-0">
+                    {g.itens.length} orçamentos · mais recente #{g.itens[0].number}
+                  </p>
+                </div>
+              )}
+              {g.itens.map(o => (
+                <OrcamentoRow
+                  key={o.id}
+                  o={o}
+                  onApprove={() => setApproveTarget(o)}
+                  onReject={() => setRejectTarget(o)}
+                  onPrint={() => setPrintTarget(o)}
+                  onDeliver={() => setDeliverTarget(o)}
+                  onSubstitute={async () => {
+                    const res = await updateStatus(o.id, "substituido");
+                    showToast(
+                      res.success ? `Orçamento #${o.number} marcado como substituído.` : "Erro ao atualizar.",
+                      res.success ? "success" : "error"
+                    );
+                  }}
+                  onMarkSent={async () => {
+                    const res = await updateStatus(o.id, "enviado");
+                    showToast(res.success ? "Marcado como enviado." : "Erro ao atualizar.", res.success ? "success" : "error");
+                  }}
+                />
+              ))}
+            </div>
           ))}
         </div>
       )}
@@ -193,12 +236,13 @@ export function OrcamentosCentral() {
   );
 }
 
-function OrcamentoRow({ o, onApprove, onReject, onPrint, onDeliver, onMarkSent }: {
+function OrcamentoRow({ o, onApprove, onReject, onPrint, onDeliver, onSubstitute, onMarkSent }: {
   o: Orcamento;
   onApprove: () => void;
   onReject: () => void;
   onPrint: () => void;
   onDeliver: () => void;
+  onSubstitute: () => void;
   onMarkSent: () => void;
 }) {
   const clientName = o.client_name || o.lead?.name || "—";
@@ -226,7 +270,11 @@ function OrcamentoRow({ o, onApprove, onReject, onPrint, onDeliver, onMarkSent }
         {pending && (
           <>
             <Button size="sm" onClick={onApprove}><CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Aprovar</Button>
-            <button title="Recusar" onClick={onReject} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg"><XCircle className="w-4 h-4" /></button>
+            <button title="Recusar (o cliente disse não)" onClick={onReject} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg"><XCircle className="w-4 h-4" /></button>
+            {/* Substituído ≠ recusado: aqui foi VOCÊ que trocou a proposta. Sai do "em aberto" e
+                fica fora da taxa de aprovação, porque não é resposta do cliente. É manual porque o
+                sistema não sabe se o orçamento novo troca este ou é outro negócio do mesmo cliente. */}
+            <button title="Marcar como substituído (você trocou a proposta por outra)" onClick={onSubstitute} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg"><Archive className="w-4 h-4" /></button>
           </>
         )}
         {o.status === "aprovado" && (

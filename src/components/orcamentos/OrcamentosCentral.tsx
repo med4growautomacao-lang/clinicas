@@ -148,55 +148,86 @@ export function OrcamentosCentral() {
       ) : (
         <div className="space-y-4">
           {grupos.map(g => {
-            // Pilha fechada mostra só o orçamento MAIS RECENTE, que é o que está em jogo; os
-            // anteriores são histórico e ficam atrás da setinha. Fechado por padrão: um cliente
-            // chegou a ter 9 propostas, e abrir todas de cara é o problema que estamos resolvendo.
+            // Cliente com vários orçamentos NÃO é mostrado como se fosse um orçamento: fechado,
+            // aparece só a linha do CLIENTE, com o que interessa para decidir se vale abrir
+            // (quantos, em que pé estão e quanto). Mostrar a proposta mais recente aqui fazia a
+            // linha parecer um orçamento comum e escondia que existiam outros oito.
             const empilhado = g.itens.length > 1;
             const aberto = !!expandidos[g.key];
-            const visiveis = !empilhado || aberto ? g.itens : g.itens.slice(0, 1);
+            const ultimo = g.itens[0];
+            const aprovados = g.itens.filter(o => o.status === "aprovado");
+            const emAberto = g.itens.filter(o => o.status === "rascunho" || o.status === "enviado");
+            // Valor em destaque: o que já virou venda, se houver; senão a proposta que está de pé.
+            const valorDestaque = aprovados.length > 0
+              ? aprovados.reduce((s, o) => s + Number(o.total || 0), 0)
+              : Number(ultimo.total || 0);
+            const rotuloValor = aprovados.length > 0 ? "Aprovado" : "Última proposta";
+            // Só os status que existem no grupo, na ordem em que importam.
+            const resumo = (["aprovado", "enviado", "rascunho", "recusado", "substituido", "expirado"] as OrcamentoStatus[])
+              .map(st => ({ st, n: g.itens.filter(o => o.status === st).length }))
+              .filter(x => x.n > 0);
             return (
             <div key={g.key} className="space-y-2.5">
               {empilhado && (
                 <button
                   type="button"
                   onClick={() => setExpandidos(p => ({ ...p, [g.key]: !p[g.key] }))}
-                  className="w-full flex items-center justify-between gap-3 px-1 py-0.5 rounded-lg hover:bg-slate-50 transition-colors text-left"
+                  className={cn(
+                    "w-full bg-white border rounded-xl p-4 shadow-sm flex items-center justify-between gap-4 flex-wrap text-left transition-colors",
+                    aberto ? "border-slate-300" : "border-slate-200 hover:border-slate-300"
+                  )}
                 >
-                  <span className="flex items-center gap-1.5 min-w-0">
+                  <div className="min-w-0 flex-1 flex items-center gap-2">
                     {aberto
-                      ? <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                      : <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />}
-                    <span className="text-xs font-black text-slate-500 uppercase tracking-wider truncate">{g.cliente}</span>
-                  </span>
-                  <span className="text-[11px] font-bold text-slate-400 shrink-0">
-                    {aberto
-                      ? `${g.itens.length} orçamentos · ${fmtBRL(g.itens.reduce((s, o) => s + Number(o.total || 0), 0))}`
-                      : `+${g.itens.length - 1} anterior${g.itens.length - 1 > 1 ? 'es' : ''}`}
-                  </span>
+                      ? <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
+                      : <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />}
+                    <div className="min-w-0">
+                      <p className="font-bold text-slate-800 text-sm truncate">{g.cliente}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {g.itens.length} orçamentos · último #{ultimo.number} em {fmtDate(ultimo.created_at)}
+                        {emAberto.length > 0 && ` · ${emAberto.length} aguardando resposta`}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {resumo.map(x => (
+                      <StatusBadge key={x.st} label={`${x.n} ${STATUS_META[x.st].label}`} tone={STATUS_META[x.st].tone} />
+                    ))}
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-lg font-black text-slate-900">{fmtBRL(valorDestaque)}</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{rotuloValor}</p>
+                  </div>
                 </button>
               )}
-              {visiveis.map(o => (
-                <OrcamentoRow
-                  key={o.id}
-                  o={o}
-                  onApprove={() => setApproveTarget(o)}
-                  onReject={() => setRejectTarget(o)}
-                  onPrint={() => setPrintTarget(o)}
-                  onDeliver={() => setDeliverTarget(o)}
-                  onView={() => setViewTarget(o)}
-                  onSubstitute={async () => {
-                    const res = await updateStatus(o.id, "substituido");
-                    showToast(
-                      res.success ? `Orçamento #${o.number} marcado como substituído.` : "Erro ao atualizar.",
-                      res.success ? "success" : "error"
-                    );
-                  }}
-                  onMarkSent={async () => {
-                    const res = await updateStatus(o.id, "enviado");
-                    showToast(res.success ? "Marcado como enviado." : "Erro ao atualizar.", res.success ? "success" : "error");
-                  }}
-                />
-              ))}
+              {(!empilhado || aberto) && (
+                // Aberto, os orçamentos entram recuados e com um fio à esquerda: sem isso eles
+                // ficam no mesmo nível da linha do cliente e a pilha some visualmente.
+                <div className={cn("space-y-2.5", empilhado && "ml-2 pl-4 border-l-2 border-slate-100")}>
+                  {g.itens.map(o => (
+                    <OrcamentoRow
+                      key={o.id}
+                      o={o}
+                      onApprove={() => setApproveTarget(o)}
+                      onReject={() => setRejectTarget(o)}
+                      onPrint={() => setPrintTarget(o)}
+                      onDeliver={() => setDeliverTarget(o)}
+                      onView={() => setViewTarget(o)}
+                      onSubstitute={async () => {
+                        const res = await updateStatus(o.id, "substituido");
+                        showToast(
+                          res.success ? `Orçamento #${o.number} marcado como substituído.` : "Erro ao atualizar.",
+                          res.success ? "success" : "error"
+                        );
+                      }}
+                      onMarkSent={async () => {
+                        const res = await updateStatus(o.id, "enviado");
+                        showToast(res.success ? "Marcado como enviado." : "Erro ao atualizar.", res.success ? "success" : "error");
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
             );
           })}

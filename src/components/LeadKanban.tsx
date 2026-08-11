@@ -1186,6 +1186,10 @@ const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 // Awaited + sequencial => serializa e evita a rajada que o WhatsApp rejeita.
 const DOC_SEND_DELAY_MS = 1000;   // documento do orçamento
 const PHOTO_SEND_DELAY_MS = 1500; // cada foto do banco
+// ⚠️ Mensagem de fechamento: delay MAIOR que o da foto de propósito. Nosso `await` volta quando a
+// uazapi ACEITA o envio, não quando o WhatsApp entrega; a última foto ainda está cumprindo o delay
+// dela no servidor. Com um valor menor, o "qualquer dúvida me chama" chegaria ANTES da última foto.
+const CLOSING_SEND_DELAY_MS = 2500;
 // Espera o arquivo recém-subido ficar acessível publicamente antes de o uazapi buscá-lo pela URL.
 const waitForPublicUrl = async (url: string, tries = 5) => {
   for (let i = 0; i < tries; i++) {
@@ -1459,6 +1463,10 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
   const [includeAccomp, setIncludeAccomp] = useState<boolean>(iq?.includeAccomp ?? true);
   const [accompText, setAccompText] = useState<string>(iq?.accompText ?? '');
   const [accompTouched, setAccompTouched] = useState<boolean>(!!iq?.accompText);
+  // Mensagem de fechamento: sai DEPOIS de tudo (documento + fotos). Nasce desligada porque é a
+  // única mensagem que o cliente recebe sem ter pedido nada; quem quiser, liga e escreve.
+  const [includeClosing, setIncludeClosing] = useState<boolean>(iq?.includeClosing ?? false);
+  const [closingText, setClosingText] = useState<string>(iq?.closingText ?? '');
   const [messageText, setMessageText] = useState('');
   const [msgTouched, setMsgTouched] = useState(false);
   const [sending, setSending] = useState(false);
@@ -1761,7 +1769,7 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
   // `projeto` viaja no snapshot (mesmo caminho que `dataEntrega` já usa): assim o pai grava na
   // coluna própria sem precisar de mais um argumento no onConfirm, e ao reabrir a proposta o campo
   // volta preenchido sozinho.
-  const buildQuoteSnapshot = () => ({ lines, manualValue, notes, projeto: projeto.trim() || null, saudacao, rodape, validade, pagamento, dataEntrega, includeSpecs, includeAccomp, ...(accompTouched ? { accompText } : {}), format, imageIds: selectedImages.map(i => i.id) });
+  const buildQuoteSnapshot = () => ({ lines, manualValue, notes, projeto: projeto.trim() || null, saudacao, rodape, validade, pagamento, dataEntrega, includeSpecs, includeAccomp, ...(accompTouched ? { accompText } : {}), includeClosing, closingText, format, imageIds: selectedImages.map(i => i.id) });
 
   // Linhas de produto com quantidade > 0 (base p/ simular disponibilidade/prazo).
   const telaLines = useMemo(
@@ -1805,7 +1813,7 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
   // Os dados do cliente não entram aqui porque não são estado do modal: vêm da prop `lead`.
   // `projeto` VAI junto de propósito: o uso mais comum do botão é mandar outra versão da MESMA
   // obra depois de o cliente achar caro. Se for outro projeto, é só trocar o nome no campo.
-  const carryOver = () => ({ projeto, saudacao, rodape, validade, pagamento, format, includeSpecs, includeAccomp });
+  const carryOver = () => ({ projeto, saudacao, rodape, validade, pagamento, format, includeSpecs, includeAccomp, includeClosing, closingText });
 
   // "Salvar e criar outra proposta" (etapa 1): grava a atual como rascunho e devolve o controle ao
   // pai, que remonta este modal em branco. NÃO chama onClose e NÃO marca `done`.
@@ -1825,7 +1833,10 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
   // Envia as fotos marcadas EM SEGUNDO PLANO (parte lenta: cada uma tem o delay nativo da
   // uazapi). Roda solto (não-awaited) e reporta por toast — sobrevive ao fechamento do modal,
   // então a tela não trava e o usuário pode continuar trabalhando. Espelha o envio sequencial.
-  const sendPhotosInBackground = async (photoUrls: string[]) => {
+  // `fechamento` (opcional) sai por ÚLTIMO, depois da última foto. É aqui que dá para saber que
+  // acabou: o laço é sequencial e awaited, então quando ele termina todas já foram entregues à
+  // uazapi. ⚠️ "Entregue à uazapi" ≠ "entregue no WhatsApp": por isso o delay maior (ver constante).
+  const sendPhotosInBackground = async (photoUrls: string[], fechamento?: string) => {
     let fails = 0;
     for (const url of photoUrls) {
       try {
@@ -1833,8 +1844,21 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
         if (pe || (pd && pd.ok === false)) fails++;
       } catch (_e) { fails++; }
     }
-    if (fails > 0) showToast(`Orçamento enviado, mas ${fails} foto(s) não foram. Reabra e reenvie.`, 'error');
-    else showToast('Fotos do orçamento enviadas ✓', 'success');
+    if (photoUrls.length > 0) {
+      if (fails > 0) showToast(`Orçamento enviado, mas ${fails} foto(s) não foram. Reabra e reenvie.`, 'error');
+      else showToast('Fotos do orçamento enviadas ✓', 'success');
+    }
+
+    const texto = (fechamento ?? '').trim();
+    if (!texto) return;
+    try {
+      const { data, error } = await callSendQuote({ clinic_id: activeClinicId, lead_id: lead.id, phone: lead.phone, text: texto, delay: CLOSING_SEND_DELAY_MS });
+      // Falha aqui é só a mensagem final: o orçamento e as fotos já foram. Avisa e não insiste.
+      if (error || (data && data.ok === false)) showToast('A mensagem final não foi enviada.', 'error');
+      else showToast('Mensagem final enviada ✓', 'success');
+    } catch (_e) {
+      showToast('A mensagem final não foi enviada.', 'error');
+    }
   };
 
   // Fecha o modal e conclui TODO o envio em SEGUNDO PLANO. `primaryFn` envia o orçamento
@@ -1847,6 +1871,9 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
     // ⚠️ O `setTimeout(onClose, …)` não é cancelável daqui; se ele disparasse no fluxo de várias
     // propostas, fecharia o modal no meio da proposta B e jogaria fora o que já foi digitado.
     afterHandoff?: () => void,
+    // Mensagem final, enviada depois de tudo. Vem por argumento (e não lida do estado) porque este
+    // trecho roda em segundo plano, possivelmente com o modal já remontado para a proposta seguinte.
+    fechamento?: string,
   ) => {
     setSending(false);
     setDone(true);
@@ -1862,9 +1889,11 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
       if (code) { showToast(`Não foi possível enviar o orçamento: ${mapSendError(code)}`, 'error'); return; }
       if (photoUrls.length > 0) {
         showToast(`Orçamento enviado ✓ Enviando ${photoUrls.length} foto(s)…`, 'info');
-        await sendPhotosInBackground(photoUrls);
+        await sendPhotosInBackground(photoUrls, fechamento);
       } else {
         showToast('Orçamento enviado ✓', 'success');
+        // Sem fotos, a mensagem final sai logo depois do orçamento (a função trata a lista vazia).
+        await sendPhotosInBackground([], fechamento);
       }
     })();
     // Remonta o formulário DEPOIS de soltar o envio. É seguro: o envio em segundo plano já tem
@@ -1894,12 +1923,14 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
     const leadId = lead.id;
     const phone = lead.phone;
     const photoUrls = selectedImages.map(i => i.url);
+    // Congelado aqui, antes de o modal poder remontar para a próxima proposta.
+    const fechamento = includeClosing ? closingText.trim() : '';
 
     try {
       if (format === 'texto') {
         // Sem DOM: manda tudo em segundo plano e fecha na hora.
         const text = messageText.trim();
-        handoffBackground(() => callSendQuote({ clinic_id: clinicId, lead_id: leadId, phone, text }), photoUrls, afterHandoff);
+        handoffBackground(() => callSendQuote({ clinic_id: clinicId, lead_id: leadId, phone, text }), photoUrls, afterHandoff, fechamento);
         return;
       }
       // imagem/PDF: a ÚNICA parte que precisa do DOM é gerar o blob do documento. Faz isso
@@ -1955,7 +1986,7 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
           media_url: pub.publicUrl, media_type: mediaType,
           filename, delay: DOC_SEND_DELAY_MS,
         });
-      }, photoUrls, afterHandoff);
+      }, photoUrls, afterHandoff, fechamento);
     } catch (_e) {
       setSending(false);
       setSendError('Erro ao gerar o documento. Tente enviar como texto.');
@@ -2341,6 +2372,29 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
                   </>)}
                 </div>
               )}
+
+              {/* Mensagem final: sai por ÚLTIMO, depois do orçamento e de todas as fotos. Nasce
+                  desligada porque é a única mensagem que o cliente recebe sem ter pedido nada. */}
+              <div className="space-y-1.5">
+                <label className="flex items-center gap-2 text-sm font-medium text-slate-600 cursor-pointer select-none">
+                  <input type="checkbox" checked={includeClosing} onChange={e => setIncludeClosing(e.target.checked)} className="w-4 h-4 accent-blue-600" />
+                  Enviar mensagem no final
+                </label>
+                {includeClosing && (<>
+                  <textarea
+                    value={closingText}
+                    onChange={e => setClosingText(e.target.value)}
+                    rows={3}
+                    placeholder="Ex.: Qualquer dúvida sobre a proposta, é só me chamar por aqui!"
+                    className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-[13px] leading-relaxed font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none"
+                  />
+                  <p className="text-[10px] text-slate-400">
+                    {selectedImages.length > 0
+                      ? `Chega depois do orçamento e das ${selectedImages.length} foto(s).`
+                      : 'Chega logo depois do orçamento.'}
+                  </p>
+                </>)}
+              </div>
 
               {quoteImages.length > 0 && (
                 <div className="space-y-1.5">

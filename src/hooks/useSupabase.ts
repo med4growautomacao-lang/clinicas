@@ -4138,8 +4138,17 @@ export function useOrcamentos() {
       p_ticket_id: input.ticketId ?? null,
     });
     await fetch(true);
-    if (error) return { success: false, error_code: error.message };
-    return res as RpcResult;
+    if (error) {
+      // §0.5: falha de ESCRITA de orçamento era invisível (o fetch registrava, a escrita não).
+      // Com propostas empilhadas, "sumiu a opção A" precisa deixar rastro em algum lugar.
+      logSystemError('ORCAMENTO_SAVE_FAIL', `save_orcamento: falha ao gravar orçamento — ${error.message}`, activeClinicId, { lead_id: input.leadId, orcamento_id: input.id ?? null, status: input.status, error: error.message }, 'error');
+      return { success: false, error_code: error.message };
+    }
+    const out = res as RpcResult;
+    if (!out?.success) {
+      logSystemError('ORCAMENTO_SAVE_REJECT', `save_orcamento: gravação recusada (${out?.error_code ?? 'sem código'})`, activeClinicId, { lead_id: input.leadId, orcamento_id: input.id ?? null, status: input.status, error_code: out?.error_code ?? null }, 'error');
+    }
+    return out;
   };
 
   // Aprovar = fecha a venda (Ganho + receita). Idempotente no servidor.

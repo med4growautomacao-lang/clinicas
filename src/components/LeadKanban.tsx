@@ -1361,12 +1361,21 @@ function ProductPicker({ value, products, protocols, useProd, useProt, sourceNou
 // NÃO gera conversão — só grava metadados no lead (estimated_value = total) e no ticket
 // (notes = resumo itemizado em texto). Se a clínica ainda não tem catálogo, cai no modo
 // manual (digita o valor), preservando o comportamento anterior.
-function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
+function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, onClose, onCancel, onConfirm, onSavedAndNew }: {
   lead: { id: string; name: string; phone?: string | null };
   initialQuote?: any;
+  // Nº da proposta DESTA sessão (1 = a primeira). Vem do pai porque este modal é REMONTADO a cada
+  // proposta nova: um contador interno seria zerado junto com o formulário.
+  sessionIndex?: number;
   onClose: () => void;
   onCancel: () => void;
-  onConfirm: (value: number, description: string, quoteData: any, status: 'rascunho' | 'enviado') => Promise<boolean>;
+  // Devolve o resultado da RPC, não só true/false: `number` é o nº REAL do orçamento no banco
+  // (sequencial por clínica), usado no aviso de tela, e `errorCode` é o que dá voz à falha —
+  // antes um retorno falso morria sem toast e sem mensagem no botão "Só registrar".
+  onConfirm: (value: number, description: string, quoteData: any, status: 'rascunho' | 'enviado') => Promise<{ ok: boolean; number?: number | null; id?: string | null; errorCode?: string }>;
+  // Proposta gravada e o vendedor quer montar outra: o pai ZERA o id do orçamento (a próxima
+  // gravação TEM que inserir), guarda o carry-over e remonta este modal em branco. NÃO fecha.
+  onSavedAndNew: (carry: any, savedNumber: number | null) => void;
 }) {
   const iq: any = initialQuote ?? null; // orçamento salvo (editar) — tem prioridade sobre o modelo
   const showToast = useToast();
@@ -1676,6 +1685,11 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
     });
   const docItemsFinal = docItems.length ? docItems : [{ name: notes.trim() || 'Serviço', description: null, specs: [] as string[], qtyLine: '', value: total }];
 
+  // Nº exibido no documento e no nome do arquivo. A remontagem já dá um número novo por proposta,
+  // MAS `Date.now() % 100000` dá a volta a cada 100 segundos: o sufixo garante que a opção A e a
+  // opção B da MESMA sessão nunca cheguem ao cliente com o mesmo número.
+  const displayNumber = sessionIndex > 1 ? `${quoteMeta.number}-${sessionIndex}` : quoteMeta.number;
+
   const quoteDocProps = {
     clinicName: clinic?.name ?? '',
     clinicLegalName: clinic?.legal_name ?? null,
@@ -1687,7 +1701,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
     logoDataUrl,
     clientName: lead.name,
     clientPhone: lead.phone ?? null,
-    number: quoteMeta.number,
+    number: displayNumber,
     dateStr: quoteMeta.date,
     items: docItemsFinal,
     total,
@@ -1716,6 +1730,22 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
     missing_params: 'Dados insuficientes para enviar.',
   } as Record<string, string>)[code] || 'Não foi possível enviar. Tente novamente.');
 
+  // Erros de GRAVAÇÃO (save_orcamento). Empilhar propostas multiplica as chances de cair neles,
+  // e até hoje todos morriam em silêncio no botão "Só registrar".
+  // ⚠️ A numeração do orçamento é MAX(number)+1 numa trigger, sem lock, contra um índice único:
+  // dois salvamentos no mesmo instante colidem, e o Postgres devolve a mensagem da constraint.
+  const mapSaveError = (code?: string) => {
+    const c = String(code || '');
+    if (c.includes('orcamentos_clinic_id_number')) return 'Outra pessoa gravou um orçamento no mesmo instante. Clique de novo.';
+    return (({
+      forbidden: 'Sem permissão para gravar orçamento nesta clínica.',
+      invalid_status: 'Status inválido para gravar o orçamento.',
+      not_found: 'Este orçamento não existe mais (pode ter sido excluído).',
+      locked_after_approval: 'Este orçamento já foi aprovado ou recusado e não pode mais ser editado. Crie outra proposta.',
+      no_active_clinic: 'Nenhuma clínica selecionada.',
+    } as Record<string, string>)[c] || 'Não foi possível salvar o orçamento. Tente de novo.');
+  };
+
   // Snapshot estruturado p/ reabrir o orçamento depois (persistido em tickets.quote_data).
   // `accompText` só entra quando foi editado à mão: assim, ao reabrir, o texto volta a acompanhar
   // saudação/rodapé em vez de congelar a versão antiga.
@@ -1743,12 +1773,39 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   const fmtDataBR = (iso?: string) => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('pt-BR') : '';
 
   // Etapa 1: registra o orçamento sem enviar (fluxo antigo — o WhatsApp é opcional).
+  // ⚠️ A falha aqui era MUDA: `if (ok)` sem else, sem toast, sem mensagem. O botão piscava e o
+  // vendedor achava que tinha salvo. Com propostas empilhadas isso vira "perdi a opção A".
   const handleRegisterOnly = async () => {
-    if (!total || total <= 0 || saving) return;
+    if (!total || total <= 0 || saving || done) return;
     setSaving(true);
-    const ok = await onConfirm(total, buildDescription().trim(), buildQuoteSnapshot(), 'rascunho');
-    if (ok) { setDone(true); setTimeout(onClose, 900); }
+    const res = await onConfirm(total, buildDescription().trim(), buildQuoteSnapshot(), 'rascunho');
     setSaving(false);
+    if (!res.ok) { const msg = mapSaveError(res.errorCode); setSendError(msg); showToast(msg, 'error'); return; }
+    setDone(true);
+    setTimeout(onClose, 900);
+  };
+
+  // O que SOBREVIVE à troca de proposta: o cabeçalho da conversa (saudação, rodapé, validade,
+  // pagamento) e a preferência de apresentação (formato, especificações, legenda). É digitação do
+  // vendedor, idêntica entre a opção A e a B do mesmo cliente.
+  // Fica de fora DE PROPÓSITO: linhas, observações, valor manual, fotos, data de entrega e legenda
+  // editada. Tudo isso é CONTEÚDO da proposta: a opção B é outra proposta, não uma cópia da A.
+  // Os dados do cliente não entram aqui porque não são estado do modal: vêm da prop `lead`.
+  const carryOver = () => ({ saudacao, rodape, validade, pagamento, format, includeSpecs, includeAccomp });
+
+  // "Salvar e criar outra proposta" (etapa 1): grava a atual como rascunho e devolve o controle ao
+  // pai, que remonta este modal em branco. NÃO chama onClose e NÃO marca `done`.
+  // ⚠️ Sai fora quando já está gravado (`done`): gravar de novo com o id ainda nulo criaria um
+  // orçamento duplicado, com número novo, idêntico ao anterior.
+  const handleSaveAndNew = async () => {
+    if (saving || sending || done) return;
+    if (!total || total <= 0) return;
+    setSaving(true);
+    const res = await onConfirm(total, buildDescription().trim(), buildQuoteSnapshot(), 'rascunho');
+    setSaving(false);
+    if (!res.ok) { const msg = mapSaveError(res.errorCode); setSendError(msg); showToast(msg, 'error'); return; }
+    showToast(res.number ? `Orçamento #${res.number} salvo ✓ Montando a próxima proposta…` : 'Orçamento salvo ✓ Montando a próxima proposta…', 'success');
+    onSavedAndNew(carryOver(), res.number ?? null);
   };
 
   // Envia as fotos marcadas EM SEGUNDO PLANO (parte lenta: cada uma tem o delay nativo da
@@ -1772,11 +1829,15 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
   const handoffBackground = (
     primaryFn: () => Promise<{ data: any; error: any; status?: number; uploadFailed?: boolean }>,
     photoUrls: string[],
+    // Quando informado, o modal NÃO fecha: é o fluxo "enviar e criar outra proposta".
+    // ⚠️ O `setTimeout(onClose, …)` não é cancelável daqui; se ele disparasse no fluxo de várias
+    // propostas, fecharia o modal no meio da proposta B e jogaria fora o que já foi digitado.
+    afterHandoff?: () => void,
   ) => {
     setSending(false);
     setDone(true);
     showToast('Enviando orçamento em segundo plano…', 'info');
-    setTimeout(onClose, 500);
+    if (!afterHandoff) setTimeout(onClose, 500);
     void (async () => {
       let res: { data: any; error: any; status?: number; uploadFailed?: boolean };
       try { res = await primaryFn(); }
@@ -1792,16 +1853,28 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
         showToast('Orçamento enviado ✓', 'success');
       }
     })();
+    // Remonta o formulário DEPOIS de soltar o envio. É seguro: o envio em segundo plano já tem
+    // tudo no closure (blob gerado, telefone, urls das fotos) e não lê mais nenhum estado do modal.
+    if (afterHandoff) afterHandoff();
   };
 
   // Etapa 2: registra o orçamento E envia pelo WhatsApp (texto, imagem ou PDF).
-  const handleSend = async () => {
+  // `continueAfter` = "enviar e criar outra proposta": o envio vai igual para o segundo plano, mas
+  // em vez de o modal fechar, o pai o remonta em branco para a próxima proposta.
+  // ⚠️ Como a função agora recebe argumento, o onClick TEM que ser `() => handleSend(false)`:
+  // `onClick={handleSend}` passaria o evento do clique como `continueAfter` (que é truthy).
+  const handleSend = async (continueAfter = false) => {
     if (sending || done) return;
     if (!activeClinicId || !lead.phone) { setSendError('Lead sem telefone cadastrado.'); return; }
     if (format === 'texto' && !messageText.trim()) { setSendError('Mensagem vazia.'); return; }
     setSending(true); setSendError(null);
-    const ok = await onConfirm(total, buildDescription().trim(), buildQuoteSnapshot(), 'enviado');
-    if (!ok) { setSending(false); setSendError('Falha ao registrar o orçamento.'); return; }
+    const res = await onConfirm(total, buildDescription().trim(), buildQuoteSnapshot(), 'enviado');
+    if (!res.ok) { setSending(false); setSendError(mapSaveError(res.errorCode)); return; }
+    const savedNumber = res.number ?? null;
+    const afterHandoff = continueAfter ? () => {
+      showToast(savedNumber ? `Orçamento #${savedNumber} registrado ✓ Montando a próxima proposta…` : 'Orçamento registrado ✓ Montando a próxima proposta…', 'success');
+      onSavedAndNew(carryOver(), savedNumber);
+    } : undefined;
 
     const clinicId = activeClinicId;
     const leadId = lead.id;
@@ -1812,7 +1885,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
       if (format === 'texto') {
         // Sem DOM: manda tudo em segundo plano e fecha na hora.
         const text = messageText.trim();
-        handoffBackground(() => callSendQuote({ clinic_id: clinicId, lead_id: leadId, phone, text }), photoUrls);
+        handoffBackground(() => callSendQuote({ clinic_id: clinicId, lead_id: leadId, phone, text }), photoUrls, afterHandoff);
         return;
       }
       // imagem/PDF: a ÚNICA parte que precisa do DOM é gerar o blob do documento. Faz isso
@@ -1838,7 +1911,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
       }
       // Sem texto de acompanhamento o documento vai sozinho: a send-quote aceita mídia sem legenda.
       const caption = includeAccomp ? accompText.trim() : '';
-      const filename = `Orcamento-${quoteMeta.number}.${ext}`;
+      const filename = `Orcamento-${displayNumber}.${ext}`;
       const mediaType: 'document' | 'image' = isPdf ? 'document' : 'image';
       // Blob pronto → o resto (subir no Storage, esperar propagar, enviar) vai pro background.
       handoffBackground(async () => {
@@ -1852,7 +1925,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
           text: caption, media_url: pub.publicUrl, media_type: mediaType,
           filename, delay: DOC_SEND_DELAY_MS,
         });
-      }, photoUrls);
+      }, photoUrls, afterHandoff);
     } catch (_e) {
       setSending(false);
       setSendError('Erro ao gerar o documento. Tente enviar como texto.');
@@ -1877,7 +1950,16 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
               <h3 className="text-base font-black text-slate-900">{step === 1 ? 'Registrar Orçamento' : 'Enviar por WhatsApp'}</h3>
               <p className="text-xs text-slate-500 font-medium mt-0.5">{lead.name}{step === 2 ? ' · Etapa 2 de 2' : ''}</p>
             </div>
-            <button onClick={onCancel} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4 text-slate-400" /></button>
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Contador da sessão: prova na tela que a proposta anterior FOI gravada e que esta
+                  é outra, em branco. Vem do pai (o modal remonta a cada proposta). */}
+              {sessionIndex > 1 && (
+                <span className="px-2 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-[10px] font-black text-emerald-700 uppercase tracking-wide">
+                  {sessionIndex}ª proposta
+                </span>
+              )}
+              <button onClick={onCancel} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4 text-slate-400" /></button>
+            </div>
           </div>
 
           {step === 1 && (<>
@@ -2298,8 +2380,14 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
           {/* Rodapé por etapa */}
           {step === 1 ? (
             <div className="space-y-2 pt-1">
+              {/* A etapa 1 não tinha onde mostrar erro: falha de gravação sumia. */}
+              {sendError && (
+                <div className="flex items-start gap-2 text-xs font-semibold text-rose-600 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2">
+                  <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {sendError}
+                </div>
+              )}
               <button
-                onClick={() => { if (canWhatsapp) { setMsgTouched(false); setStep(2); } }}
+                onClick={() => { if (canWhatsapp) { setSendError(null); setMsgTouched(false); setStep(2); } }}
                 disabled={!canWhatsapp}
                 title={!lead.phone ? 'Lead sem telefone cadastrado' : (total <= 0 ? 'Monte o orçamento primeiro' : '')}
                 className={cn(
@@ -2308,6 +2396,22 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
                 )}
               >
                 <Send className="w-4 h-4" /> Enviar por WhatsApp →
+              </button>
+              {/* Duas propostas no mesmo atendimento (o cliente pediu a opção A e a B): grava esta
+                  e recomeça em branco, com o modal ABERTO. Quem remonta o formulário é o pai, que
+                  também zera o id do orçamento, então a próxima gravação INSERE, não reescreve. */}
+              <button
+                onClick={handleSaveAndNew}
+                disabled={saving || sending || done || !total || total <= 0}
+                title="Grava esta proposta e abre outra em branco para o mesmo contato"
+                className={cn(
+                  "w-full py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 border",
+                  (saving || sending || done || !total || total <= 0)
+                    ? "bg-slate-50 border-slate-200 text-slate-400"
+                    : "bg-white border-blue-200 text-blue-700 hover:bg-blue-50"
+                )}
+              >
+                <Plus className="w-4 h-4" /> Salvar e criar outra proposta
               </button>
               <div className="flex gap-2">
                 <button onClick={onCancel} className="flex-1 py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-500 hover:bg-slate-50 transition-all">
@@ -2337,7 +2441,7 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
                 </div>
               )}
               <button
-                onClick={handleSend}
+                onClick={() => handleSend(false)}
                 disabled={sending || done || (format === 'texto' && !messageText.trim())}
                 className={cn(
                   "w-full py-2.5 rounded-xl text-sm font-black transition-all flex items-center justify-center gap-2",
@@ -2349,6 +2453,22 @@ function OrcamentoModal({ lead, initialQuote, onClose, onCancel, onConfirm }: {
                 {done ? <><Check className="w-4 h-4" /> Enviado!</> :
                   sending ? <><Loader2 className="w-4 h-4 animate-spin" /> {format === 'texto' ? 'Enviando…' : 'Gerando e enviando…'}</> :
                     <><Send className="w-4 h-4" /> {format === 'texto' ? 'Enviar pelo WhatsApp' : `Enviar ${format === 'pdf' ? 'PDF' : 'imagem'}`}</>}
+              </button>
+              {/* Mesmo envio do botão acima, mas o modal NÃO fecha: o envio segue em segundo plano
+                  (o documento já foi gerado) e o formulário volta em branco para a próxima
+                  proposta. É este o caminho real do caso "mandei a A, agora monto a B". */}
+              <button
+                onClick={() => handleSend(true)}
+                disabled={sending || done || (format === 'texto' && !messageText.trim())}
+                title="Envia esta proposta e já abre outra em branco para o mesmo contato"
+                className={cn(
+                  "w-full py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 border",
+                  (sending || done || (format === 'texto' && !messageText.trim()))
+                    ? "bg-slate-50 border-slate-200 text-slate-400"
+                    : "bg-white border-blue-200 text-blue-700 hover:bg-blue-50"
+                )}
+              >
+                <Plus className="w-4 h-4" /> Enviar e criar outra proposta
               </button>
               <button onClick={() => setStep(1)} disabled={sending} className="w-full py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-500 hover:bg-slate-50 transition-all">
                 ← Voltar
@@ -2985,7 +3105,10 @@ export function LeadKanban() {
   // contexto do desfazer: ticket, etapa anterior (voltar o card) e o agendamento (cancelar), se houver.
   const [attribLead, setAttribLead] = useState<{ id: string; name: string; phone: string | null; ctwaClid: string | null; ticketId: string; prevStageId: string | null; appointmentId: string | null } | null>(null);
   const [lossLead, setLossLead] = useState<{ id: string; name: string; prevStageId: string | null; ticketId: string } | null>(null);
-  const [orcamentoLead, setOrcamentoLead] = useState<{ id: string; name: string; phone: string | null; prevStageId: string | null; ticketId: string; initialQuote?: any; orcamentoId?: string | null } | null>(null);
+  // `seq` = nº da proposta DENTRO desta sessão do modal, e é a `key` do OrcamentoModal: trocar o
+  // seq REMONTA o modal, que é o que zera o formulário inteiro de uma vez (dezenas de estados, os
+  // refs de mão única e o `quoteMeta`, que foi escrito sem setter e nenhum reset manual alcança).
+  const [orcamentoLead, setOrcamentoLead] = useState<{ id: string; name: string; phone: string | null; prevStageId: string | null; ticketId: string; initialQuote?: any; orcamentoId?: string | null; seq?: number } | null>(null);
   const [poLead, setPoLead] = useState<{ id: string; name: string; phone: string | null; quoteData: any; ticketId?: string | null } | null>(null);
   // Aviso ao arrastar um card já resolvido (venda/perda) para uma etapa ativa: manter (novo
   // ciclo, card único) ou cancelar (reabre o mesmo ticket). Guarda o ticket p/ o fluxo "Manter".
@@ -5160,13 +5283,37 @@ export function LeadKanban() {
       {/* Orçamento Modal (valor + produto/serviço; NÃO é conversão) */}
       {orcamentoLead && (
         <OrcamentoModal
+          /* ⚠️ A `key` NÃO é enfeite: é ela que remonta o modal a cada proposta nova, e é a única
+             forma de zerar tudo. Sem ela a opção B nasceria com as linhas da A, com o botão de
+             enviar morto (a flag `done` nunca volta a false), com as fotos e a data de entrega da
+             A, e com o MESMO número no arquivo que chega ao cliente (`quoteMeta` foi escrito sem
+             setter). Remontar também inverte o padrão: campo novo no formulário nasce zerado na
+             proposta B, em vez de vazar em silêncio. */
+          key={`orc-${orcamentoLead.id}-${orcamentoLead.seq ?? 1}`}
           lead={orcamentoLead}
           initialQuote={orcamentoLead.initialQuote}
+          sessionIndex={orcamentoLead.seq ?? 1}
           onClose={() => setOrcamentoLead(null)}
           onCancel={() => {
             const { ticketId, prevStageId } = orcamentoLead;
             setOrcamentoLead(null);
             if (prevStageId) moveTicket(ticketId, prevStageId);
+          }}
+          onSavedAndNew={(carry) => {
+            setOrcamentoLead(prev => prev ? {
+              ...prev,
+              // ⚠️ ESTA é a linha que decide inserir x sobrescrever. Zerar o id é o que faz a
+              // próxima gravação INSERIR. Mantê-lo faria a proposta B reescrever a A, e a opção A
+              // sumiria do banco sem erro nenhum na tela.
+              orcamentoId: null,
+              // Carry-over: só o cabeçalho da mensagem e a preferência de formato. Sem linhas,
+              // sem observações, sem fotos, sem data de entrega.
+              initialQuote: carry,
+              // Já gravou: Cancelar/X não pode mais devolver o card para a etapa anterior, senão
+              // quem desiste da 2ª proposta tira o card da etapa Orçamento com a 1ª já salva.
+              prevStageId: null,
+              seq: (prev.seq ?? 1) + 1,
+            } : prev);
           }}
           onConfirm={async (value, description, quoteData, status) => {
             // Única escrita: a RPC grava o orçamento E espelha em tickets.quote_data/notes +
@@ -5181,9 +5328,12 @@ export function LeadKanban() {
               notes: description || null,
               snapshot: quoteData ?? null,
             });
-            if (!res.success) return false;
+            // O código do erro sobe até a tela: antes ele era descartado e a falha era muda.
+            if (!res.success) return { ok: false, errorCode: res.error_code };
             await refetchTickets(true);
-            return true;
+            // `number` é o nº REAL do orçamento (sequencial por clínica), o mesmo que aparece na
+            // Central de Orçamentos e no lançamento financeiro. Antes era descartado.
+            return { ok: true, number: (res as any).number ?? null, id: (res as any).id ?? null };
           }}
         />
       )}

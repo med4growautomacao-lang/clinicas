@@ -1336,7 +1336,7 @@ export function ComercialDashboard() {
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-xl bg-emerald-50"><Wallet className="w-4 h-4 text-emerald-700" /></div>
               <div>
-                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Faturamento (orçamentos aprovados)</p>
+                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Faturamento (orçamentos ganhos)</p>
                 <p className="text-xl font-black text-slate-900">{fmtBRL(faturamentoWD)}</p>
               </div>
             </div>
@@ -1345,7 +1345,7 @@ export function ComercialDashboard() {
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-xl bg-cyan-50"><CheckCircle2 className="w-4 h-4 text-cyan-600" /></div>
               <div>
-                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Orçamentos aprovados</p>
+                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Orçamentos ganhos</p>
                 <p className="text-xl font-black text-slate-900">{orcamentosAprovados.length}</p>
               </div>
             </div>
@@ -1354,7 +1354,7 @@ export function ComercialDashboard() {
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-xl bg-violet-50"><Percent className="w-4 h-4 text-violet-600" /></div>
               <div>
-                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Taxa de aprovação</p>
+                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Taxa de ganho</p>
                 <p className="text-xl font-black text-slate-900">{taxaAprovacaoWD != null ? `${taxaAprovacaoWD}%` : "—"}</p>
               </div>
             </div>

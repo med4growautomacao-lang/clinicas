@@ -19,7 +19,11 @@ function fmtBRL(n: number | null | undefined) {
 const STATUS_META: Record<OrcamentoStatus, { label: string; tone: "slate" | "amber" | "emerald" | "rose" | "sky" }> = {
   rascunho: { label: "Rascunho", tone: "slate" },
   enviado: { label: "Enviado", tone: "sky" },
-  aprovado: { label: "Aprovado", tone: "emerald" },
+  // ⚠️ O valor GRAVADO continua 'aprovado' (é o que dezenas de RPCs, views e triggers leem); o que
+  // muda aqui é só o que o vendedor lê. "Ganho" é a mesma palavra do Kanban de propósito: aprovar a
+  // proposta e ganhar o card são o mesmo evento, e chamar de "Aprovado" fazia parecer um passo antes
+  // da venda.
+  aprovado: { label: "Ganho", tone: "emerald" },
   recusado: { label: "Recusado", tone: "rose" },
   expirado: { label: "Expirado", tone: "amber" },
   substituido: { label: "Substituído", tone: "slate" },
@@ -33,7 +37,7 @@ const FILTERS: { id: OrcamentoStatus | "todos"; label: string }[] = [
   { id: "todos", label: "Todos" },
   { id: "rascunho", label: "Rascunho" },
   { id: "enviado", label: "Enviado" },
-  { id: "aprovado", label: "Aprovado" },
+  { id: "aprovado", label: "Ganho" },
   { id: "recusado", label: "Recusado" },
   { id: "substituido", label: "Substituído" },
 ];
@@ -48,14 +52,14 @@ function goToLeadKanban() {
 function mapApproveError(code?: string) {
   return (
     {
-      no_open_ticket: "Este lead não tem um card ativo no funil — abra/reabra o card no Kanban antes de aprovar.",
-      ticket_perdido: "O card deste lead está marcado como Perdido — reverta a perda no Kanban antes de aprovar.",
+      no_open_ticket: "Este lead não tem um card ativo no funil — abra/reabra o card no Kanban antes de marcar o ganho.",
+      ticket_perdido: "O card deste lead está marcado como Perdido — reverta a perda no Kanban antes de marcar o ganho.",
       no_lead_linked: "Este orçamento não está vinculado a um lead.",
-      already_processed: "Este orçamento já foi processado (aprovado/recusado).",
-      forbidden: "Sem permissão para aprovar este orçamento.",
+      already_processed: "Este orçamento já foi processado (ganho/recusado).",
+      forbidden: "Sem permissão para fechar esta venda.",
       orcamento_not_found: "Orçamento não encontrado.",
     } as Record<string, string>
-  )[code || ""] || "Não foi possível aprovar o orçamento.";
+  )[code || ""] || "Não foi possível registrar o ganho.";
 }
 
 export function OrcamentosCentral() {
@@ -127,15 +131,15 @@ export function OrcamentosCentral() {
     <div className="max-w-6xl mx-auto">
       <div className="mb-6">
         <h1 className="text-2xl font-black text-slate-900 tracking-tight">Central de Orçamentos</h1>
-        <p className="text-sm text-slate-500 mt-0.5">Todos os orçamentos da fábrica — status, aprovação e histórico.</p>
+        <p className="text-sm text-slate-500 mt-0.5">Todos os orçamentos da fábrica: status, ganhos e histórico.</p>
       </div>
 
       <div className="flex flex-wrap gap-3 mb-5">
         <StatCard label="Em aberto" value={String(abertos.length)} icon={<FileText className="w-4 h-4 text-slate-300" />} />
         <StatCard label="Valor em aberto" value={fmtBRL(totalAberto)} tone="teal" />
-        <StatCard label="Aprovados" value={String(aprovados.length)} tone="emerald" icon={<CheckCircle2 className="w-4 h-4 text-slate-300" />} />
-        <StatCard label="Faturado (aprovados)" value={fmtBRL(totalAprovado)} tone="emerald" />
-        <StatCard label="Taxa de aprovação" value={`${approvalRate}%`} tone={approvalRate >= 50 ? "emerald" : "amber"} />
+        <StatCard label="Ganhos" value={String(aprovados.length)} tone="emerald" icon={<CheckCircle2 className="w-4 h-4 text-slate-300" />} />
+        <StatCard label="Faturado (ganhos)" value={fmtBRL(totalAprovado)} tone="emerald" />
+        <StatCard label="Taxa de ganho" value={`${approvalRate}%`} tone={approvalRate >= 50 ? "emerald" : "amber"} />
       </div>
 
       <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
@@ -186,7 +190,7 @@ export function OrcamentosCentral() {
             const valorDestaque = aprovados.length > 0
               ? aprovados.reduce((s, o) => s + Number(o.total || 0), 0)
               : Number(ultimo.total || 0);
-            const rotuloValor = aprovados.length > 0 ? "Aprovado" : "Última proposta";
+            const rotuloValor = aprovados.length > 0 ? "Ganho" : "Última proposta";
             // Só os status que existem no grupo, na ordem em que importam.
             const resumo = (["aprovado", "enviado", "rascunho", "recusado", "substituido", "expirado"] as OrcamentoStatus[])
               .map(st => ({ st, n: g.itens.filter(o => o.status === st).length }))
@@ -293,7 +297,7 @@ export function OrcamentosCentral() {
                 // Desde 10/08 todo orçamento aprovado lança a SUA venda, com a sua data, mesmo que
                 // o cliente já tenha comprado antes no mesmo card. O aviso antigo de "venda já
                 // existente, sem duplicar receita" descrevia o atalho que sumia com o dinheiro.
-                showToast(`Orçamento #${approveTarget.number} aprovado — venda registrada.`, "success");
+                showToast(`Orçamento #${approveTarget.number} ganho: venda registrada.`, "success");
               } else {
                 showToast(mapApproveError(res.error_code), "error");
               }
@@ -327,7 +331,7 @@ export function OrcamentosCentral() {
                   : res.error_code === "tem_venda_lancada"
                     ? "Esta proposta tem venda lançada. Cancele a venda no Kanban antes de voltar o status."
                     : res.error_code === "use_aprovar"
-                      ? "Para aprovar use o botão Aprovar: ele lança a venda, a receita e a produção."
+                      ? "Para fechar a venda use o botão Marcar Ganho: ele lança a receita e a produção junto."
                       : "Não foi possível alterar o status.",
                 res.success ? "success" : "error"
               );
@@ -451,10 +455,10 @@ function OrcamentoRow({ o, versaoAntiga = false, onApprove, onReject, onPrint, o
         )}
         {pending && (
           <>
-            <Button size="sm" onClick={onApprove}><CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Aprovar</Button>
+            <Button size="sm" onClick={onApprove}><CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Marcar Ganho</Button>
             <button title="Recusar (o cliente disse não)" onClick={onReject} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg"><XCircle className="w-4 h-4" /></button>
             {/* Substituído ≠ recusado: aqui foi VOCÊ que trocou a proposta. Sai do "em aberto" e
-                fica fora da taxa de aprovação, porque não é resposta do cliente. É manual porque o
+                fica fora da taxa de ganho, porque não é resposta do cliente. É manual porque o
                 sistema não sabe se o orçamento novo troca este ou é outro negócio do mesmo cliente. */}
             <button title="Marcar como substituído (você trocou a proposta por outra)" onClick={onSubstitute} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg"><Archive className="w-4 h-4" /></button>
           </>
@@ -550,7 +554,7 @@ function ApproveModal({ orcamento, onClose, onConfirm }: {
 
   return (
     <Modal
-      title={`Aprovar orçamento #${orcamento.number}`}
+      title={`Marcar ganho do orçamento #${orcamento.number}`}
       subtitle="Isso fecha a venda: marca o card como Ganho, lança a receita e programa a produção."
       onClose={onClose}
       footer={<>
@@ -566,7 +570,7 @@ function ApproveModal({ orcamento, onClose, onConfirm }: {
           });
           setSaving(false);
         }} disabled={saving || selectedLines.length === 0}>
-          {saving ? "Aprovando…" : "Confirmar venda"}
+          {saving ? "Registrando…" : "Confirmar venda"}
         </Button>
       </>}
     >

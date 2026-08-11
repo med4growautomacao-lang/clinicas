@@ -90,6 +90,27 @@ export function mensagemDeErroDeVenda(code?: string): string {
   )[code || ""] || "Não foi possível concluir. Nada foi lançado.";
 }
 
+// Recusas do CANCELAMENTO de venda (`reopen_ticket`). Texto próprio de propósito: o padrão acima é
+// de quem tentou LANÇAR ("nada foi lançado"), e aqui o usuário tentou APAGAR uma venda, então a
+// frase genérica manda ele procurar no lugar errado.
+export function mensagemDeErroDeCancelamento(code?: string): string {
+  const proprias: Record<string, string> = {
+    ticket_not_found: "Este card não existe mais. Feche e abra a janela de novo.",
+    stage_not_found: "A etapa escolhida não existe mais. Escolha outra.",
+    target_must_be_active: "O card não pode voltar para Ganho nem para Perdido. Escolha uma etapa ativa do funil.",
+    venda_nao_encontrada: "A venda escolhida não existe mais. Feche e abra a janela de novo.",
+    multiplas_vendas: "Este card tem mais de uma venda lançada. Escolha qual delas.",
+  };
+  if (code && proprias[code]) return proprias[code];
+  // ⚠️ Falta de permissão NÃO chega como código: `reopen_ticket` chama `assert_clinic_access`, que
+  // levanta exceção ("acesso negado a clinic_id ...", errcode 42501). O hook repassa a mensagem
+  // crua do Postgres no lugar do error_code, então quem reconhece o caso é o texto.
+  if (code && /acesso negado|permission denied|42501/i.test(code)) {
+    return "Sem permissão para cancelar venda nesta clínica.";
+  }
+  return "Não foi possível cancelar esta venda. Nada foi apagado.";
+}
+
 // Campo de dinheiro no formato de caixa (os dígitos entram pela direita). Cópia deliberada do que o
 // Kanban usa: importá-lo de lá fecharia o ciclo de import que este arquivo existe para evitar.
 function CurrencyInput({ value, onChange, className, placeholder, autoFocus }: {
@@ -127,7 +148,7 @@ function CurrencyInput({ value, onChange, className, placeholder, autoFocus }: {
 
 // Uma linha do orçamento resolvida contra o catálogo. `key` é a MESMA chave que o provision usa
 // (orcamento_line_key = 'L' + ordinal da linha no snapshot), por isso o ordinal conta TODAS as linhas
-// cruas — inclusive as puladas — para não desalinhar a seleção do que vira pedido/OP.
+// cruas (inclusive as puladas) para não desalinhar a seleção do que vira pedido/OP.
 export type OrcLine = { ord: number; key: string; name: string; qtyLine: string; value: number; productId: string; qty: number; altura: number };
 
 // Vive aqui (e não na Central) porque a seleção de itens é da JANELA DE VENDA. A Central importa
@@ -217,17 +238,57 @@ export function RegistrarVendaModal({
   // diferença, `ticketDoCard` nulo parece card sem venda nenhuma, e é assim que a janela liberaria
   // a confirmação antes de conferir o que já está lançado.
   const [cardResolvido, setCardResolvido] = useState(!!ticketId);
+  // ⚠️ Card que a RPC vai usar. `close_sale_from_orcamento` NUNCA usa o ticket que a tela mandou:
+  // ela procura sozinha o ticket ABERTO do cliente. Enquanto os dois forem o mesmo (o normal), nada
+  // muda; quando divergem, a janela mostra as vendas de um card e a RPC age em outro.
+  const [ticketAberto, setTicketAberto] = useState<string | null>(null);
+  const [abertoConferido, setAbertoConferido] = useState(false);
+  // §0.5: leitura do card que FALHOU é diferente de "o cliente não tem card aberto". Dar a
+  // conferência por feita aqui libera o botão sem saber o que já está lançado, que é a dobra de
+  // faturamento entrando pela porta dos fundos.
+  const [cardFalhou, setCardFalhou] = useState(false);
+  const [tentativa, setTentativa] = useState(0);
+  // Card sem proposta nenhuma (toda clínica MedDesk e a maioria dos cards da fábrica) não paga esta
+  // leitura: sem proposta em jogo não existe a pergunta "em qual card a proposta vai cair?".
+  const precisaDoCardAberto = !!aprovarProposta && orcamentos.length > 0;
   useEffect(() => {
-    if (ticketId) { setTicketDoCard(ticketId); setCardResolvido(true); return; }
-    if (!lead.id) { setCardResolvido(true); return; }
+    if (ticketId) setTicketDoCard(ticketId);
+    if (!lead.id) { setCardResolvido(true); setAbertoConferido(true); return; }
+    if (ticketId && !precisaDoCardAberto) {
+      setTicketAberto(ticketId);
+      setCardResolvido(true);
+      setAbertoConferido(true);
+      setCardFalhou(false);
+      return;
+    }
+    // ⚠️ Volta a "não conferido" ANTES de sair perguntando. A lista de propostas chega depois do
+    // primeiro render, então sem esta linha a conferência anterior (feita quando ainda não havia
+    // proposta em jogo) continuaria valendo por uma volta de rede, com o botão liberado.
+    setAbertoConferido(false);
     let cancelado = false;
     (async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("tickets").select("id").eq("lead_id", lead.id).eq("status", "open").limit(1).maybeSingle();
-      if (!cancelado) { setTicketDoCard((data as any)?.id ?? null); setCardResolvido(true); }
+      if (cancelado) return;
+      if (error) {
+        setCardFalhou(true);
+        setAbertoConferido(false);
+        setTicketAberto(null);
+        if (!ticketId) setCardResolvido(false);
+        logSystemError("VENDA_CARD_ABERTO_FETCH_FAIL",
+          `Janela de venda: falha ao descobrir o card aberto do cliente (${error.message})`,
+          clinic?.id ?? null, { lead_id: lead.id, ticket_id: ticketId, error: error.message }, "error");
+        return;
+      }
+      const aberto = (data as any)?.id ?? null;
+      setCardFalhou(false);
+      setTicketAberto(aberto);
+      if (!ticketId) setTicketDoCard(aberto);
+      setCardResolvido(true);
+      setAbertoConferido(true);
     })();
     return () => { cancelado = true; };
-  }, [ticketId, lead.id]);
+  }, [ticketId, lead.id, precisaDoCardAberto, tentativa, clinic?.id]);
 
   // ── Vendas já lançadas neste card ───────────────────────────────────────────────────────
   const [vendas, setVendas] = useState<VendaDoCard[]>([]);
@@ -264,7 +325,9 @@ export function RegistrarVendaModal({
     setVendasFalharam(false);
     setVendas((data as VendaDoCard[]) || []);
     setVendasConferidas(true);
-  }, [ticketDoCard, cardResolvido, clinic?.id]);
+    // `tentativa` entra aqui de propósito: é o botão "Tentar de novo" refazendo as DUAS leituras
+    // (o card e as vendas dele) com um clique só.
+  }, [ticketDoCard, cardResolvido, clinic?.id, tentativa]);
 
   useEffect(() => { carregarVendas(); }, [carregarVendas]);
 
@@ -342,6 +405,9 @@ export function RegistrarVendaModal({
   }, [orcamentos, orcSelecionadoId]);
   const vendasLivres = vendas.filter(v => !vendasTomadas.has(v.id));
   const precisaDecidirVinculo = !!orcSel && vendasLivres.length > 0;
+  // ⚠️ Valor ESTÁVEL (o id, não a lista). `vendasLivres` nasce de um `filter` a cada render, então
+  // usá-lo como dependência faz o efeito abaixo rodar depois de toda digitação do formulário.
+  const unicaVendaLivreId = vendasLivres.length === 1 ? vendasLivres[0].id : null;
 
   const [respostaVinculo, setRespostaVinculo] = useState<"mesma" | "outra" | null>(null);
   const [vendaAlvoId, setVendaAlvoId] = useState<string | null>(null);
@@ -354,8 +420,8 @@ export function RegistrarVendaModal({
   }, [orcSelecionadoId]);
   useEffect(() => {
     // Uma venda livre só: já fica escolhida (a pergunta que importa continua sendo mesma x outra).
-    if (respostaVinculo === "mesma" && !vendaAlvoId && vendasLivres.length === 1) setVendaAlvoId(vendasLivres[0].id);
-  }, [respostaVinculo, vendaAlvoId, vendasLivres]);
+    if (respostaVinculo === "mesma" && !vendaAlvoId && unicaVendaLivreId) setVendaAlvoId(unicaVendaLivreId);
+  }, [respostaVinculo, vendaAlvoId, unicaVendaLivreId]);
 
   const vendaAlvo = vendas.find(v => v.id === vendaAlvoId) ?? null;
   const vinculando = !!orcSel && respostaVinculo === "mesma";
@@ -376,13 +442,24 @@ export function RegistrarVendaModal({
   const fromAd = !!lead.ctwaClid;
   const [emailInput, setEmailInput] = useState(lead.email ?? "");
   // DEBUG (TEMPORÁRIO, p/ aprovação Meta): resultado do envio de teste (payload + resposta crua).
-  // Remover este estado + o painel abaixo depois da aprovação e restaurar o auto-close no handleSave.
+  // Para remover depois da aprovação: apague este estado, o painel de conferência lá embaixo e o
+  // `if (isConversionStage)` de `salvarAvulsa`, deixando o auto-close (`setTimeout(onClose, 1000)`)
+  // valer para os dois casos. ⚠️ Não existe `handleSave` neste arquivo (esse é o do GanhoModal
+  // antigo, em LeadKanban.tsx, que continua de pé para a aba "Vendas sugeridas").
   const [capiResult, setCapiResult] = useState<any>(null);
   const [capiOpen, setCapiOpen] = useState(true);
 
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  // Aviso (âmbar): a venda entrou, mas alguma coisa em volta dela não. Diferente de `erro`, que diz
+  // que nada entrou.
+  const [aviso, setAviso] = useState<string | null>(null);
+  // Paciente do lead, MANTIDO entre tentativas. ⚠️ `lead.patientId` é um retrato tirado quando a
+  // janela abriu e nunca se atualiza: sem guardar aqui, a segunda tentativa criaria o paciente de
+  // novo, bateria no índice único `patients_clinic_phone_uniq (clinic_id, phone)` e a receita
+  // nasceria sem paciente, sumindo do "Faturamento real" com filtro de coorte.
+  const [patientIdResolvido, setPatientIdResolvido] = useState<string | null>(lead.patientId ?? null);
 
   // ── Disponibilidade / prazo (fábrica) ───────────────────────────────────────────────────
   const [eta, setEta] = useState<any>(null);
@@ -417,20 +494,36 @@ export function RegistrarVendaModal({
   // confiável: quando o ticket sai de 'ganho', o gatilho fn_purge_ticket_sale apaga a conversão E a
   // receita ligada (sem órfão no Financeiro).
   const salvarAvulsa = async () => {
-    if (!onCreate) return;
-    if (!value || Number(value) <= 0) return;
+    // §0.5: sair calado aqui é a janela não fazer nada com o botão habilitado. Os dois casos são
+    // defensivos (nenhum chamador de hoje chega neles), mas mudo é o que não pode ser.
+    if (!onCreate) {
+      setErro("Esta tela não registra venda avulsa. Escolha de qual proposta é a venda.");
+      logSystemError("VENDA_AVULSA_SEM_HANDLER",
+        "Janela de venda: pediram venda avulsa numa tela que não recebeu o onCreate",
+        clinic?.id ?? null, { lead_id: lead.id, ticket_id: ticketDoCard }, "warn");
+      return;
+    }
+    if (!value || Number(value) <= 0) { setErro(mensagemDeErroDeVenda("valor_invalido")); return; }
     setErro(null);
+    setAviso(null);
     setSaving(true);
-    // Garante um paciente vinculado ao lead ANTES de fechar o ticket — senão o trigger
+    // Garante um paciente vinculado ao lead ANTES de fechar o ticket, senão o trigger
     // fn_auto_create_lead_on_patient abriria um ticket novo. Sem patient_id, a receita
     // nasce órfã e some do "Faturamento real" quando há filtro de coorte (Entrada).
-    let patientId = lead.patientId ?? null;
+    let patientId = patientIdResolvido;
     if (!patientId && createPatient) {
       const np = await createPatient({ name: lead.name, phone: lead.phone ?? null });
       if (np?.id) {
         patientId = np.id;
+        setPatientIdResolvido(np.id);
         // O trigger já liga por telefone; este update cobre o caso de lead sem telefone.
         await updateLead?.(lead.id, { converted_patient_id: np.id });
+      } else {
+        // §0.5: o caso mais comum é o telefone já existir em `patients` (índice único por clínica).
+        // A venda segue, mas a receita nasce sem paciente e isso não pode passar em silêncio.
+        logSystemError("VENDA_AVULSA_SEM_PACIENTE",
+          "Venda avulsa: não foi possível criar o paciente, a receita vai sem paciente vinculado",
+          clinic?.id ?? null, { lead_id: lead.id, ticket_id: ticketDoCard, phone: lead.phone ?? null }, "warn");
       }
     }
     // Atribuição Meta: grava o e-mail informado (coluna simples, sem risco de zerar JSONB) para
@@ -442,7 +535,11 @@ export function RegistrarVendaModal({
 
     const tx = await createTransaction({
       type: "receita",
-      category: "Consulta",
+      // Mesma categoria do caminho da proposta (`close_sale_from_orcamento` grava "Venda de
+      // produto"): com a janela única, o mesmo card fechado à mão e fechado por proposta caía em
+      // duas categorias diferentes no relatório do Financeiro. E "Consulta" é vocabulário de
+      // clínica (§0.2), que o cliente WakeDesk não tem.
+      category: isFactory ? "Venda de produto" : "Consulta",
       amount: Number(value),
       description: description || "Venda registrada",
       payment_method: paymentMethod as any,
@@ -451,6 +548,16 @@ export function RegistrarVendaModal({
       protocol_ids: protocolIds,
       patient_id: patientId ?? undefined,
     } as any);
+    // ⚠️ `useFinancial().create` devolve null em QUALQUER falha e guarda a mensagem num estado que
+    // esta janela não lê. A venda continua sendo registrada de propósito (é ela que conta no
+    // faturamento, e travar o Ganho por causa do caixa é pior), mas a falha não pode ser muda: sem
+    // receita não há `financial_transaction_id`, e o cancelamento passa a depender do casamento por
+    // semelhança, que já fez receita de outro card sumir.
+    if (!tx) {
+      logSystemError("VENDA_AVULSA_RECEITA_FALHOU",
+        "Venda avulsa: o lançamento no Financeiro não foi criado, a venda entra sem receita ligada",
+        clinic?.id ?? null, { lead_id: lead.id, ticket_id: ticketDoCard, valor: Number(value) }, "error");
+    }
     const ok = await onCreate({
       lead_id: lead.id,
       value: Number(value),
@@ -463,8 +570,11 @@ export function RegistrarVendaModal({
     if (ok) {
       setDone(true);
       onAtualizado?.();
+      if (!tx) {
+        setAviso("A venda foi registrada, mas o lançamento no Financeiro NÃO entrou. Lance a receita à mão no Financeiro, senão o caixa fica sem este valor.");
+      }
       // Só dispara CAPI quando 'ganho' É a etapa de conversão desta clínica. Se a conversão está em
-      // outra etapa (ex.: 'agendado'), mover para ganho não gera evento — então fecha normal.
+      // outra etapa (ex.: 'agendado'), mover para ganho não gera evento, então fecha normal.
       if (isConversionStage) {
         // DEBUG (TEMPORÁRIO, p/ aprovação Meta): dispara a conversão na hora e mostra payload+resposta.
         setCapiResult("loading");
@@ -474,9 +584,11 @@ export function RegistrarVendaModal({
         } catch (e) {
           setCapiResult({ ok: false, error: e instanceof Error ? e.message : String(e) });
         }
-      } else {
+      } else if (tx) {
         setTimeout(onClose, 1000);
       }
+      // Sem receita a janela NÃO fecha sozinha: o aviso acima é a única chance de o usuário
+      // descobrir que precisa lançar no Financeiro à mão.
     } else {
       // ⚠️ A receita nasce ANTES da venda (é o vínculo que deixa o cancelamento limpo). Se a venda
       // não entrou, o lançamento fica órfão no Financeiro, e convidar a tentar de novo criaria um
@@ -501,6 +613,7 @@ export function RegistrarVendaModal({
   const salvarProposta = async () => {
     if (!orcSel || !aprovarProposta) return;
     setErro(null);
+    setAviso(null);
     setSaving(true);
     // Atribuição Meta: mesma gravação da venda avulsa (coluna simples, sem risco de zerar JSONB).
     // O fechamento é que enfileira o evento de conversão, e a edge meta-capi-conversions lê o
@@ -514,7 +627,7 @@ export function RegistrarVendaModal({
       paymentStatus: txStatus,
       paymentDate: date,
       dataEntrega: isFactory ? (dataEntrega || null) : null,
-      // Só manda a seleção quando ela é parcial — sem seleção, o servidor mantém tudo/total cotado.
+      // Só manda a seleção quando ela é parcial, sem seleção o servidor mantém tudo/total cotado.
       lineKeys: isPartial ? selectedLines.map(l => l.key) : null,
       total: isPartial ? selectedTotal : null,
       linkConversionId: vinculando ? vendaAlvoId : null,
@@ -582,14 +695,23 @@ export function RegistrarVendaModal({
   const [cancelando, setCancelando] = useState(false);
   const podeCancelar = !!cancelarVenda && stagesParaReabrir.length > 0;
 
+  // ⚠️ O RESULTADO manda no texto. `reopen_ticket` (produção desde 11/08) só devolve o card ao
+  // funil quando a venda cancelada era a ÚLTIMA: sobrando venda, ela apaga só a escolhida e retorna
+  // `reopened:false`, sem tocar em etapa nem em desfecho. Anunciar "o card voltou para o funil" nos
+  // dois casos manda o usuário procurar o card onde ele não está.
   const confirmarCancelamento = async (id: string) => {
     if (!cancelarVenda || !stageDestino) return;
     setCancelando(true);
     const res = await cancelarVenda(id, stageDestino);
     setCancelando(false);
-    if (!res?.success) { setErro(mensagemDeErroDeVenda(res?.error_code)); return; }
+    if (!res?.success) { setErro(mensagemDeErroDeCancelamento(res?.error_code)); return; }
     onAtualizado?.();
-    showToast("Venda cancelada: a receita e o lançamento no Financeiro foram removidos, e o card voltou para o funil.", "success");
+    showToast(
+      res.reopened
+        ? "Venda cancelada: a receita e o lançamento no Financeiro foram removidos, e o card voltou para o funil."
+        : "Venda cancelada: a receita e o lançamento no Financeiro foram removidos. O card continua em Ganho, com as outras vendas.",
+      "success",
+    );
     onClose();
   };
 
@@ -604,7 +726,16 @@ export function RegistrarVendaModal({
   // clicável e um clique rápido lança venda NOVA por cima da que já estava lançada, que é
   // exatamente o que a RPC faz nesse caso (o CAMINHO B vale também para card já ganho, de
   // propósito). Vale só para o caminho da proposta: a venda avulsa não tem o que vincular.
-  const conferindoVendas = !!orcSel && !vendasConferidas;
+  const conferindoVendas = !!orcSel && (!vendasConferidas || !abertoConferido);
+  // ⚠️ A RPC age no card ABERTO do cliente, não no card que a tela mostra. Divergiram, a janela
+  // pergunta "mesma venda ou outra?" olhando as vendas de um card enquanto a RPC lança no outro (ou
+  // recusa com `no_open_ticket`, e o vínculo, que é a razão de existir deste arquivo, nunca
+  // conclui). Alcançável hoje: card já ganho e fechado, aberto pelo Kanban com "mostrar resolvidos"
+  // ou pela busca, e lead com um segundo card aberto.
+  const cardDivergente = !!orcSel && abertoConferido && ticketAberto !== ticketDoCard;
+  // Venda de R$ 0,00 fecha o card como Ganho sem dinheiro nenhum: entra na contagem de vendas dos
+  // painéis e vai para a produção. A RPC não valida o sinal (só `update_conversion_sale` valida).
+  const propostaSemValor = !!orcSel && !vinculando && !(totalDaProposta > 0);
   const bloqueado =
     saving ||
     // Já registrou: a janela só fica de pé por causa do painel de conferência do Meta, e um
@@ -613,6 +744,8 @@ export function RegistrarVendaModal({
     faltaEscolherProposta ||
     (orcSel
       ? conferindoVendas ||
+        cardDivergente ||
+        propostaSemValor ||
         (lines.length > 0 && selectedLines.length === 0) ||
         (precisaDecidirVinculo && respostaVinculo === null) ||
         (vinculando && !vendaAlvoId)
@@ -700,19 +833,30 @@ export function RegistrarVendaModal({
           )}
 
           {/* ── Pergunta que impede o faturamento de dobrar ───────────────────────────── */}
-          {vendasFalharam && (
+          {(vendasFalharam || cardFalhou) && (
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 flex items-center gap-2">
               <p className="text-[11px] font-semibold text-amber-700 flex-1">
-                Não consegui conferir as vendas já lançadas neste card.{" "}
+                Não consegui conferir o que já está lançado neste card.{" "}
                 {orcSel
                   ? "Enquanto isso a confirmação fica travada, para não lançar a mesma venda duas vezes."
                   : "Confira o card antes de registrar, para não lançar a mesma venda duas vezes."}
               </p>
-              <Button variant="outline" size="sm" onClick={() => { void carregarVendas(); }}>Tentar de novo</Button>
+              <Button variant="outline" size="sm" onClick={() => setTentativa(t => t + 1)}>Tentar de novo</Button>
             </div>
           )}
-          {conferindoVendas && !vendasFalharam && (
+          {conferindoVendas && !vendasFalharam && !cardFalhou && (
             <p className="text-[11px] font-semibold text-slate-400">Conferindo as vendas já lançadas neste card…</p>
+          )}
+          {/* ⚠️ O card da tela não é o card em que a venda cairia. Sem este aviso a janela deixa o
+              usuário responder "mesma venda ou outra?" olhando as vendas do card errado. */}
+          {cardDivergente && (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2">
+              <p className="text-[11px] font-semibold text-rose-700">
+                {ticketAberto
+                  ? "Este card está fechado, e a venda desta proposta cairia no card que está ABERTO deste cliente. Feche a venda pelo card aberto, ou reabra este card antes de continuar."
+                  : "Este cliente não tem card aberto no funil, e venda só entra em card aberto. Reabra este card (ou abra um novo) antes de registrar a venda."}
+              </p>
+            </div>
           )}
           {orcSel && vendas.length > 0 && (
             <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 space-y-2.5">
@@ -790,7 +934,7 @@ export function RegistrarVendaModal({
           )}
 
           {/* ── Valor ────────────────────────────────────────────────────────────────── */}
-          {orcSel ? (
+          {orcSel ? (<>
             <div className="bg-emerald-50 rounded-xl px-4 py-3 flex items-center justify-between">
               <span className="text-sm font-bold text-emerald-800">{vinculando ? "Valor da venda amarrada" : "Valor da venda"}</span>
               <div className="text-right">
@@ -800,7 +944,14 @@ export function RegistrarVendaModal({
                 {isPartial && <div className="text-[11px] text-emerald-700/70">cotado {fmtBRL(orcSel.total)}</div>}
               </div>
             </div>
-          ) : (
+            {propostaSemValor && (
+              <p className="text-[11px] font-semibold text-rose-500">
+                {isPartial
+                  ? "Os itens marcados somam zero. Marque itens com valor, ou corrija os preços na proposta."
+                  : "Esta proposta está com valor zero. Corrija o valor da proposta antes de fechar a venda."}
+              </p>
+            )}
+          </>) : (
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Valor (R$)</label>
               <CurrencyInput autoFocus value={value} onChange={setValue} className="focus:ring-emerald-500/20 focus:border-emerald-500" />
@@ -978,12 +1129,16 @@ export function RegistrarVendaModal({
           )}
 
           {/* ── Vendas já lançadas neste card: editar e cancelar ─────────────────────── */}
-          {(vendas.length > 0 || vendasCarregando) && (
+          {/* ⚠️ O gate é a LISTA, nunca o "carregando". `vendasCarregando` vira true de forma
+              síncrona em todo card recém-aberto, então incluí-lo aqui fazia o título afirmar que o
+              card já tem venda antes de a leitura voltar, inclusive nos cards que nunca tiveram
+              venda nenhuma (100% das clínicas MedDesk). Afirmação falsa em janela de dinheiro. */}
+          {vendas.length > 0 && (
             <div className="rounded-xl border border-slate-200 p-3 space-y-2">
               <div className="text-xs font-bold text-slate-500 uppercase tracking-wide">
                 Vendas já lançadas neste card
               </div>
-              {vendasCarregando && vendas.length === 0 && <p className="text-xs text-slate-400">Carregando…</p>}
+              {vendasCarregando && <p className="text-xs text-slate-400">Atualizando…</p>}
               {vendas.map(v => (
                 <div key={v.id} className="rounded-lg border border-slate-200 px-3 py-2">
                   <div className="flex items-center gap-2">
@@ -1023,6 +1178,14 @@ export function RegistrarVendaModal({
                               forma a opção não aparece, porque a RPC não apaga forma de pagamento
                               e a tela diria que apagou sem ter apagado. */}
                           {!v.payment_method && <option value="">Não informada</option>}
+                          {/* ⚠️ Forma gravada FORA do menu (18 vendas em produção: "Particular",
+                              "pix+cartao", "cartao 12x", "entrada+cartao"). Sem esta opção o select
+                              controlado fica sem seleção e a tela mostra campo vazio (ou a primeira
+                              opção) para uma venda que TEM forma registrada, e um clique para
+                              "preencher" grava por cima do valor real. */}
+                          {v.payment_method && !METODOS.some(m => m.id === v.payment_method) && (
+                            <option value={v.payment_method}>{v.payment_method}</option>
+                          )}
                           {METODOS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
                         </select>
                       </Field>
@@ -1043,23 +1206,27 @@ export function RegistrarVendaModal({
 
                   {cancelandoId === v.id && (
                     <div className="mt-2.5 pt-2.5 border-t border-slate-100 space-y-2">
+                      {/* ⚠️ O texto SEGUE A REGRA DO BANCO, e ela mudou em 11/08: `reopen_ticket`
+                          só devolve o card ao funil quando a venda cancelada é a ÚLTIMA. Sobrando
+                          venda, ela apaga só a escolhida e retorna `reopened:false`, sem tocar em
+                          etapa nem em desfecho. O aviso antigo dizia o contrário e mandava o
+                          usuário "marcar como Ganho de novo" um card que nunca saiu de Ganho. */}
                       <p className="text-[11px] font-semibold text-rose-600">
-                        Cancelar apaga esta venda e a receita dela no Financeiro. O card sai de Ganho e volta para a etapa escolhida.
+                        {vendas.length > 1
+                          ? "Cancelar apaga esta venda e a receita dela no Financeiro. As outras vendas deste card continuam lançadas, e o card CONTINUA em Ganho."
+                          : "Cancelar apaga esta venda e a receita dela no Financeiro. Como é a única venda do card, ele sai de Ganho e volta para a etapa escolhida."}
                       </p>
-                      {/* ⚠️ Consequência que a tela escondia: o cancelamento tira o GANHO do card
-                          inteiro, não só da venda escolhida. As outras vendas continuam lançadas
-                          (o dinheiro delas segue no faturamento), mas o card deixa de ser contado
-                          como venda nos painéis até voltar para Ganho. */}
-                      {vendas.length > 1 && (
-                        <p className="text-[11px] font-semibold text-amber-700">
-                          As outras vendas deste card continuam lançadas, com o dinheiro delas no faturamento. Mas o card inteiro sai de Ganho, então ele deixa de contar como venda nos painéis até você marcá-lo como Ganho de novo.
-                        </p>
+                      {/* A etapa de destino só é usada quando o card realmente volta ao funil. Com
+                          outra venda de pé o backend ignora a escolha, então perguntar seria pedir
+                          uma decisão que não tem efeito. Um valor válido continua indo na chamada
+                          (a RPC recusa etapa inexistente com 'stage_not_found'). */}
+                      {vendas.length <= 1 && (
+                        <Field label="Para qual etapa o card volta">
+                          <select className={inputCls} value={stageDestino} onChange={e => setStageDestino(e.target.value)}>
+                            {stagesParaReabrir.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                          </select>
+                        </Field>
                       )}
-                      <Field label="Para qual etapa o card volta">
-                        <select className={inputCls} value={stageDestino} onChange={e => setStageDestino(e.target.value)}>
-                          {stagesParaReabrir.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                        </select>
-                      </Field>
                       <div className="flex justify-end gap-2">
                         <Button variant="outline" size="sm" onClick={() => setCancelandoId(null)}>Voltar</Button>
                         <Button size="sm" onClick={() => confirmarCancelamento(v.id)} disabled={cancelando || !stageDestino}>
@@ -1076,6 +1243,14 @@ export function RegistrarVendaModal({
           {erro && (
             <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2">
               <p className="text-xs font-semibold text-rose-700">{erro}</p>
+            </div>
+          )}
+
+          {/* Âmbar: a venda ENTROU, mas alguma coisa em volta dela não. Fica de pé até o usuário
+              fechar a janela na mão, senão o auto-close apagaria o recado em 1 segundo. */}
+          {aviso && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+              <p className="text-xs font-semibold text-amber-700">{aviso}</p>
             </div>
           )}
 
@@ -1156,11 +1331,12 @@ export function EscolherVendaCancelarModal({ vendas, onClose, onEscolher }: {
         <p className="text-xs text-slate-500 mb-3">
           Cancelar apaga a venda escolhida e a receita dela no Financeiro. As outras continuam lançadas, com o dinheiro delas no faturamento.
         </p>
-        {/* ⚠️ Mesma consequência do cancelamento pela janela de venda: quem sai de Ganho é o CARD,
-            não só a venda escolhida. Dizer só "as outras continuam" fazia parecer que o card seguia
-            contando como venda. */}
+        {/* ⚠️ Esta janela SÓ abre com mais de uma venda no card ('multiplas_vendas'), então aqui
+            sempre sobra venda, e desde 11/08 o `reopen_ticket` nesse caso apaga só a venda escolhida
+            e retorna `reopened:false`: não mexe em etapa nem em desfecho. O aviso anterior dizia que
+            o card saía de Ganho e voltava ao funil, o que era errado em 100% das aberturas. */}
         <p className="text-xs font-semibold text-amber-700 mb-3">
-          O card inteiro sai de Ganho e volta para o funil, então ele deixa de contar como venda nos painéis até ser marcado como Ganho de novo.
+          O card continua em Ganho, com as vendas que sobrarem, e não sai da contagem de vendas dos painéis. Ele não volta para o funil.
         </p>
         <div className="space-y-2">
           {vendas.map(v => (

@@ -1630,9 +1630,18 @@ export function useTickets() {
       p_loss_reason_slug: lossReasonSlug ?? null,
       p_loss_note: lossNote ?? null,
     });
-    if (error) { fetch(true); }
+    if (error) {
+      fetch(true);
+      // §0.5: falhar aqui é card sem desfecho. Na venda isso é pior que parece: a conversão já
+      // existe, então o dinheiro entra em `v_kpi_sales_value` e o card NÃO entra em `v_kpi_wins`,
+      // e nenhum gatilho conserta depois. Antes o erro sumia no `if (error)` mudo.
+      logSystemError('TICKET_FINALIZE_FAIL', `finalize_ticket: falha ao marcar o desfecho '${outcome}' do card`,
+        activeClinicId, { ticket_id: ticketId, outcome, error: (error as any)?.message ?? String(error) }, 'error');
+      return false;
+    }
     // A mensagem de encerramento (ganho/perdido) é enviada nativamente pelo trigger
-    // trg_ticket_finish_message ao setar o outcome — sem chamada ao n8n.
+    // trg_ticket_finish_message ao setar o outcome (sem chamada ao n8n).
+    return true;
   };
 
   const finalizeTicket = async (ticketId: string) => {

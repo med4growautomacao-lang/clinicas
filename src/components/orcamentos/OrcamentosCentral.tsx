@@ -5,7 +5,7 @@ import { FileText, Send, CheckCircle2, XCircle, Search, ExternalLink, Printer, D
 // nele. Uma segunda tela de orçamento aqui divergiria da primeira na primeira mudança.
 import { OrcamentoModal } from "../LeadKanban";
 import { cn } from "@/src/lib/utils";
-import { useOrcamentos, useSettings, useProducts, useProtocols, Orcamento, OrcamentoStatus } from "../../hooks/useSupabase";
+import { useOrcamentos, useSettings, useProducts, useProtocols, useConversions, Orcamento, OrcamentoStatus } from "../../hooks/useSupabase";
 import { useToast } from "../ui/toast";
 import { Button, Modal, Field, StatCard, StatusBadge, EmptyState, inputCls, fmtDate } from "../production/shared";
 import { useImageDataUrl } from "../QuoteDocument";
@@ -73,12 +73,35 @@ export function OrcamentosCentral() {
   const abertos = orcamentos.filter(o => o.status === "rascunho" || o.status === "enviado");
   const aprovados = orcamentos.filter(o => o.status === "aprovado");
   const totalAberto = abertos.reduce((s, o) => s + Number(o.total || 0), 0);
-  // ⚠️ Isto soma o valor das PROPOSTAS ganhas, que não é necessariamente o dinheiro lançado. Desde
-  // que a janela de venda permite amarrar uma proposta numa venda que já existe sem sincronizar o
-  // valor (o usuário responde "mantenha o valor lançado"), os dois números podem divergir de
-  // propósito. Faturamento de verdade tem fonte única e é `conversions` (v_kpi_sales_value, painel
-  // Comercial); por isso o rótulo aqui diz proposta, e não "faturado".
-  const totalAprovado = aprovados.reduce((s, o) => s + Number(o.total || 0), 0);
+
+  // ⚠️ `orcamentos.total` é o valor COTADO, não o dinheiro que entrou. Desde que a janela de venda
+  // permite amarrar uma proposta numa venda que já existe SEM sincronizar o valor (o usuário
+  // responde "mantenha o valor lançado"), os dois divergem de propósito: proposta de R$ 1.638
+  // amarrada numa venda de R$ 750 continua com 1.638 no cabeçalho dela. Somar isso e chamar de
+  // faturado fazia a Central mostrar dinheiro que ninguém recebeu.
+  //
+  // 📌 A fonte do dinheiro é sempre `conversions` (§1), aqui alcançada pelo vínculo
+  // `orcamentos.conversion_id` que a própria RPC de fechamento grava. Proposta em aberto continua
+  // valendo pelo cotado, que é o que ela é.
+  const { data: conversoes } = useConversions();
+  const valorPorConversao = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const c of conversoes) m.set(c.id, Number(c.value || 0));
+    return m;
+  }, [conversoes]);
+  const valorGanho = (o: Orcamento): number => {
+    const cotado = Number(o.total || 0);
+    // ⚠️ Proposta ganha e SEM vínculo continua valendo o cotado, de propósito. `conversion_id` é FK
+    // `ON DELETE SET NULL`: no fluxo normal, cancelar a venda também devolve a proposta para
+    // "Enviado" (trigger trg_orcamento_revert_on_sale_lost), então esta linha só aparece no legado
+    // anterior ao vínculo. Zerá-la deixaria a tela mostrando "Ganho" com R$ 0, que confunde tanto
+    // quanto o número errado.
+    if (!o.conversion_id) return cotado;
+    // Não achou a venda (lista ainda chegando): mantém o cotado, zerar aqui faria a tela piscar um
+    // número falso em cima de dinheiro que existe.
+    return valorPorConversao.get(o.conversion_id) ?? cotado;
+  };
+  const totalAprovado = aprovados.reduce((s, o) => s + valorGanho(o), 0);
   const processedCount = orcamentos.filter(o => o.status === "aprovado" || o.status === "recusado").length;
   const approvalRate = processedCount > 0 ? Math.round((aprovados.length / processedCount) * 100) : 0;
 
@@ -136,7 +159,7 @@ export function OrcamentosCentral() {
         <StatCard label="Em aberto" value={String(abertos.length)} icon={<FileText className="w-4 h-4 text-slate-300" />} />
         <StatCard label="Valor em aberto" value={fmtBRL(totalAberto)} tone="teal" />
         <StatCard label="Ganhos" value={String(aprovados.length)} tone="emerald" icon={<CheckCircle2 className="w-4 h-4 text-slate-300" />} />
-        <StatCard label="Valor das propostas ganhas" value={fmtBRL(totalAprovado)} tone="emerald" />
+        <StatCard label="Faturado (ganhos)" value={fmtBRL(totalAprovado)} tone="emerald" />
         <StatCard label="Taxa de ganho" value={`${approvalRate}%`} tone={approvalRate >= 50 ? "emerald" : "amber"} />
       </div>
 
@@ -184,13 +207,12 @@ export function OrcamentosCentral() {
             const ultimo = g.itens[0];
             const aprovados = g.itens.filter(o => o.status === "aprovado");
             const emAberto = g.itens.filter(o => o.status === "rascunho" || o.status === "enviado");
-            // Valor em destaque: o que já foi ganho, se houver; senão a proposta que está de pé.
-            // ⚠️ É o valor COTADO nas propostas ganhas, não o dinheiro lançado (ver o comentário do
-            // total lá em cima): proposta amarrada a uma venda que já existia mantém o valor dela.
+            // Valor em destaque: o dinheiro já lançado, se houver venda; senão o valor cotado na
+            // proposta que está de pé. Mesma régua do total lá em cima (`valorGanho`).
             const valorDestaque = aprovados.length > 0
-              ? aprovados.reduce((s, o) => s + Number(o.total || 0), 0)
+              ? aprovados.reduce((s, o) => s + valorGanho(o), 0)
               : Number(ultimo.total || 0);
-            const rotuloValor = aprovados.length > 0 ? "Ganho (propostas)" : "Última proposta";
+            const rotuloValor = aprovados.length > 0 ? "Ganho" : "Última proposta";
             // Só os status que existem no grupo, na ordem em que importam.
             const resumo = (["aprovado", "enviado", "rascunho", "recusado", "substituido", "expirado"] as OrcamentoStatus[])
               .map(st => ({ st, n: g.itens.filter(o => o.status === st).length }))

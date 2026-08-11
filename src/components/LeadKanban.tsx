@@ -39,7 +39,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { useFunnelStages, useLeads, useNotLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useProducts, Product, ProductInput, ProductAttribute, useQuoteImages, useAppointments, useDoctors, usePatients, useConsultationTypes, useProductionOrders, useInventoryItems, useOrcamentos, useClinicLossReasons, getVigenteOrcamento, Conversion, Lead, Ticket, TransitionRule } from "../hooks/useSupabase";
+import { useFunnelStages, useLeads, useNotLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useProducts, Product, ProductInput, ProductAttribute, useQuoteImages, useAppointments, useDoctors, usePatients, useConsultationTypes, useProductionOrders, useInventoryItems, useOrcamentos, useClinicLossReasons, getVigenteOrcamento, logSystemError, Conversion, Lead, Ticket, TransitionRule } from "../hooks/useSupabase";
 import { NotLeadPanel } from "./NotLeadPanel";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -56,7 +56,7 @@ import { ProductionOrderDocument } from "./ProductionOrderDocument";
 import { OrganizarContatosButton } from "./OnboardingSync";
 // Janela ÚNICA de venda, compartilhada com a Central de Orçamentos. Mora fora deste arquivo porque
 // a Central importa o construtor de orçamento daqui, e o caminho inverso fecharia um ciclo.
-import { RegistrarVendaModal, EscolherVendaCancelarModal } from "./vendas/RegistrarVendaModal";
+import { RegistrarVendaModal, EscolherVendaCancelarModal, mensagemDeErroDeCancelamento } from "./vendas/RegistrarVendaModal";
 
 const SOURCE_LABELS: Record<string, string> = {
   'meta_ads': 'Meta Ads',
@@ -5443,12 +5443,23 @@ export function LeadKanban() {
           onCreate={async (data) => {
             // Grava ticket_id na conversão p/ o "Cancelar venda" apagá-la com precisão depois.
             const ok = await createConversion({ ...data, ticket_id: ganhoLead.ticketId });
-            if (ok) {
-              const ganhoStage = stages.find(s => s.slug === 'ganho');
-              if (ganhoStage) await moveTicket(ganhoLead.ticketId, ganhoStage.id);
-              await closeTicket(ganhoLead.ticketId, 'ganho');
+            if (!ok) return false;
+            const ganhoStage = stages.find(s => s.slug === 'ganho');
+            const movido = ganhoStage ? await moveTicket(ganhoLead.ticketId, ganhoStage.id) : true;
+            const fechado = await closeTicket(ganhoLead.ticketId, 'ganho');
+            // ⚠️ Neste ponto a venda JÁ está em `conversions`, então continua valendo `true`:
+            // devolver false faria a janela desfazer só a receita e deixar a venda de pé, que é
+            // pior. Mas se o desfecho não gravou, o card não entra em `v_kpi_wins` enquanto o
+            // dinheiro dele já entra em `v_kpi_sales_value`: faturamento e número de vendas passam
+            // a divergir por DEFINIÇÃO, e nenhum gatilho conserta isso depois. Tem que acender na
+            // Central e aparecer na tela (§0.5).
+            if (!movido || !fechado) {
+              logSystemError('VENDA_SEM_DESFECHO',
+                'Venda registrada, mas o card não ficou marcado como Ganho',
+                activeClinicId, { ticket_id: ganhoLead.ticketId, lead_id: ganhoLead.id, moveu: movido, fechou: fechado }, 'error');
+              showToast('A venda foi registrada, mas o card não ficou marcado como Ganho. Passe o card para Ganho de novo, senão ele não conta como venda nos painéis.', 'error');
             }
-            return ok;
+            return true;
           }}
         />
       )}
@@ -5593,12 +5604,10 @@ export function LeadKanban() {
               if (res.error_code === 'multiplas_vendas' && Array.isArray(res.lista)) {
                 setEscolherVendaCancelar({ ticketId: ticket.id, targetStageId, cancelAppointment, lista: res.lista });
               } else {
-                showToast(
-                  res.error_code === 'forbidden'
-                    ? 'Sem permissão para cancelar o desfecho deste card.'
-                    : 'Não foi possível cancelar. O card voltou para onde estava.',
-                  'error'
-                );
+                // ⚠️ `reopen_ticket` NÃO devolve 'forbidden': sem permissão ela levanta exceção
+                // (assert_clinic_access, errcode 42501) e a mensagem crua do Postgres chega no lugar
+                // do error_code. O tradutor da janela de venda reconhece os dois casos.
+                showToast(mensagemDeErroDeCancelamento(res.error_code), 'error');
               }
             }
           }}
@@ -5625,10 +5634,15 @@ export function LeadKanban() {
             await refetchTickets(true);
             refetchConversions();
             setEscolherVendaCancelar(null);
+            // ⚠️ Esta janela só abre com mais de uma venda no card, então `reopened` vem false: o
+            // banco apaga só a venda escolhida e o card CONTINUA em Ganho. Anunciar "voltou para o
+            // funil" mandava o usuário procurar o card onde ele não está.
             showToast(
-              res.success
-                ? 'Venda cancelada: a receita e o lançamento no Financeiro foram removidos, e o card voltou para o funil.'
-                : 'Não foi possível cancelar esta venda. O card voltou para onde estava.',
+              !res.success
+                ? mensagemDeErroDeCancelamento(res.error_code)
+                : res.reopened
+                  ? 'Venda cancelada: a receita e o lançamento no Financeiro foram removidos, e o card voltou para o funil.'
+                  : 'Venda cancelada: a receita e o lançamento no Financeiro foram removidos. O card continua em Ganho, com as outras vendas.',
               res.success ? 'success' : 'error'
             );
           }}

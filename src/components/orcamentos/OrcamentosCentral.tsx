@@ -444,10 +444,12 @@ function OrcamentoRow({ o, versaoAntiga = false, onApprove, onReject, onPrint, o
         <button title="Ver orçamento" onClick={onView} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg"><Eye className="w-4 h-4" /></button>
         {/* Editar abre o MESMO construtor do Kanban (itens, valores, projeto, validade, pagamento,
             observações e dados do documento), gravando por cima desta proposta.
-            ⚠️ Só enquanto a proposta está aberta: aprovar É a venda, e junto dela saem a receita
-            lançada, a reserva de estoque e a ordem de produção. Editar depois disso mudaria o
-            documento sem refazer nada daquilo. Para corrigir uma venda, cancele-a no Kanban. */}
-        {pending && (
+            📌 Vale também depois de GANHO: a RPC arrasta junto o que a proposta gerou (venda,
+            receita e, quando produto/quantidade/altura mudam, a reserva de estoque e a ordem de
+            produção). Mexer só em preço ou texto NÃO reprograma a fábrica.
+            ⚠️ Ela recusa a mudança de itens quando já foi entregue, quando a produção começou ou
+            quando a venda foi parcial; nesses casos o caminho é cancelar a venda no Kanban. */}
+        {(pending || o.status === "aprovado") && (
           <button title="Editar orçamento" onClick={onEdit} className="p-2 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded-lg"><Pencil className="w-4 h-4" /></button>
         )}
         {o.status === "rascunho" && (

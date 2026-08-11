@@ -1773,7 +1773,12 @@ export function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosD
       forbidden: 'Sem permissão para gravar orçamento nesta clínica.',
       invalid_status: 'Status inválido para gravar o orçamento.',
       not_found: 'Este orçamento não existe mais (pode ter sido excluído).',
-      locked_after_approval: 'Este orçamento já foi aprovado ou recusado e não pode mais ser editado. Crie outra proposta.',
+      locked_after_approval: 'Este orçamento foi recusado, expirou ou foi substituído, então não pode mais ser editado. Crie outra proposta.',
+      // ⚠️ As três abaixo só aparecem em orçamento JÁ GANHO, e só quando a edição mexe em produto,
+      // quantidade ou altura. Mudar preço, desconto ou texto continua liberado nos três casos.
+      ja_entregue: 'A mercadoria deste pedido já foi entregue e o estoque já baixou, então os itens não podem mais mudar. Dá para corrigir valores e textos. Para mudar os itens, cancele a venda no Kanban e refaça.',
+      producao_iniciada: 'A fábrica já começou (ou terminou) a produzir este pedido, então os itens não podem mais mudar. Dá para corrigir valores e textos.',
+      aprovacao_parcial: 'Este orçamento foi ganho só com parte dos itens, então mexer nas linhas mudaria o que foi vendido. Cancele a venda no Kanban e refaça.',
       no_active_clinic: 'Nenhuma clínica selecionada.',
     } as Record<string, string>)[c] || 'Não foi possível salvar o orçamento. Tente de novo.');
   };

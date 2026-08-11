@@ -54,6 +54,9 @@ import { UtmLeadFilter, leadUtmKey, NO_UTM_KEY } from "./filters/UtmLeadFilter";
 import { QuoteDocument, formatValidade, useImageDataUrl } from "./QuoteDocument";
 import { ProductionOrderDocument } from "./ProductionOrderDocument";
 import { OrganizarContatosButton } from "./OnboardingSync";
+// Janela ÚNICA de venda, compartilhada com a Central de Orçamentos. Mora fora deste arquivo porque
+// a Central importa o construtor de orçamento daqui, e o caminho inverso fecharia um ciclo.
+import { RegistrarVendaModal, EscolherVendaCancelarModal } from "./vendas/RegistrarVendaModal";
 
 const SOURCE_LABELS: Record<string, string> = {
   'meta_ads': 'Meta Ads',
@@ -802,8 +805,11 @@ function CurrencyInput({ value, onChange, className, placeholder, autoFocus }: {
   );
 }
 
-// Exportado porque a aba "Vendas sugeridas" (ConvAIReview) aprova a sugestão da IA
-// pelo MESMO caminho do Kanban: uma regra de negócio, um dono.
+// ⚠️ PENDÊNCIA (11/08): o Kanban e a Central de Orçamentos migraram para a janela única
+// (`vendas/RegistrarVendaModal`), que é a que pergunta se a proposta é a MESMA venda já lançada ou
+// outra. Este modal ficou de pé APENAS para a aba "Vendas sugeridas" (ConvAIReview), que aprova a
+// sugestão da IA por aqui. Ele lança venda avulsa e não conhece proposta nenhuma: enquanto existir,
+// aprovar por lá continua deixando a proposta viva no card. Migrar aquela tela encerra o assunto.
 export function GanhoModal({ lead, ticketId, isConversionStage, onClose, onCancel, onCreate, createPatient, updateLead }: {
   lead: { id: string; name: string; phone?: string | null; patientId?: string | null; ctwaClid?: string | null; email?: string | null };
   ticketId: string;
@@ -3223,11 +3229,11 @@ export function LeadKanban() {
   const { tickets, loading: ticketsLoading, refetch: refetchTickets, moveTicket, reopenTicket, moveTicketKeepOutcome, openTicket, closeTicket, finalizeTicket, removeTicket } = useTickets();
   // Por TICKET: a venda pertence ao atendimento, não ao contato. `semTicketByLead` carrega o
   // legado sem vínculo, que o quadro pendura num card só (ver `vendasPorTicket`).
-  const { byTicket: conversionsByTicket, semTicketByLead: conversionsSemTicket, create: createConversion } = useConversions();
+  const { byTicket: conversionsByTicket, semTicketByLead: conversionsSemTicket, create: createConversion, refetch: refetchConversions } = useConversions();
   // Fonte ÚNICA dos motivos de perda: este formulário e o LossModal leem a mesma lista.
   const { lossReasons: motivosPerda } = useClinicLossReasons();
   const { aiConfig, updateAI } = useSettings();
-  const { data: orcamentos, save: saveOrcamento } = useOrcamentos();
+  const { data: orcamentos, save: saveOrcamento, approve: aprovarOrcamento } = useOrcamentos();
   const [ganhoLead, setGanhoLead] = useState<{ id: string; name: string; phone: string | null; patientId: string | null; prevStageId: string | null; ticketId: string; ctwaClid?: string | null; email?: string | null } | null>(null);
   // Captura de atribuição para etapa de conversão que NÃO é 'ganho' (ex.: "Compareceu"/"Agendado") —
   // só p/ lead de anúncio (tem ctwa_clid) com e-mail faltando, para enriquecer a conversão. Carrega o
@@ -3242,6 +3248,12 @@ export function LeadKanban() {
   // Aviso ao arrastar um card já resolvido (venda/perda) para uma etapa ativa: manter (novo
   // ciclo, card único) ou cancelar (reabre o mesmo ticket). Guarda o ticket p/ o fluxo "Manter".
   const [reopenLead, setReopenLead] = useState<{ ticket: Ticket; outcome: 'ganho' | 'perdido'; targetStageId: string } | null>(null);
+  // Card com VÁRIAS vendas: a RPC recusa o cancelamento sem saber qual delas e devolve a lista.
+  // Guardamos o pedido inteiro para repetir a chamada com a venda escolhida.
+  const [escolherVendaCancelar, setEscolherVendaCancelar] = useState<{
+    ticketId: string; targetStageId: string; cancelAppointment: boolean;
+    lista: { conversion_id: string; valor: number; data: string; descricao: string | null }[];
+  } | null>(null);
   const { data: transitionRules, create: createRule, remove: removeRule, update: updateRule, reorder: reorderRules, testRule, lookupActiveStageByPhone } = useTransitionRules();
   const [showModal, setShowModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -5408,14 +5420,24 @@ export function LeadKanban() {
         onRestore={async (id) => { await restoreNotLead(id); refetchTickets(true); }}
       />
 
-      {/* Ganho Modal */}
+      {/* Janela de venda (a mesma da Central de Orçamentos) */}
       {ganhoLead && (
-        <GanhoModal
+        <RegistrarVendaModal
           lead={ganhoLead}
           ticketId={ganhoLead.ticketId}
           isConversionStage={stages.find(s => s.slug === 'ganho')?.is_conversion === true}
+          // A lista da clínica inteira: a janela filtra as propostas VIVAS deste card.
+          orcamentos={orcamentos}
+          aprovarProposta={aprovarOrcamento}
           createPatient={createPatient}
           updateLead={update}
+          // Etapas para onde o card volta ao cancelar uma venda. Terminais e ocultas ficam de fora:
+          // a RPC recusa ganho/perdido, e etapa oculta não desenha coluna no quadro.
+          stagesParaReabrir={stages
+            .filter(s => s.slug !== 'ganho' && s.slug !== 'perdido' && !s.is_hidden)
+            .map(s => ({ id: s.id, name: s.name }))}
+          cancelarVenda={(conversionId, stageId) => reopenTicket(ganhoLead.ticketId, stageId, false, conversionId)}
+          onAtualizado={async () => { await refetchTickets(true); refetchConversions(); }}
           onClose={() => setGanhoLead(null)}
           onCancel={() => setGanhoLead(null)}
           onCreate={async (data) => {
@@ -5564,16 +5586,20 @@ export function LeadKanban() {
             const res = await reopenTicket(ticket.id, targetStageId, cancelAppointment);
             await refetchTickets(true);
             // ⚠️ A recusa era MUDA até 11/08: o card pulava de coluna, a RPC negava e ele voltava
-            // sozinho, sem explicação. Com N vendas por card, 'multiplas_vendas' é a recusa comum.
+            // sozinho, sem explicação. Com N vendas por card, 'multiplas_vendas' é a recusa comum,
+            // e ela vem com a LISTA das vendas: em vez de mandar o usuário procurar em outra tela,
+            // perguntamos qual cancelar e repetimos a chamada com o alvo.
             if (!res.success) {
-              showToast(
-                res.error_code === 'multiplas_vendas'
-                  ? 'Este card tem mais de uma venda lançada, então é preciso dizer qual cancelar. Abra "Ver / editar orçamento" e cancele pela proposta correspondente.'
-                  : res.error_code === 'forbidden'
+              if (res.error_code === 'multiplas_vendas' && Array.isArray(res.lista)) {
+                setEscolherVendaCancelar({ ticketId: ticket.id, targetStageId, cancelAppointment, lista: res.lista });
+              } else {
+                showToast(
+                  res.error_code === 'forbidden'
                     ? 'Sem permissão para cancelar o desfecho deste card.'
                     : 'Não foi possível cancelar. O card voltou para onde estava.',
-                'error'
-              );
+                  'error'
+                );
+              }
             }
           }}
           checkAppointment={async (ticketId) => {
@@ -5584,6 +5610,27 @@ export function LeadKanban() {
               .order('date', { ascending: false });
             const a = (data || []).find((x: any) => x.status !== 'cancelado' && x.status !== 'faltou');
             return a ? { id: a.id, date: a.date, time: a.time, status: a.status, doctorName: (a as any).doctor?.name } : null;
+          }}
+        />
+      )}
+
+      {/* Qual venda cancelar (card com mais de uma) */}
+      {escolherVendaCancelar && (
+        <EscolherVendaCancelarModal
+          vendas={escolherVendaCancelar.lista}
+          onClose={() => setEscolherVendaCancelar(null)}
+          onEscolher={async (conversionId) => {
+            const { ticketId, targetStageId, cancelAppointment } = escolherVendaCancelar;
+            const res = await reopenTicket(ticketId, targetStageId, cancelAppointment, conversionId);
+            await refetchTickets(true);
+            refetchConversions();
+            setEscolherVendaCancelar(null);
+            showToast(
+              res.success
+                ? 'Venda cancelada: a receita e o lançamento no Financeiro foram removidos, e o card voltou para o funil.'
+                : 'Não foi possível cancelar esta venda. O card voltou para onde estava.',
+              res.success ? 'success' : 'error'
+            );
           }}
         />
       )}

@@ -6,11 +6,14 @@ import { FileText, Send, CheckCircle2, XCircle, Search, ExternalLink, Printer, D
 import { OrcamentoModal } from "../LeadKanban";
 import { cn } from "@/src/lib/utils";
 import { useOrcamentos, useSettings, useProducts, useProtocols, Orcamento, OrcamentoStatus } from "../../hooks/useSupabase";
-import { supabase } from "../../lib/supabase";
 import { useToast } from "../ui/toast";
-import { Button, Modal, Field, StatCard, StatusBadge, EmptyState, inputCls, fmtDate, fmtQty } from "../production/shared";
+import { Button, Modal, Field, StatCard, StatusBadge, EmptyState, inputCls, fmtDate } from "../production/shared";
 import { useImageDataUrl } from "../QuoteDocument";
 import { ReciboDocument, ReciboItem } from "./ReciboDocument";
+// Janela ÚNICA de venda: a mesma do Kanban. Marcar Ganho aqui e arrastar o card lá são o MESMO
+// evento, e enquanto foram duas telas o card ganho pelo Kanban deixava a proposta viva, e a
+// proposta aprovada aqui lançava dinheiro em cima de uma venda que já existia.
+import { RegistrarVendaModal, resolveOrcamentoLines } from "../vendas/RegistrarVendaModal";
 
 function fmtBRL(n: number | null | undefined) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(n ?? 0));
@@ -49,18 +52,8 @@ function goToLeadKanban() {
   window.dispatchEvent(new CustomEvent("app-navigate", { detail: { tab: "ai-secretary" } }));
 }
 
-function mapApproveError(code?: string) {
-  return (
-    {
-      no_open_ticket: "Este lead não tem um card ativo no funil — abra/reabra o card no Kanban antes de marcar o ganho.",
-      ticket_perdido: "O card deste lead está marcado como Perdido — reverta a perda no Kanban antes de marcar o ganho.",
-      no_lead_linked: "Este orçamento não está vinculado a um lead.",
-      already_processed: "Este orçamento já foi processado (ganho/recusado).",
-      forbidden: "Sem permissão para fechar esta venda.",
-      orcamento_not_found: "Orçamento não encontrado.",
-    } as Record<string, string>
-  )[code || ""] || "Não foi possível registrar o ganho.";
-}
+// As mensagens de recusa do fechamento de venda moram na janela de venda (mensagemDeErroDeVenda),
+// junto com as duas telas que a abrem: duas listas de erro divergiam na primeira mudança da RPC.
 
 export function OrcamentosCentral() {
   const showToast = useToast();
@@ -288,21 +281,25 @@ export function OrcamentosCentral() {
 
       <AnimatePresence>
         {approveTarget && (
-          <ApproveModal
-            orcamento={approveTarget}
-            onClose={() => setApproveTarget(null)}
-            onConfirm={async opts => {
-              const res = await approve(approveTarget.id, opts);
-              if (res.success) {
-                // Desde 10/08 todo orçamento aprovado lança a SUA venda, com a sua data, mesmo que
-                // o cliente já tenha comprado antes no mesmo card. O aviso antigo de "venda já
-                // existente, sem duplicar receita" descrevia o atalho que sumia com o dinheiro.
-                showToast(`Orçamento #${approveTarget.number} ganho: venda registrada.`, "success");
-              } else {
-                showToast(mapApproveError(res.error_code), "error");
-              }
-              setApproveTarget(null);
+          // ⚠️ `ticketId` vai NULO de propósito: a Central conhece a proposta, não o card. Quem
+          // resolve é a própria janela, pelo ticket ABERTO do cliente, que é o mesmo que a RPC vai
+          // usar. `orcamentos.ticket_id` pode apontar para um card já fechado, e aí a pergunta
+          // "mesma venda ou outra?" olharia para as vendas do card errado.
+          //
+          // Sem `onCreate`: aqui a venda nasce SEMPRE de uma proposta (foi dela que o usuário
+          // clicou). Venda avulsa, editar e cancelar venda continuam no Kanban.
+          <RegistrarVendaModal
+            lead={{
+              id: approveTarget.lead_id ?? "",
+              name: approveTarget.client_name || approveTarget.lead?.name || "",
+              phone: approveTarget.lead?.phone ?? null,
             }}
+            ticketId={null}
+            orcamentos={orcamentos}
+            orcamentoInicialId={approveTarget.id}
+            aprovarProposta={approve}
+            onClose={() => setApproveTarget(null)}
+            onCancel={() => setApproveTarget(null)}
           />
         )}
         {rejectTarget && (
@@ -488,188 +485,6 @@ function OrcamentoRow({ o, versaoAntiga = false, onApprove, onReject, onPrint, o
   );
 }
 
-// Mini-confirmação de pagamento — "Aprovar" fecha a venda (Ganho + receita), decisão do usuário.
-function ApproveModal({ orcamento, onClose, onConfirm }: {
-  orcamento: Orcamento;
-  onClose: () => void;
-  onConfirm: (opts: { paymentMethod: string; paymentStatus: "pago" | "pendente"; paymentDate: string; dataEntrega?: string | null; lineKeys?: string[] | null; total?: number | null }) => Promise<void>;
-}) {
-  const { clinic } = useSettings();
-  const { data: products } = useProducts();
-  const { data: protocols } = useProtocols();
-  const isFactory = clinic?.category === "outro";
-  const [paymentMethod, setPaymentMethod] = useState("pix");
-  const [paymentStatus, setPaymentStatus] = useState<"pago" | "pendente">("pago");
-  const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [saving, setSaving] = useState(false);
-  const [eta, setEta] = useState<any>(null);
-  const [etaLoading, setEtaLoading] = useState(false);
-  const [dataEntrega, setDataEntrega] = useState<string>(orcamento.data_entrega_prevista ?? "");
-
-  // Itens cotados. O vendedor marca quais viram pedido/OP (a fábrica costuma cotar 2 opções — ex.:
-  // fio grosso e fio fino — e o cliente escolhe uma). Todos marcados por padrão.
-  const lines = useMemo(() => resolveOrcamentoLines(orcamento.snapshot, products, protocols), [orcamento.snapshot, products, protocols]);
-  const [selected, setSelected] = useState<Set<string> | null>(null);
-  const sel = selected ?? new Set(lines.map(l => l.key));
-  const toggle = (key: string) => {
-    const next = new Set(sel);
-    if (next.has(key)) next.delete(key); else next.add(key);
-    setSelected(next);
-  };
-  const selectedLines = lines.filter(l => sel.has(l.key));
-  const selectedTotal = selectedLines.reduce((s, l) => s + l.value, 0);
-  const isPartial = lines.length > 1 && selectedLines.length < lines.length;
-  // Chave estável p/ re-rodar a simulação quando a seleção muda.
-  const selKey = selectedLines.map(l => l.key).join(",");
-
-  // Simula disponibilidade/prazo dos itens SELECIONADOS. Depende de isFactory porque `clinic` chega
-  // async (na 1ª renderização é null) — sem isso o efeito rodava cedo demais e nunca chamava a RPC.
-  useEffect(() => {
-    if (!isFactory) return;
-    if (selectedLines.length === 0) { setEta(null); setEtaLoading(false); return; }
-    const payload = selectedLines
-      .filter(l => l.productId.startsWith("p:"))
-      .map(l => ({ productId: l.productId, qty: String(l.qty), altura: l.altura ? String(l.altura) : "" }));
-    if (payload.length === 0) { setEta(null); setEtaLoading(false); return; }
-    let cancelled = false;
-    setEtaLoading(true);
-    (async () => {
-      const { data, error } = await supabase.rpc("simulate_production_eta", { p_clinic_id: orcamento.clinic_id, p_lines: payload });
-      if (cancelled) return;
-      setEtaLoading(false);
-      if (error || !(data as any)?.success) { setEta({ error: true }); return; }
-      const res = data as any;
-      setEta(res);
-      setDataEntrega(prev => prev || res.resumo?.data_sugerida || "");
-    })();
-    return () => { cancelled = true; };
-  }, [isFactory, selKey, orcamento.clinic_id]);
-
-  const fmtDataBR = (iso?: string) => iso ? new Date(iso + "T00:00:00").toLocaleDateString("pt-BR") : "";
-
-  const METHODS = [
-    { id: "pix", label: "Pix" },
-    { id: "cartao", label: "Cartão" },
-    { id: "dinheiro", label: "Dinheiro" },
-    { id: "plano", label: "Plano" },
-  ];
-
-  return (
-    <Modal
-      title={`Marcar ganho do orçamento #${orcamento.number}`}
-      subtitle="Isso fecha a venda: marca o card como Ganho, lança a receita e programa a produção."
-      onClose={onClose}
-      footer={<>
-        <Button variant="outline" size="sm" onClick={onClose}>Cancelar</Button>
-        <Button size="sm" onClick={async () => {
-          setSaving(true);
-          await onConfirm({
-            paymentMethod, paymentStatus, paymentDate,
-            dataEntrega: isFactory ? (dataEntrega || null) : null,
-            // Só manda a seleção quando ela é parcial — sem seleção, o servidor mantém tudo/total cotado.
-            lineKeys: isPartial ? selectedLines.map(l => l.key) : null,
-            total: isPartial ? selectedTotal : null,
-          });
-          setSaving(false);
-        }} disabled={saving || selectedLines.length === 0}>
-          {saving ? "Registrando…" : "Confirmar venda"}
-        </Button>
-      </>}
-    >
-      <div className="space-y-4">
-        <div className="bg-emerald-50 rounded-xl px-4 py-3 flex items-center justify-between">
-          <span className="text-sm font-bold text-emerald-800">Valor da venda</span>
-          <div className="text-right">
-            <span className="text-xl font-black text-emerald-700">{fmtBRL(isPartial ? selectedTotal : orcamento.total)}</span>
-            {isPartial && <div className="text-[11px] text-emerald-700/70">cotado {fmtBRL(orcamento.total)}</div>}
-          </div>
-        </div>
-
-        {lines.length > 1 && (
-          <div className="rounded-xl border border-slate-200 p-3 space-y-2">
-            <div className="text-xs font-bold text-slate-500 uppercase tracking-wide">Itens que viram pedido</div>
-            {lines.map(l => (
-              <label key={l.key} className="flex items-center gap-2.5 cursor-pointer select-none">
-                <input type="checkbox" checked={sel.has(l.key)} onChange={() => toggle(l.key)} className="w-4 h-4 accent-teal-600 shrink-0" />
-                <span className={cn("flex-1 min-w-0 text-sm truncate", sel.has(l.key) ? "text-slate-700 font-semibold" : "text-slate-400 line-through")}>
-                  {l.name}
-                </span>
-                <span className="text-xs text-slate-400 shrink-0">{l.qtyLine}</span>
-                <span className={cn("text-sm font-bold tabular-nums shrink-0 w-24 text-right", sel.has(l.key) ? "text-slate-700" : "text-slate-300")}>{fmtBRL(l.value)}</span>
-              </label>
-            ))}
-            {selectedLines.length === 0 && <p className="text-[11px] text-rose-500 font-semibold">Selecione ao menos um item.</p>}
-            <p className="text-[11px] text-slate-400">Só os marcados geram receita, pedido e ordem de produção. Os demais ficam registrados na cotação.</p>
-          </div>
-        )}
-
-        {isFactory && (
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
-            <div className="text-xs font-bold text-slate-500 uppercase tracking-wide">Disponibilidade e prazo</div>
-            {etaLoading ? (
-              <p className="text-sm text-slate-400 py-1">Verificando estoque e produção…</p>
-            ) : eta && !eta.error ? (
-              <>
-                <div className="space-y-1">
-                  {eta.linhas.map((ln: any, idx: number) => (
-                    <div key={idx} className="flex items-center justify-between text-xs gap-2">
-                      <span className="text-slate-600 truncate">{ln.label}</span>
-                      {ln.sem_estimativa ? (
-                        <span className="text-amber-600 font-semibold shrink-0">sem estimativa</span>
-                      ) : ln.em_estoque ? (
-                        <span className="text-emerald-600 font-semibold shrink-0">✓ em estoque</span>
-                      ) : (
-                        <span className="text-blue-600 font-semibold shrink-0">⏳ produzir {fmtQty(Number(ln.falta))} m</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                <div className="pt-2 border-t border-slate-200 flex items-center justify-between gap-2">
-                  <span className="text-xs text-slate-500">
-                    {eta.resumo.tudo_em_estoque
-                      ? "Tudo em estoque"
-                      : `Produção ~${eta.resumo.dias_producao} dia(s)${eta.resumo.dias_expedicao ? ` + ${eta.resumo.dias_expedicao} expedição` : ""}`}
-                  </span>
-                  <span className="text-sm font-black text-slate-800 shrink-0">Sugerido: {fmtDataBR(eta.resumo.data_sugerida)}</span>
-                </div>
-                {eta.resumo.sem_estimativa && (
-                  <p className="text-[11px] text-amber-600">Alguma linha sem taxa de produção cadastrada — o prazo pode estar incompleto.</p>
-                )}
-              </>
-            ) : eta?.error ? (
-              <p className="text-sm text-amber-600 py-1">Não foi possível verificar a disponibilidade agora.</p>
-            ) : selectedLines.length === 0 ? (
-              <p className="text-sm text-slate-400 py-1">Selecione ao menos um item para verificar.</p>
-            ) : (
-              <p className="text-sm text-slate-400 py-1">Nenhum item de produção neste orçamento.</p>
-            )}
-            <Field label="Prazo de entrega (confirme ou ajuste)">
-              <input type="date" className={inputCls} value={dataEntrega} onChange={e => setDataEntrega(e.target.value)} />
-            </Field>
-          </div>
-        )}
-
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Forma de pagamento">
-            <select className={inputCls} value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}>
-              {METHODS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-            </select>
-          </Field>
-          <Field label="Status">
-            <select className={inputCls} value={paymentStatus} onChange={e => setPaymentStatus(e.target.value as "pago" | "pendente")}>
-              <option value="pago">Pago</option>
-              <option value="pendente">Pendente</option>
-            </select>
-          </Field>
-        </div>
-        <Field label="Data do pagamento">
-          <input type="date" className={inputCls} value={paymentDate} onChange={e => setPaymentDate(e.target.value)} />
-        </Field>
-      </div>
-    </Modal>
-  );
-}
-
 function RejectModal({ orcamento, onClose, onConfirm }: {
   orcamento: Orcamento;
   onClose: () => void;
@@ -768,39 +583,6 @@ function EntregaModal({ orcamento, onClose, onConfirm }: {
       </Field>
     </Modal>
   );
-}
-
-// Uma linha do orçamento resolvida contra o catálogo. `key` é a MESMA chave que o provision usa
-// (orcamento_line_key = 'L' + ordinal da linha no snapshot), por isso o ordinal conta TODAS as linhas
-// cruas — inclusive as puladas — para não desalinhar a seleção do que vira pedido/OP.
-type OrcLine = { ord: number; key: string; name: string; qtyLine: string; value: number; productId: string; qty: number; altura: number };
-
-function resolveOrcamentoLines(snapshot: any, products: any[], protocols: any[]): OrcLine[] {
-  const lines = Array.isArray(snapshot?.lines) ? snapshot.lines : [];
-  const num = (v: any) => Number(String(v ?? "").replace(",", ".")) || 0;
-  const out: OrcLine[] = [];
-  lines.forEach((l: any, i: number) => {
-    const ord = i + 1;
-    const key = String(l.productId || "");
-    const id = key.slice(2);
-    const prod = key.startsWith("p:") ? products.find(p => p.id === id) : null;
-    const prot = key.startsWith("t:") ? protocols.find((t: any) => t.id === id) : null;
-    if (!prod && !prot) return;
-    const q = num(l.qty);
-    if (q <= 0) return;
-    const name = prod?.name ?? prot?.name ?? "—";
-    const unit = prod?.unit ?? "serviço";
-    const isArea = !!prod?.charge_by_area;
-    const unitPrice = l.price !== "" && l.price != null && !isNaN(num(l.price)) ? num(l.price) : Number(prod?.unit_price ?? prot?.price ?? 0);
-    const altura = isArea ? (num(l.altura) || 1) : 1;
-    const base = q * altura * unitPrice;
-    const pct = Math.min(100, Math.max(0, num(l.discount)));
-    const fee = num(l.fee);
-    const value = Math.max(0, base - base * (pct / 100)) + fee;
-    const qtyLine = isArea ? `${q}m × ${altura}m` : `${q} ${unit}`;
-    out.push({ ord, key: `L${ord}`, name, qtyLine, value, productId: key, qty: q, altura: isArea ? altura : 0 });
-  });
-  return out;
 }
 
 // Itens do documento (recibo). Se o orçamento foi aprovado só com alguns itens (o cliente escolheu

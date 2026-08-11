@@ -3092,6 +3092,34 @@ export function useConversions() {
   return { data, loading, byLead, byTicket, semTicketByLead, create, remove, update, refetch: fetch };
 }
 
+// Editar uma venda JÁ lançada (valor, data, forma de pagamento e descrição). A receita do
+// Financeiro acompanha os quatro campos; o orçamento, o estoque e a produção NÃO são tocados.
+// Até 11/08 venda lançada à mão não tinha edição nenhuma: só apagar e refazer, o que trocava a
+// data da venda e mexia no faturamento do mês sem ninguém pedir.
+//
+// 📌 Função solta, fora de hook, de propósito: quem chama é a janela de venda, que abre por cima
+// do Kanban E da Central, e não pode pagar o carregamento das conversões da clínica inteira só
+// para ter esta chamada.
+export async function updateSale(
+  conversionId: string,
+  patch: { value?: number | null; convertedAt?: string | null; paymentMethod?: string | null; description?: string | null },
+): Promise<RpcResult> {
+  const { data, error } = await supabase.rpc('update_conversion_sale', {
+    p_conversion_id: conversionId,
+    p_value: patch.value ?? null,
+    p_converted_at: patch.convertedAt ?? null,
+    p_payment_method: patch.paymentMethod ?? null,
+    p_description: patch.description ?? null,
+  });
+  if (error) {
+    // §0.5: mexer em dinheiro já lançado e falhar em silêncio é o pior dos dois mundos.
+    logSystemError('VENDA_EDIT_FAIL', `update_conversion_sale: falha ao editar a venda (${error.message})`,
+      null, { conversion_id: conversionId, error: error.message }, 'error');
+    return { success: false, error_code: error.message };
+  }
+  return data as RpcResult;
+}
+
 // ==========================================
 // PROTOCOLS
 // ==========================================
@@ -4061,6 +4089,9 @@ export interface Orcamento {
   entregue_at: string | null;            // entrega REAL: é o que dispara a baixa de estoque
   entregue_por: string | null;
   approved_line_keys?: string[] | null;  // itens aprovados ('L1','L2'…); null = todos do snapshot
+  // Venda (conversions) que ESTA proposta fechou. É o que permite cancelar uma venda e reverter só
+  // o orçamento dela, e é o que impede duas propostas de se dizerem donas do mesmo dinheiro.
+  conversion_id?: string | null;
   pagamento: string | null;
   notes: string | null;
   reject_reason: string | null;
@@ -4184,7 +4215,12 @@ export function useOrcamentos() {
   };
 
   // Aprovar = fecha a venda (Ganho + receita). Idempotente no servidor.
-  const approve = async (id: string, opts: { paymentMethod: string; paymentStatus: 'pago' | 'pendente'; paymentDate: string; category?: string; dataEntrega?: string | null; lineKeys?: string[] | null; total?: number | null }): Promise<RpcResult> => {
+  // ⚠️ `linkConversionId` inverte o significado da chamada: com ele a RPC NÃO cria dinheiro, só
+  // amarra a proposta numa venda que já existe no card (e manda para a produção). É o que impede o
+  // faturamento de dobrar quando a venda foi lançada à mão no Kanban e a proposta ficou em aberto.
+  // `linkSyncValue` traz o valor da proposta para a venda e para a receita; sem ele, o valor
+  // lançado fica como está.
+  const approve = async (id: string, opts: { paymentMethod: string; paymentStatus: 'pago' | 'pendente'; paymentDate: string; category?: string; dataEntrega?: string | null; lineKeys?: string[] | null; total?: number | null; linkConversionId?: string | null; linkSyncValue?: boolean }): Promise<RpcResult> => {
     const { data: res, error } = await supabase.rpc('close_sale_from_orcamento', {
       p_orcamento_id: id,
       p_payment_method: opts.paymentMethod,
@@ -4194,6 +4230,8 @@ export function useOrcamentos() {
       p_data_entrega: opts.dataEntrega || null,
       p_line_keys: opts.lineKeys ?? null,
       p_total: opts.total ?? null,
+      p_link_conversion_id: opts.linkConversionId ?? null,
+      p_link_sync_value: opts.linkSyncValue ?? false,
     });
     await fetch(true);
     if (error) return { success: false, error_code: error.message };

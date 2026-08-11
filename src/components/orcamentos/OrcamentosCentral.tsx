@@ -73,6 +73,11 @@ export function OrcamentosCentral() {
   const abertos = orcamentos.filter(o => o.status === "rascunho" || o.status === "enviado");
   const aprovados = orcamentos.filter(o => o.status === "aprovado");
   const totalAberto = abertos.reduce((s, o) => s + Number(o.total || 0), 0);
+  // ⚠️ Isto soma o valor das PROPOSTAS ganhas, que não é necessariamente o dinheiro lançado. Desde
+  // que a janela de venda permite amarrar uma proposta numa venda que já existe sem sincronizar o
+  // valor (o usuário responde "mantenha o valor lançado"), os dois números podem divergir de
+  // propósito. Faturamento de verdade tem fonte única e é `conversions` (v_kpi_sales_value, painel
+  // Comercial); por isso o rótulo aqui diz proposta, e não "faturado".
   const totalAprovado = aprovados.reduce((s, o) => s + Number(o.total || 0), 0);
   const processedCount = orcamentos.filter(o => o.status === "aprovado" || o.status === "recusado").length;
   const approvalRate = processedCount > 0 ? Math.round((aprovados.length / processedCount) * 100) : 0;
@@ -131,7 +136,7 @@ export function OrcamentosCentral() {
         <StatCard label="Em aberto" value={String(abertos.length)} icon={<FileText className="w-4 h-4 text-slate-300" />} />
         <StatCard label="Valor em aberto" value={fmtBRL(totalAberto)} tone="teal" />
         <StatCard label="Ganhos" value={String(aprovados.length)} tone="emerald" icon={<CheckCircle2 className="w-4 h-4 text-slate-300" />} />
-        <StatCard label="Faturado (ganhos)" value={fmtBRL(totalAprovado)} tone="emerald" />
+        <StatCard label="Valor das propostas ganhas" value={fmtBRL(totalAprovado)} tone="emerald" />
         <StatCard label="Taxa de ganho" value={`${approvalRate}%`} tone={approvalRate >= 50 ? "emerald" : "amber"} />
       </div>
 
@@ -179,11 +184,13 @@ export function OrcamentosCentral() {
             const ultimo = g.itens[0];
             const aprovados = g.itens.filter(o => o.status === "aprovado");
             const emAberto = g.itens.filter(o => o.status === "rascunho" || o.status === "enviado");
-            // Valor em destaque: o que já virou venda, se houver; senão a proposta que está de pé.
+            // Valor em destaque: o que já foi ganho, se houver; senão a proposta que está de pé.
+            // ⚠️ É o valor COTADO nas propostas ganhas, não o dinheiro lançado (ver o comentário do
+            // total lá em cima): proposta amarrada a uma venda que já existia mantém o valor dela.
             const valorDestaque = aprovados.length > 0
               ? aprovados.reduce((s, o) => s + Number(o.total || 0), 0)
               : Number(ultimo.total || 0);
-            const rotuloValor = aprovados.length > 0 ? "Ganho" : "Última proposta";
+            const rotuloValor = aprovados.length > 0 ? "Ganho (propostas)" : "Última proposta";
             // Só os status que existem no grupo, na ordem em que importam.
             const resumo = (["aprovado", "enviado", "rascunho", "recusado", "substituido", "expirado"] as OrcamentoStatus[])
               .map(st => ({ st, n: g.itens.filter(o => o.status === st).length }))

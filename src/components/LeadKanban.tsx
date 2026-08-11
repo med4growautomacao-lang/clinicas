@@ -39,7 +39,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { useFunnelStages, useLeads, useNotLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useProducts, Product, ProductInput, ProductAttribute, useQuoteImages, useAppointments, useDoctors, usePatients, useConsultationTypes, useProductionOrders, useInventoryItems, useOrcamentos, getVigenteOrcamento, Conversion, Lead, Ticket, TransitionRule } from "../hooks/useSupabase";
+import { useFunnelStages, useLeads, useNotLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useProducts, Product, ProductInput, ProductAttribute, useQuoteImages, useAppointments, useDoctors, usePatients, useConsultationTypes, useProductionOrders, useInventoryItems, useOrcamentos, useClinicLossReasons, getVigenteOrcamento, Conversion, Lead, Ticket, TransitionRule } from "../hooks/useSupabase";
 import { NotLeadPanel } from "./NotLeadPanel";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -608,27 +608,39 @@ function LossModal({ lead, onClose, onCancel, onConfirm }: {
   lead: { id: string; name: string };
   onClose: () => void;
   onCancel: () => void;
-  onConfirm: (reason: string) => Promise<void>;
+  onConfirm: (reason: string, slug: string, note: string | null) => Promise<void>;
 }) {
   const [selected, setSelected] = useState('');
-  const [customText, setCustomText] = useState('');
+  const [nota, setNota] = useState('');
   const [saving, setSaving] = useState(false);
+  // O textarea agora está SEMPRE montado, então `autoFocus` não serve: o React só o aplica no
+  // mount, quando ainda não há motivo escolhido. Sem isto, escolher "Outro" pintava o campo de
+  // vermelho e obrigava a preencher, mas o cursor nunca ia parar lá.
+  const notaRef = useRef<HTMLTextAreaElement>(null);
 
-  const REASONS = ['Preço alto', 'Escolheu concorrente', 'Não respondeu', 'Sem interesse', 'Fora do perfil', 'Fora do raio', 'Agendou e não compareceu', 'Tentativas de follow-up esgotadas', 'Tentativas esgotadas', 'Sem dinheiro', 'Sem perfil', 'Sem limite no cartão', 'Comprou com outra empresa', 'Outro'];
-  const isOutro = selected === 'Outro';
-  const finalReason = isOutro ? customText.trim() : selected;
-  const canConfirm = !saving && finalReason.length > 0;
+  // Lista vinda do CATÁLOGO da clínica (get_clinic_loss_reasons). Antes eram 14 itens escritos
+  // na mão aqui e outros 14 no formulário de edição, divergindo em acento em 3 deles.
+  const { lossReasons, loading: carregandoMotivos, erro: erroMotivos, recarregar } = useClinicLossReasons();
+  const escolhido = lossReasons.find(r => r.slug === selected) ?? null;
+  const isOutro = selected === 'outro';
+  // "Outro" sem explicação é lixo no relatório: é o único caso em que a anotação é obrigatória.
+  const canConfirm = !saving && !!escolhido && (!isOutro || nota.trim().length > 0);
+
+  useEffect(() => { if (isOutro) notaRef.current?.focus(); }, [isOutro]);
 
   const handleConfirm = async () => {
-    if (!canConfirm) return;
+    if (!canConfirm || !escolhido) return;
     setSaving(true);
-    await onConfirm(finalReason);
+    await onConfirm(escolhido.label, escolhido.slug, nota.trim() || null);
     setSaving(false);
     onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onCancel}>
+    // ⚠️ z-[90] como TODOS os modais irmãos deste arquivo, e não z-50: a gaveta do chat (LeadChat)
+    // é z-[70]. Em z-50 este modal abria ATRÁS dela e, no celular (gaveta w-full), ficava invisível
+    // — quem mudava a etapa para Perdido dentro do chat via o menu voltar sozinho e nada acontecer.
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onCancel}>
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
@@ -647,34 +659,64 @@ function LossModal({ lead, onClose, onCancel, onConfirm }: {
 
           <div className="space-y-1.5">
             <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Motivo</label>
-            <div className="flex flex-wrap gap-1.5">
-              {REASONS.map(r => (
-                <button key={r} type="button" onClick={() => setSelected(r)}
-                  className={cn("px-3 py-1.5 rounded-lg text-xs font-bold border transition-all",
-                    selected === r ? "bg-rose-600 text-white border-rose-600" : "bg-white text-slate-600 border-slate-200 hover:border-rose-300"
-                  )}>
-                  {r}
-                </button>
-              ))}
-            </div>
+            {carregandoMotivos ? (
+              <div className="flex items-center gap-2 text-xs text-slate-400 py-2">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Carregando motivos...
+              </div>
+            ) : erroMotivos || lossReasons.length === 0 ? (
+              /* Nunca deixar o quadro em branco: sem isso a pessoa não entende por que o botão não
+                 habilita, e a perda simplesmente deixa de ser registrada.
+                 Falha de leitura e lista vazia são causas DIFERENTES e pedem ações diferentes
+                 (tentar de novo x configurar), então não podem mostrar o mesmo texto. */
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 space-y-1.5">
+                <p className="text-xs font-bold text-amber-800">
+                  {erroMotivos ? 'Não consegui carregar a lista de motivos.' : 'Nenhum motivo de perda está habilitado.'}
+                </p>
+                <p className="text-[11px] text-amber-700 leading-snug">
+                  {erroMotivos
+                    ? 'Sem ela não dá para registrar a perda. Tente de novo; se continuar, avise o suporte.'
+                    : 'Sem ao menos um motivo habilitado não dá para registrar a perda. Avise o suporte para liberar a lista.'}
+                </p>
+                {erroMotivos && (
+                  <button type="button" onClick={() => recarregar()} className="text-[11px] font-bold text-amber-900 underline underline-offset-2">
+                    Tentar de novo
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {lossReasons.map(r => (
+                  <button key={r.slug} type="button" onClick={() => setSelected(r.slug)} title={r.descricao}
+                    className={cn("px-3 py-1.5 rounded-lg text-xs font-bold border transition-all",
+                      selected === r.slug ? "bg-rose-600 text-white border-rose-600" : "bg-white text-slate-600 border-slate-200 hover:border-rose-300"
+                    )}>
+                    {r.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {escolhido && <p className="text-[11px] text-slate-400 leading-snug pt-0.5">{escolhido.descricao}</p>}
           </div>
 
-          {isOutro && (
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-rose-500 uppercase tracking-wider">Qual o motivo? *</label>
-              <textarea
-                autoFocus
-                value={customText}
-                onChange={e => setCustomText(e.target.value)}
-                placeholder="Descreva o motivo da perda..."
-                rows={3}
-                className={cn(
-                  "w-full px-3 py-2.5 border rounded-xl text-sm font-medium focus:outline-none focus:ring-2 resize-none transition-colors",
-                  customText.trim() ? "border-slate-200 focus:ring-rose-500/20 focus:border-rose-500" : "border-rose-300 focus:ring-rose-500/20 focus:border-rose-500 bg-rose-50/30"
-                )}
-              />
-            </div>
-          )}
+          {/* Anotação SEMPRE disponível: é o conserto dos 28 encerramentos que a equipe fez sem
+              conseguir escrever uma linha (o modal simplesmente não tinha onde). Obrigatória só
+              quando o motivo é "Outro". */}
+          <div className="space-y-1.5">
+            <label className={cn("text-xs font-bold uppercase tracking-wider", isOutro ? "text-rose-500" : "text-slate-500")}>
+              {isOutro ? 'Descreva o caso *' : 'Detalhe (opcional)'}
+            </label>
+            <textarea
+              ref={notaRef}
+              value={nota}
+              onChange={e => setNota(e.target.value)}
+              placeholder="O que aconteceu, em uma frase..."
+              rows={3}
+              className={cn(
+                "w-full px-3 py-2.5 border rounded-xl text-sm font-medium focus:outline-none focus:ring-2 resize-none transition-colors",
+                !isOutro || nota.trim() ? "border-slate-200 focus:ring-rose-500/20 focus:border-rose-500" : "border-rose-300 focus:ring-rose-500/20 focus:border-rose-500 bg-rose-50/30"
+              )}
+            />
+          </div>
 
           <div className="flex gap-2 pt-1">
             <button onClick={onCancel} className="flex-1 py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-500 hover:bg-slate-50 transition-all">
@@ -2933,6 +2975,8 @@ export function LeadKanban() {
   // Por TICKET: a venda pertence ao atendimento, não ao contato. `semTicketByLead` carrega o
   // legado sem vínculo, que o quadro pendura num card só (ver `vendasPorTicket`).
   const { byTicket: conversionsByTicket, semTicketByLead: conversionsSemTicket, create: createConversion } = useConversions();
+  // Fonte ÚNICA dos motivos de perda: este formulário e o LossModal leem a mesma lista.
+  const { lossReasons: motivosPerda } = useClinicLossReasons();
   const { aiConfig, updateAI } = useSettings();
   const { data: orcamentos, save: saveOrcamento } = useOrcamentos();
   const [ganhoLead, setGanhoLead] = useState<{ id: string; name: string; phone: string | null; patientId: string | null; prevStageId: string | null; ticketId: string; ctwaClid?: string | null; email?: string | null } | null>(null);
@@ -3202,12 +3246,22 @@ export function LeadKanban() {
         // na própria venda (Ganho / Cancelar venda), nunca por este campo.
         if (targetStageId && selectedLead._ticketId) {
           const openT = tickets.find(t => t.id === selectedLead._ticketId);
-          if (openT && targetStageId !== openT.stage_id) {
-            if (isPerdido) {
-              await closeTicket(openT.id, 'perdido');
-            } else if (isConversao) {
+          if (openT) {
+            // O motivo escolhido aqui TEM que chegar ao ticket: antes ele era gravado só no lead
+            // (payload acima) e o `closeTicket` ia sem `loss_reason`, apagando o que já existia.
+            const motivoEscolhido = formData.loss_reason || null;
+            // O select guarda o RÓTULO (é o que vai para leads.loss_reason, legível). O código
+            // canônico sai do catálogo pelo rótulo, e é ele que os painéis agrupam.
+            const slugEscolhido = motivosPerda.find(r => r.label === motivoEscolhido)?.slug;
+            const mudouEtapa = targetStageId !== openT.stage_id;
+            // Perdido fica FORA do `if (mudouEtapa)` de propósito: com o card já em Perdido, trocar
+            // só o motivo também precisa gravar — esse caminho era engolido silenciosamente.
+            if (isPerdido && (mudouEtapa || motivoEscolhido !== openT.loss_reason)) {
+              // Nunca apagar: dropdown em branco preserva o motivo que o ticket já tinha.
+              await closeTicket(openT.id, 'perdido', motivoEscolhido ?? openT.loss_reason ?? undefined, slugEscolhido);
+            } else if (mudouEtapa && isConversao) {
               setGanhoLead({ id: selectedLead.id, name: selectedLead.name, phone: selectedLead.phone ?? null, patientId: selectedLead.converted_patient_id ?? null, prevStageId: openT.stage_id, ticketId: openT.id, ctwaClid: selectedLead.ctwa_clid ?? null, email: selectedLead.email ?? null });
-            } else {
+            } else if (mudouEtapa && !isPerdido) {
               await moveTicket(openT.id, targetStageId);
             }
           }
@@ -3255,7 +3309,11 @@ export function LeadKanban() {
       capture_channel: lead.capture_channel || 'whatsapp',
       stage_id: ticket.stage_id || '',
       estimated_value: (lead.estimated_value ?? '').toString(),
-      loss_reason: lead.loss_reason || '',
+      // TICKET primeiro, lead como reserva: a IA e as automações gravam o motivo só no ticket, e
+      // ler do lead deixava o campo em branco num card que exibe o motivo no chip — e ainda fazia
+      // a comparação "mudou o motivo?" dar verdadeiro em todo salvamento, re-executando o
+      // encerramento à toa ao editar um telefone.
+      loss_reason: ticket.loss_reason || lead.loss_reason || '',
       avatar_url: lead.avatar_url || ''
     });
     setShowModal(true);
@@ -4328,16 +4386,26 @@ export function LeadKanban() {
                           </div>
                         </div>
 
-                        {/* Motivo da perda */}
+                        {/* Motivo da perda (+ a anotação, que até agora era escrita e nunca lida) */}
                         {isPerdido && (
                           <div className={cn(
-                            "mt-2 px-2 py-1 rounded text-[9px] font-bold flex items-center gap-1.5",
+                            "mt-2 px-2 py-1 rounded text-[9px] font-bold flex flex-col gap-0.5",
                             semMotivo
                               ? "bg-amber-50 border border-amber-200 text-amber-700"
                               : "bg-rose-50 border border-rose-100 text-rose-700"
                           )}>
-                            <AlertCircle className="w-2.5 h-2.5 shrink-0" />
-                            {semMotivo ? "Motivo da perda não preenchido" : (ticket.loss_reason || lead.loss_reason)}
+                            <span className="flex items-center gap-1.5">
+                              <AlertCircle className="w-2.5 h-2.5 shrink-0" />
+                              {semMotivo ? "Motivo da perda não preenchido" : (ticket.loss_reason || lead.loss_reason)}
+                            </span>
+                            {/* A IA escreve aqui desde maio e NENHUMA tela mostrava: eram 4 mil
+                                anotações trafegadas para ninguém ler. É o detalhe que diferencia
+                                "não fazemos" de "fazemos, mas na outra unidade". */}
+                            {ticket.loss_note && (
+                              <span className="font-medium opacity-80 leading-snug pl-4" title={ticket.loss_note}>
+                                {ticket.loss_note.length > 90 ? `${ticket.loss_note.slice(0, 90)}...` : ticket.loss_note}
+                              </span>
+                            )}
                           </div>
                         )}
 
@@ -4617,21 +4685,29 @@ export function LeadKanban() {
                       onChange={e => setFormData(p => ({ ...p, loss_reason: e.target.value }))}
                       className="w-full px-4 py-2.5 bg-rose-50 border border-rose-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-200 font-medium text-sm"
                     >
+                      {/* Mesma lista do LossModal, vinda do catálogo da clínica. Os 14 itens que
+                          estavam escritos aqui na mão divergiam em acento dos do modal
+                          ('Preco alto' x 'Preço alto'), e o filtro do Comercial compara por
+                          igualdade: bastava alguém salvar por aqui para o número se partir em dois. */}
                       <option value="">Selecione um motivo...</option>
-                      <option value="Preco alto">Preco alto</option>
-                      <option value="Escolheu concorrente">Escolheu concorrente</option>
-                      <option value="Nao respondeu">Nao respondeu</option>
-                      <option value="Sem interesse">Sem interesse</option>
-                      <option value="Fora do perfil">Fora do perfil</option>
-                      <option value="Fora do raio">Fora do raio</option>
-                      <option value="Agendou e nao compareceu">Agendou e nao compareceu</option>
-                      <option value="Tentativas de follow-up esgotadas">Tentativas de follow-up esgotadas</option>
-                      <option value="Tentativas esgotadas">Tentativas esgotadas</option>
-                      <option value="Sem dinheiro">Sem dinheiro</option>
-                      <option value="Sem perfil">Sem perfil</option>
-                      <option value="Sem limite no cartão">Sem limite no cartão</option>
-                      <option value="Comprou com outra empresa">Comprou com outra empresa</option>
-                      <option value="Outro">Outro</option>
+                      {/* ⚠️ O motivo JÁ GRAVADO entra como opção, mesmo não estando no catálogo.
+                          Sem isto o campo aparece EM BRANCO em todos os 6.401 cards perdidos
+                          existentes, porque nenhum texto antigo ('Tentativas esgotadas',
+                          'Sem dinheiro') bate com um rótulo novo ('Parou de responder'). Select
+                          controlado com valor que nenhuma option carrega renderiza vazio — e o
+                          operador via o motivo no card e nada no formulário, o que convida a
+                          apagar sem querer. O valor legado continua traduzido pelo de-para nos
+                          painéis, então não há divergência de número. */}
+                      {formData.loss_reason && !motivosPerda.some(r => r.label === formData.loss_reason) && (
+                        <option value={formData.loss_reason}>{formData.loss_reason} (registro anterior)</option>
+                      )}
+                      {/* "Outro" fica FORA daqui: ele exige explicação, e este formulário não tem
+                          campo de anotação. Oferecê-lo aqui produziria exatamente a perda sem
+                          explicação que a regra do modal existe para impedir. Quem precisa de
+                          "Outro" usa a janela de perda, que tem o campo. */}
+                      {motivosPerda.filter(r => r.slug !== 'outro').map(r => (
+                        <option key={r.slug} value={r.label}>{r.label}</option>
+                      ))}
                     </select>
                   </div>
                 )}
@@ -5039,11 +5115,11 @@ export function LeadKanban() {
           lead={lossLead}
           onClose={() => setLossLead(null)}
           onCancel={() => setLossLead(null)}
-          onConfirm={async (reason) => {
+          onConfirm={async (reason, slug, note) => {
             await update(lossLead.id, { loss_reason: reason || null });
             const perdidoStage = stages.find(s => s.slug === 'perdido');
             if (perdidoStage) await moveTicket(lossLead.ticketId, perdidoStage.id);
-            await closeTicket(lossLead.ticketId, 'perdido', reason || undefined);
+            await closeTicket(lossLead.ticketId, 'perdido', reason || undefined, slug, note ?? undefined);
           }}
         />
       )}
@@ -5138,7 +5214,9 @@ export function LeadKanban() {
               const ticket = tickets.find(t => t.id === chatLead.ticketId);
               if (ticket && stageId !== ticket.stage_id) {
                 if (targetStage?.slug === 'perdido') {
-                  await closeTicket(ticket.id, 'perdido');
+                  // Abre o modal de motivo, igual ao botão "Perdido" (onPerdido, logo acima).
+                  // Antes fechava direto e sem motivo: era um dos caminhos que gerava perda muda.
+                  setLossLead({ id: chatLead.lead.id, name: chatLead.lead.name, prevStageId: ticket.stage_id, ticketId: ticket.id });
                 } else if (targetStage?.slug === 'ganho') {
                   setGanhoLead({ id: chatLead.lead.id, name: chatLead.lead.name, phone: chatLead.lead.phone ?? null, patientId: chatLead.lead.converted_patient_id ?? null, prevStageId: ticket.stage_id, ticketId: ticket.id, ctwaClid: chatLead.lead.ctwa_clid ?? null, email: chatLead.lead.email ?? null });
                 } else {

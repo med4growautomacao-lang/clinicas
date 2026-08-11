@@ -232,6 +232,58 @@ export function useConsultationTypes(doctorId: string | null | undefined) {
   return { data, loading, error, lastError, refetch: fetch, create, update, remove };
 }
 
+/** Um motivo de perda do catálogo da clínica. */
+export interface ClinicLossReason {
+  slug: string;
+  label: string;
+  descricao: string;
+  ia_pode_escolher: boolean;
+  ordem: number;
+}
+
+/** Motivos de perda DA CLÍNICA, fonte única para toda a tela.
+ *
+ * ⚠️ Antes existiam DUAS listas escritas na mão dentro de LeadKanban.tsx, e elas divergiam em
+ * acento em 3 itens ('Preco alto' x 'Preço alto'). Como o filtro do Comercial compara por
+ * igualdade, no dia em que alguém salvasse pelo formulário de edição o motivo virava um chip
+ * separado e o número se partia em dois. Nunca voltar a escrever a lista na mão. */
+export function useClinicLossReasons() {
+  const { activeClinicId } = useAuth();
+  const [data, setData] = useState<ClinicLossReason[]>([]);
+  const [loading, setLoading] = useState(true);
+  // ⚠️ `erro` separado de "lista vazia": sem isso o modal de perda mostrava um quadro em branco e
+  // o botão nunca habilitava, ou seja, a pessoa arrastava o card e NÃO CONSEGUIA registrar a perda.
+  // A lista fixa antiga nunca podia falhar assim, então isto seria uma regressão silenciosa.
+  const [erro, setErro] = useState<string | null>(null);
+
+  const carregar = useCallback(async () => {
+    if (!activeClinicId) { setData([]); setLoading(false); return; }
+    const cacheKey = `loss_reasons:${activeClinicId}`;
+    const cached = getCached<ClinicLossReason[]>(cacheKey);
+    if (cached) { setData(cached); setErro(null); setLoading(false); return; }
+    setLoading(true);
+    const { data, error } = await supabase.rpc('get_clinic_loss_reasons', { p_clinic_id: activeClinicId });
+    if (error) {
+      setErro(error.message);
+      setData([]);
+      setLoading(false);
+      logFetchFailThrottled('LOSS_REASONS_FETCH_FAIL', 'Nao foi possivel carregar os motivos de perda; a equipe fica sem conseguir registrar a perda', activeClinicId, { erro: error.message });
+      return;
+    }
+    const rows = (data as ClinicLossReason[] | null) ?? [];
+    // Lista vazia NÃO entra em cache: senão o botão "Tentar de novo" do modal vira um clique morto
+    // por 5 minutos, que é o TTL do cache.
+    if (rows.length > 0) setCached(cacheKey, rows);
+    setData(rows);
+    setErro(null);
+    setLoading(false);
+  }, [activeClinicId]);
+
+  useEffect(() => { carregar(); }, [carregar]);
+
+  return { lossReasons: data, loading, erro, recarregar: carregar };
+}
+
 export function useDoctors() {
   const { profile, activeClinicId } = useAuth();
   const [data, setData] = useState<Doctor[]>([]);
@@ -1017,6 +1069,10 @@ export interface Ticket {
   outcome: 'ganho' | 'perdido' | null;
   outcome_at: string | null;
   loss_reason: string | null;
+  /** Motivo canônico (catálogo loss_reasons). É por aqui que os painéis agrupam. */
+  loss_reason_slug: string | null;
+  /** Anotação livre DA PERDA. Campo próprio: `notes` é compartilhado e três rotinas o apagam. */
+  loss_note: string | null;
   notes: string | null;
   created_at: string;
   lead_phone: string | null;
@@ -1540,16 +1596,26 @@ export function useTickets() {
   // (ver migration ticket_finish_message_native). O antigo disparo via webhook-proxy→n8n
   // foi removido — a lógica é agnóstica (feche pelo app, IA ou CRM).
 
-  const closeTicket = async (ticketId: string, outcome: 'ganho' | 'perdido', lossReason?: string) => {
+  const closeTicket = async (
+    ticketId: string,
+    outcome: 'ganho' | 'perdido',
+    lossReason?: string,
+    lossReasonSlug?: string,
+    lossNote?: string,
+  ) => {
     const now = new Date().toISOString();
     // Marca o RESULTADO via RPC canônica (atômica: outcome + outcome_at + estágio terminal).
     // p_resolve:false mantém o card aberto no Kanban (encerrar é o botão "Resolver"/finalizeTicket).
-    setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, outcome, outcome_at: now, ...(lossReason ? { loss_reason: lossReason } : {}) } : t));
+    setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, outcome, outcome_at: now, ...(lossReason ? { loss_reason: lossReason } : {}), ...(lossReasonSlug ? { loss_reason_slug: lossReasonSlug } : {}), ...(lossNote ? { loss_note: lossNote } : {}) } : t));
     const { error } = await supabase.rpc('finalize_ticket', {
       p_ticket_id: ticketId,
       p_outcome: outcome,
       p_loss_reason: lossReason ?? null,
       p_resolve: false,
+      // O slug é a chave do KPI. Quando não vier (caminho antigo), a própria finalize_ticket
+      // traduz o texto pelo de-para, então nenhum caminho fica sem motivo canônico.
+      p_loss_reason_slug: lossReasonSlug ?? null,
+      p_loss_note: lossNote ?? null,
     });
     if (error) { fetch(true); }
     // A mensagem de encerramento (ganho/perdido) é enviada nativamente pelo trigger

@@ -1321,13 +1321,17 @@ serve(async (req) => {
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
       );
     } else if (action === "close_as_lost") {
-      // Encerra o ticket aberto do lead como PERDIDO quando ele está fora do perfil
-      // (ex.: pede cirurgia ou quer tratar uma dor que a clínica não atende).
-      // Mantém o card aberto na etapa Perdido (resolve=false), grava o motivo, e NÃO
-      // desliga a IA: o follow-up de reengajamento já para sozinho porque o slug 'perdido'
-      // está na lista de etapas excluídas da query do n8n. A despedida é a resposta final
-      // do próprio agente (instruída via next_step).
-      const { lead_phone, detail } = payload;
+      // Encerra o ticket aberto do lead como PERDIDO, com MOTIVO escolhido do catálogo da clínica.
+      // Mantém o card aberto na etapa Perdido (resolve=false) e NÃO desliga a IA: o follow-up de
+      // reengajamento para sozinho porque fn_followup_candidates_reengagement exclui a etapa
+      // 'perdido'. A despedida é a resposta final do próprio agente (instruída via next_step).
+      //
+      // ⚠️ Este caminho NÃO mexe em `leads.is_not_lead`, nem para 'contato_indevido'. Decisão do
+      // dono (10/08): quem adiciona à lista de não-lead é a secretária, e contato dessa lista já
+      // sai de todos os KPIs por conta da v_kpi_outcomes.
+      const { lead_phone, detail, motivo, detalhe: detalheArg } = payload;
+      // `detail` é o nome antigo do campo; aceito enquanto houver worker antigo em voo no deploy.
+      const detalhe = detalheArg || detail || null;
       if (!lead_phone) {
         return new Response(JSON.stringify({ success: false, error: "lead_phone is required" }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
@@ -1351,9 +1355,79 @@ serve(async (req) => {
       const openTicket = openTickets && openTickets.length > 0 ? openTickets[0] : null;
       if (!openTicket) {
         return new Response(JSON.stringify({
+          // Texto NEUTRO e sem causa presumida: a tool agora encerra por qualquer motivo (preço,
+          // desinteresse, concorrente...), e mandar dizer "não atendemos esse caso" faria o agente
+          // dispensar quem só achou caro. "Clínica" também sai: 13 tenants são loja e metalúrgica.
           success: true, applied: false, reason: "no_open_ticket",
-          next_step: "Não há atendimento aberto para encerrar. Apenas se despeça com gentileza, explicando que a clínica não atende esse caso, sem oferecer agendamento.",
+          next_step: "Não há atendimento aberto para encerrar. Apenas conclua a conversa com gentileza, coerente com o que já foi conversado, sem oferecer agendamento.",
         }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+      }
+
+      // ---- Validação do motivo NO SERVIDOR ----
+      // O `enum` no schema da tool é dica ao provedor, não garantia: dois terços do tráfego rodam
+      // num modelo em preview com formato próprio de tool. A trava de verdade é esta.
+      const { data: catalogo, error: catErr } = await supabaseClient.rpc("fn_clinic_loss_reasons", { p_clinic_id: clinic_id });
+      if (catErr) {
+        // Engolir este erro DESLIGA a trava em silêncio: sem catálogo, `permitidos` fica vazio, a
+        // exigência de motivo é pulada e o encerramento sai com o rótulo legado — a perda volta a
+        // nascer muda e ninguém fica sabendo. Melhor recusar e deixar a IA seguir conversando.
+        await registrarErro(
+          "catalogo_motivos_falhou",
+          "Nao consegui ler o catalogo de motivos de perda; o encerramento foi recusado para nao gravar perda sem motivo",
+          "error", clinic_id, { erro: catErr.message, lead_id: lead.id },
+        );
+        return new Response(JSON.stringify({
+          success: false, error_code: "catalogo_indisponivel",
+          error: "Nao consegui carregar a lista de motivos agora.",
+          next_step: "Nao encerre o atendimento agora. Siga a conversa normalmente e, se o caso realmente nao for seguir, acione o atendimento humano (ACIONAR_HANDOFF).",
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+      }
+      const permitidos = ((catalogo as any[]) || []).filter((m) => m.ia_pode_escolher);
+      const escolhido = permitidos.find((m) => m.slug === motivo);
+
+      // Sem motivo nenhum: recusa e devolve a lista. Não encerra às cegas — perda muda é
+      // exatamente o problema que este caminho existe para acabar.
+      // ⚠️ Sem `&& permitidos.length > 0`: com catálogo vazio (sem erro) a exigência era PULADA e o
+      // encerramento saía com o rótulo legado, ou seja o buraco que este bloco fecha reaparecia
+      // pela porta dos fundos. Catálogo vazio é defeito de configuração, não licença para gravar
+      // perda muda.
+      if (!motivo) {
+        return new Response(JSON.stringify({
+          success: false, error_code: "motivo_obrigatorio",
+          error: "É obrigatório escolher um motivo da lista.",
+          motivos: permitidos.map((m: any) => ({ motivo: m.slug, quando_usar: m.descricao })),
+          next_step: "Escolha UM motivo da lista em `motivos` e chame ENCERRAR_COMO_PERDIDO de novo. Não responda ao paciente antes disso.",
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+      }
+
+      // 'outro' sem detalhe vira lixo no relatório: é a única forma de exigir a explicação.
+      if (motivo === "outro" && !detalhe) {
+        return new Response(JSON.stringify({
+          success: false, error_code: "detalhe_obrigatorio",
+          error: 'O motivo "outro" exige o campo `detalhe`.',
+          next_step: "Chame ENCERRAR_COMO_PERDIDO de novo preenchendo `detalhe` com o caso em uma frase.",
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+      }
+
+      // Motivo fora da lista: NÃO aceita o texto inventado como categoria. Cai em 'outro', guarda
+      // o que o modelo escreveu na anotação e acende a Central (prompt/catálogo desalinhados).
+      let slugFinal = escolhido?.slug ?? null;
+      let rotuloFinal = escolhido?.label ?? null;
+      let anotacao = detalhe || null;
+      if (motivo && !escolhido) {
+        // O rótulo tem que sair do CATÁLOGO, não ser a string "Outro" na mão: o rótulo real é
+        // "Outro (descreva)", e "Outro" sozinho não tem tradução no de-para — o slug ficaria nulo
+        // e a finalize_ticket ainda acenderia um SEGUNDO alerta em cima do que já registramos aqui.
+        const balde = permitidos.find((m: any) => m.slug === "outro");
+        slugFinal = balde?.slug ?? null;
+        rotuloFinal = balde?.label ?? null;
+        anotacao = [`[motivo fora da lista: ${motivo}]`, detalhe].filter(Boolean).join(" ");
+        await registrarErro(
+          "motivo_perda_invalido",
+          `A IA escolheu um motivo de perda que não existe no catálogo da clínica: "${motivo}"`,
+          "warning", clinic_id,
+          { motivo_recebido: motivo, lead_id: lead.id, permitidos: permitidos.map((m: any) => m.slug) },
+        );
       }
 
       // Marca PERDIDO + motivo, mantendo o card aberto (resolve=false). O trigger de
@@ -1362,9 +1436,13 @@ serve(async (req) => {
       const { data: fin, error: finErr } = await supabaseClient.rpc("finalize_ticket", {
         p_ticket_id: openTicket.id,
         p_outcome: "perdido",
-        p_loss_reason: "Fora do perfil",
-        p_notes: detail || null,
+        p_loss_reason: rotuloFinal ?? "Fora do perfil",
+        // p_notes NÃO: `tickets.notes` é campo compartilhado e três rotinas o apagam. A anotação
+        // da perda tem coluna própria agora.
+        p_notes: null,
         p_resolve: false,
+        p_loss_reason_slug: slugFinal,
+        p_loss_note: anotacao,
       });
       if (finErr || !(fin as any)?.success) {
         return new Response(JSON.stringify({
@@ -1379,8 +1457,9 @@ serve(async (req) => {
         ticket_id: openTicket.id,
         lead_id: lead.id,
         outcome: "perdido",
-        loss_reason: "Fora do perfil",
-        next_step: "Lead marcado como perdido (fora do perfil). Despeça-se com gentileza, explicando brevemente que a clínica não atende esse caso e, se útil, sugira procurar um especialista adequado. NÃO ofereça agendamento.",
+        loss_reason: rotuloFinal ?? "Fora do perfil",
+        loss_reason_slug: slugFinal,
+        next_step: "Atendimento encerrado como perdido. Despeça-se com gentileza, explicando brevemente o motivo e, se útil, indique onde a pessoa pode ser atendida. NÃO ofereça agendamento.",
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
     } else {
       return new Response(JSON.stringify({ success: false, error: "Invalid action" }),

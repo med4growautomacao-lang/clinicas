@@ -107,6 +107,17 @@ enabled = true
 verify_jwt = true
 entrypoint = "./functions/ai-sandbox/index.ts"
 
+[functions.ai-bench]
+enabled = true
+# Bancada de modelos. O valor real em produção é true (conferido pela API de gestão em 10/08/2026);
+# estava FORA deste arquivo, e foi declarado aqui em 10/08.
+# ⚠️ verify_jwt = true NÃO é a proteção desta função, e por um tempo esta linha deu a entender que
+# era: até 10/08/2026 a função não checava NADA por dentro e rodava com service_role, então
+# qualquer usuário logado de qualquer clínica conseguia ler lead, conversa e prompt de outro
+# cliente e gastar a cota de IA. A trava de verdade é o is_super_admin dentro do index.ts.
+verify_jwt = true
+entrypoint = "./functions/ai-bench/index.ts"
+
 [functions.whatsapp-orchestrator]
 enabled = true
 # Máquina de estados da conexão WhatsApp; chamada sem JWT (frontend via whatsapp-bridge/proxy).

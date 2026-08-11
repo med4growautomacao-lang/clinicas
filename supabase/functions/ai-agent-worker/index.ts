@@ -9,7 +9,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.7.1";
 import { runAgentTurn, type AgentMsg, type ModelConfig } from "../_shared/llm.ts";
 import { registrarUsoIA, FEATURE } from "../_shared/llm-usage.ts";
-import { agentToolSpecs, executeToolCall, type SessionCtx } from "../_shared/agent/tools.ts";
+import { agentToolSpecs, carregarMotivosPerda, executeToolCall, type SessionCtx } from "../_shared/agent/tools.ts";
 import { assembleSystemPrompt, fetchAgentContext } from "../_shared/agent/prompt.ts";
 import { splitIntoBubbles } from "../_shared/agent/split.ts";
 import { loadConversation, MEMORY_WINDOW, saveAiResponse } from "../_shared/agent/memory.ts";
@@ -275,9 +275,23 @@ async function processTurn(supabase: any, turn: { session_id: string; clinic_id:
     const authToken = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
     const session: SessionCtx = { clinic_id: clinicId, lead_phone: leadPhone, schedulerUrl, authToken };
 
-    const agentCtx = await fetchAgentContext(supabase, clinicId, turn.session_id, ctx.handoff_rules ?? [], !!ctx.handoff_enabled, ctx.lead_id ?? null);
+    // O catalogo de motivos de perda pega carona no mesmo ponto do contexto: e ele que vira o
+    // `enum` do parametro `motivo` da ENCERRAR_COMO_PERDIDO, por clinica.
+    const [agentCtx, motivos] = await Promise.all([
+      fetchAgentContext(supabase, clinicId, turn.session_id, ctx.handoff_rules ?? [], !!ctx.handoff_enabled, ctx.lead_id ?? null),
+      carregarMotivosPerda(supabase, clinicId),
+    ]);
     const system = assembleSystemPrompt(agentCtx);
-    const tools = agentToolSpecs();
+    const tools = agentToolSpecs(motivos.lista);
+    // ⚠️ Sem `await`: isto roda em TODO turno enquanto a condicao durar, e segurar o paciente numa
+    // gravacao de log e pagar com tempo de resposta por um problema que nao e dele.
+    if (motivos.erro) {
+      // FALHA DE LEITURA, nao cadastro vazio. Dizer "a clinica nao tem motivo cadastrado" mandaria
+      // o operador arrumar o que ja esta certo, e a causa real (timeout/permissao) ficaria invisivel.
+      registrarErro(supabase, "catalogo_motivos_falhou", "Nao consegui LER os motivos de perda da clinica; ate isso voltar a IA NAO consegue encerrar atendimento como perdido (o encerramento e recusado e ela segue conversando)", "error", clinicId, { session_id: turn.session_id, erro: motivos.erro }).catch(() => {});
+    } else if (motivos.lista.filter((m) => m.ia_pode_escolher).length === 0) {
+      registrarErro(supabase, "catalogo_motivos_vazio", "A clinica nao tem nenhum motivo de perda habilitado para a IA; encerramentos vao sair sem motivo", "error", clinicId, { session_id: turn.session_id }).catch(() => {});
+    }
 
     const messages = await loadConversation(supabase, turn.session_id, MEMORY_WINDOW, buffer);
 

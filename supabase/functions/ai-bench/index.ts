@@ -23,7 +23,7 @@
 // Consumo de IA (e o custo por clinica) com gasto de laboratorio.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.7.1";
-import { agentToolSpecs, TOOL_DEFS, type SessionCtx } from "../_shared/agent/tools.ts";
+import { agentToolSpecs, carregarMotivosPerda, TOOL_DEFS, type SessionCtx } from "../_shared/agent/tools.ts";
 import { assembleSystemPrompt, fetchAgentContext } from "../_shared/agent/prompt.ts";
 import { loadConversation, MEMORY_WINDOW } from "../_shared/agent/memory.ts";
 import { looksTechnical, sanitizeForPatient, stripCodeFences } from "../_shared/agent/guard.ts";
@@ -242,10 +242,26 @@ async function executarNaBancada(
       success: true, readable_summary: "Transbordo acionado: a IA foi pausada e a equipe avisada.",
       next_step: "Nao escreva mais nada alem de uma despedida curta. Nao ofereca agendamento.",
     },
-    ENCERRAR_FORA_PERFIL: {
-      success: true, readable_summary: "Atendimento encerrado como PERDIDO (fora do perfil).",
-      next_step: "Despeca-se com gentileza e NAO ofereca agendamento.",
-    },
+    // ⚠️ Espelha as RECUSAS da producao, nao so o caminho feliz. Enquanto isto devolvia
+    // `success:true` sempre, um modelo que chamasse a tool SEM `motivo` (o que a producao recusa
+    // com motivo_obrigatorio) era pontuado como acerto: a bancada aprovava exatamente a regressao
+    // que ela existe para pegar.
+    ENCERRAR_COMO_PERDIDO: !a.motivo
+      ? {
+        success: false, error_code: "motivo_obrigatorio",
+        error: "E obrigatorio escolher um motivo da lista.",
+        next_step: "Escolha UM motivo da lista e chame ENCERRAR_COMO_PERDIDO de novo. Nao responda ao paciente antes disso.",
+      }
+      : (a.motivo === "outro" && !a.detalhe)
+      ? {
+        success: false, error_code: "detalhe_obrigatorio",
+        error: 'O motivo "outro" exige o campo `detalhe`.',
+        next_step: "Chame ENCERRAR_COMO_PERDIDO de novo preenchendo `detalhe` com o caso em uma frase.",
+      }
+      : {
+        success: true, readable_summary: `Atendimento encerrado como PERDIDO (motivo: ${a.motivo}).`,
+        next_step: "Despeca-se com gentileza, explicando brevemente o motivo, e NAO ofereca agendamento.",
+      },
   };
   return { output: JSON.stringify(canned[call.name] ?? { success: true }), simulada: true };
 }
@@ -309,6 +325,9 @@ async function rodar(supabase: any, corpo: any) {
   const { data: pares, error } = await supabase.rpc("ai_bench_claim", { p_limit: limite });
   if (error) throw new Error(`claim: ${error.message}`);
   const feitos: any[] = [];
+  // Cache por clinica: o catalogo nao muda no meio de uma rodada, e sem isto era 1 RPC por
+  // par (caso x modelo).
+  const motivosPorClinica = new Map<string, Awaited<ReturnType<typeof carregarMotivosPerda>>>();
 
   for (const par of (pares ?? [])) {
     if (Date.now() - t0 > budgetMs) {
@@ -320,7 +339,23 @@ async function rodar(supabase: any, corpo: any) {
       const { data: caso } = await supabase.from("ai_bench_cases").select("*").eq("id", par.case_id).single();
       const { data: lead } = await supabase.from("leads").select("phone").eq("id", caso.lead_id).maybeSingle();
       const key = await chave(supabase, par.provider);
-      const tools = agentToolSpecs();
+      // Mesma superficie de tool da producao (com o enum de motivos da clinica do caso). Sem isto
+      // a bancada replaya uma ferramenta DIFERENTE da que roda de verdade e mente sem dar erro.
+      // ⚠️ Se a leitura do catalogo FALHAR, abortar o par em vez de replayar a tool degradada:
+      // sem enum o modelo manda texto livre, o canned aceita, e a bancada pontua como acerto uma
+      // superficie que nao e a de producao. Era o mesmo engolir-erro que este commit foi corrigir.
+      const catalogo = motivosPorClinica.get(caso.clinic_id) ?? await (async () => {
+        const c = await carregarMotivosPerda(supabase, caso.clinic_id);
+        motivosPorClinica.set(caso.clinic_id, c);
+        return c;
+      })();
+      if (catalogo.erro) {
+        await supabase.from("ai_bench_results").update({
+          status: "erro", erro: `catalogo de motivos indisponivel: ${catalogo.erro}`,
+        }).eq("id", par.id);
+        continue;
+      }
+      const tools = agentToolSpecs(catalogo.lista);
       const messages = caso.messages as AgentMsg[];
       const runner: Runner = par.provider === "openai"
         ? new OpenAIRunner(key, par.model, caso.system_prompt, messages, tools)
@@ -373,6 +408,42 @@ async function rodar(supabase: any, corpo: any) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   const supabase = svc();
+
+  // ⚠️ AUTORIZACAO. verify_jwt=true so prova que a pessoa esta LOGADA, nao que ela pode estar aqui.
+  // Sem esta checagem, qualquer usuario de QUALQUER clinica dirigia um cliente service_role: `semear`
+  // le leads e chat_messages por lead_id escolhido pelo chamador, SEM amarrar a clinica dele, e
+  // devolve o prompt de sistema e a janela de conversa daquele cliente — alem de gastar a cota de IA
+  // da casa. Mesma licao do setup-prontuario-password: JWT ligado nao e checagem de permissao.
+  // A bancada e ferramenta de Super Admin: aqui nao ha o ramo "gestor da propria clinica" que a
+  // ai-sandbox tem, porque `semear` nao recebe clinic_id para comparar.
+  try {
+    const authHeader = req.headers.get("Authorization") ?? "";
+    const jwt = authHeader.replace(/^Bearer\s+/i, "");
+    const userClient = createClient(
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+      { global: { headers: { Authorization: authHeader } } },
+    );
+    // getUser(jwt) valida o TOKEN passado; getUser() sem argumento procuraria uma sessao que este
+    // client nao tem e falharia sempre (era a causa do 401 na ai-sandbox).
+    const { data: ures } = await userClient.auth.getUser(jwt);
+    if (!ures?.user?.id) {
+      return new Response(JSON.stringify({ erro: "unauthorized" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 401,
+      });
+    }
+    const { data: isSuper } = await userClient.rpc("is_super_admin");
+    if (isSuper !== true) {
+      return new Response(JSON.stringify({ erro: "forbidden" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403,
+      });
+    }
+  } catch {
+    return new Response(JSON.stringify({ erro: "unauthorized" }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 401,
+    });
+  }
+
   try {
     const corpo = await req.json().catch(() => ({}));
     const modo = corpo.mode || "run";

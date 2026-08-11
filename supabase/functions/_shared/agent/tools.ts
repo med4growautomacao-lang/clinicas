@@ -238,26 +238,133 @@ export const TOOL_DEFS: Record<string, ToolDef> = {
     body: (a, ctx) => ({ clinic_id: ctx.clinic_id, lead_phone: ctx.lead_phone, detail: s(a.detail) }),
   },
 
-  ENCERRAR_FORA_PERFIL: {
+  // Nome antigo ate 10/08/2026: ENCERRAR_FORA_PERFIL. A tool nasceu so para desqualificacao
+  // estrutural, mas hoje encerra por QUALQUER motivo do catalogo (preco, desinteresse,
+  // concorrente...), entao o nome velho descrevia errado o que ela faz e induzia o modelo a nao
+  // usa-la. `action` segue close_as_lost de proposito: e o nome interno, ja neutro, e e ele que
+  // compoe o fingerprint da Central (ferramenta_quebrou_close_as_lost).
+  ENCERRAR_COMO_PERDIDO: {
     action: "close_as_lost",
     spec: {
-      name: "ENCERRAR_FORA_PERFIL",
+      name: "ENCERRAR_COMO_PERDIDO",
+      // "negocio"/"empresa" e nao "clinica": boa parte dos tenants e loja, metalurgica, cafe ou
+      // joalheria, e esta description e a UNICA superficie que chega a 100% deles (so 4 de 34
+      // clinicas tem prompt template, todas medicas).
       description:
-        "Encerra o atendimento como PERDIDO quando o caso esta fora do perfil da clinica (ex.: pede algo " +
-        "que a clinica nao atende). Depois, despeca-se com gentileza e NAO ofereca agendamento. Siga o next_step.",
+        "Encerra o atendimento como PERDIDO. Escolha em `motivo` UM item da lista, o que melhor " +
+        "descreve por que este contato nao vai fechar. Depois despeca-se com gentileza e NAO " +
+        "ofereca agendamento. Siga o next_step.",
       parameters: {
         type: "object",
         properties: {
-          detail: { type: "string", description: "Opcional: breve motivo do fora-de-perfil." },
+          // O `enum` e injetado por agentToolSpecs() a partir do catalogo da clinica.
+          motivo: { type: "string", description: "Obrigatorio: escolha UM da lista.", enum: [] },
+          detalhe: {
+            type: "string",
+            description:
+              "O caso em uma frase (ex.: 'procura cirurgia de protese testicular'). " +
+              "OBRIGATORIO quando motivo = 'outro'.",
+          },
         },
+        required: ["motivo"],
       },
     },
-    body: (a, ctx) => ({ clinic_id: ctx.clinic_id, lead_phone: ctx.lead_phone, detail: s(a.detail) }),
+    body: (a, ctx) => ({
+      clinic_id: ctx.clinic_id,
+      lead_phone: ctx.lead_phone,
+      motivo: s(a.motivo),
+      detalhe: s(a.detalhe),
+    }),
   },
 };
 
-export function agentToolSpecs(): AgentTool[] {
-  return Object.values(TOOL_DEFS).map((d) => d.spec);
+/** Um motivo de perda do catalogo da clinica (vem de fn_clinic_loss_reasons). */
+export interface LossReasonOption {
+  slug: string;
+  label: string;
+  descricao: string;
+  ia_pode_escolher: boolean;
+}
+
+/** Catalogo de motivos DA CLINICA.
+ *
+ *  ⚠️ Devolve `erro` separado da lista de proposito. Antes engolia tudo num `[]`, e ai "catalogo
+ *  vazio" e "a leitura falhou" viravam a MESMA coisa: o alerta acusava a clinica de nao ter motivo
+ *  cadastrado quando o problema era timeout ou permissao, e mandava o operador consertar um
+ *  cadastro que ja estava certo (§0.7: desligado x falta configuracao x defeito de codigo). */
+export async function carregarMotivosPerda(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  clinicId: string,
+): Promise<{ lista: LossReasonOption[]; erro: string | null }> {
+  try {
+    const { data, error } = await supabase.rpc("fn_clinic_loss_reasons", { p_clinic_id: clinicId });
+    if (error) return { lista: [], erro: error.message ?? String(error) };
+    if (!Array.isArray(data)) return { lista: [], erro: "catalogo devolveu formato inesperado" };
+    return { lista: data as LossReasonOption[], erro: null };
+  } catch (e) {
+    return { lista: [], erro: String((e as Error)?.message ?? e) };
+  }
+}
+
+/** Specs das tools para o turno. `motivos` vem do catalogo DA CLINICA: o vocabulario de perda e
+ *  do cliente, nao do produto (ex.: "Fora do raio" e 76/76 WakeDesk; "Nao realizamos convenio" e
+ *  100% de uma clinica so). Passar a lista pelo `enum` do schema custa ~100 tokens dentro da
+ *  requisicao que ja ia sair; uma tool de listagem separada custaria um turno inteiro de LLM
+ *  (medido: 13.389 tokens de entrada em media, porque o historico vai junto a cada turno). */
+export function agentToolSpecs(motivos: LossReasonOption[] = []): AgentTool[] {
+  const permitidos = motivos.filter((m) => m.ia_pode_escolher);
+  const temSlug = (s: string) => permitidos.some((m) => m.slug === s);
+
+  // Regra de desempate montada a partir do que REALMENTE esta no enum. Citar um slug que a clinica
+  // desligou (clinic_loss_reasons) ou que a marca dela nao tem (categorias) manda o modelo escolher
+  // um valor inexistente, que cai no fallback e ainda acende alerta acusando o modelo.
+  const desempate = [
+    temSlug("perfil_nao_atendido") && temSlug("servico_nao_oferecido")
+      ? "se a empresa oferece o servico mas nao para essa pessoa, use perfil_nao_atendido; se nao oferece a ninguem, use servico_nao_oferecido"
+      : null,
+    temSlug("atendido_em_outra_unidade") ? "se oferece em outro lugar, use atendido_em_outra_unidade" : null,
+  ].filter(Boolean).join("; ");
+
+  return Object.values(TOOL_DEFS).map((d) => {
+    if (d.spec.name !== "ENCERRAR_COMO_PERDIDO") return d.spec;
+
+    // ⚠️ Catalogo vazio (falha de leitura, na pratica): devolver o spec base seria mandar
+    // `enum: []` COM `required: ["motivo"]`, um schema que nenhum valor satisfaz. O Gemini pode
+    // recusar a requisicao inteira com 400, e ai o paciente fica sem resposta nenhuma — nao so
+    // sem esta tool. Degrada para campo livre: a ai-scheduler valida no servidor de qualquer jeito.
+    if (permitidos.length === 0) {
+      return {
+        ...d.spec,
+        parameters: {
+          type: "object" as const,
+          properties: {
+            motivo: { type: "string", description: "Motivo do encerramento, em poucas palavras." },
+            detalhe: { type: "string", description: "O caso em uma frase." },
+          },
+        },
+      };
+    }
+
+    // Clone raso: TOOL_DEFS e modulo compartilhado e nao pode ser mutado por clinica.
+    return {
+      ...d.spec,
+      parameters: {
+        ...d.spec.parameters,
+        properties: {
+          ...d.spec.parameters.properties,
+          motivo: {
+            type: "string",
+            enum: permitidos.map((m) => m.slug),
+            description:
+              "Obrigatorio: escolha UM." +
+              (desempate ? ` Regra de desempate: ${desempate}.` : "") +
+              "\n" + permitidos.map((m) => `- ${m.slug}: ${m.descricao}`).join("\n"),
+          },
+        },
+      },
+    };
+  });
 }
 
 /** Executa uma tool call do modelo contra a ai-scheduler. Devolve a resposta (JSON string) que

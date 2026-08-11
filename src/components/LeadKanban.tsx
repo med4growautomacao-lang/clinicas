@@ -1451,8 +1451,10 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
   // Especificações (malha, fio…) não têm mais chave AQUI: seguem o padrão da clínica
   // (Configurações › Modelo do Orçamento). Só um orçamento salvo antes disso pode trazer valor próprio.
   const [includeSpecs, setIncludeSpecs] = useState<boolean>(iq?.includeSpecs ?? (tpl.include_specs ?? true));
-  // Texto de acompanhamento = a legenda que vai junto do documento no WhatsApp, LOGO ABAIXO do
-  // orçamento. Nasce de Saudação + Rodapé e é editável aqui (editar não altera aqueles campos).
+  // Mensagem de apresentação: vai ANTES do orçamento, como mensagem NORMAL e separada no WhatsApp
+  // (decisão do dono, 11/08). Antes era a legenda colada na imagem/PDF, o que fazia o texto chegar
+  // preso ao arquivo e o cliente ter que abrir a mídia para ler.
+  // Nasce de Saudação + Rodapé e é editável aqui (editar não altera aqueles campos).
   // Só existe em imagem/PDF: no formato texto a mensagem inteira já é editável mais abaixo.
   const [includeAccomp, setIncludeAccomp] = useState<boolean>(iq?.includeAccomp ?? true);
   const [accompText, setAccompText] = useState<string>(iq?.accompText ?? '');
@@ -1921,8 +1923,11 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
         blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(new Error('blob')), 'image/jpeg', 0.92));
         ext = 'jpg'; contentType = 'image/jpeg';
       }
-      // Sem texto de acompanhamento o documento vai sozinho: a send-quote aceita mídia sem legenda.
-      const caption = includeAccomp ? accompText.trim() : '';
+      // Mensagem de apresentação: vai SEPARADA e ANTES do documento (decisão do dono, 11/08).
+      // ⚠️ Antes ela era passada como `text` junto da mídia, e a send-quote manda isso como LEGENDA
+      // no /send/media: o cliente recebia um arquivo com texto colado, e no WhatsApp legenda de
+      // documento fica escondida atrás do anexo. São duas mensagens agora, nesta ordem.
+      const apresentacao = includeAccomp ? accompText.trim() : '';
       const filename = `Orcamento-${displayNumber}.${ext}`;
       const mediaType: 'document' | 'image' = isPdf ? 'document' : 'image';
       // Blob pronto → o resto (subir no Storage, esperar propagar, enviar) vai pro background.
@@ -1932,9 +1937,22 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
         if (upErr) return { data: null, error: null, uploadFailed: true };
         const { data: pub } = supabase.storage.from('quotes').getPublicUrl(path);
         await waitForPublicUrl(pub.publicUrl);
+
+        // 1) A mensagem, sozinha. É AWAIT de propósito: sem esperar a 1ª voltar, as duas saem em
+        // paralelo e a ordem no WhatsApp vira sorteio (o documento pode chegar antes do texto).
+        if (apresentacao) {
+          const r = await callSendQuote({ clinic_id: clinicId, lead_id: leadId, phone, text: apresentacao });
+          // Falha aqui NÃO cancela o orçamento: o documento é o que importa. Mas avisa, senão o
+          // vendedor acha que mandou a apresentação e o cliente recebeu só o arquivo.
+          if (r.error || (r.data && r.data.ok === false)) {
+            showToast('A mensagem de apresentação não foi enviada. O orçamento segue mesmo assim.', 'error');
+          }
+        }
+
+        // 2) O documento, SEM legenda.
         return await callSendQuote({
           clinic_id: clinicId, lead_id: leadId, phone,
-          text: caption, media_url: pub.publicUrl, media_type: mediaType,
+          media_url: pub.publicUrl, media_type: mediaType,
           filename, delay: DOC_SEND_DELAY_MS,
         });
       }, photoUrls, afterHandoff);
@@ -2267,16 +2285,10 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
                   ))}
                 </div>
               </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Saudação</label>
-                <input
-                  type="text"
-                  value={saudacao}
-                  onChange={e => setSaudacao(e.target.value)}
-                  placeholder="Olá! Segue seu orçamento:"
-                  className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                />
-              </div>
+              {/* Saudação e Rodapé saíram da tela (decisão do dono, 11/08): agora é UMA mensagem só,
+                  e três campos para montar um texto que já é editável logo abaixo só atrapalhava.
+                  Os dois continuam existindo como PADRÃO, vindos do Modelo do Orçamento em
+                  Configurações, e é de lá que a mensagem nasce. */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Validade</label>
@@ -2299,27 +2311,17 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
                   />
                 </div>
               </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Rodapé</label>
-                <input
-                  type="text"
-                  value={rodape}
-                  onChange={e => setRodape(e.target.value)}
-                  placeholder="Qualquer dúvida, estou à disposição!"
-                  className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                />
-              </div>
               {/* Em "texto" a mensagem inteira já é editável logo abaixo: um segundo campo com o
                   mesmo conteúdo só confundiria. */}
               {format !== 'texto' && (
                 <div className="space-y-1.5">
                   <label className="flex items-center gap-2 text-sm font-medium text-slate-600 cursor-pointer select-none">
                     <input type="checkbox" checked={includeAccomp} onChange={e => setIncludeAccomp(e.target.checked)} className="w-4 h-4 accent-blue-600" />
-                    Incluir texto de acompanhamento
+                    Enviar mensagem antes do orçamento
                   </label>
                   {includeAccomp && (<>
                     <div className="flex items-center justify-between">
-                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Texto</label>
+                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Mensagem</label>
                       {accompTouched && (
                         <button type="button" onClick={() => setAccompTouched(false)} className="text-[11px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1">
                           <RotateCcw className="w-3 h-3" /> Regenerar
@@ -2330,11 +2332,11 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
                       value={accompText}
                       onChange={e => { setAccompText(e.target.value); setAccompTouched(true); }}
                       rows={4}
-                      placeholder="Texto que vai junto do orçamento…"
+                      placeholder="Mensagem que chega antes do orçamento…"
                       className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-[13px] leading-relaxed font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none"
                     />
                     <p className="text-[10px] text-slate-400">
-                      Vai logo abaixo {format === 'pdf' ? 'do PDF' : 'da imagem'} no WhatsApp. Sai da Saudação + Rodapé; editar aqui não altera esses campos.
+                      Chega como mensagem separada, ANTES {format === 'pdf' ? 'do PDF' : 'da imagem'}. O texto padrão vem do Modelo do Orçamento, em Configurações.
                     </p>
                   </>)}
                 </div>

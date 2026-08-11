@@ -4698,7 +4698,13 @@ export function LeadKanban() {
                           operador via o motivo no card e nada no formulário, o que convida a
                           apagar sem querer. O valor legado continua traduzido pelo de-para nos
                           painéis, então não há divergência de número. */}
-                      {formData.loss_reason && !motivosPerda.some(r => r.label === formData.loss_reason) && (
+                      {/* ⚠️ A guarda testa a lista RENDERIZADA (sem 'outro'), não o catálogo
+                          inteiro. Testando o catálogo, o rótulo "Outro (descreva)" passava no
+                          `some()` e mesmo assim era removido pelo `filter` logo abaixo: sobrava um
+                          select controlado sem option correspondente, ou seja o campo em branco que
+                          este bloco existe para evitar. Escrevem esse rótulo o modal de perda e o
+                          balde de motivo fora da lista da IA. */}
+                      {formData.loss_reason && !motivosPerda.some(r => r.slug !== 'outro' && r.label === formData.loss_reason) && (
                         <option value={formData.loss_reason}>{formData.loss_reason} (registro anterior)</option>
                       )}
                       {/* "Outro" fica FORA daqui: ele exige explicação, e este formulário não tem

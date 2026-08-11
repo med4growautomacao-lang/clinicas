@@ -350,9 +350,15 @@ async function rodar(supabase: any, corpo: any) {
         return c;
       })();
       if (catalogo.erro) {
-        await supabase.from("ai_bench_results").update({
-          status: "erro", erro: `catalogo de motivos indisponivel: ${catalogo.erro}`,
+        // ⚠️ A coluna e `error` e o CHECK de status so aceita pending|running|done|error. Com
+        // `erro`/`status:'erro'` o update era recusado (PGRST204 / 23514), o retorno nao era
+        // checado, e o `continue` deixava o par preso em `running` — que o ai_bench_claim nunca
+        // reclama de volta e o contador de `restam` nao ve. O tratamento de erro produzia
+        // exatamente o sumico silencioso que ele foi acrescentado para evitar.
+        const { error: updErr } = await supabase.from("ai_bench_results").update({
+          status: "error", error: `catalogo de motivos indisponivel: ${catalogo.erro}`,
         }).eq("id", par.id);
+        if (updErr) console.error("ai-bench: nao consegui marcar o par como error", updErr.message);
         continue;
       }
       const tools = agentToolSpecs(catalogo.lista);

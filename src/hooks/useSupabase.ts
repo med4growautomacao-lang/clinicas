@@ -1549,7 +1549,13 @@ export function useTickets() {
   // zera outcome (via trigger de consistência), reabre status/closed_at e, para venda, apaga a
   // receita órfã (conversions + financial_transactions) e desvincula o paciente se não houver
   // consulta ativa. p_cancel_appointment cancela também a consulta ativa, se houver.
-  const reopenTicket = async (ticketId: string, stageId: string, cancelAppointment = false) => {
+  // ⚠️ `conversionId` diz QUAL venda cancelar. Com o card aceitando várias vendas (desde 10/08), a
+  // RPC recusa sem ele e devolve `error_code='multiplas_vendas'` + `lista`. Até 11/08 o hook nem
+  // mandava o parâmetro nem contava a recusa: o card pulava para a coluna nova, a RPC negava e ele
+  // voltava sozinho para Ganho, sem uma linha de explicação. Parecia travamento.
+  // Por isso o retorno virou o RESULTADO da RPC, não um booleano: quem chama precisa do error_code
+  // para saber que tem de perguntar qual venda.
+  const reopenTicket = async (ticketId: string, stageId: string, cancelAppointment = false, conversionId?: string | null): Promise<RpcResult> => {
     setTickets(prev => prev.map(t => t.id === ticketId
       ? { ...t, stage_id: stageId, status: 'open', outcome: null, outcome_at: null, closed_at: null, loss_reason: null }
       : t));
@@ -1557,13 +1563,20 @@ export function useTickets() {
       p_ticket_id: ticketId,
       p_new_stage_id: stageId,
       p_cancel_appointment: cancelAppointment,
+      p_conversion_id: conversionId ?? null,
     });
     if (error || !(data as any)?.success) {
       console.error('[reopenTicket] reopen_ticket falhou', { ticketId, stageId, error, data });
+      // Desfaz o otimismo: sem isto o card fica na coluna nova mentindo que a operação deu certo.
       fetch(true);
-      return false;
+      // ⚠️ Ordem dos argumentos: (code, title, clinicId, context, level). Trocar `context` por
+      // `level` não dá erro de tipo em runtime e o registro chega vazio na Central.
+      logSystemError('cancelar_venda_falhou', 'Cancelar venda/perda foi recusado', null, {
+        ticket_id: ticketId, stage_id: stageId, error_code: (data as any)?.error_code, message: error?.message,
+      }, 'warn');
+      return (data as RpcResult) ?? { success: false, error_code: error?.message || 'erro_desconhecido' };
     }
-    return true;
+    return data as RpcResult;
   };
 
   // "Manter venda/perda": move o MESMO ticket para outra coluna PRESERVANDO o desfecho

@@ -3219,6 +3219,7 @@ export function LeadKanban() {
   // Apagar o lead daqui desvincula todos os tickets dele e cascateia conversa/conversões.
   const { data: leads, create, createWithTicket, update, markNotLead } = useLeads({ pageSize: 150 });
   const { data: notLeads, restore: restoreNotLead } = useNotLeads();
+  const showToast = useToast();
   const { tickets, loading: ticketsLoading, refetch: refetchTickets, moveTicket, reopenTicket, moveTicketKeepOutcome, openTicket, closeTicket, finalizeTicket, removeTicket } = useTickets();
   // Por TICKET: a venda pertence ao atendimento, não ao contato. `semTicketByLead` carrega o
   // legado sem vínculo, que o quadro pendura num card só (ver `vendasPorTicket`).
@@ -5560,8 +5561,20 @@ export function LeadKanban() {
           onCancelOutcome={async (cancelAppointment) => {
             const { ticket, targetStageId } = reopenLead;
             setReopenLead(null);
-            await reopenTicket(ticket.id, targetStageId, cancelAppointment);
+            const res = await reopenTicket(ticket.id, targetStageId, cancelAppointment);
             await refetchTickets(true);
+            // ⚠️ A recusa era MUDA até 11/08: o card pulava de coluna, a RPC negava e ele voltava
+            // sozinho, sem explicação. Com N vendas por card, 'multiplas_vendas' é a recusa comum.
+            if (!res.success) {
+              showToast(
+                res.error_code === 'multiplas_vendas'
+                  ? 'Este card tem mais de uma venda lançada, então é preciso dizer qual cancelar. Abra "Ver / editar orçamento" e cancele pela proposta correspondente.'
+                  : res.error_code === 'forbidden'
+                    ? 'Sem permissão para cancelar o desfecho deste card.'
+                    : 'Não foi possível cancelar. O card voltou para onde estava.',
+                'error'
+              );
+            }
           }}
           checkAppointment={async (ticketId) => {
             const { data } = await supabase

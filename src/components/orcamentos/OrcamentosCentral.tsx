@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence } from "framer-motion";
-import { FileText, Send, CheckCircle2, XCircle, Search, ExternalLink, Printer, Download, Receipt, Truck, Archive, ChevronDown, ChevronRight, Eye, Pencil, Wallet } from "lucide-react";
+import { FileText, Send, CheckCircle2, XCircle, Search, ExternalLink, Printer, Download, Receipt, Truck, Archive, ChevronDown, ChevronRight, Eye, Pencil, Wallet, RotateCcw } from "lucide-react";
 // Mesmo construtor do Kanban, de propósito: catálogo, alturas, cálculo, documento e envio já vivem
 // nele. Uma segunda tela de orçamento aqui divergiria da primeira na primeira mudança.
 import { OrcamentoModal } from "../LeadKanban";
@@ -61,7 +61,7 @@ function mapApproveError(code?: string) {
 
 export function OrcamentosCentral() {
   const showToast = useToast();
-  const { data: orcamentos, loading, approve, updateStatus, markDelivered, save: saveOrcamento } = useOrcamentos();
+  const { data: orcamentos, loading, approve, updateStatus, markDelivered, fixStatus, save: saveOrcamento } = useOrcamentos();
   const [filter, setFilter] = useState<OrcamentoStatus | "todos">("todos");
   const [search, setSearch] = useState("");
   const [approveTarget, setApproveTarget] = useState<Orcamento | null>(null);
@@ -70,6 +70,8 @@ export function OrcamentosCentral() {
   const [deliverTarget, setDeliverTarget] = useState<Orcamento | null>(null);
   const [viewTarget, setViewTarget] = useState<Orcamento | null>(null);
   const [editTarget, setEditTarget] = useState<Orcamento | null>(null);
+  const [payTarget, setPayTarget] = useState<Orcamento | null>(null);
+  const [statusTarget, setStatusTarget] = useState<Orcamento | null>(null);
   // Pilha de orçamentos do mesmo cliente: fechada por padrão, abre pela setinha.
   const [expandidos, setExpandidos] = useState<Record<string, boolean>>({});
 
@@ -257,15 +259,8 @@ export function OrcamentosCentral() {
                           onDeliver={() => setDeliverTarget(o)}
                           onView={() => setViewTarget(o)}
                           onEdit={() => setEditTarget(o)}
-                          onPay={async () => {
-                            const res = await updateStatus(o.id, "pago");
-                            showToast(
-                              res.success
-                                ? `Orçamento #${o.number} marcado como pago. A partir de agora ele não pode mais ser editado.`
-                                : "Não foi possível marcar como pago.",
-                              res.success ? "success" : "error"
-                            );
-                          }}
+                          onPay={() => setPayTarget(o)}
+                          onFixStatus={() => setStatusTarget(o)}
                           onSubstitute={async () => {
                             const res = await updateStatus(o.id, "substituido");
                             showToast(
@@ -322,6 +317,42 @@ export function OrcamentosCentral() {
         )}
         {viewTarget && (
           <VerOrcamentoModal orcamento={viewTarget} onClose={() => setViewTarget(null)} />
+        )}
+        {payTarget && (
+          <PagamentoModal
+            orcamento={payTarget}
+            onClose={() => setPayTarget(null)}
+            onConfirm={async data => {
+              const res = await fixStatus(payTarget.id, "pago", data);
+              showToast(
+                res.success
+                  ? `Orçamento #${payTarget.number} marcado como pago. Ele não pode mais ser editado.`
+                  : "Não foi possível marcar como pago.",
+                res.success ? "success" : "error"
+              );
+              setPayTarget(null);
+            }}
+          />
+        )}
+        {statusTarget && (
+          <StatusModal
+            orcamento={statusTarget}
+            onClose={() => setStatusTarget(null)}
+            onConfirm={async (status, pagoEm) => {
+              const res = await fixStatus(statusTarget.id, status, pagoEm);
+              showToast(
+                res.success
+                  ? `Status do #${statusTarget.number} alterado para ${STATUS_META[status].label}.`
+                  : res.error_code === "tem_venda_lancada"
+                    ? "Esta proposta tem venda lançada. Cancele a venda no Kanban antes de voltar o status."
+                    : res.error_code === "use_aprovar"
+                      ? "Para aprovar use o botão Aprovar: ele lança a venda, a receita e a produção."
+                      : "Não foi possível alterar o status.",
+                res.success ? "success" : "error"
+              );
+              if (res.success) setStatusTarget(null);
+            }}
+          />
         )}
         {editTarget && editTarget.lead_id && (
           <OrcamentoModal
@@ -381,7 +412,7 @@ export function OrcamentosCentral() {
   );
 }
 
-function OrcamentoRow({ o, versaoAntiga = false, onApprove, onReject, onPrint, onDeliver, onView, onEdit, onPay, onSubstitute, onMarkSent }: {
+function OrcamentoRow({ o, versaoAntiga = false, onApprove, onReject, onPrint, onDeliver, onView, onEdit, onPay, onFixStatus, onSubstitute, onMarkSent }: {
   o: Orcamento;
   // Versão anterior dentro do mesmo projeto: continua clicável (dá para aprovar, se o cliente
   // voltar atrás), mas aparece apagada, porque quem está de pé é a mais recente.
@@ -393,6 +424,7 @@ function OrcamentoRow({ o, versaoAntiga = false, onApprove, onReject, onPrint, o
   onView: () => void;
   onEdit: () => void;
   onPay: () => void;
+  onFixStatus: () => void;
   onSubstitute: () => void;
   onMarkSent: () => void;
 }) {
@@ -463,9 +495,15 @@ function OrcamentoRow({ o, versaoAntiga = false, onApprove, onReject, onPrint, o
         {FECHADO.includes(o.status) && !o.entregue_at && (
           <Button size="sm" variant="outline" onClick={onDeliver}><Truck className="w-3.5 h-3.5 mr-1" /> Marcar entregue</Button>
         )}
+        {o.pago_at && (
+          <span className="text-[10px] font-bold text-violet-600 px-1.5">Pago em {fmtDate(o.pago_at)}</span>
+        )}
         {o.entregue_at && (
           <span className="text-[10px] font-bold text-emerald-600 px-1.5">Entregue em {fmtDate(o.entregue_at)}</span>
         )}
+        {/* Corrigir status: clique errado acontece, e refazer a proposta inteira por causa disso é
+            pior. A trava de verdade está na RPC, não aqui. */}
+        <button title="Corrigir status" onClick={onFixStatus} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg"><RotateCcw className="w-4 h-4" /></button>
         <button title="Ver no Kanban" onClick={goToLeadKanban} className="p-2 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded-lg"><ExternalLink className="w-4 h-4" /></button>
       </div>
     </div>
@@ -675,6 +713,88 @@ function RejectModal({ orcamento, onClose, onConfirm }: {
       <Field label="Motivo (opcional)">
         <textarea className={cn(inputCls, "min-h-[72px] resize-y")} value={reason} onChange={e => setReason(e.target.value)} placeholder="Ex.: preço alto, escolheu concorrente…" autoFocus />
       </Field>
+    </Modal>
+  );
+}
+
+// Pagamento com DATA informada, mesmo motivo da entrega: quem registra costuma fazer isso dias
+// depois, e assumir "hoje" joga o dinheiro no dia errado.
+function PagamentoModal({ orcamento, onClose, onConfirm }: {
+  orcamento: Orcamento;
+  onClose: () => void;
+  onConfirm: (data: string) => Promise<void>;
+}) {
+  const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+  const [data, setData] = useState(hoje);
+  const [saving, setSaving] = useState(false);
+  return (
+    <Modal
+      title={`Registrar pagamento do #${orcamento.number}`}
+      onClose={onClose}
+      footer={<>
+        <Button variant="outline" size="sm" onClick={onClose}>Cancelar</Button>
+        <Button size="sm" onClick={async () => { setSaving(true); await onConfirm(data); setSaving(false); }} disabled={saving || !data}>
+          {saving ? "Registrando…" : "Confirmar pagamento"}
+        </Button>
+      </>}
+    >
+      <p className="text-xs text-slate-500 mb-3">
+        Depois de marcado como pago, este orçamento <strong>não pode mais ser editado</strong>. Dá para
+        voltar atrás em "Corrigir status", enquanto a venda não for cancelada.
+      </p>
+      <Field label="Data do pagamento">
+        <input type="date" className={inputCls} value={data} onChange={e => setData(e.target.value)} autoFocus />
+      </Field>
+    </Modal>
+  );
+}
+
+// Correção manual do status: clique errado acontece, e refazer a proposta por causa disso é pior.
+// ⚠️ A trava de verdade está na RPC: sair de aprovado/pago com venda lançada é RECUSADO, porque
+// desfazer venda exige apagar conversão e lançamento financeiro juntos (é o "Cancelar venda").
+function StatusModal({ orcamento, onClose, onConfirm }: {
+  orcamento: Orcamento;
+  onClose: () => void;
+  onConfirm: (status: OrcamentoStatus, pagoEm: string | null) => Promise<void>;
+}) {
+  const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+  const [status, setStatus] = useState<OrcamentoStatus>(orcamento.status);
+  const [pagoEm, setPagoEm] = useState(orcamento.pago_at ? String(orcamento.pago_at).slice(0, 10) : hoje);
+  const [saving, setSaving] = useState(false);
+  const fechado = FECHADO.includes(orcamento.status);
+  // Só o que faz sentido a partir de onde ele está. Aprovar de verdade é pelo botão Aprovar, que
+  // lança venda e receita, então "aprovado" só aparece para quem já está fechado.
+  const opcoes: OrcamentoStatus[] = fechado
+    ? ["aprovado", "pago"]
+    : ["rascunho", "enviado", "recusado", "substituido", "expirado"];
+  return (
+    <Modal
+      title={`Corrigir status do #${orcamento.number}`}
+      onClose={onClose}
+      footer={<>
+        <Button variant="outline" size="sm" onClick={onClose}>Cancelar</Button>
+        <Button size="sm" onClick={async () => { setSaving(true); await onConfirm(status, status === "pago" ? pagoEm : null); setSaving(false); }} disabled={saving}>
+          {saving ? "Salvando…" : "Salvar status"}
+        </Button>
+      </>}
+    >
+      <Field label="Status">
+        <select className={inputCls} value={status} onChange={e => setStatus(e.target.value as OrcamentoStatus)}>
+          {opcoes.map(s => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
+        </select>
+      </Field>
+      {status === "pago" && (
+        <div className="mt-3">
+          <Field label="Data do pagamento">
+            <input type="date" className={inputCls} value={pagoEm} onChange={e => setPagoEm(e.target.value)} />
+          </Field>
+        </div>
+      )}
+      <p className="mt-3 text-[11px] text-slate-400">
+        {fechado
+          ? "Esta proposta virou venda. Aqui dá para desfazer só o pagamento; cancelar a venda em si é pelo Kanban, que apaga a receita junto."
+          : "Correção livre: esta proposta ainda não gerou venda."}
+      </p>
     </Modal>
   );
 }

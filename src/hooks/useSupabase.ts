@@ -4044,6 +4044,7 @@ export interface Orcamento {
   data_entrega_prevista: string | null;  // data PROMETIDA de entrega (preenchida na aprovação)
   entregue_at: string | null;            // entrega REAL: é o que dispara a baixa de estoque
   entregue_por: string | null;
+  pago_at: string | null;                // quando o cliente PAGOU (data informada, não a do clique)
   approved_line_keys?: string[] | null;  // itens aprovados ('L1','L2'…); null = todos do snapshot
   pagamento: string | null;
   notes: string | null;
@@ -4222,7 +4223,21 @@ export function useOrcamentos() {
     return res as RpcResult;
   };
 
-  return { data, loading, refetch: fetch, save, approve, updateStatus, setPrintInfo, markDelivered };
+  // Corrige o status na mão (clique errado) e grava a data do pagamento. A RPC RECUSA sair de
+  // aprovado/pago quando ainda existe venda lançada: desfazer venda é pelo "Cancelar venda" no
+  // Kanban, que apaga a conversão e o lançamento financeiro juntos.
+  const fixStatus = async (id: string, status: OrcamentoStatus, pagoEm?: string | null): Promise<RpcResult> => {
+    const { data: res, error } = await supabase.rpc('corrigir_status_orcamento', {
+      p_orcamento_id: id,
+      p_status: status,
+      p_pago_em: pagoEm || null,
+    });
+    await fetch(true);
+    if (error) return { success: false, error_code: error.message };
+    return res as RpcResult;
+  };
+
+  return { data, loading, refetch: fetch, save, approve, updateStatus, setPrintInfo, markDelivered, fixStatus };
 }
 
 // Equipamento/maquina (Manutencao).

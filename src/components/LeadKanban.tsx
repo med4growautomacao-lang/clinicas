@@ -4640,31 +4640,58 @@ export function LeadKanban() {
                   </div>
                 </div>
                 {(() => {
+                  // Só com card existente: no cadastro de contato novo ainda não há ticket onde
+                  // pendurar orçamento.
                   const et = tickets.find(t => t.id === selectedLead?._ticketId);
-                  if (!et?.quote_data) return null;
+                  if (!et || !selectedLead) return null;
+                  const jaTemOrcamento = !!et.quote_data;
                   return (
                     <div className="space-y-2">
+                      {/* Orçamento NOVO, em branco. É a porta para empilhar: o anterior não é
+                          sobrescrito nem apagado, fica no histórico do cliente, e cada orçamento
+                          aprovado vira sua própria venda com a sua própria data.
+                          ⚠️ `orcamentoId: null` é o que faz a RPC INSERIR em vez de atualizar.
+                          Passar o id do vigente aqui reescreveria a proposta antiga. */}
                       <button
                         type="button"
                         onClick={() => {
                           setShowModal(false);
-                          const vig = getVigenteOrcamento(orcamentos, selectedLead.id, et.id);
-                          setOrcamentoLead({ id: selectedLead.id, name: selectedLead.name, phone: selectedLead.phone ?? null, prevStageId: null, ticketId: et.id, initialQuote: et.quote_data, orcamentoId: vig?.id ?? null });
+                          setOrcamentoLead({ id: selectedLead.id, name: selectedLead.name, phone: selectedLead.phone ?? null, prevStageId: null, ticketId: et.id, initialQuote: undefined, orcamentoId: null });
                         }}
-                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 font-bold text-sm hover:bg-blue-100 transition-colors"
+                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 font-bold text-sm hover:bg-emerald-100 transition-colors"
                       >
-                        <FileText className="w-4 h-4" /> Ver / editar orçamento criado
+                        <Plus className="w-4 h-4" /> {jaTemOrcamento ? 'Novo orçamento / venda' : 'Criar orçamento / venda'}
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowModal(false);
-                          setPoLead({ id: selectedLead.id, name: selectedLead.name, phone: selectedLead.phone ?? null, quoteData: et.quote_data, ticketId: et.id });
-                        }}
-                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-teal-200 bg-teal-50 text-teal-700 font-bold text-sm hover:bg-teal-100 transition-colors"
-                      >
-                        <Package className="w-4 h-4" /> Gerar ordem de produção / separação
-                      </button>
+                      {jaTemOrcamento && (
+                        <p className="text-[10px] font-medium text-slate-400 text-center -mt-1">
+                          O orçamento atual continua no histórico.
+                        </p>
+                      )}
+                      {jaTemOrcamento && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowModal(false);
+                            const vig = getVigenteOrcamento(orcamentos, selectedLead.id, et.id);
+                            setOrcamentoLead({ id: selectedLead.id, name: selectedLead.name, phone: selectedLead.phone ?? null, prevStageId: null, ticketId: et.id, initialQuote: et.quote_data, orcamentoId: vig?.id ?? null });
+                          }}
+                          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 font-bold text-sm hover:bg-blue-100 transition-colors"
+                        >
+                          <FileText className="w-4 h-4" /> Ver / editar orçamento atual
+                        </button>
+                      )}
+                      {jaTemOrcamento && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowModal(false);
+                            setPoLead({ id: selectedLead.id, name: selectedLead.name, phone: selectedLead.phone ?? null, quoteData: et.quote_data, ticketId: et.id });
+                          }}
+                          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-teal-200 bg-teal-50 text-teal-700 font-bold text-sm hover:bg-teal-100 transition-colors"
+                        >
+                          <Package className="w-4 h-4" /> Gerar ordem de produção / separação
+                        </button>
+                      )}
                     </div>
                   );
                 })()}

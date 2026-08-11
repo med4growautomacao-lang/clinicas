@@ -1361,9 +1361,12 @@ function ProductPicker({ value, products, protocols, useProd, useProt, sourceNou
 // NÃO gera conversão — só grava metadados no lead (estimated_value = total) e no ticket
 // (notes = resumo itemizado em texto). Se a clínica ainda não tem catálogo, cai no modo
 // manual (digita o valor), preservando o comportamento anterior.
-function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, onClose, onCancel, onConfirm, onSavedAndNew }: {
+function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoCliente = [], onClose, onCancel, onConfirm, onSavedAndNew }: {
   lead: { id: string; name: string; phone?: string | null };
   initialQuote?: any;
+  // Projetos que este cliente já tem, para sugerir no campo e evitar que a mesma obra vire dois
+  // nomes ("Obra Rua X" e "obra rua x"), o que quebraria o agrupamento e voltaria a inflar a soma.
+  projetosDoCliente?: string[];
   // Nº da proposta DESTA sessão (1 = a primeira). Vem do pai porque este modal é REMONTADO a cada
   // proposta nova: um contador interno seria zerado junto com o formulário.
   sessionIndex?: number;
@@ -1425,6 +1428,10 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, onClose, onCance
   const [feeOpen, setFeeOpen] = useState<Record<number, boolean>>({}); // desconto/frete por linha (ocultos por padrão; setinha p/ mostrar)
   const [manualValue, setManualValue] = useState(iq?.manualValue ?? '');
   const [notes, setNotes] = useState(iq?.notes ?? '');
+  // Projeto/obra desta proposta. É o nível que faltava entre o cliente e o orçamento: propostas do
+  // MESMO projeto são versões (vale a mais recente), projetos diferentes somam no funil. Sem ele o
+  // sistema não distingue "mandei outra versão" de "é outra obra", e a soma do card inflava.
+  const [projeto, setProjeto] = useState<string>(iq?.projeto ?? '');
 
   // Etapa 2 (opcional): configuracao da mensagem enviada por WhatsApp.
   // Valores iniciais vêm do "modelo do orçamento" da clínica (clinic.quote_template).
@@ -1749,7 +1756,10 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, onClose, onCance
   // Snapshot estruturado p/ reabrir o orçamento depois (persistido em tickets.quote_data).
   // `accompText` só entra quando foi editado à mão: assim, ao reabrir, o texto volta a acompanhar
   // saudação/rodapé em vez de congelar a versão antiga.
-  const buildQuoteSnapshot = () => ({ lines, manualValue, notes, saudacao, rodape, validade, pagamento, dataEntrega, includeSpecs, includeAccomp, ...(accompTouched ? { accompText } : {}), format, imageIds: selectedImages.map(i => i.id) });
+  // `projeto` viaja no snapshot (mesmo caminho que `dataEntrega` já usa): assim o pai grava na
+  // coluna própria sem precisar de mais um argumento no onConfirm, e ao reabrir a proposta o campo
+  // volta preenchido sozinho.
+  const buildQuoteSnapshot = () => ({ lines, manualValue, notes, projeto: projeto.trim() || null, saudacao, rodape, validade, pagamento, dataEntrega, includeSpecs, includeAccomp, ...(accompTouched ? { accompText } : {}), format, imageIds: selectedImages.map(i => i.id) });
 
   // Linhas de produto com quantidade > 0 (base p/ simular disponibilidade/prazo).
   const telaLines = useMemo(
@@ -1791,7 +1801,9 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, onClose, onCance
   // Fica de fora DE PROPÓSITO: linhas, observações, valor manual, fotos, data de entrega e legenda
   // editada. Tudo isso é CONTEÚDO da proposta: a opção B é outra proposta, não uma cópia da A.
   // Os dados do cliente não entram aqui porque não são estado do modal: vêm da prop `lead`.
-  const carryOver = () => ({ saudacao, rodape, validade, pagamento, format, includeSpecs, includeAccomp });
+  // `projeto` VAI junto de propósito: o uso mais comum do botão é mandar outra versão da MESMA
+  // obra depois de o cliente achar caro. Se for outro projeto, é só trocar o nome no campo.
+  const carryOver = () => ({ projeto, saudacao, rodape, validade, pagamento, format, includeSpecs, includeAccomp });
 
   // "Salvar e criar outra proposta" (etapa 1): grava a atual como rascunho e devolve o controle ao
   // pai, que remonta este modal em branco. NÃO chama onClose e NÃO marca `done`.
@@ -1963,6 +1975,28 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, onClose, onCance
           </div>
 
           {step === 1 && (<>
+          {/* Projeto/obra. É o que separa "outra versão desta proposta" de "outro negócio deste
+              cliente": versões do mesmo projeto não somam no funil, projetos diferentes somam.
+              Em branco continua funcionando como sempre (cliente com um negócio só). */}
+          <div>
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Projeto / obra</label>
+            <input
+              type="text"
+              list={`projetos-${lead.id}`}
+              value={projeto}
+              onChange={e => setProjeto(e.target.value)}
+              placeholder={projetosDoCliente.length ? 'Ex.: Obra Rua X (ou escolha um já existente)' : 'Ex.: Obra Rua X · opcional'}
+              className="mt-1.5 w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-200 font-medium text-sm"
+            />
+            <datalist id={`projetos-${lead.id}`}>
+              {projetosDoCliente.map(p => <option key={p} value={p} />)}
+            </datalist>
+            {projetosDoCliente.length > 0 && (
+              <p className="mt-1 text-[10px] font-medium text-slate-400">
+                Mesmo projeto = nova versão desta proposta. Projeto novo = outro negócio, que soma no funil.
+              </p>
+            )}
+          </div>
           {hasCatalog ? (
             <div className="space-y-2.5">
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">{sectionLabel}</label>
@@ -3539,6 +3573,54 @@ export function LeadKanban() {
     });
   }, [convDateFrom, convDateTo]);
 
+  // Propostas VIVAS de cada card (rascunho ou enviado). Substituída, recusada, vencida e aprovada
+  // ficam de fora: aprovada já virou venda e entra pelo valor real, as outras não estão mais na mesa.
+  //
+  // 📌 A RÉGUA (decisão do dono, 11/08): o valor do card é a soma dos PROJETOS, contando a proposta
+  // MAIS RECENTE de cada um. Duas propostas da mesma obra são versões (a 2ª substitui a 1ª, não
+  // somam); duas obras diferentes somam, porque podem fechar as duas.
+  //
+  // ⚠️ Proposta sem projeto conta como negócio próprio. É o legado e o cliente de um negócio só,
+  // onde cada orçamento realmente é um. Quem empilhou versões antes do campo existir continua
+  // somando até alguém nomear ou marcar como substituída (medido em 11/08: um cliente com 7
+  // propostas da mesma negociação somava R$ 19.968).
+  const propostasVivasPorTicket = React.useMemo(() => {
+    // 1º agrupa por (card, projeto) guardando só a proposta de maior número, que é a mais recente.
+    const maisRecente: Record<string, { total: number; number: number }> = {};
+    for (const o of orcamentos) {
+      if (!o.ticket_id) continue;   // legado sem vínculo: o card cai no valor estimado do lead
+      if (o.status !== 'rascunho' && o.status !== 'enviado') continue;
+      const v = Number(o.total || 0);
+      if (v <= 0) continue;
+      const proj = (o.projeto || '').trim().toLowerCase();
+      // Sem projeto, a chave é o próprio orçamento: cada um conta sozinho.
+      const chave = proj ? `${o.ticket_id}|p:${proj}` : `${o.ticket_id}|o:${o.id}`;
+      const atual = maisRecente[chave];
+      if (!atual || o.number > atual.number) maisRecente[chave] = { total: v, number: o.number };
+    }
+    // 2º soma um valor por projeto dentro de cada card.
+    const porTicket: Record<string, { soma: number; qtd: number }> = {};
+    for (const [chave, { total }] of Object.entries(maisRecente)) {
+      const ticketId = chave.split('|')[0];
+      const atual = porTicket[ticketId];
+      porTicket[ticketId] = atual ? { soma: atual.soma + total, qtd: atual.qtd + 1 } : { soma: total, qtd: 1 };
+    }
+    return porTicket;
+  }, [orcamentos]);
+
+  // Nomes de projeto que cada cliente já usou, para o campo do modal sugerir em vez de deixar
+  // digitar de novo (e a mesma obra virar dois nomes, que quebraria o agrupamento).
+  const projetosPorLead = React.useMemo(() => {
+    const porLead: Record<string, string[]> = {};
+    for (const o of orcamentos) {
+      const nome = (o.projeto || '').trim();
+      if (!nome || !o.lead_id) continue;
+      const lista = porLead[o.lead_id] ?? (porLead[o.lead_id] = []);
+      if (!lista.some(n => n.toLowerCase() === nome.toLowerCase())) lista.push(nome);
+    }
+    return porLead;
+  }, [orcamentos]);
+
   // Predicado de facetas (origem + canal + datas + UTM, podendo ignorar uma dimensão UTM).
   // Reaproveitado na filtragem do board e na CONTAGEM dos valores de UTM, p/ que os números
   // reflitam os filtros ativos (período, origem, canal e combinação de UTMs).
@@ -4169,8 +4251,10 @@ export function LeadKanban() {
             const stageTotal = stageTickets.reduce((sum, t) => {
               // Todas as vendas DESTE card (uma por orçamento aprovado), já no recorte do filtro.
               const vendido = somaVendas(vendasNoFiltro(vendasPorTicket[t.id] || []));
-              // Card sem venda no recorte continua valendo o orçamento do contato, como antes.
-              return sum + (vendido > 0 ? vendido : Number(t.lead?.estimated_value || 0));
+              if (vendido > 0) return sum + vendido;
+              // Sem venda: soma das propostas VIVAS do card. Sem proposta, o valor estimado.
+              const proposta = propostasVivasPorTicket[t.id]?.soma;
+              return sum + (proposta ?? Number(t.lead?.estimated_value || 0));
             }, 0);
             const visibleCount = (columnPages[stage.id] || 1) * COLUMN_PAGE_SIZE;
             const visibleTickets = stageTickets.slice(0, visibleCount);
@@ -4584,8 +4668,13 @@ export function LeadKanban() {
                         {/* Footer: valor | tempo + chat */}
                         {(() => {
                           // Valor do card = soma das vendas DESTE atendimento (vindas do ticket,
-                          // não do contato). Sem venda, continua valendo o orçamento estimado.
-                          const displayValue = totalVendido > 0 ? totalVendido : Number(lead.estimated_value || 0);
+                          // não do contato). Sem venda, a soma das propostas VIVAS: cada orçamento
+                          // vivo é um negócio que pode fechar. Alternativa do mesmo negócio é linha
+                          // dentro de um orçamento só, não orçamento separado.
+                          const propostas = propostasVivasPorTicket[ticket.id];
+                          const displayValue = totalVendido > 0
+                            ? totalVendido
+                            : (propostas?.soma ?? Number(lead.estimated_value || 0));
                           const isReal = totalVendido > 0;
                           const ultimaVenda = vendas[0];
                           return (
@@ -4593,13 +4682,17 @@ export function LeadKanban() {
                               <div
                                 title={isReal
                                   ? `${vendas.length} venda${vendas.length > 1 ? 's' : ''} neste card: ${vendas.map(v => `${format(parseISO(v.converted_at), 'dd/MM')} ${formatBRL(v.value)}`).join(' + ')}`
-                                  : 'Valor do orçamento, nenhuma venda lançada neste card'}
+                                  : (propostas && propostas.qtd > 1
+                                    ? `${propostas.qtd} propostas em aberto, somadas. Se alguma foi só uma versão anterior, marque como substituída na Central.`
+                                    : 'Valor do orçamento, nenhuma venda lançada neste card')}
                                 className={cn(
                                   "text-[9px] font-bold px-1.5 py-0.5 rounded border shrink-0",
                                   isReal ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-teal-50 text-teal-700 border-teal-100"
                                 )}
                               >
-                                {formatBRL(displayValue)}{vendas.length > 1 ? ` (${vendas.length}x)` : ''}
+                                {formatBRL(displayValue)}
+                                {isReal && vendas.length > 1 ? ` (${vendas.length}x)` : ''}
+                                {!isReal && propostas && propostas.qtd > 1 ? ` (${propostas.qtd} propostas)` : ''}
                               </div>
                               <span className={cn(
                                 "text-[9px] font-medium truncate text-right flex-1",
@@ -5293,6 +5386,7 @@ export function LeadKanban() {
           lead={orcamentoLead}
           initialQuote={orcamentoLead.initialQuote}
           sessionIndex={orcamentoLead.seq ?? 1}
+          projetosDoCliente={projetosPorLead[orcamentoLead.id] ?? []}
           onClose={() => setOrcamentoLead(null)}
           onCancel={() => {
             const { ticketId, prevStageId } = orcamentoLead;
@@ -5327,6 +5421,9 @@ export function LeadKanban() {
               total: value,
               notes: description || null,
               snapshot: quoteData ?? null,
+              // O projeto viaja dentro do snapshot (mesmo caminho da data de entrega) e é gravado
+              // na coluna própria, que é por onde a soma do funil agrupa.
+              projeto: (quoteData as any)?.projeto ?? null,
             });
             // O código do erro sobe até a tela: antes ele era descartado e a falha era muda.
             if (!res.success) return { ok: false, errorCode: res.error_code };

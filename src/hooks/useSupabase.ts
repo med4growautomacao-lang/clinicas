@@ -4029,6 +4029,9 @@ export interface Orcamento {
   total: number;
   validade: string | null;
   vencimento: string | null;
+  // Projeto/obra a que a proposta pertence. É o nível que separa "outra VERSÃO da mesma proposta"
+  // de "OUTRO negócio do mesmo cliente": mesmo projeto não soma, projetos diferentes somam.
+  projeto: string | null;
   data_entrega_prevista: string | null;  // data PROMETIDA de entrega (preenchida na aprovação)
   entregue_at: string | null;            // entrega REAL: é o que dispara a baixa de estoque
   entregue_por: string | null;
@@ -4062,6 +4065,9 @@ export interface SaveOrcamentoInput {
   pagamento?: string | null;
   notes?: string | null;
   snapshot?: any;
+  // Nome do projeto/obra. Propostas do MESMO projeto são versões (vale a mais recente);
+  // projetos diferentes somam no funil.
+  projeto?: string | null;
 }
 
 type RpcResult = { success: boolean; error_code?: string; [key: string]: any };
@@ -4136,6 +4142,7 @@ export function useOrcamentos() {
       p_notes: input.notes ?? null,
       p_snapshot: input.snapshot ?? null,
       p_ticket_id: input.ticketId ?? null,
+      p_projeto: input.projeto ?? null,
     });
     await fetch(true);
     if (error) {

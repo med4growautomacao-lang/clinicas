@@ -95,7 +95,23 @@ export function OrcamentosCentral() {
       else mapa.set(key, { key, cliente: o.client_name || o.lead?.name || "Sem nome", itens: [o] });
     }
     // Dentro do cliente, do mais novo para o mais antigo: o número é sequencial por clínica.
-    return [...mapa.values()].map(g => ({ ...g, itens: [...g.itens].sort((a, b) => b.number - a.number) }));
+    // E um nível a mais: PROJETO. Propostas do mesmo projeto são versões da mesma negociação;
+    // projetos diferentes são negócios distintos. Sem essa separação, 5 linhas soltas do mesmo
+    // cliente não dizem se são cinco obras ou cinco versões da mesma.
+    return [...mapa.values()].map(g => {
+      const itens = [...g.itens].sort((a, b) => b.number - a.number);
+      const porProjeto = new Map<string, { nome: string | null; itens: Orcamento[] }>();
+      for (const o of itens) {
+        const nome = (o.projeto || "").trim();
+        // Sem projeto, cada proposta fica sozinha: é o legado, e agrupá-las inventaria um vínculo
+        // que o dado não tem.
+        const chave = nome ? `p:${nome.toLowerCase()}` : `o:${o.id}`;
+        const sub = porProjeto.get(chave);
+        if (sub) sub.itens.push(o);
+        else porProjeto.set(chave, { nome: nome || null, itens: [o] });
+      }
+      return { ...g, itens, projetos: [...porProjeto.values()] };
+    });
   }, [filtered]);
 
   return (
@@ -184,6 +200,7 @@ export function OrcamentosCentral() {
                     <div className="min-w-0">
                       <p className="font-bold text-slate-800 text-sm truncate">{g.cliente}</p>
                       <p className="text-xs text-slate-400 mt-0.5">
+                        {g.projetos.filter(p => p.nome).length > 0 && `${g.projetos.length} projetos · `}
                         {g.itens.length} orçamentos · último #{ultimo.number} em {fmtDate(ultimo.created_at)}
                         {emAberto.length > 0 && ` · ${emAberto.length} aguardando resposta`}
                       </p>
@@ -203,28 +220,48 @@ export function OrcamentosCentral() {
               {(!empilhado || aberto) && (
                 // Aberto, os orçamentos entram recuados e com um fio à esquerda: sem isso eles
                 // ficam no mesmo nível da linha do cliente e a pilha some visualmente.
-                <div className={cn("space-y-2.5", empilhado && "ml-2 pl-4 border-l-2 border-slate-100")}>
-                  {g.itens.map(o => (
-                    <OrcamentoRow
-                      key={o.id}
-                      o={o}
-                      onApprove={() => setApproveTarget(o)}
-                      onReject={() => setRejectTarget(o)}
-                      onPrint={() => setPrintTarget(o)}
-                      onDeliver={() => setDeliverTarget(o)}
-                      onView={() => setViewTarget(o)}
-                      onSubstitute={async () => {
-                        const res = await updateStatus(o.id, "substituido");
-                        showToast(
-                          res.success ? `Orçamento #${o.number} marcado como substituído.` : "Erro ao atualizar.",
-                          res.success ? "success" : "error"
-                        );
-                      }}
-                      onMarkSent={async () => {
-                        const res = await updateStatus(o.id, "enviado");
-                        showToast(res.success ? "Marcado como enviado." : "Erro ao atualizar.", res.success ? "success" : "error");
-                      }}
-                    />
+                <div className={cn("space-y-3", empilhado && "ml-2 pl-4 border-l-2 border-slate-100")}>
+                  {g.projetos.map((proj, pi) => (
+                    <div key={proj.nome ?? proj.itens[0].id} className="space-y-2.5">
+                      {/* Cabeçalho do projeto só quando ele tem nome: propostas sem projeto são o
+                          legado e cada uma vale por si, então rotulá-las inventaria um vínculo. */}
+                      {proj.nome && (
+                        <div className="flex items-baseline justify-between gap-3 px-1 pt-0.5">
+                          <p className="text-[11px] font-black text-teal-700 uppercase tracking-wider truncate">{proj.nome}</p>
+                          <p className="text-[10px] font-bold text-slate-400 shrink-0">
+                            {proj.itens.length > 1
+                              ? `${proj.itens.length} versões · vale a #${proj.itens[0].number}`
+                              : "1 proposta"}
+                          </p>
+                        </div>
+                      )}
+                      {proj.itens.map((o, i) => (
+                        <OrcamentoRow
+                          key={o.id}
+                          o={o}
+                          // Dentro de um projeto, só a mais recente está de pé; as outras são
+                          // versões anteriores e aparecem apagadas para não competirem pela atenção.
+                          versaoAntiga={!!proj.nome && i > 0 && (o.status === "rascunho" || o.status === "enviado")}
+                          onApprove={() => setApproveTarget(o)}
+                          onReject={() => setRejectTarget(o)}
+                          onPrint={() => setPrintTarget(o)}
+                          onDeliver={() => setDeliverTarget(o)}
+                          onView={() => setViewTarget(o)}
+                          onSubstitute={async () => {
+                            const res = await updateStatus(o.id, "substituido");
+                            showToast(
+                              res.success ? `Orçamento #${o.number} marcado como substituído.` : "Erro ao atualizar.",
+                              res.success ? "success" : "error"
+                            );
+                          }}
+                          onMarkSent={async () => {
+                            const res = await updateStatus(o.id, "enviado");
+                            showToast(res.success ? "Marcado como enviado." : "Erro ao atualizar.", res.success ? "success" : "error");
+                          }}
+                        />
+                      ))}
+                      {pi < g.projetos.length - 1 && proj.nome && <div className="h-px bg-slate-100 mx-1" />}
+                    </div>
                   ))}
                 </div>
               )}
@@ -291,8 +328,11 @@ export function OrcamentosCentral() {
   );
 }
 
-function OrcamentoRow({ o, onApprove, onReject, onPrint, onDeliver, onView, onSubstitute, onMarkSent }: {
+function OrcamentoRow({ o, versaoAntiga = false, onApprove, onReject, onPrint, onDeliver, onView, onSubstitute, onMarkSent }: {
   o: Orcamento;
+  // Versão anterior dentro do mesmo projeto: continua clicável (dá para aprovar, se o cliente
+  // voltar atrás), mas aparece apagada, porque quem está de pé é a mais recente.
+  versaoAntiga?: boolean;
   onApprove: () => void;
   onReject: () => void;
   onPrint: () => void;
@@ -304,17 +344,25 @@ function OrcamentoRow({ o, onApprove, onReject, onPrint, onDeliver, onView, onSu
   const clientName = o.client_name || o.lead?.name || "—";
   const pending = o.status === "rascunho" || o.status === "enviado";
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex items-center justify-between gap-4 flex-wrap">
+    <div className={cn(
+      "bg-white border rounded-xl p-4 shadow-sm flex items-center justify-between gap-4 flex-wrap",
+      versaoAntiga ? "border-slate-200 opacity-60 hover:opacity-100 transition-opacity" : "border-slate-200"
+    )}>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 mb-1">
           <span className="text-xs font-black text-slate-400">#{o.number}</span>
           <StatusBadge label={STATUS_META[o.status].label} tone={STATUS_META[o.status].tone} />
+          {versaoAntiga && (
+            <span className="text-[10px] font-bold text-slate-400">versão anterior</span>
+          )}
           {o.status === "aprovado" && !o.approved_ticket_id && (
             <span className="text-[10px] font-bold text-amber-600">venda desfeita</span>
           )}
         </div>
         <p className="font-bold text-slate-800 text-sm truncate">{clientName}</p>
-        <p className="text-xs text-slate-400 mt-0.5">{fmtDate(o.created_at)}</p>
+        <p className="text-xs text-slate-400 mt-0.5">
+          {fmtDate(o.created_at)}{o.projeto ? ` · ${o.projeto}` : ""}
+        </p>
       </div>
       <div className="text-right">
         <p className="text-lg font-black text-slate-900">{fmtBRL(o.total)}</p>
@@ -658,7 +706,10 @@ function VerOrcamentoModal({ orcamento, onClose }: { orcamento: Orcamento; onClo
       footer={<Button variant="outline" size="sm" onClick={onClose}>Fechar</Button>}
     >
       <div className="flex items-center justify-between gap-3 mb-3">
-        <p className="font-bold text-slate-800 text-sm truncate">{orcamento.client_name || orcamento.lead?.name || "—"}</p>
+        <div className="min-w-0">
+          <p className="font-bold text-slate-800 text-sm truncate">{orcamento.client_name || orcamento.lead?.name || "—"}</p>
+          {orcamento.projeto && <p className="text-[11px] font-bold text-teal-700 truncate">{orcamento.projeto}</p>}
+        </div>
         <StatusBadge label={STATUS_META[orcamento.status].label} tone={STATUS_META[orcamento.status].tone} />
       </div>
 

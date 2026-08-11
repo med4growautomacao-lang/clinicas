@@ -4017,9 +4017,12 @@ export function useProductionOrders() {
 // (isso é 'recusado'), então fica FORA da taxa de aprovação, e sai do "em aberto" porque ninguém
 // está esperando resposta dele. Marcação MANUAL: com vários negócios possíveis por cliente, o
 // sistema não sabe se o orçamento novo substitui o anterior ou é outro negócio.
-// 'pago' vem DEPOIS de aprovado e é o ponto sem volta: até 'aprovado' a proposta ainda pode ser
-// corrigida (e a venda lançada acompanha o novo valor); de 'pago' em diante, não se edita mais.
-export type OrcamentoStatus = 'rascunho' | 'enviado' | 'aprovado' | 'pago' | 'recusado' | 'expirado' | 'substituido';
+// 📌 'aprovado' é o fim da linha, e é o MESMO evento de passar o card para Ganho: aprovar lança a
+// venda, a receita e a produção. NÃO existe status 'pago' aqui, de propósito: quem responde se o
+// cliente pagou é `financial_transactions.status`, preenchido no próprio modal de aprovação. Um
+// status 'pago' no orçamento seria uma segunda resposta para a mesma pergunta (tentado e revertido
+// em 11/08).
+export type OrcamentoStatus = 'rascunho' | 'enviado' | 'aprovado' | 'recusado' | 'expirado' | 'substituido';
 
 export interface Orcamento {
   id: string;
@@ -4044,7 +4047,6 @@ export interface Orcamento {
   data_entrega_prevista: string | null;  // data PROMETIDA de entrega (preenchida na aprovação)
   entregue_at: string | null;            // entrega REAL: é o que dispara a baixa de estoque
   entregue_por: string | null;
-  pago_at: string | null;                // quando o cliente PAGOU (data informada, não a do clique)
   approved_line_keys?: string[] | null;  // itens aprovados ('L1','L2'…); null = todos do snapshot
   pagamento: string | null;
   notes: string | null;
@@ -4185,7 +4187,7 @@ export function useOrcamentos() {
     return res as RpcResult;
   };
 
-  const updateStatus = async (id: string, status: 'enviado' | 'recusado' | 'expirado' | 'substituido' | 'pago', reason?: string | null): Promise<RpcResult> => {
+  const updateStatus = async (id: string, status: 'enviado' | 'recusado' | 'expirado' | 'substituido', reason?: string | null): Promise<RpcResult> => {
     const { data: res, error } = await supabase.rpc('update_orcamento_status', {
       p_orcamento_id: id,
       p_status: status,
@@ -4223,14 +4225,14 @@ export function useOrcamentos() {
     return res as RpcResult;
   };
 
-  // Corrige o status na mão (clique errado) e grava a data do pagamento. A RPC RECUSA sair de
-  // aprovado/pago quando ainda existe venda lançada: desfazer venda é pelo "Cancelar venda" no
-  // Kanban, que apaga a conversão e o lançamento financeiro juntos.
-  const fixStatus = async (id: string, status: OrcamentoStatus, pagoEm?: string | null): Promise<RpcResult> => {
+  // Corrige o status na mão (clique errado). A RPC recusa nos dois sentidos: sair de 'aprovado' com
+  // venda lançada (desfazer venda é o "Cancelar venda" do Kanban, que apaga a conversão e o
+  // lançamento financeiro juntos) e ENTRAR em 'aprovado' por aqui (aprovar de verdade lança venda,
+  // receita e produção).
+  const fixStatus = async (id: string, status: OrcamentoStatus): Promise<RpcResult> => {
     const { data: res, error } = await supabase.rpc('corrigir_status_orcamento', {
       p_orcamento_id: id,
       p_status: status,
-      p_pago_em: pagoEm || null,
     });
     await fetch(true);
     if (error) return { success: false, error_code: error.message };

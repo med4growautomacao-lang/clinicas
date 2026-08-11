@@ -1365,7 +1365,10 @@ function ProductPicker({ value, products, protocols, useProd, useProt, sourceNou
 // NÃO gera conversão — só grava metadados no lead (estimated_value = total) e no ticket
 // (notes = resumo itemizado em texto). Se a clínica ainda não tem catálogo, cai no modo
 // manual (digita o valor), preservando o comportamento anterior.
-function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoCliente = [], onClose, onCancel, onConfirm, onSavedAndNew }: {
+// Exportado para a Central de Orçamentos reusar o MESMO construtor. Duplicar esta tela lá seria
+// manter dois orçamentos diferentes vivos (catálogo, alturas, cálculo, documento e envio), e eles
+// divergiriam na primeira mudança.
+export function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoCliente = [], onClose, onCancel, onConfirm, onSavedAndNew }: {
   lead: { id: string; name: string; phone?: string | null };
   initialQuote?: any;
   // Projetos que este cliente já tem, para sugerir no campo e evitar que a mesma obra vire dois
@@ -1382,7 +1385,9 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
   onConfirm: (value: number, description: string, quoteData: any, status: 'rascunho' | 'enviado') => Promise<{ ok: boolean; number?: number | null; id?: string | null; errorCode?: string }>;
   // Proposta gravada e o vendedor quer montar outra: o pai ZERA o id do orçamento (a próxima
   // gravação TEM que inserir), guarda o carry-over e remonta este modal em branco. NÃO fecha.
-  onSavedAndNew: (carry: any, savedNumber: number | null) => void;
+  // Opcional: a Central de Orçamentos usa este modal para EDITAR uma proposta existente, onde
+  // "criar outra" não faz sentido, então os botões somem quando ele não vem.
+  onSavedAndNew?: (carry: any, savedNumber: number | null) => void;
 }) {
   const iq: any = initialQuote ?? null; // orçamento salvo (editar) — tem prioridade sobre o modelo
   const showToast = useToast();
@@ -1436,6 +1441,13 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
   // MESMO projeto são versões (vale a mais recente), projetos diferentes somam no funil. Sem ele o
   // sistema não distingue "mandei outra versão" de "é outra obra", e a soma do card inflava.
   const [projeto, setProjeto] = useState<string>(iq?.projeto ?? '');
+  // Dados que só aparecem no RECIBO de entrega (CPF/CNPJ, endereço, vencimento). Ficam recolhidos:
+  // na hora de montar a proposta ninguém tem isso em mãos, mas quem edita depois precisa de um
+  // lugar para preencher sem esperar a entrega.
+  const [showDocData, setShowDocData] = useState(false);
+  const [clientDoc, setClientDoc] = useState<string>(iq?.clientDoc ?? '');
+  const [clientAddress, setClientAddress] = useState<string>(iq?.clientAddress ?? '');
+  const [vencimento, setVencimento] = useState<string>(iq?.vencimento ?? '');
 
   // Etapa 2 (opcional): configuracao da mensagem enviada por WhatsApp.
   // Valores iniciais vêm do "modelo do orçamento" da clínica (clinic.quote_template).
@@ -1772,7 +1784,7 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
   // `projeto` viaja no snapshot (mesmo caminho que `dataEntrega` já usa): assim o pai grava na
   // coluna própria sem precisar de mais um argumento no onConfirm, e ao reabrir a proposta o campo
   // volta preenchido sozinho.
-  const buildQuoteSnapshot = () => ({ lines, manualValue, notes, projeto: projeto.trim() || null, saudacao, rodape, validade, pagamento, dataEntrega, includeSpecs, includeAccomp, ...(accompTouched ? { accompText } : {}), includeClosing, closingText, format, imageIds: selectedImages.map(i => i.id) });
+  const buildQuoteSnapshot = () => ({ lines, manualValue, notes, projeto: projeto.trim() || null, clientDoc: clientDoc.trim() || null, clientAddress: clientAddress.trim() || null, vencimento: vencimento || null, saudacao, rodape, validade, pagamento, dataEntrega, includeSpecs, includeAccomp, ...(accompTouched ? { accompText } : {}), includeClosing, closingText, format, imageIds: selectedImages.map(i => i.id) });
 
   // Linhas de produto com quantidade > 0 (base p/ simular disponibilidade/prazo).
   const telaLines = useMemo(
@@ -1830,7 +1842,7 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
     setSaving(false);
     if (!res.ok) { const msg = mapSaveError(res.errorCode); setSendError(msg); showToast(msg, 'error'); return; }
     showToast(res.number ? `Orçamento #${res.number} salvo ✓ Montando a próxima proposta…` : 'Orçamento salvo ✓ Montando a próxima proposta…', 'success');
-    onSavedAndNew(carryOver(), res.number ?? null);
+    onSavedAndNew?.(carryOver(), res.number ?? null);
   };
 
   // Envia as fotos marcadas EM SEGUNDO PLANO (parte lenta: cada uma tem o delay nativo da
@@ -1919,7 +1931,7 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
     const savedNumber = res.number ?? null;
     const afterHandoff = continueAfter ? () => {
       showToast(savedNumber ? `Orçamento #${savedNumber} registrado ✓ Montando a próxima proposta…` : 'Orçamento registrado ✓ Montando a próxima proposta…', 'success');
-      onSavedAndNew(carryOver(), savedNumber);
+      onSavedAndNew?.(carryOver(), savedNumber);
     } : undefined;
 
     const clinicId = activeClinicId;
@@ -2043,6 +2055,24 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
             <datalist id={`projetos-${lead.id}`}>
               {projetosDoCliente.map(p => <option key={p} value={p} />)}
             </datalist>
+            {/* Recolhido: são dados do RECIBO de entrega, não da proposta. Quem monta o orçamento
+                raramente tem em mãos; quem edita depois precisa de onde preencher. */}
+            <button type="button" onClick={() => setShowDocData(v => !v)} className="mt-2 text-[11px] font-bold text-slate-400 hover:text-slate-600 flex items-center gap-1">
+              {showDocData ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />} Dados do cliente para o recibo
+            </button>
+            {showDocData && (
+              <div className="mt-2 space-y-2 rounded-xl border border-slate-200 p-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <input type="text" value={clientDoc} onChange={e => setClientDoc(e.target.value)} placeholder="CPF / CNPJ"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-200" />
+                  <input type="date" value={vencimento} onChange={e => setVencimento(e.target.value)} title="Vencimento"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-200" />
+                </div>
+                <input type="text" value={clientAddress} onChange={e => setClientAddress(e.target.value)} placeholder="Endereço"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-200" />
+                <p className="text-[10px] text-slate-400">Aparecem no Recibo de Entrega, não no orçamento enviado ao cliente.</p>
+              </div>
+            )}
             {projetosDoCliente.length > 0 && (
               <p className="mt-1 text-[10px] font-medium text-slate-400">
                 Mesmo projeto = nova versão desta proposta. Projeto novo = outro negócio, que soma no funil.
@@ -2493,7 +2523,7 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
               {/* Duas propostas no mesmo atendimento (o cliente pediu a opção A e a B): grava esta
                   e recomeça em branco, com o modal ABERTO. Quem remonta o formulário é o pai, que
                   também zera o id do orçamento, então a próxima gravação INSERE, não reescreve. */}
-              <button
+              {onSavedAndNew && <button
                 onClick={handleSaveAndNew}
                 disabled={saving || sending || done || !total || total <= 0}
                 title="Grava esta proposta e abre outra em branco para o mesmo contato"
@@ -2505,7 +2535,7 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
                 )}
               >
                 <Plus className="w-4 h-4" /> Salvar e criar outra proposta
-              </button>
+              </button>}
               <div className="flex gap-2">
                 <button onClick={onCancel} className="flex-1 py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-500 hover:bg-slate-50 transition-all">
                   Cancelar
@@ -2550,7 +2580,7 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
               {/* Mesmo envio do botão acima, mas o modal NÃO fecha: o envio segue em segundo plano
                   (o documento já foi gerado) e o formulário volta em branco para a próxima
                   proposta. É este o caminho real do caso "mandei a A, agora monto a B". */}
-              <button
+              {onSavedAndNew && <button
                 onClick={() => handleSend(true)}
                 disabled={sending || done || (format === 'texto' && !messageText.trim())}
                 title="Envia esta proposta e já abre outra em branco para o mesmo contato"
@@ -2562,7 +2592,7 @@ function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoClient
                 )}
               >
                 <Plus className="w-4 h-4" /> Enviar e criar outra proposta
-              </button>
+              </button>}
               <button onClick={() => setStep(1)} disabled={sending} className="w-full py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-500 hover:bg-slate-50 transition-all">
                 ← Voltar
               </button>
@@ -5483,6 +5513,10 @@ export function LeadKanban() {
               // O projeto viaja dentro do snapshot (mesmo caminho da data de entrega) e é gravado
               // na coluna própria, que é por onde a soma do funil agrupa.
               projeto: (quoteData as any)?.projeto ?? null,
+              // Dados do recibo: a RPC usa COALESCE, então em branco não apaga o que já existe.
+              clientDoc: (quoteData as any)?.clientDoc ?? null,
+              clientAddress: (quoteData as any)?.clientAddress ?? null,
+              vencimento: (quoteData as any)?.vencimento ?? null,
             });
             // O código do erro sobe até a tela: antes ele era descartado e a falha era muda.
             if (!res.success) return { ok: false, errorCode: res.error_code };

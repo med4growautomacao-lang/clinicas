@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence } from "framer-motion";
-import { FileText, Send, CheckCircle2, XCircle, Search, ExternalLink, Printer, Download, Receipt, Truck, Archive, ChevronDown, ChevronRight, Eye } from "lucide-react";
+import { FileText, Send, CheckCircle2, XCircle, Search, ExternalLink, Printer, Download, Receipt, Truck, Archive, ChevronDown, ChevronRight, Eye, Pencil } from "lucide-react";
+// Mesmo construtor do Kanban, de propósito: catálogo, alturas, cálculo, documento e envio já vivem
+// nele. Uma segunda tela de orçamento aqui divergiria da primeira na primeira mudança.
+import { OrcamentoModal } from "../LeadKanban";
 import { cn } from "@/src/lib/utils";
 import { useOrcamentos, useSettings, useProducts, useProtocols, Orcamento, OrcamentoStatus } from "../../hooks/useSupabase";
 import { supabase } from "../../lib/supabase";
@@ -53,7 +56,7 @@ function mapApproveError(code?: string) {
 
 export function OrcamentosCentral() {
   const showToast = useToast();
-  const { data: orcamentos, loading, approve, updateStatus, markDelivered } = useOrcamentos();
+  const { data: orcamentos, loading, approve, updateStatus, markDelivered, save: saveOrcamento } = useOrcamentos();
   const [filter, setFilter] = useState<OrcamentoStatus | "todos">("todos");
   const [search, setSearch] = useState("");
   const [approveTarget, setApproveTarget] = useState<Orcamento | null>(null);
@@ -61,6 +64,7 @@ export function OrcamentosCentral() {
   const [printTarget, setPrintTarget] = useState<Orcamento | null>(null);
   const [deliverTarget, setDeliverTarget] = useState<Orcamento | null>(null);
   const [viewTarget, setViewTarget] = useState<Orcamento | null>(null);
+  const [editTarget, setEditTarget] = useState<Orcamento | null>(null);
   // Pilha de orçamentos do mesmo cliente: fechada por padrão, abre pela setinha.
   const [expandidos, setExpandidos] = useState<Record<string, boolean>>({});
 
@@ -247,6 +251,7 @@ export function OrcamentosCentral() {
                           onPrint={() => setPrintTarget(o)}
                           onDeliver={() => setDeliverTarget(o)}
                           onView={() => setViewTarget(o)}
+                          onEdit={() => setEditTarget(o)}
                           onSubstitute={async () => {
                             const res = await updateStatus(o.id, "substituido");
                             showToast(
@@ -304,6 +309,40 @@ export function OrcamentosCentral() {
         {viewTarget && (
           <VerOrcamentoModal orcamento={viewTarget} onClose={() => setViewTarget(null)} />
         )}
+        {editTarget && editTarget.lead_id && (
+          <OrcamentoModal
+            // Sem `key` por seq: aqui o modal edita UMA proposta, não empilha propostas novas.
+            lead={{ id: editTarget.lead_id, name: editTarget.client_name || editTarget.lead?.name || "", phone: editTarget.lead?.phone ?? null }}
+            // O snapshot é o orçamento inteiro (linhas, projeto, mensagens, formato): é o que faz o
+            // construtor reabrir exatamente como foi salvo.
+            initialQuote={editTarget.snapshot}
+            projetosDoCliente={[...new Set(orcamentos.filter(x => x.lead_id === editTarget.lead_id && x.projeto).map(x => x.projeto as string))]}
+            onClose={() => setEditTarget(null)}
+            onCancel={() => setEditTarget(null)}
+            onConfirm={async (value, description, quoteData, status) => {
+              // ⚠️ `id` PREENCHIDO: aqui é edição, tem que ATUALIZAR. Sem ele a RPC inseriria uma
+              // proposta nova e a Central ganharia uma linha duplicada a cada salvamento.
+              const res = await saveOrcamento({
+                id: editTarget.id,
+                leadId: editTarget.lead_id!,
+                ticketId: editTarget.ticket_id,
+                status,
+                clientName: editTarget.client_name,
+                total: value,
+                notes: description || null,
+                snapshot: quoteData ?? null,
+                projeto: (quoteData as any)?.projeto ?? null,
+                // Dados do recibo: a RPC usa COALESCE neles, então em branco não apaga o que já
+                // estava gravado (o Recibo também os edita, e um não pode zerar o outro).
+                clientDoc: (quoteData as any)?.clientDoc ?? null,
+                clientAddress: (quoteData as any)?.clientAddress ?? null,
+                vencimento: (quoteData as any)?.vencimento ?? null,
+              });
+              if (!res.success) return { ok: false, errorCode: res.error_code };
+              return { ok: true, number: editTarget.number, id: editTarget.id };
+            }}
+          />
+        )}
         {printTarget && (
           <GerarReciboModal orcamento={printTarget} onClose={() => setPrintTarget(null)} />
         )}
@@ -328,7 +367,7 @@ export function OrcamentosCentral() {
   );
 }
 
-function OrcamentoRow({ o, versaoAntiga = false, onApprove, onReject, onPrint, onDeliver, onView, onSubstitute, onMarkSent }: {
+function OrcamentoRow({ o, versaoAntiga = false, onApprove, onReject, onPrint, onDeliver, onView, onEdit, onSubstitute, onMarkSent }: {
   o: Orcamento;
   // Versão anterior dentro do mesmo projeto: continua clicável (dá para aprovar, se o cliente
   // voltar atrás), mas aparece apagada, porque quem está de pé é a mais recente.
@@ -338,6 +377,7 @@ function OrcamentoRow({ o, versaoAntiga = false, onApprove, onReject, onPrint, o
   onPrint: () => void;
   onDeliver: () => void;
   onView: () => void;
+  onEdit: () => void;
   onSubstitute: () => void;
   onMarkSent: () => void;
 }) {
@@ -371,6 +411,13 @@ function OrcamentoRow({ o, versaoAntiga = false, onApprove, onReject, onPrint, o
         {/* Ver a proposta sem sair da Central: com a pilha do mesmo cliente, o número sozinho não
             diz o que tem dentro. É só leitura; editar continua no Kanban. */}
         <button title="Ver orçamento" onClick={onView} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg"><Eye className="w-4 h-4" /></button>
+        {/* Editar abre o MESMO construtor do Kanban (itens, valores, projeto, validade, pagamento,
+            observações e dados do documento), gravando por cima desta proposta. Só enquanto ela
+            está em aberto: depois de aprovada há venda e receita lançadas, e mexer no valor ali
+            deixaria o faturamento diferente do documento que o cliente recebeu. */}
+        {pending && (
+          <button title="Editar orçamento" onClick={onEdit} className="p-2 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded-lg"><Pencil className="w-4 h-4" /></button>
+        )}
         {o.status === "rascunho" && (
           <Button size="sm" variant="outline" onClick={onMarkSent}><Send className="w-3.5 h-3.5 mr-1" /> Marcar enviado</Button>
         )}

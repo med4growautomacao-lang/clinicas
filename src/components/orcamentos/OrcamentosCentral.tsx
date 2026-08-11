@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence } from "framer-motion";
-import { FileText, Send, CheckCircle2, XCircle, Search, ExternalLink, Printer, Download, Receipt, Truck, Archive } from "lucide-react";
+import { FileText, Send, CheckCircle2, XCircle, Search, ExternalLink, Printer, Download, Receipt, Truck, Archive, ChevronDown, ChevronRight, Eye } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useOrcamentos, useSettings, useProducts, useProtocols, Orcamento, OrcamentoStatus } from "../../hooks/useSupabase";
 import { supabase } from "../../lib/supabase";
@@ -60,6 +60,9 @@ export function OrcamentosCentral() {
   const [rejectTarget, setRejectTarget] = useState<Orcamento | null>(null);
   const [printTarget, setPrintTarget] = useState<Orcamento | null>(null);
   const [deliverTarget, setDeliverTarget] = useState<Orcamento | null>(null);
+  const [viewTarget, setViewTarget] = useState<Orcamento | null>(null);
+  // Pilha de orçamentos do mesmo cliente: fechada por padrão, abre pela setinha.
+  const [expandidos, setExpandidos] = useState<Record<string, boolean>>({});
 
   const abertos = orcamentos.filter(o => o.status === "rascunho" || o.status === "enviado");
   const aprovados = orcamentos.filter(o => o.status === "aprovado");
@@ -144,19 +147,35 @@ export function OrcamentosCentral() {
         />
       ) : (
         <div className="space-y-4">
-          {grupos.map(g => (
+          {grupos.map(g => {
+            // Pilha fechada mostra só o orçamento MAIS RECENTE, que é o que está em jogo; os
+            // anteriores são histórico e ficam atrás da setinha. Fechado por padrão: um cliente
+            // chegou a ter 9 propostas, e abrir todas de cara é o problema que estamos resolvendo.
+            const empilhado = g.itens.length > 1;
+            const aberto = !!expandidos[g.key];
+            const visiveis = !empilhado || aberto ? g.itens : g.itens.slice(0, 1);
+            return (
             <div key={g.key} className="space-y-2.5">
-              {/* Cabeçalho só quando o cliente tem mais de um: com um só ele seria ruído. Sem isto,
-                  9 orçamentos do mesmo cliente viram 9 linhas soltas e ninguém sabe qual vale. */}
-              {g.itens.length > 1 && (
-                <div className="flex items-baseline justify-between gap-3 px-1">
-                  <p className="text-xs font-black text-slate-500 uppercase tracking-wider truncate">{g.cliente}</p>
-                  <p className="text-[11px] font-bold text-slate-400 shrink-0">
-                    {g.itens.length} orçamentos · mais recente #{g.itens[0].number}
-                  </p>
-                </div>
+              {empilhado && (
+                <button
+                  type="button"
+                  onClick={() => setExpandidos(p => ({ ...p, [g.key]: !p[g.key] }))}
+                  className="w-full flex items-center justify-between gap-3 px-1 py-0.5 rounded-lg hover:bg-slate-50 transition-colors text-left"
+                >
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    {aberto
+                      ? <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      : <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />}
+                    <span className="text-xs font-black text-slate-500 uppercase tracking-wider truncate">{g.cliente}</span>
+                  </span>
+                  <span className="text-[11px] font-bold text-slate-400 shrink-0">
+                    {aberto
+                      ? `${g.itens.length} orçamentos · ${fmtBRL(g.itens.reduce((s, o) => s + Number(o.total || 0), 0))}`
+                      : `+${g.itens.length - 1} anterior${g.itens.length - 1 > 1 ? 'es' : ''}`}
+                  </span>
+                </button>
               )}
-              {g.itens.map(o => (
+              {visiveis.map(o => (
                 <OrcamentoRow
                   key={o.id}
                   o={o}
@@ -164,6 +183,7 @@ export function OrcamentosCentral() {
                   onReject={() => setRejectTarget(o)}
                   onPrint={() => setPrintTarget(o)}
                   onDeliver={() => setDeliverTarget(o)}
+                  onView={() => setViewTarget(o)}
                   onSubstitute={async () => {
                     const res = await updateStatus(o.id, "substituido");
                     showToast(
@@ -178,7 +198,8 @@ export function OrcamentosCentral() {
                 />
               ))}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -212,6 +233,9 @@ export function OrcamentosCentral() {
             }}
           />
         )}
+        {viewTarget && (
+          <VerOrcamentoModal orcamento={viewTarget} onClose={() => setViewTarget(null)} />
+        )}
         {printTarget && (
           <GerarReciboModal orcamento={printTarget} onClose={() => setPrintTarget(null)} />
         )}
@@ -236,12 +260,13 @@ export function OrcamentosCentral() {
   );
 }
 
-function OrcamentoRow({ o, onApprove, onReject, onPrint, onDeliver, onSubstitute, onMarkSent }: {
+function OrcamentoRow({ o, onApprove, onReject, onPrint, onDeliver, onView, onSubstitute, onMarkSent }: {
   o: Orcamento;
   onApprove: () => void;
   onReject: () => void;
   onPrint: () => void;
   onDeliver: () => void;
+  onView: () => void;
   onSubstitute: () => void;
   onMarkSent: () => void;
 }) {
@@ -264,6 +289,9 @@ function OrcamentoRow({ o, onApprove, onReject, onPrint, onDeliver, onSubstitute
         <p className="text-lg font-black text-slate-900">{fmtBRL(o.total)}</p>
       </div>
       <div className="flex items-center gap-1.5">
+        {/* Ver a proposta sem sair da Central: com a pilha do mesmo cliente, o número sozinho não
+            diz o que tem dentro. É só leitura; editar continua no Kanban. */}
+        <button title="Ver orçamento" onClick={onView} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg"><Eye className="w-4 h-4" /></button>
         {o.status === "rascunho" && (
           <Button size="sm" variant="outline" onClick={onMarkSent}><Send className="w-3.5 h-3.5 mr-1" /> Marcar enviado</Button>
         )}
@@ -574,6 +602,72 @@ function resolveOrcamentoItems(snapshot: any, products: any[], protocols: any[],
   return resolveOrcamentoLines(snapshot, products, protocols)
     .filter(l => !has || approvedKeys!.includes(l.key))
     .map(l => ({ name: l.name, qtyLine: l.qtyLine, value: l.value }));
+}
+
+// Ver o orçamento sem sair da Central e sem risco de alterar nada. A edição continua no Kanban
+// (o OrcamentoModal é o construtor, com catálogo, alturas e cálculo); aqui é só leitura, porque o
+// caso de uso é "qual é a proposta desta linha?", em especial com vários orçamentos empilhados do
+// mesmo cliente, onde só o número não diz nada.
+function VerOrcamentoModal({ orcamento, onClose }: { orcamento: Orcamento; onClose: () => void }) {
+  const { data: products } = useProducts();
+  const { data: protocols } = useProtocols();
+  // Sem `approved_line_keys`: mostra a proposta INTEIRA, não só o que foi aprovado. Quem quer o
+  // recorte aprovado tem o Recibo.
+  const items = useMemo(
+    () => resolveOrcamentoItems(orcamento.snapshot, products, protocols),
+    [orcamento.snapshot, products, protocols],
+  );
+  const subtotal = Number(orcamento.subtotal ?? orcamento.total ?? 0);
+  const desconto = Number(orcamento.desconto ?? 0);
+  const frete = Number(orcamento.frete ?? 0);
+  return (
+    <Modal
+      title={`Orçamento #${orcamento.number}`}
+      onClose={onClose}
+      footer={<Button variant="outline" size="sm" onClick={onClose}>Fechar</Button>}
+    >
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <p className="font-bold text-slate-800 text-sm truncate">{orcamento.client_name || orcamento.lead?.name || "—"}</p>
+        <StatusBadge label={STATUS_META[orcamento.status].label} tone={STATUS_META[orcamento.status].tone} />
+      </div>
+
+      {items.length === 0 ? (
+        <p className="text-sm text-slate-400 py-6 text-center">Este orçamento não tem itens detalhados (valor lançado direto).</p>
+      ) : (
+        <div className="border border-slate-200 rounded-lg divide-y divide-slate-100">
+          {items.map((it, i) => (
+            <div key={i} className="flex items-start justify-between gap-3 px-3 py-2">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-slate-700 truncate">{it.name}</p>
+                {it.qtyLine && <p className="text-[11px] text-slate-400">{it.qtyLine}</p>}
+              </div>
+              <p className="text-sm font-bold text-slate-800 shrink-0">{fmtBRL(it.value)}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="mt-3 space-y-1 text-sm">
+        {(desconto > 0 || frete > 0) && (
+          <>
+            <div className="flex justify-between text-slate-500"><span>Subtotal</span><span>{fmtBRL(subtotal)}</span></div>
+            {desconto > 0 && <div className="flex justify-between text-slate-500"><span>Desconto</span><span>- {fmtBRL(desconto)}</span></div>}
+            {frete > 0 && <div className="flex justify-between text-slate-500"><span>Frete</span><span>{fmtBRL(frete)}</span></div>}
+          </>
+        )}
+        <div className="flex justify-between font-black text-slate-900 text-base pt-1 border-t border-slate-100">
+          <span>Total</span><span>{fmtBRL(orcamento.total)}</span>
+        </div>
+      </div>
+
+      <div className="mt-3 space-y-0.5 text-[11px] text-slate-400">
+        <p>Criado em {fmtDate(orcamento.created_at)}{orcamento.validade ? ` · validade ${fmtDate(orcamento.validade)}` : ""}</p>
+        {orcamento.pagamento && <p>Pagamento: {orcamento.pagamento}</p>}
+        {orcamento.entregue_at && <p className="text-emerald-600 font-bold">Entregue em {fmtDate(orcamento.entregue_at)}</p>}
+        {orcamento.notes && <p className="text-slate-500 whitespace-pre-wrap pt-1">{orcamento.notes}</p>}
+      </div>
+    </Modal>
+  );
 }
 
 // Gera o Recibo de Entrega imprimível (Via Empresa/Via Cliente, com assinatura do cliente) a

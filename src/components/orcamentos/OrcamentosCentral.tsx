@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence } from "framer-motion";
-import { FileText, Send, CheckCircle2, XCircle, Search, ExternalLink, Printer, Download, Receipt, Truck, Archive, ChevronDown, ChevronRight, Eye, Pencil } from "lucide-react";
+import { FileText, Send, CheckCircle2, XCircle, Search, ExternalLink, Printer, Download, Receipt, Truck, Archive, ChevronDown, ChevronRight, Eye, Pencil, Wallet } from "lucide-react";
 // Mesmo construtor do Kanban, de propósito: catálogo, alturas, cálculo, documento e envio já vivem
 // nele. Uma segunda tela de orçamento aqui divergiria da primeira na primeira mudança.
 import { OrcamentoModal } from "../LeadKanban";
@@ -20,16 +20,21 @@ const STATUS_META: Record<OrcamentoStatus, { label: string; tone: "slate" | "amb
   rascunho: { label: "Rascunho", tone: "slate" },
   enviado: { label: "Enviado", tone: "sky" },
   aprovado: { label: "Aprovado", tone: "emerald" },
+  pago: { label: "Pago", tone: "violet" },
   recusado: { label: "Recusado", tone: "rose" },
   expirado: { label: "Expirado", tone: "amber" },
   substituido: { label: "Substituído", tone: "slate" },
 };
+
+// Proposta que virou venda: 'pago' é 'aprovado' que já recebeu, então conta nos mesmos lugares.
+const FECHADO: OrcamentoStatus[] = ["aprovado", "pago"];
 
 const FILTERS: { id: OrcamentoStatus | "todos"; label: string }[] = [
   { id: "todos", label: "Todos" },
   { id: "rascunho", label: "Rascunho" },
   { id: "enviado", label: "Enviado" },
   { id: "aprovado", label: "Aprovado" },
+  { id: "pago", label: "Pago" },
   { id: "recusado", label: "Recusado" },
   { id: "substituido", label: "Substituído" },
 ];
@@ -69,10 +74,10 @@ export function OrcamentosCentral() {
   const [expandidos, setExpandidos] = useState<Record<string, boolean>>({});
 
   const abertos = orcamentos.filter(o => o.status === "rascunho" || o.status === "enviado");
-  const aprovados = orcamentos.filter(o => o.status === "aprovado");
+  const aprovados = orcamentos.filter(o => FECHADO.includes(o.status));
   const totalAberto = abertos.reduce((s, o) => s + Number(o.total || 0), 0);
   const totalAprovado = aprovados.reduce((s, o) => s + Number(o.total || 0), 0);
-  const processedCount = orcamentos.filter(o => o.status === "aprovado" || o.status === "recusado").length;
+  const processedCount = orcamentos.filter(o => FECHADO.includes(o.status) || o.status === "recusado").length;
   const approvalRate = processedCount > 0 ? Math.round((aprovados.length / processedCount) * 100) : 0;
 
   const filtered = useMemo(() => {
@@ -175,7 +180,7 @@ export function OrcamentosCentral() {
             const empilhado = g.itens.length > 1;
             const aberto = !!expandidos[g.key];
             const ultimo = g.itens[0];
-            const aprovados = g.itens.filter(o => o.status === "aprovado");
+            const aprovados = g.itens.filter(o => FECHADO.includes(o.status));
             const emAberto = g.itens.filter(o => o.status === "rascunho" || o.status === "enviado");
             // Valor em destaque: o que já virou venda, se houver; senão a proposta que está de pé.
             const valorDestaque = aprovados.length > 0
@@ -183,7 +188,7 @@ export function OrcamentosCentral() {
               : Number(ultimo.total || 0);
             const rotuloValor = aprovados.length > 0 ? "Aprovado" : "Última proposta";
             // Só os status que existem no grupo, na ordem em que importam.
-            const resumo = (["aprovado", "enviado", "rascunho", "recusado", "substituido", "expirado"] as OrcamentoStatus[])
+            const resumo = (["pago", "aprovado", "enviado", "rascunho", "recusado", "substituido", "expirado"] as OrcamentoStatus[])
               .map(st => ({ st, n: g.itens.filter(o => o.status === st).length }))
               .filter(x => x.n > 0);
             return (
@@ -252,6 +257,15 @@ export function OrcamentosCentral() {
                           onDeliver={() => setDeliverTarget(o)}
                           onView={() => setViewTarget(o)}
                           onEdit={() => setEditTarget(o)}
+                          onPay={async () => {
+                            const res = await updateStatus(o.id, "pago");
+                            showToast(
+                              res.success
+                                ? `Orçamento #${o.number} marcado como pago. A partir de agora ele não pode mais ser editado.`
+                                : "Não foi possível marcar como pago.",
+                              res.success ? "success" : "error"
+                            );
+                          }}
                           onSubstitute={async () => {
                             const res = await updateStatus(o.id, "substituido");
                             showToast(
@@ -367,7 +381,7 @@ export function OrcamentosCentral() {
   );
 }
 
-function OrcamentoRow({ o, versaoAntiga = false, onApprove, onReject, onPrint, onDeliver, onView, onEdit, onSubstitute, onMarkSent }: {
+function OrcamentoRow({ o, versaoAntiga = false, onApprove, onReject, onPrint, onDeliver, onView, onEdit, onPay, onSubstitute, onMarkSent }: {
   o: Orcamento;
   // Versão anterior dentro do mesmo projeto: continua clicável (dá para aprovar, se o cliente
   // voltar atrás), mas aparece apagada, porque quem está de pé é a mais recente.
@@ -378,11 +392,14 @@ function OrcamentoRow({ o, versaoAntiga = false, onApprove, onReject, onPrint, o
   onDeliver: () => void;
   onView: () => void;
   onEdit: () => void;
+  onPay: () => void;
   onSubstitute: () => void;
   onMarkSent: () => void;
 }) {
   const clientName = o.client_name || o.lead?.name || "—";
   const pending = o.status === "rascunho" || o.status === "enviado";
+  // Editar vale até APROVADO; 'pago' é o ponto sem volta.
+  const editavel = pending || o.status === "aprovado";
   return (
     <div className={cn(
       "bg-white border rounded-xl p-4 shadow-sm flex items-center justify-between gap-4 flex-wrap",
@@ -395,7 +412,7 @@ function OrcamentoRow({ o, versaoAntiga = false, onApprove, onReject, onPrint, o
           {versaoAntiga && (
             <span className="text-[10px] font-bold text-slate-400">versão anterior</span>
           )}
-          {o.status === "aprovado" && !o.approved_ticket_id && (
+          {FECHADO.includes(o.status) && !o.approved_ticket_id && (
             <span className="text-[10px] font-bold text-amber-600">venda desfeita</span>
           )}
         </div>
@@ -412,10 +429,11 @@ function OrcamentoRow({ o, versaoAntiga = false, onApprove, onReject, onPrint, o
             diz o que tem dentro. É só leitura; editar continua no Kanban. */}
         <button title="Ver orçamento" onClick={onView} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg"><Eye className="w-4 h-4" /></button>
         {/* Editar abre o MESMO construtor do Kanban (itens, valores, projeto, validade, pagamento,
-            observações e dados do documento), gravando por cima desta proposta. Só enquanto ela
-            está em aberto: depois de aprovada há venda e receita lançadas, e mexer no valor ali
-            deixaria o faturamento diferente do documento que o cliente recebeu. */}
-        {pending && (
+            observações e dados do documento), gravando por cima desta proposta.
+            Vale até APROVADO: se o valor mudar, a venda e a receita lançadas são ajustadas junto
+            pela RPC, então o painel não fica discordando do documento. De PAGO em diante trava:
+            dinheiro que entrou não se reescreve por tela (desfazer é cancelar a venda no Kanban). */}
+        {editavel && (
           <button title="Editar orçamento" onClick={onEdit} className="p-2 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded-lg"><Pencil className="w-4 h-4" /></button>
         )}
         {o.status === "rascunho" && (
@@ -431,13 +449,18 @@ function OrcamentoRow({ o, versaoAntiga = false, onApprove, onReject, onPrint, o
             <button title="Marcar como substituído (você trocou a proposta por outra)" onClick={onSubstitute} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg"><Archive className="w-4 h-4" /></button>
           </>
         )}
-        {o.status === "aprovado" && (
+        {FECHADO.includes(o.status) && (
           <Button size="sm" variant="outline" onClick={onPrint}><Receipt className="w-3.5 h-3.5 mr-1" /> Recibo</Button>
+        )}
+        {/* Pago é o desfecho financeiro e é o que TRANCA a proposta. Fica depois de aprovado, e só
+            aparece nele: não dá para pular etapa nem despagar por aqui. */}
+        {o.status === "aprovado" && (
+          <Button size="sm" variant="outline" onClick={onPay}><Wallet className="w-3.5 h-3.5 mr-1" /> Marcar pago</Button>
         )}
         {/* A entrega é o que baixa o estoque, por PEDIDO. Antes a baixa só acontecia quando o card
             era arquivado, e no modelo novo o card fica aberto de propósito para receber a próxima
             venda: a mercadoria saía da fábrica e o estoque nunca baixava. */}
-        {o.status === "aprovado" && !o.entregue_at && (
+        {FECHADO.includes(o.status) && !o.entregue_at && (
           <Button size="sm" variant="outline" onClick={onDeliver}><Truck className="w-3.5 h-3.5 mr-1" /> Marcar entregue</Button>
         )}
         {o.entregue_at && (

@@ -328,9 +328,10 @@ export function ComercialDashboard() {
   // aprovados (fonte: Central de Orçamentos), independente do período filtrado no topo.
   const { data: orcamentosWD } = useOrcamentos();
   const isOutro = activeClinicCategory === 'outro';
-  const orcamentosAprovados = isOutro ? orcamentosWD.filter(o => o.status === 'aprovado') : [];
+  // 'pago' é 'aprovado' que já recebeu: continua sendo venda fechada e conta nos mesmos números.
+  const orcamentosAprovados = isOutro ? orcamentosWD.filter(o => o.status === 'aprovado' || o.status === 'pago') : [];
   const faturamentoWD = orcamentosAprovados.reduce((s, o) => s + Number(o.total || 0), 0);
-  const orcamentosProcessados = isOutro ? orcamentosWD.filter(o => o.status === 'aprovado' || o.status === 'recusado').length : 0;
+  const orcamentosProcessados = isOutro ? orcamentosWD.filter(o => o.status === 'aprovado' || o.status === 'pago' || o.status === 'recusado').length : 0;
   const taxaAprovacaoWD = orcamentosProcessados > 0 ? Math.round((orcamentosAprovados.length / orcamentosProcessados) * 100) : null;
   const [data, setData] = useState<CommercialData | null>(null);
   // Erro exposto à tela: sem isto, a 1ª carga com falha fica em spinner eterno (o gate `if (!data)`),

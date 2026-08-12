@@ -2065,11 +2065,14 @@ export function OrcamentoModal({ lead, ticketId, initialQuote, sessionIndex = 1,
               Dados coletados no atendimento
             </p>
             {itensSDR.length > 0 ? (
-              <dl className="grid grid-cols-2 gap-x-3 gap-y-2">
+              /* Um campo POR LINHA, rótulo à esquerda e valor à direita: lê-se como ficha técnica,
+                 que é o que o vendedor precisa conferir item a item. Em duas colunas os valores
+                 ficavam lado a lado e voltavam a parecer texto corrido. */
+              <dl className="divide-y divide-teal-100">
                 {itensSDR.map((it, i) => (
-                  <div key={`${it.campo}-${i}`} className="min-w-0">
-                    <dt className="text-[10px] font-bold text-slate-400 uppercase tracking-wide truncate">{it.campo}</dt>
-                    <dd className="text-sm font-black text-slate-800 break-words leading-tight">{it.valor}</dd>
+                  <div key={`${it.campo}-${i}`} className="flex items-baseline gap-3 py-1.5">
+                    <dt className="w-28 shrink-0 text-[11px] font-bold text-slate-500 uppercase tracking-wide">{it.campo}</dt>
+                    <dd className="flex-1 min-w-0 text-sm font-black text-slate-800 break-words leading-tight">{it.valor}</dd>
                   </div>
                 ))}
               </dl>

@@ -1704,10 +1704,14 @@ export interface DashboardStats {
   chartData: {
     date: string;
     agendamentos: number;
-    faturamento: number;
+    faturamento: number;       // R$ lançado no dia
     leads: number;
-    vendas: number;
+    vendas: number;            // CARDS ganhos no dia (clientes)
+    vendas_lancadas: number;   // LANÇAMENTOS de venda no dia (denominador do ticket do dia)
     investimento: number;
+    orcamentos: number;        // orçamentos enviados no dia (só WakeDesk)
+    orcamentos_valor: number;
+    orcamentos_ganhos: number; // quantos DESSES viraram venda
   }[];
 }
 

@@ -144,8 +144,13 @@ export function Dashboard() {
 
   const [selectedMetric, setSelectedMetric] = useState<string>('vendas');
 
+  // ⚠️ Os ids são as CHAVES de stats.chartData vindas da RPC — trocar id apaga a série.
+  // `ticket_medio` e `orcamentos_conv` são a exceção: não vêm prontos do banco, são calculados
+  // abaixo a partir das chaves cruas do dia (é o mesmo par valor ÷ quantidade dos cards).
   const chartMetrics = [
     { id: 'faturamento', label: 'VENDAS LANÇADAS (R$)', type: 'currency', color: '#0d9488' },
+    { id: 'vendas_lancadas', label: 'VENDAS LANÇADAS (Nº)', type: 'number', color: '#a21caf' },
+    { id: 'ticket_medio', label: 'TICKET MÉDIO', type: 'currency', color: '#2563eb' },
     { id: 'investimento', label: 'INVESTIMENTO', type: 'currency', color: '#f59e0b' },
     { id: 'roas', label: 'ROAS', type: 'number', color: '#8b5cf6' },
     { id: 'leads', label: 'LEADS', type: 'number', color: '#4f46e5' },
@@ -153,6 +158,12 @@ export function Dashboard() {
     // ⚠️ O id NÃO muda: é a chave de stats.chartData vinda da RPC. Só o rótulo, porque a contagem
     // é por CARD (cliente que comprou), não por venda lançada.
     { id: 'vendas', label: 'CLIENTES', type: 'number', color: '#10b981' },
+    // Orçamento é módulo do WakeDesk: numa clínica as séries seriam três linhas retas no zero.
+    ...(isOutro ? [
+      { id: 'orcamentos', label: 'ORÇAMENTOS ENVIADOS', type: 'number', color: '#0284c7' },
+      { id: 'orcamentos_valor', label: 'ORÇAMENTOS (R$)', type: 'currency', color: '#0369a1' },
+      { id: 'orcamentos_conv', label: 'ORÇAMENTO → VENDA', type: 'percent', color: '#059669' },
+    ] : []),
   ];
 
   const processedChartData = useMemo(() => {
@@ -163,6 +174,12 @@ export function Dashboard() {
         ...d,
         name: `${day}/${month}`,
         roas: d.investimento > 0 ? Number((d.faturamento / d.investimento).toFixed(2)) : 0,
+        // Ticket do dia: valor lançado ÷ vendas lançadas naquele dia. Dia sem venda fica 0 (barra
+        // vazia), não herda o ticket do dia anterior.
+        ticket_medio: d.vendas_lancadas > 0 ? Number((d.faturamento / d.vendas_lancadas).toFixed(2)) : 0,
+        // Taxa do dia = orçamentos daquele dia que viraram venda ÷ enviados naquele dia. Em janela
+        // curta oscila muito (denominador pequeno): a leitura boa é a linha de média do gráfico.
+        orcamentos_conv: d.orcamentos > 0 ? Number(((d.orcamentos_ganhos / d.orcamentos) * 100).toFixed(1)) : 0,
       };
     });
   }, [stats.chartData]);
@@ -375,10 +392,13 @@ export function Dashboard() {
         </CardHeader>
         <CardContent className="pl-2 pt-2">
           {(() => {
+            // A série segue o activeMetric, não o selectedMetric: numa clínica sem Orçamentos a
+            // métrica salva na sessão pode não existir mais, e aí o gráfico desenharia zeros com
+            // o rótulo de outra métrica em vez de cair no padrão.
             const activeMetric = chartMetrics.find(m => m.id === selectedMetric) || chartMetrics[0];
             return (
               <TrendBarChart
-                series={processedChartData.map((d: any) => ({ label: d.name, value: Number(d[selectedMetric]) || 0 }))}
+                series={processedChartData.map((d: any) => ({ label: d.name, value: Number(d[activeMetric.id]) || 0 }))}
                 format={fmtByType(activeMetric.type)}
                 height={300}
               />

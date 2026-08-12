@@ -592,12 +592,12 @@ export function Settings() {
                                     <CardHeader>
                                         <CardTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
                                             <DollarSign className="w-5 h-5 text-teal-600" />
-                                            Ticket Médio
+                                            Meta de Ticket Médio
                                         </CardTitle>
                                     </CardHeader>
                                     <CardContent>
                                         <div className="space-y-1.5">
-                                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Valor padrão por lead</label>
+                                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Valor da meta</label>
                                             <div className="flex items-center gap-2">
                                                 <span className="text-sm font-bold text-slate-500">R$</span>
                                                 <input
@@ -610,7 +610,11 @@ export function Settings() {
                                                     placeholder="0,00"
                                                 />
                                             </div>
-                                            <p className="text-xs text-slate-400 pl-1">Pré-preenchido automaticamente em novos leads.</p>
+                                            {/* O número não é só um rótulo de meta: ele também vira valor de lead e valor
+                                                de venda automática. Quem sobe a meta sem saber disso muda dinheiro no
+                                                painel, então os três efeitos ficam escritos aqui. */}
+                                            <p className="text-xs text-slate-400 pl-1">Aparece nos painéis como meta, ao lado do ticket médio real do período.</p>
+                                            <p className="text-xs text-slate-400 pl-1">Também é o valor pré-preenchido em novos leads e o que a IA lança quando fecha uma venda sem valor informado.</p>
                                         </div>
                                     </CardContent>
                                 </Card>

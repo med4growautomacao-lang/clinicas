@@ -39,7 +39,8 @@ import {
   Images,
   Video,
   Play,
-  ExternalLink
+  ExternalLink,
+  Receipt
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -116,6 +117,14 @@ const METRICS_CONFIG = [
   { id: 'cpapt', label: 'Custo p/ Agend.', color: '#ec4899', type: 'currency', icon: Target, bgColor: 'bg-pink-50 text-pink-600' },
   { id: 'cpa', label: 'CAC', color: '#f43f5e', type: 'currency', icon: Activity, bgColor: 'bg-rose-50 text-rose-600' },
   { id: 'conv_value', label: 'Vendas lançadas', color: '#059669', type: 'currency', icon: DollarSign, bgColor: 'bg-green-50 text-green-600' },
+  // Quantas vendas foram LANÇADAS (sales da RPC). Não é 'convs': aquele conta cards ganhos, e o
+  // mesmo card pode ter várias vendas. Mesma fonte e mesmo eixo do 'conv_value' aqui de cima.
+  { id: 'sales_count', label: 'Vendas lançadas (nº)', color: '#a21caf', type: 'number', icon: Receipt, bgColor: 'bg-fuchsia-50 text-fuchsia-600' },
+  // Ticket médio REAL do recorte (valor lançado ÷ nº de vendas). A meta configurada em Dados da
+  // Clínica aparece no rodapé do card, não como valor principal.
+  { id: 'ticket_medio', label: 'Ticket Médio', color: '#2563eb', type: 'currency', icon: DollarSign, bgColor: 'bg-blue-50 text-blue-600' },
+  // Só WakeDesk tem Central de Orçamentos: numa clínica a métrica é filtrada da lista e do ⚙️.
+  { id: 'quotes_sent', label: 'Orçamentos enviados', color: '#0284c7', type: 'number', icon: FileText, bgColor: 'bg-sky-50 text-sky-600' },
   { id: 'roas', label: 'ROAS', color: '#ea580c', type: 'ratio', icon: TrendingUp, bgColor: 'bg-orange-50 text-orange-600' },
   { id: 'lead_to_apt_rate', label: 'Lead p/ Agend.', color: '#0ea5e9', type: 'percent', icon: Activity, bgColor: 'bg-sky-50 text-sky-600' },
   { id: 'lead_to_conv_rate', label: 'Lead p/ Cliente', color: '#06b6d4', type: 'percent', icon: Activity, bgColor: 'bg-cyan-50 text-cyan-600' },
@@ -146,8 +155,18 @@ const parseCfgArray = (raw: string | null, fallback: string[]): string[] => {
   }
 };
 
-const loadVisibleMetrics = (base: string): string[] =>
-  parseCfgArray(readCfg(base), METRICS_CONFIG.map(m => m.id));
+// `orderBase` é a chave da ORDEM, e serve para separar "métrica que o usuário desligou" de
+// "métrica que ainda não existia quando ele configurou". Sem isso, card NOVO nasce invisível
+// para todo mundo que já mexeu no ⚙️ uma vez, sem pista nenhuma na tela de que ele existe.
+const loadVisibleMetrics = (base: string, orderBase: string): string[] => {
+  const all = METRICS_CONFIG.map(m => m.id);
+  const saved = readCfg(base);
+  if (!saved) return all;
+  const visible = parseCfgArray(saved, all);
+  const known = parseCfgArray(readCfg(orderBase), []);
+  const brandNew = all.filter(id => !visible.includes(id) && !known.includes(id));
+  return [...visible, ...brandNew];
+};
 const loadMetricsOrder = (base: string): string[] => {
   const initial = METRICS_CONFIG.map(m => m.id);
   const saved = readCfg(base);
@@ -317,7 +336,20 @@ function buildDimTrend(rows: any[], dim: string, stageSet: Set<string>, periods:
 }
 
 export function MarketingAnalytics() {
-  const { activeClinicId } = useAuth();
+  const { activeClinicId, activeClinicCategory } = useAuth();
+  // Orçamento é módulo do WakeDesk (mesmo discriminador do menu). Em clínica, a métrica sai da
+  // lista e do ⚙️ em vez de virar um card zerado.
+  const isOutro = activeClinicCategory === 'outro';
+  // META de ticket médio (Dados da Clínica). Uma consulta curta: é um escalar por clínica, não
+  // cabe na RPC de KPI (que é por dia × plataforma × canal).
+  const [metaTicket, setMetaTicket] = useState(0);
+  useEffect(() => {
+    if (!activeClinicId) { setMetaTicket(0); return; }
+    let vivo = true;
+    supabase.from('ai_config').select('default_ticket_value').eq('clinic_id', activeClinicId).maybeSingle()
+      .then(({ data }) => { if (vivo) setMetaTicket(Number(data?.default_ticket_value) || 0); });
+    return () => { vivo = false; };
+  }, [activeClinicId]);
   const [period, setPeriod] = useState<Period>('dia');
   const [viewMode, setViewMode] = useState<'dashboard' | 'table'>(() => (localStorage.getItem('marketingViewMode') as any) || 'dashboard');
   const [dateRange, setDateRange] = useState({
@@ -399,9 +431,11 @@ export function MarketingAnalytics() {
   const [selectedPlatform, setSelectedPlatform] = useState<string[]>([]);
   const [selectedChannel, setSelectedChannel] = useState<string[]>([]);
 
-  const [dashboardVisibleMetrics, setDashboardVisibleMetrics] = useState<string[]>(() => loadVisibleMetrics('mkt_dash_visible_metrics'));
+  // Ordem exibida = ordem salva MENOS as métricas de módulo que esta clínica não tem.
+  const semModuloAusente = useCallback((ids: string[]) => ids.filter((id) => id !== 'quotes_sent' || isOutro), [isOutro]);
+  const [dashboardVisibleMetrics, setDashboardVisibleMetrics] = useState<string[]>(() => loadVisibleMetrics('mkt_dash_visible_metrics', 'mkt_dash_metrics_order'));
   const [dashboardMetricsOrder, setDashboardMetricsOrder] = useState<string[]>(() => loadMetricsOrder('mkt_dash_metrics_order'));
-  const [tableVisibleMetrics, setTableVisibleMetrics] = useState<string[]>(() => loadVisibleMetrics('mkt_table_visible_metrics'));
+  const [tableVisibleMetrics, setTableVisibleMetrics] = useState<string[]>(() => loadVisibleMetrics('mkt_table_visible_metrics', 'mkt_table_metrics_order'));
   const [tableMetricsOrder, setTableMetricsOrder] = useState<string[]>(() => loadMetricsOrder('mkt_table_metrics_order'));
 
   // Configuração das etapas do Funil de Vendas (escolhidas a partir das etapas do funil de oportunidades)
@@ -415,9 +449,9 @@ export function MarketingAnalytics() {
   useEffect(() => {
     if (cfgClinicRef.current === activeClinicId) return;
     cfgClinicRef.current = activeClinicId;
-    setDashboardVisibleMetrics(loadVisibleMetrics('mkt_dash_visible_metrics'));
+    setDashboardVisibleMetrics(loadVisibleMetrics('mkt_dash_visible_metrics', 'mkt_dash_metrics_order'));
     setDashboardMetricsOrder(loadMetricsOrder('mkt_dash_metrics_order'));
-    setTableVisibleMetrics(loadVisibleMetrics('mkt_table_visible_metrics'));
+    setTableVisibleMetrics(loadVisibleMetrics('mkt_table_visible_metrics', 'mkt_table_metrics_order'));
     setTableMetricsOrder(loadMetricsOrder('mkt_table_metrics_order'));
     setFunnelStagesOrder(loadFunnelOrder());
     setFunnelHiddenStages(loadFunnelHidden());
@@ -630,12 +664,14 @@ export function MarketingAnalytics() {
     // Índice (dia|plataforma) → linha manual: evita marketingData.find() dentro do
     // loop de kpiRows (era O(períodos × linhas × marketingData) na visão diária).
     const manualByKey = new Map(marketingData.map(m => [`${m.date}|${m.platform}`, m]));
+    // sales_count tem o nome do id da métrica de propósito: é o que faz a linha da TABELA
+    // (MetricRow) achar o valor pelo caminho genérico, sem mais um `else if` para manter.
     const mkStat = () => ({
-      leads: 0, convs: 0, investment: 0, conv_value: 0, appointments: 0, whatsapp_leads: 0, forms_leads: 0,
+      leads: 0, convs: 0, investment: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, appointments: 0, whatsapp_leads: 0, forms_leads: 0,
       ch: {
-        forms:    { leads: 0, convs: 0, conv_value: 0, appointments: 0 },
-        whatsapp: { leads: 0, convs: 0, conv_value: 0, appointments: 0 },
-        balcao:   { leads: 0, convs: 0, conv_value: 0, appointments: 0 },
+        forms:    { leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, appointments: 0 },
+        whatsapp: { leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, appointments: 0 },
+        balcao:   { leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, appointments: 0 },
       },
     });
 
@@ -685,6 +721,25 @@ export function MarketingAnalytics() {
         if (vConv > 0 && !manual?.conversions_value) {
           stats[pKey][platform].conv_value += vConv;
           stats[pKey][platform].ch[ch].conv_value += vConv;
+        }
+        // Quantas vendas foram lançadas. NÃO tem override manual (o editor só sobrescreve
+        // valor), então entra sempre da RPC — inclusive no dia em que o valor foi digitado
+        // à mão, onde a contagem continua sendo a real do banco.
+        const nSales = Number(row.sales) || 0;
+        if (nSales > 0) {
+          stats[pKey][platform].sales_count += nSales;
+          stats[pKey][platform].ch[ch].sales_count += nSales;
+        }
+        // Orçamentos ENVIADOS (quantidade e valor), pelo dia do envio. Sem override manual.
+        const nQuotes = Number(row.quotes) || 0;
+        if (nQuotes > 0) {
+          stats[pKey][platform].quotes_sent += nQuotes;
+          stats[pKey][platform].ch[ch].quotes_sent += nQuotes;
+        }
+        const vQuotes = Number(row.quotes_value) || 0;
+        if (vQuotes > 0) {
+          stats[pKey][platform].quotes_value += vQuotes;
+          stats[pKey][platform].ch[ch].quotes_value += vQuotes;
         }
         // Conversões e Agendamentos: MESMA fonte da verdade que VG/Comercial —
         // wins = tickets.outcome='ganho'; scheduled = união agendamento∪etapa (dedupe).
@@ -948,7 +1003,7 @@ export function MarketingAnalytics() {
             />
             <div className="ml-auto">
               <MetricsConfigButton
-                metricsOrder={dashboardMetricsOrder}
+                metricsOrder={semModuloAusente(dashboardMetricsOrder)}
                 visibleMetrics={dashboardVisibleMetrics}
                 toggleMetric={(id: string) => toggleMetric(id, 'dashboard')}
                 moveMetric={(id: string, dir: any) => moveMetric(id, dir, 'dashboard')}
@@ -979,8 +1034,9 @@ export function MarketingAnalytics() {
                 isComparing={isComparing}
                 visibleMetrics={dashboardVisibleMetrics}
                 toggleMetric={(id: string) => toggleMetric(id, 'dashboard')}
-                metricsOrder={dashboardMetricsOrder}
+                metricsOrder={semModuloAusente(dashboardMetricsOrder)}
                 moveMetric={(id: string, dir) => moveMetric(id, dir as any, 'dashboard')}
+                metaTicket={metaTicket}
                 funnelStages={stages}
                 funnelCohort={funnelCohort}
                 funnelCohortCompare={funnelCohortCompare}
@@ -1010,7 +1066,7 @@ export function MarketingAnalytics() {
                   </div>
 
                   <MetricsConfigButton
-                    metricsOrder={tableMetricsOrder}
+                    metricsOrder={semModuloAusente(tableMetricsOrder)}
                     visibleMetrics={tableVisibleMetrics}
                     toggleMetric={(id: string) => toggleMetric(id, 'table')}
                     moveMetric={(id: string, dir) => moveMetric(id, dir as any, 'table')}
@@ -1033,10 +1089,10 @@ export function MarketingAnalytics() {
                         </tr>
                       </thead>
                       <tbody>
-                        <PlatformRows platform="meta_ads" periods={periods} metricsByPeriod={metricsByPeriod} comparisonMetricsByPeriod={comparisonMetricsByPeriod} isComparing={isComparing} isEditing={isEditing} editValues={editValues} setEditValues={setEditValues} period={period} visibleMetrics={tableVisibleMetrics} metricsOrder={tableMetricsOrder} />
-                        <PlatformRows platform="google_ads" periods={periods} metricsByPeriod={metricsByPeriod} comparisonMetricsByPeriod={comparisonMetricsByPeriod} isComparing={isComparing} isEditing={isEditing} editValues={editValues} setEditValues={setEditValues} period={period} visibleMetrics={tableVisibleMetrics} metricsOrder={tableMetricsOrder} />
-                        <PlatformRows platform="no_track" periods={periods} metricsByPeriod={metricsByPeriod} comparisonMetricsByPeriod={comparisonMetricsByPeriod} isComparing={isComparing} isEditing={isEditing} editValues={editValues} setEditValues={setEditValues} period={period} visibleMetrics={tableVisibleMetrics} metricsOrder={tableMetricsOrder} />
-                        <SummaryRows periods={periods} metricsByPeriod={metricsByPeriod} comparisonMetricsByPeriod={comparisonMetricsByPeriod} isComparing={isComparing} visibleMetrics={tableVisibleMetrics} metricsOrder={tableMetricsOrder} />
+                        <PlatformRows platform="meta_ads" periods={periods} metricsByPeriod={metricsByPeriod} comparisonMetricsByPeriod={comparisonMetricsByPeriod} isComparing={isComparing} isEditing={isEditing} editValues={editValues} setEditValues={setEditValues} period={period} visibleMetrics={tableVisibleMetrics} metricsOrder={semModuloAusente(tableMetricsOrder)} />
+                        <PlatformRows platform="google_ads" periods={periods} metricsByPeriod={metricsByPeriod} comparisonMetricsByPeriod={comparisonMetricsByPeriod} isComparing={isComparing} isEditing={isEditing} editValues={editValues} setEditValues={setEditValues} period={period} visibleMetrics={tableVisibleMetrics} metricsOrder={semModuloAusente(tableMetricsOrder)} />
+                        <PlatformRows platform="no_track" periods={periods} metricsByPeriod={metricsByPeriod} comparisonMetricsByPeriod={comparisonMetricsByPeriod} isComparing={isComparing} isEditing={isEditing} editValues={editValues} setEditValues={setEditValues} period={period} visibleMetrics={tableVisibleMetrics} metricsOrder={semModuloAusente(tableMetricsOrder)} />
+                        <SummaryRows periods={periods} metricsByPeriod={metricsByPeriod} comparisonMetricsByPeriod={comparisonMetricsByPeriod} isComparing={isComparing} visibleMetrics={tableVisibleMetrics} metricsOrder={semModuloAusente(tableMetricsOrder)} />
                       </tbody>
                     </table>
                   </div>
@@ -1416,7 +1472,7 @@ function FunnelConfigButton({ stages, order, hidden, toggleStage, moveStage, fix
   );
 }
 
-function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, isComparing, visibleMetrics, metricsOrder, toggleMetric, moveMetric, funnelStages, funnelCohort, funnelCohortCompare, utmCohort, utmCohortCompare, campaignInvestment, campaignPlatformSplit, conversionCatalog, campaignConversions, lossReasons, funnelOrder, funnelHidden, toggleFunnelStage, moveFunnelStage, selectedPlatform, selectedChannel }: any) {
+function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, isComparing, visibleMetrics, metricsOrder, toggleMetric, moveMetric, metaTicket, funnelStages, funnelCohort, funnelCohortCompare, utmCohort, utmCohortCompare, campaignInvestment, campaignPlatformSplit, conversionCatalog, campaignConversions, lossReasons, funnelOrder, funnelHidden, toggleFunnelStage, moveFunnelStage, selectedPlatform, selectedChannel }: any) {
 
   const [selectedMetric, setSelectedMetric] = useState('leads');
   const latestPeriod = periods[periods.length - 1]?.label || '';
@@ -1424,17 +1480,20 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
   // Ajusta uma linha de stats (por plataforma ou já somada) ao canal selecionado.
   // Investimento não tem canal — fica sempre cheio.
   const adjChannel = useCallback((s: any) => {
-    if (!s) return { investment: 0, leads: 0, convs: 0, conv_value: 0, appointments: 0 };
+    if (!s) return { investment: 0, leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, appointments: 0 };
     if (selectedChannel.length === 0) {
-      return { investment: s.investment || 0, leads: s.leads || 0, convs: s.convs || 0, conv_value: s.conv_value || 0, appointments: s.appointments || 0 };
+      return { investment: s.investment || 0, leads: s.leads || 0, convs: s.convs || 0, conv_value: s.conv_value || 0, sales_count: s.sales_count || 0, quotes_sent: s.quotes_sent || 0, quotes_value: s.quotes_value || 0, appointments: s.appointments || 0 };
     }
     // Soma os canais selecionados (investimento não tem canal -> fica cheio)
-    const acc = { investment: s.investment || 0, leads: 0, convs: 0, conv_value: 0, appointments: 0 };
+    const acc = { investment: s.investment || 0, leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, appointments: 0 };
     selectedChannel.forEach((ch) => {
       const c = s.ch?.[ch] || {};
       acc.leads += c.leads || 0;
       acc.convs += c.convs || 0;
       acc.conv_value += c.conv_value || 0;
+      acc.sales_count += c.sales_count || 0;
+      acc.quotes_sent += c.quotes_sent || 0;
+      acc.quotes_value += c.quotes_value || 0;
       acc.appointments += c.appointments || 0;
     });
     return acc;
@@ -1442,8 +1501,8 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
 
   const getTotals = useCallback((metricSet: any) => {
     const res: any = {
-      investment: 0, leads: 0, convs: 0, conv_value: 0, appointments: 0,
-      ch: { forms: { leads: 0, convs: 0, conv_value: 0, appointments: 0 }, whatsapp: { leads: 0, convs: 0, conv_value: 0, appointments: 0 }, balcao: { leads: 0, convs: 0, conv_value: 0, appointments: 0 } },
+      investment: 0, leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, appointments: 0,
+      ch: { forms: { leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, appointments: 0 }, whatsapp: { leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, appointments: 0 }, balcao: { leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, appointments: 0 } },
     };
     if (!metricSet) return res;
     Object.values(metricSet).forEach((p: any) => {
@@ -1451,12 +1510,18 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
       res.leads += p.leads || 0;
       res.convs += p.convs || 0;
       res.conv_value += p.conv_value || 0;
+      res.sales_count += p.sales_count || 0;
+      res.quotes_sent += p.quotes_sent || 0;
+      res.quotes_value += p.quotes_value || 0;
       res.appointments += p.appointments || 0;
       (['forms', 'whatsapp', 'balcao'] as const).forEach((ch) => {
         const c = p.ch?.[ch] || {};
         res.ch[ch].leads += c.leads || 0;
         res.ch[ch].convs += c.convs || 0;
         res.ch[ch].conv_value += c.conv_value || 0;
+        res.ch[ch].sales_count += c.sales_count || 0;
+        res.ch[ch].quotes_sent += c.quotes_sent || 0;
+        res.ch[ch].quotes_value += c.quotes_value || 0;
         res.ch[ch].appointments += c.appointments || 0;
       });
     });
@@ -1465,8 +1530,8 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
 
   // Sum across ALL periods in the range, respecting the selected platform
   const currentTotals = useMemo(() => {
-    const res = { 
-      investment: 0, leads: 0, convs: 0, conv_value: 0, appointments: 0,
+    const res = {
+      investment: 0, leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, appointments: 0,
       whatsapp: 0, forms: 0,
       breakdown: {
         meta_ads: { leads: 0, whatsapp: 0, forms: 0 },
@@ -1493,6 +1558,9 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
           res.leads += a.leads;
           res.convs += a.convs;
           res.conv_value += a.conv_value;
+          res.sales_count += a.sales_count;
+          res.quotes_sent += a.quotes_sent;
+          res.quotes_value += a.quotes_value;
           res.appointments += a.appointments;
           res.whatsapp += s.ch?.whatsapp?.leads || 0;
           res.forms += s.ch?.forms?.leads || 0;
@@ -1503,7 +1571,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
   }, [periods, metricsByPeriod, selectedPlatform, selectedChannel, adjChannel]);
 
   const prevTotals = useMemo(() => {
-    const res = { investment: 0, leads: 0, convs: 0, conv_value: 0, appointments: 0 };
+    const res = { investment: 0, leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, appointments: 0 };
     if (!isComparing) return res;
     periods.forEach((p: any) => {
       const dayStats = comparisonMetricsByPeriod[p.label];
@@ -1519,6 +1587,9 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
           res.leads += a.leads;
           res.convs += a.convs;
           res.conv_value += a.conv_value;
+          res.sales_count += a.sales_count;
+          res.quotes_sent += a.quotes_sent;
+          res.quotes_value += a.quotes_value;
           res.appointments += a.appointments;
         }
       });
@@ -1550,6 +1621,9 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
         appointments: stats.appointments,
         convs: stats.convs,
         conv_value: stats.conv_value,
+        sales_count: stats.sales_count,
+        quotes_sent: stats.quotes_sent,
+        ticket_medio: stats.sales_count > 0 ? stats.conv_value / stats.sales_count : 0,
         cpl: invNA ? NaN : (stats.leads > 0 ? stats.investment / stats.leads : 0),
         cpapt: invNA ? NaN : (stats.appointments > 0 ? stats.investment / stats.appointments : 0),
         cpa: invNA ? NaN : (stats.convs > 0 ? stats.investment / stats.convs : 0),
@@ -1563,6 +1637,9 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
         appointments_prev: compStats.appointments,
         convs_prev: compStats.convs,
         conv_value_prev: compStats.conv_value,
+        sales_count_prev: compStats.sales_count,
+        quotes_sent_prev: compStats.quotes_sent,
+        ticket_medio_prev: compStats.sales_count > 0 ? compStats.conv_value / compStats.sales_count : 0,
         cpl_prev: invNA ? NaN : (compStats.leads > 0 ? compStats.investment / compStats.leads : 0),
         cpapt_prev: invNA ? NaN : (compStats.appointments > 0 ? compStats.investment / compStats.appointments : 0),
         cpa_prev: invNA ? NaN : (compStats.convs > 0 ? compStats.investment / compStats.convs : 0),
@@ -1643,6 +1720,14 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
           else if (id === 'appointments') { value = currentTotals.appointments; prevValue = isComparing ? prevTotals.appointments : null; }
           else if (id === 'convs') { value = currentTotals.convs; prevValue = isComparing ? prevTotals.convs : null; }
           else if (id === 'conv_value') { value = currentTotals.conv_value; prevValue = isComparing ? prevTotals.conv_value : null; }
+          else if (id === 'sales_count') { value = currentTotals.sales_count; prevValue = isComparing ? prevTotals.sales_count : null; }
+          else if (id === 'quotes_sent') { value = currentTotals.quotes_sent; prevValue = isComparing ? prevTotals.quotes_sent : null; }
+          else if (id === 'ticket_medio') {
+            // REAL: valor lançado ÷ nº de vendas lançadas. Sem venda no período não existe ticket
+            // real — NaN vira "—" no StatCard, e a meta continua no rodapé.
+            value = currentTotals.sales_count > 0 ? currentTotals.conv_value / currentTotals.sales_count : NaN;
+            prevValue = isComparing ? (prevTotals.sales_count > 0 ? prevTotals.conv_value / prevTotals.sales_count : null) : null;
+          }
           else if (id === 'roas') {
             value = currentTotals.investment > 0 ? currentTotals.conv_value / currentTotals.investment : 0;
             prevValue = isComparing ? (prevTotals.investment > 0 ? prevTotals.conv_value / prevTotals.investment : 0) : null;
@@ -1679,6 +1764,17 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
             prevValue = null;
           }
 
+          // Os dois números da venda no mesmo card: o de cima é quantas vendas foram lançadas,
+          // o rodapé é quantos CLIENTES fecharam. Quem não lança valor vê 0 em cima e o nº de
+          // clientes embaixo, então o card nunca fica mudo (e nem parece painel quebrado).
+          const sub = id === 'sales_count'
+            ? `${currentTotals.convs} ${currentTotals.convs === 1 ? 'cliente comprou' : 'clientes compraram'}`
+            : id === 'ticket_medio'
+            ? (metaTicket > 0 ? `Meta: R$ ${metaTicket.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : 'Meta não definida')
+            : id === 'quotes_sent'
+            ? `R$ ${currentTotals.quotes_value.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} enviados`
+            : undefined;
+
           return (
             <StatCard
               key={id}
@@ -1688,6 +1784,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
               type={m.type}
               icon={m.icon}
               color={m.bgColor}
+              sub={sub}
             />
           );
         })}
@@ -3135,7 +3232,7 @@ function UtmValuePicker({ label, allLabel, options, selected, onChange }: {
   );
 }
 
-function StatCard({ title, value, prevValue, type, icon: Icon, color }: any) {
+function StatCard({ title, value, prevValue, type, icon: Icon, color, sub }: any) {
   // Valor não-finito (NaN/null) = "não atribuível" (ex.: investimento sob filtro de canal) → "—".
   const isNA = value == null || !Number.isFinite(value);
   const delta = (!isNA && prevValue !== null && prevValue > 0) ? ((value - prevValue) / prevValue) * 100 : null;
@@ -3158,6 +3255,7 @@ function StatCard({ title, value, prevValue, type, icon: Icon, color }: any) {
             type === 'percent' ? `${value.toFixed(1)}%` :
             type === 'ratio' ? `${value.toFixed(2)}x` : value.toLocaleString('pt-BR')}
         </p>
+        {sub && <p className="text-[10px] font-bold text-slate-400 mt-0.5 whitespace-nowrap">{sub}</p>}
       </div>
     </Card>
   );
@@ -3282,11 +3380,21 @@ function MetricRow({ label, periods, metrics, compareMetrics, isComparing, platf
         else if (valueKey === 'leads') { val = currentLeads; pVal = prevLeads; }
         else if (valueKey === 'appointments') { val = currentApts; pVal = prevMetrics?.appointments || 0; }
         else if (valueKey === 'convs') { val = currentConvs; pVal = prevMetrics?.convs || 0; }
+        else if (valueKey === 'ticket_medio') {
+          // Ticket REAL da linha: valor lançado ÷ nº de vendas lançadas do dia/plataforma.
+          const n = dayMetrics?.sales_count || 0;
+          const nPrev = prevMetrics?.sales_count || 0;
+          val = n > 0 ? (dayMetrics?.conv_value || 0) / n : 0;
+          pVal = nPrev > 0 ? (prevMetrics?.conv_value || 0) / nPrev : 0;
+        }
         else { val = (dayMetrics as any)?.[valueKey] || 0; pVal = (prevMetrics as any)?.[valueKey] || 0; }
 
         const delta = pVal > 0 ? ((val - pVal) / pVal) * 100 : null;
 
-        const isCalculated = ['cpl', 'cpa', 'cpapt', 'roas'].includes(valueKey);
+        // Linhas que o editor NÃO deixa digitar. 'sales_count' entra aqui porque não existe
+        // override manual de contagem de vendas: um input aqui aceitaria o número e o descartaria
+        // no salvar, que é pior do que não ter campo.
+        const isCalculated = ['cpl', 'cpa', 'cpapt', 'roas', 'sales_count', 'ticket_medio', 'quotes_sent'].includes(valueKey);
 
         if (isEditing && period === 'dia' && valueKey && !isCalculated) {
           const isMoney = valueKey === 'investment' || valueKey === 'conversions_value' || valueKey === 'conv_value';
@@ -3354,12 +3462,15 @@ function SummaryMetricRow({ label, periods, metrics, compareMetrics, isComparing
         const platforms = ['meta_ads', 'google_ads', 'no_track'] as Platform[];
 
         const getTotals = (s: any) => {
-          const res = { leads: 0, convs: 0, investment: 0, value: 0, appointments: 0 };
+          const res = { leads: 0, convs: 0, investment: 0, value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, appointments: 0 };
           platforms.forEach(pl => {
             res.leads += s?.[pl]?.leads || 0;
             res.convs += s?.[pl]?.convs || 0;
             res.investment += s?.[pl]?.investment || 0;
             res.value += s?.[pl]?.conv_value || 0;
+            res.sales_count += s?.[pl]?.sales_count || 0;
+            res.quotes_sent += s?.[pl]?.quotes_sent || 0;
+            res.quotes_value += s?.[pl]?.quotes_value || 0;
             res.appointments += s?.[pl]?.appointments || 0;
           });
           return res;
@@ -3376,6 +3487,9 @@ function SummaryMetricRow({ label, periods, metrics, compareMetrics, isComparing
         else if (type === 'appointments') val = current.appointments;
         else if (type === 'investment') { val = current.investment; formatType = 'curr'; }
         else if (type === 'conv_value') { val = current.value; formatType = 'curr'; }
+        else if (type === 'sales_count') val = current.sales_count;
+        else if (type === 'quotes_sent') val = current.quotes_sent;
+        else if (type === 'ticket_medio') { val = current.sales_count > 0 ? current.value / current.sales_count : 0; formatType = 'curr'; }
         else if (type === 'cpl') { val = current.leads > 0 ? current.investment / current.leads : 0; formatType = 'curr'; }
         else if (type === 'cpapt') { val = current.appointments > 0 ? current.investment / current.appointments : 0; formatType = 'curr'; }
         else if (type === 'cpa') { val = current.convs > 0 ? current.investment / current.convs : 0; formatType = 'curr'; }

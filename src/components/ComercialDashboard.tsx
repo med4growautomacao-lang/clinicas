@@ -37,6 +37,7 @@ import {
   Copy,
   Check,
   Store,
+  Receipt,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { format, subDays, addMonths, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subMonths, subWeeks, parseISO } from "date-fns";
@@ -71,7 +72,9 @@ interface CommercialData {
   messages: { inbound: number; total: number };
   appointments: { total: number; ia: number; manual: number; byStatus: Record<string, number> };
   sla: { breaches: number; firstResponseMin: number; responseMin: number; overBreachMin: number; responseCycles: number; slaMinutes: number };
-  finance: { revenue: number; revenueScoped: number; investment: number; investmentTotal: number; convertedValue: number; salesCycleDays: number; attendedConsults: number; defaultTicket: number };
+  // salesCount = quantas VENDAS foram lançadas no recorte (o mesmo card pode ter várias);
+  // outcomes.won = quantos CARDS ganhos. Números diferentes de propósito.
+  finance: { revenue: number; revenueScoped: number; salesCount?: number; investment: number; investmentTotal: number; convertedValue: number; salesCycleDays: number; attendedConsults: number; defaultTicket: number; quotesSent?: number; quotesValue?: number };
   outcomes: { won: number; lost: number; lossReasons: { reason: string; count: number }[] };
   agent: AgentFilter;
   csat: { type: string; answered: number; avg: number | null; distribution: { score: number; count: number }[] };
@@ -147,9 +150,13 @@ const METRICS_CONFIG: { id: string; label: string }[] = [
   { id: "consultas", label: "Consultas (realizadas/marcadas)" },
   { id: "consultas_geradas", label: "Agendamentos Gerados" },
   { id: "faturamento", label: "Faturamento" },
+  { id: "vendas", label: "Vendas lançadas (nº)" },
+  // Só WakeDesk (category='outro') tem Central de Orçamentos. Numa clínica esta métrica é
+  // filtrada da lista, para não sobrar um card zerado nem uma opção que não faz nada no ⚙️.
+  { id: "orcamentos", label: "Orçamentos enviados" },
   { id: "custo_agendamento", label: "Custo por Agendamento" },
   { id: "cac", label: "CAC" },
-  { id: "ticket_config", label: "Ticket Médio" },
+  { id: "ticket_config", label: "Ticket Médio (real x meta)" },
   { id: "roas", label: "ROAS" },
 ];
 const DEFAULT_METRIC_IDS = METRICS_CONFIG.map((m) => m.id);
@@ -288,7 +295,9 @@ const CHART_METRICS: { label: string; value: ChartMetric; icon: any; type?: stri
   { label: "Faturamento Projetado", value: "faturamentoProjetado", icon: Wallet, type: "currency" },
   { label: "ROAS Real", value: "roasReal", icon: TrendingUp, type: "ratio" },
   { label: "ROAS Projetado", value: "roasProj", icon: TrendingUp, type: "ratio" },
-  { label: "Ticket Médio", value: "ticketMedio", icon: DollarSign, type: "currency" },
+  // Linha reta: é a META configurada, não o ticket real (o diário não traz nº de vendas por dia).
+  // O `value` é chave de dado e não muda; só o rótulo diz a verdade.
+  { label: "Meta de ticket médio", value: "ticketMedio", icon: DollarSign, type: "currency" },
   { label: "Msgs IA", value: "aiMessages", icon: Bot },
   { label: "Msgs Humano", value: "humanMessages", icon: UserCheck },
   { label: "Handoffs", value: "handoffs", icon: ArrowRightLeft },
@@ -823,7 +832,8 @@ export function ComercialDashboard() {
   // CAC = investimento ÷ clientes. Parcial: ÷ vendas reais (ganhos). Previsto: ÷ agendamentos gerados.
   const cac = outcomes.won > 0 && fin.investment > 0 ? fin.investment / outcomes.won : null;
   const cacPrevisto = apptGenerated > 0 && fin.investment > 0 ? fin.investment / apptGenerated : null;
-  // Ticket médio = espelho do valor configurado em Dados da Clínica (ai_config.default_ticket_value).
+  // META de ticket médio: valor configurado em Dados da Clínica (ai_config.default_ticket_value).
+  // O ticket REAL é calculado logo abaixo, a partir das vendas do próprio recorte.
   const configuredTicket = fin.defaultTicket > 0 ? fin.defaultTicket : null;
   // ===== Perdas (seção Comparecimento & Perdas) =====
   const canceled = status.cancelado || 0;
@@ -837,6 +847,17 @@ export function ComercialDashboard() {
   // Faturamento Real do recorte: receita das consultas realizadas escopada por origem/agente (revenueScoped);
   // cai no revenue não escopado só se a RPC não devolver o campo (versão antiga da função).
   const realRevenue = fin.revenueScoped ?? fin.revenue;
+  // Quantas VENDAS foram lançadas no mesmo recorte do valor acima (mesma consulta na RPC).
+  // ⚠️ Não é outcomes.won: aquele conta CARDS ganhos (1 por cliente) e desde que o card aceita
+  // mais de uma venda os dois números se separaram. `?? 0` cobre o intervalo entre o deploy do
+  // banco e o do front, quando a RPC velha ainda não devolve o campo.
+  const salesCount = fin.salesCount ?? 0;
+  // Ticket médio REAL do recorte = valor lançado ÷ nº de vendas lançadas. Divide por LANÇAMENTOS,
+  // não por clientes (outcomes.won): o mesmo cliente pode ter fechado duas vezes.
+  const realTicket = salesCount > 0 ? realRevenue / salesCount : null;
+  // Orçamentos enviados no recorte (só WakeDesk usa a Central de Orçamentos).
+  const quotesSent = fin.quotesSent ?? 0;
+  const quotesValue = fin.quotesValue ?? 0;
   // Sem lançamento no financeiro: há consultas realizadas mas nenhuma receita registrada (clínica não
   // lança pagamentos). Mostra "—" em vez de "R$ 0,00" para não parecer que faturou zero.
   const noRevenueRecorded = realRevenue <= 0 && attended > 0;
@@ -855,13 +876,22 @@ export function ComercialDashboard() {
     { id: "consultas", title: "Consultas", value: attended, valueLabel: "realizadas", value2: toRealize, value2Label: "marcadas", value3: noShow + canceled, value3Label: "faltou/cancelado", icon: CheckCircle2, color: "text-emerald-600", bg: "bg-emerald-50", sub: "no período (Conversão)", agentScoped: true, originScoped: true },
     { id: "consultas_geradas", title: "Agendamentos Gerados", value: apptGenerated, icon: CalendarCheck, color: "text-teal-600", bg: "bg-teal-50", sub: "criadas no período (Agendado)", agentScoped: true, originScoped: true },
     { id: "faturamento", title: "Vendas lançadas", value: noRevenueRecorded ? "—" : fmtBRL(realRevenue), valueLabel: "lançado", value2: projectedRevenue != null ? fmtBRL(projectedRevenue) : "—", value2Label: "previsto", icon: Wallet, color: "text-emerald-700", bg: "bg-emerald-50", agentScoped: true, originScoped: true },
+    // Os dois números da venda no mesmo card: "vendas" = lançamentos, "clientes" = cards ganhos.
+    // (Este strip não renderiza `sub`, então a explicação fica nos rótulos e não em texto morto.)
+    { id: "vendas", title: "Vendas lançadas", value: salesCount, valueLabel: "vendas", value2: outcomes.won, value2Label: "clientes", icon: Receipt, color: "text-fuchsia-600", bg: "bg-fuchsia-50", agentScoped: true, originScoped: true },
+    { id: "orcamentos", title: "Orçamentos enviados", value: quotesSent, valueLabel: "enviados", value2: fmtBRL(quotesValue), value2Label: "valor", icon: FileText, color: "text-blue-600", bg: "bg-blue-50", agentScoped: true, originScoped: true },
     { id: "custo_agendamento", title: "Custo por Consulta", value: costPerRealizada != null ? fmtBRL(costPerRealizada) : "—", valueLabel: "parcial", value2: costPerAppt != null ? fmtBRL(costPerAppt) : "—", value2Label: "previsto", icon: Target, color: "text-rose-600", bg: "bg-rose-50", agentScoped: true, originScoped: true },
     { id: "cac", title: "CAC", value: cac != null ? fmtBRL(cac) : "—", valueLabel: "parcial", value2: cacPrevisto != null ? fmtBRL(cacPrevisto) : "—", value2Label: "previsto", icon: UserCheck, color: "text-rose-600", bg: "bg-rose-50", agentScoped: false, originScoped: true },
-    { id: "ticket_config", title: "Ticket Médio", value: configuredTicket != null ? fmtBRL(configuredTicket) : "—", icon: DollarSign, color: "text-blue-600", bg: "bg-blue-50", sub: "definido em Dados da Clínica", agentScoped: false, originScoped: false },
+    // Real em cima (sai das vendas do recorte), meta embaixo (Dados da Clínica). O id NÃO muda:
+    // é chave da config salva no localStorage de quem já organizou os cards.
+    { id: "ticket_config", title: "Ticket Médio", value: realTicket != null ? fmtBRL(realTicket) : "—", valueLabel: "real", value2: configuredTicket != null ? fmtBRL(configuredTicket) : "—", value2Label: "meta", icon: DollarSign, color: "text-blue-600", bg: "bg-blue-50", agentScoped: true, originScoped: true },
     { id: "roas", title: "ROAS", value: noRevenueRecorded ? "—" : (roas != null ? `${roas.toFixed(1)}x` : "—"), valueLabel: "parcial", value2: projectedRoas != null ? `${projectedRoas.toFixed(1)}x` : "—", value2Label: "previsto", icon: TrendingUp, color: "text-violet-600", bg: "bg-violet-50", agentScoped: false, originScoped: true },
   ];
   const kpiById = Object.fromEntries(allKpis.map((k) => [k.id, k]));
-  const headlineKpis = metricsOrder.filter((id) => visibleMetrics.includes(id)).map((id) => kpiById[id]).filter(Boolean) as Kpi[];
+  // Métrica de módulo que a clínica não tem sai da lista INTEIRA (card e ⚙️), em vez de aparecer
+  // zerada. Hoje só "orcamentos" é assim; é o mesmo critério do menu lateral (category='outro').
+  const metricsOrderDisponivel = metricsOrder.filter((id) => id !== "orcamentos" || isOutro);
+  const headlineKpis = metricsOrderDisponivel.filter((id) => visibleMetrics.includes(id)).map((id) => kpiById[id]).filter(Boolean) as Kpi[];
 
   // ===== Seções =====
   // Atividade de Atendimento — dirigida pelo filtro global de agente
@@ -1323,7 +1353,7 @@ export function ComercialDashboard() {
         {/* Relatório + Métricas — alinhados à direita, abaixo dos filtros de data */}
         <div className="flex items-center gap-2 ml-auto">
           <ReportButton onGenerate={generateReport} loadingKind={reportLoading} iaAvailable={clinicFeatures?.feature_ia !== false} />
-          <MetricsConfigButton metricsOrder={metricsOrder} visibleMetrics={visibleMetrics} toggleMetric={toggleMetric} moveMetric={moveMetric} />
+          <MetricsConfigButton metricsOrder={metricsOrderDisponivel} visibleMetrics={visibleMetrics} toggleMetric={toggleMetric} moveMetric={moveMetric} />
         </div>
       </div>
       </div>

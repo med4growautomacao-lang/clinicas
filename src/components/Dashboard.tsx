@@ -9,6 +9,7 @@ import {
   Activity,
   Loader2,
   ShoppingCart,
+  Receipt,
   DollarSign,
   Target,
   Bot,
@@ -20,6 +21,7 @@ import { TrendBarChart, fmtByType } from "./TrendBarChart";
 import { cn } from "@/src/lib/utils";
 import { motion } from "framer-motion";
 import { useDashboardStats } from "../hooks/useSupabase";
+import { useAuth } from "../contexts/AuthContext";
 import GoogleLogo from "../assets/logos/Logo Googleads.png";
 import MetaLogo from "../assets/logos/Logo Metaads.png";
 import SemOrigemLogo from "../assets/logos/Logo Sem origem.png";
@@ -46,6 +48,10 @@ import {
 // LANÇADAS (conversions sem 'Orçamento Enviado'), vendas = tickets.outcome, agendados =
 // união agenda∪etapa. Detalhe por coorte/UTM fica em Comercial e Marketing.
 export function Dashboard() {
+  // Orçamento é módulo do WakeDesk (category='outro'), o mesmo discriminador que decide o menu.
+  // Numa clínica o card só mostraria zero para sempre, então nem entra na lista.
+  const { activeClinicCategory } = useAuth();
+  const isOutro = activeClinicCategory === 'outro';
   const [period, setPeriod] = useState<Period>('mês');
   const [isPeriodOpen, setIsPeriodOpen] = useState(false);
   // Origem e Canal são multi-seleção (array vazio = "Todos"). Agente segue único.
@@ -169,21 +175,35 @@ export function Dashboard() {
   const conversionRate = stats.totalLeads > 0 && stats.totalSales > 0
     ? ((stats.totalSales / stats.totalLeads) * 100)
     : 0;
+  // Ticket médio REAL do período: o que entrou dividido por quantas vendas foram lançadas.
+  // ⚠️ Divide por salesCount (lançamentos), não por totalSales (clientes): o mesmo cliente pode
+  // ter fechado duas vezes, e usar clientes aqui inflaria o ticket sem ninguém perceber.
   const configuredTicket = stats.defaultTicket > 0 ? stats.defaultTicket : 0;
+  const realTicket = stats.salesCount > 0 ? salesValue / stats.salesCount : 0;
+  const fmtBRL0 = (v: number) => `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 
   const cards = [
     // Dinheiro
     { title: "Vendas lançadas", value: `R$ ${salesValue.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: "Valor lançado no fechamento", icon: DollarSign, color: "bg-emerald-50 text-emerald-600" },
     { title: "Investimento", value: investimento == null ? "—" : `R$ ${investimento.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}`, trend: investimento == null ? "Não atribuível por canal/agente" : "Em mídia paga", icon: TrendingUp, color: "bg-amber-50 text-amber-600" },
     { title: "ROAS", value: roas > 0 ? `${roas.toFixed(2).replace('.', ',')}x` : "—", trend: "Vendas ÷ Investimento", icon: Activity, color: "bg-teal-50 text-teal-600" },
-    { title: "Ticket Médio", value: configuredTicket > 0 ? `R$ ${configuredTicket.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}` : "—", trend: "Definido em Dados da Clínica", icon: Target, color: "bg-violet-50 text-violet-600" },
+    // Em cima o ticket REAL (sai das vendas do período); embaixo a META configurada em Dados da
+    // Clínica. Sem venda lançada não há ticket real: mostra "—" em vez de fingir R$ 0.
+    { title: "Ticket Médio", value: realTicket > 0 ? fmtBRL0(realTicket) : "—", trend: configuredTicket > 0 ? `Meta: ${fmtBRL0(configuredTicket)}` : "Meta não definida em Dados da Clínica", icon: Target, color: "bg-violet-50 text-violet-600" },
     // Funil
     { title: "Leads", value: `${stats.totalLeads}`, trend: "Novos no período", icon: MessageSquare, color: "bg-indigo-50 text-indigo-600" },
     { title: "Agendados", value: `${stats.totalAppointments}`, trend: "Gerados (agenda ∪ funil)", icon: CalendarCheck, color: "bg-sky-50 text-sky-600" },
+    // Quantidade em destaque, valor somado embaixo. Conta pelo dia do ENVIO (sent_at).
+    ...(isOutro ? [{ title: "Orçamentos enviados", value: `${stats.quotesSent}`, trend: `${fmtBRL0(stats.quotesValue)} enviados no período`, icon: FileText, color: "bg-blue-50 text-blue-600" }] : []),
     // ⚠️ Este número conta CARDS ganhos, ou seja, clientes que compraram, não vendas lançadas: o
     // mesmo cliente pode fechar vários negócios no mesmo card e continua contando 1. Faturamento
     // (acima) sai de conversions e soma todas. Não "corrigir" a conta: o rótulo é que estava velho.
     { title: "Clientes que compraram", value: `${stats.totalSales}`, trend: "1 por cliente, não por venda", icon: ShoppingCart, color: "bg-rose-50 text-rose-600" },
+    // Quantas VENDAS foram lançadas (o mesmo card pode ter várias). É o par em número do card
+    // "Vendas lançadas" em R$ lá de cima: mesma fonte (conversions), mesmo eixo (converted_at).
+    // ⚠️ Zero aqui não é bug: clínica que marca ganho mas não lança valor tem R$ 0 no card de
+    // dinheiro e 0 aqui — por isso o nº de clientes vem embaixo, para o card nunca ficar mudo.
+    { title: "Vendas lançadas (nº)", value: `${stats.salesCount}`, trend: `${stats.totalSales} ${stats.totalSales === 1 ? 'cliente comprou' : 'clientes compraram'}`, icon: Receipt, color: "bg-fuchsia-50 text-fuchsia-600" },
     { title: "Conversão Lead → Cliente", value: conversionRate > 0 ? `${conversionRate.toFixed(1).replace('.', ',')}%` : "—", trend: "Clientes ÷ Leads", icon: TrendingUp, color: "bg-cyan-50 text-cyan-600" },
   ];
 

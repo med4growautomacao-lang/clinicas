@@ -23,7 +23,12 @@ interface ClinicMetricRow {
   lost: number;
   revenue: number;
   investment: number;
+  // ticketMedio é o ticket REAL do período (faturamento ÷ vendas lançadas), calculado na RPC.
+  // A meta configurada em Dados da Clínica vem separada, em ticketMeta — antes as duas eram a
+  // mesma coisa aqui, e o painel chamava a meta de "Ticket Médio".
   ticketMedio: number | null;
+  salesCount: number;
+  ticketMeta: number | null;
 }
 
 type Fmt = "number" | "currency" | "percent" | "ratio";
@@ -36,6 +41,8 @@ interface MetricDef {
   valueColor?: string;
   format: Fmt;
   get: (r: ClinicMetricRow) => number | null;
+  // Linha de apoio embaixo do valor (hoje só a meta do ticket).
+  sub?: (r: ClinicMetricRow) => string | null;
 }
 
 function toISODate(d: Date) {
@@ -77,7 +84,8 @@ const METRICS: MetricDef[] = [
   { id: "revenue",     label: "Faturamento",                    Icon: Wallet,        color: "text-teal-600 bg-teal-50",       format: "currency", get: r => r.revenue },
   { id: "investment",  label: "Investimento Geral (Google/Meta)", Icon: Megaphone,   color: "text-amber-600 bg-amber-50",     format: "currency", get: r => r.investment },
   { id: "roas",        label: "ROAS",                           Icon: TrendingUp,    color: "text-fuchsia-600 bg-fuchsia-50", format: "ratio",    get: r => r.investment > 0 ? r.revenue / r.investment : null },
-  { id: "ticketMedio", label: "Ticket Médio",                   Icon: DollarSign,    color: "text-blue-600 bg-blue-50",       format: "currency", get: r => r.ticketMedio },
+  { id: "ticketMedio", label: "Ticket Médio",                   Icon: DollarSign,    color: "text-blue-600 bg-blue-50",       format: "currency", get: r => r.ticketMedio,
+    sub: r => r.ticketMeta && r.ticketMeta > 0 ? `Meta: ${formatBRL(r.ticketMeta)}` : null },
   { id: "cpl",         label: "Custo por Lead",                 Icon: Coins,         color: "text-cyan-600 bg-cyan-50",       format: "currency", get: r => r.leads > 0 ? r.investment / r.leads : null },
   { id: "custoAgendamento", label: "Custo por Agendamento",     Icon: CalendarClock, color: "text-lime-600 bg-lime-50",       format: "currency", get: r => r.patientsCaptured > 0 ? r.investment / r.patientsCaptured : null },
   // Investimento dividido por CLIENTES que compraram: é a definição de CAC, e por isso continua
@@ -175,6 +183,8 @@ export function OrgMetrics() {
         revenue: Number(r.revenue || 0),
         investment: Number(r.investment || 0),
         ticketMedio: r.ticketMedio != null ? Number(r.ticketMedio) : null,
+        salesCount: Number(r.salesCount || 0),
+        ticketMeta: r.ticketMeta != null ? Number(r.ticketMeta) : null,
       })));
     }
     setLoading(false);
@@ -209,6 +219,8 @@ export function OrgMetrics() {
           revenue: Number(r.revenue || 0),
           investment: Number(r.investment || 0),
           ticketMedio: r.ticketMedio != null ? Number(r.ticketMedio) : null,
+          salesCount: Number(r.salesCount || 0),
+          ticketMeta: r.ticketMeta != null ? Number(r.ticketMeta) : null,
         })));
       }
       if (!cancelled) setTodayLoading(false);
@@ -265,8 +277,10 @@ export function OrgMetrics() {
     return list;
   }, [visible, sortMetric, sortDesc]);
 
-  // Linha "totais" usada só para alimentar os cards de resumo (Ticket Médio = média
-  // dos valores configurados nas clínicas visíveis que têm um valor definido).
+  // Linha "totais" usada só para alimentar os cards de resumo.
+  // ⚠️ Ticket Médio do total = faturamento somado ÷ vendas somadas, NÃO média das médias: com
+  // clínicas de tamanhos diferentes, a média das médias dá peso igual a quem vendeu 2 e a quem
+  // vendeu 200. A meta continua sendo média (é um alvo por clínica, não tem o que somar).
   const totals = useMemo<ClinicMetricRow>(() => {
     const t = visible.reduce(
       (acc, r) => ({
@@ -276,16 +290,19 @@ export function OrgMetrics() {
         lost: acc.lost + r.lost,
         revenue: acc.revenue + r.revenue,
         investment: acc.investment + r.investment,
-        ticketSum: acc.ticketSum + (r.ticketMedio ?? 0),
-        ticketCount: acc.ticketCount + (r.ticketMedio ? 1 : 0),
+        salesCount: acc.salesCount + (r.salesCount ?? 0),
+        metaSum: acc.metaSum + (r.ticketMeta ?? 0),
+        metaCount: acc.metaCount + (r.ticketMeta ? 1 : 0),
       }),
-      { leads: 0, patientsCaptured: 0, sales: 0, lost: 0, revenue: 0, investment: 0, ticketSum: 0, ticketCount: 0 }
+      { leads: 0, patientsCaptured: 0, sales: 0, lost: 0, revenue: 0, investment: 0, salesCount: 0, metaSum: 0, metaCount: 0 }
     );
     return {
       clinicId: "__total__", clinicName: "", logoUrl: null, isActive: true, category: null,
       leads: t.leads, patientsCaptured: t.patientsCaptured, sales: t.sales, lost: t.lost,
       revenue: t.revenue, investment: t.investment,
-      ticketMedio: t.ticketCount > 0 ? t.ticketSum / t.ticketCount : null,
+      salesCount: t.salesCount,
+      ticketMedio: t.salesCount > 0 ? t.revenue / t.salesCount : null,
+      ticketMeta: t.metaCount > 0 ? t.metaSum / t.metaCount : null,
     };
   }, [visible]);
 
@@ -687,6 +704,10 @@ export function OrgMetrics() {
               <span className="text-xl font-black text-slate-900 truncate">
                 {loading ? "…" : formatMetric(m.get(totals), m.format)}
               </span>
+              {/* Real em cima, meta embaixo (só o Ticket Médio usa isto hoje). */}
+              {!loading && m.sub?.(totals) && (
+                <span className="text-[10px] font-bold text-slate-400 -mt-1.5 truncate">{m.sub(totals)} (média)</span>
+              )}
             </div>
           ))}
         </div>
@@ -750,7 +771,10 @@ export function OrgMetrics() {
                         : (m.valueColor ?? "text-slate-700");
                       return (
                         <td key={m.id} className={cn("px-4 py-3 text-right text-xs font-bold whitespace-nowrap", cellColor)}>
-                          {formatMetric(val, m.format)}
+                          <div className="flex flex-col items-end leading-tight">
+                            <span>{formatMetric(val, m.format)}</span>
+                            {m.sub?.(r) && <span className="text-[9px] font-bold text-slate-400">{m.sub(r)}</span>}
+                          </div>
                         </td>
                       );
                     })}

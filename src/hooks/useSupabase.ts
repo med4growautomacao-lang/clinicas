@@ -1434,8 +1434,13 @@ export interface MarketingKpiRow {
   channel: string;
   leads: number;       // v_kpi_leads (created_at)
   conv_value: number;  // v_kpi_sales_value (converted_at, sem 'Orçamento Enviado')
+  // sales e wins NÃO são o mesmo número: sales conta LANÇAMENTOS de venda (o mesmo card pode
+  // ter vários), wins conta CARDS ganhos (1 por cliente). Saem da mesma CTE do valor lançado.
+  sales: number;       // v_kpi_sales_value (converted_at) — quantas vendas lançadas
   wins: number;        // v_kpi_wins = tickets.outcome='ganho' (fonte única) — Conversões
   scheduled: number;   // v_kpi_scheduled = união agendamento∪etapa dedupe — Agendamentos
+  quotes: number;        // v_kpi_quotes (sent_at) — orçamentos ENVIADOS (só WakeDesk usa)
+  quotes_value: number;  // soma do total desses orçamentos
 }
 
 export function useMarketingKpis(start: string | null, end: string | null) {
@@ -1444,7 +1449,7 @@ export function useMarketingKpis(start: string | null, end: string | null) {
   return useRpcRows<MarketingKpiRow>(
     'marketing_kpis',
     start && end ? { p_start: start, p_end: end } : null,
-    (r) => ({ ...r, leads: Number(r.leads) || 0, conv_value: Number(r.conv_value) || 0, wins: Number(r.wins) || 0, scheduled: Number(r.scheduled) || 0 })
+    (r) => ({ ...r, leads: Number(r.leads) || 0, conv_value: Number(r.conv_value) || 0, sales: Number(r.sales) || 0, wins: Number(r.wins) || 0, scheduled: Number(r.scheduled) || 0, quotes: Number(r.quotes) || 0, quotes_value: Number(r.quotes_value) || 0 })
   );
 }
 
@@ -1685,7 +1690,10 @@ export interface DashboardStats {
   totalConversionsValue: number;
   totalLeads: number;
   newPatients: number;
-  totalSales: number;
+  totalSales: number;          // CARDS ganhos (1 por cliente que comprou)
+  salesCount: number;          // LANÇAMENTOS de venda (o mesmo card pode ter vários) — pareia com salesValue
+  quotesSent: number;          // orçamentos ENVIADOS no período (v_kpi_quotes, eixo sent_at)
+  quotesValue: number;         // soma do total desses orçamentos
   totalInvestment: number | null;   // null = não atribuível (filtro de canal/agente ativo) → UI mostra "—"
   totalSlaBreaches: number;
   avgResponseTime: number; // minutes
@@ -1712,6 +1720,9 @@ export function useDashboardStats(dateRange?: { start: string; end: string }, or
     totalLeads: 0,
     newPatients: 0,
     totalSales: 0,
+    salesCount: 0,
+    quotesSent: 0,
+    quotesValue: 0,
     totalInvestment: 0,
     totalSlaBreaches: 0,
     avgResponseTime: 0,
@@ -1762,6 +1773,9 @@ export function useDashboardStats(dateRange?: { start: string; end: string }, or
         totalLeads: r?.totalLeads || 0,
         newPatients: r?.newPatients || 0,
         totalSales: r?.totalSales || 0,
+        salesCount: Number(r?.salesCount || 0),
+        quotesSent: Number(r?.quotesSent || 0),
+        quotesValue: Number(r?.quotesValue || 0),
         totalInvestment: r?.totalInvestment == null ? null : Number(r.totalInvestment),
         totalSlaBreaches: r?.totalSlaBreaches || 0,
         avgResponseTime: Number(r?.avgResponseTime || 0),

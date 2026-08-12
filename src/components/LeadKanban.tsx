@@ -1375,12 +1375,32 @@ function ProductPicker({ value, products, protocols, useProd, useProt, sourceNou
 // Exportado para a Central de Orçamentos reusar o MESMO construtor. Duplicar esta tela lá seria
 // manter dois orçamentos diferentes vivos (catálogo, alturas, cálculo, documento e envio), e eles
 // divergiriam na primeira mudança.
-export function OrcamentoModal({ lead, ticketId, initialQuote, sessionIndex = 1, projetosDoCliente = [], onClose, onCancel, onConfirm, onSavedAndNew }: {
+/** A tela comporta as três colunas? Espelha o breakpoint `xl` do Tailwind (1280px), e existe para
+ *  o COMPORTAMENTO acompanhar o layout: esconder a conversa com `hidden xl:flex` tira do olho, mas
+ *  o componente continua montado, buscando e observando. Aqui ele nem é criado. */
+function useTelaLarga(): boolean {
+  const consulta = '(min-width: 1280px)';
+  const [larga, setLarga] = useState(() => typeof window !== 'undefined' && window.matchMedia(consulta).matches);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia(consulta);
+    const aoMudar = (e: MediaQueryListEvent) => setLarga(e.matches);
+    setLarga(mq.matches);
+    mq.addEventListener('change', aoMudar);
+    return () => mq.removeEventListener('change', aoMudar);
+  }, []);
+  return larga;
+}
+
+export function OrcamentoModal({ lead, ticketId, dadosPreAtendimento, initialQuote, sessionIndex = 1, projetosDoCliente = [], onClose, onCancel, onConfirm, onSavedAndNew }: {
   lead: { id: string; name: string; phone?: string | null };
   // Atendimento aberto. É por ele que se lê o que o pré-atendimento coletou (malha, altura,
   // comprimento): o dado é do ATENDIMENTO, não do contato — o mesmo cliente volta meses depois
   // querendo outra tela, e a medida do pedido anterior não pode reaparecer aqui.
   ticketId?: string;
+  // Atalho para quem JÁ tem o ticket carregado (o Kanban): evita reler do banco o que está na
+  // memória do quadro. Quem só tem o `ticketId` (a Central de Orçamentos) omite, e o modal busca.
+  dadosPreAtendimento?: any;
   initialQuote?: any;
   // Projetos que este cliente já tem, para sugerir no campo e evitar que a mesma obra vire dois
   // nomes ("Obra Rua X" e "obra rua x"), o que quebraria o agrupamento e voltaria a inflar a soma.
@@ -1417,16 +1437,60 @@ export function OrcamentoModal({ lead, ticketId, initialQuote, sessionIndex = 1,
   // ─── Contexto do atendimento: o que o pré-atendimento coletou + a conversa ──────────────────
   // Os dois existem para o vendedor NÃO precisar sair daqui: antes ele fechava o orçamento, abria
   // a conversa para achar a medida e voltava. Ele lê à direita e preenche à esquerda.
-  const { data: chatMessages, loading: chatLoading } = useChatMessages(lead.id, lead.phone ?? undefined);
-  const [dadosSDR, setDadosSDR] = useState<{ resumo?: string | null; itens?: { campo: string; valor: string }[] } | null>(null);
+  //
+  // A conversa SÓ é buscada quando a coluna dela cabe na tela. Abaixo de 1280px ela não é exibida,
+  // e buscar assim mesmo custava, a cada abertura do modal, uma consulta de 200 mensagens com os
+  // campos de mídia, uma inscrição de tempo real e o observador do rolo — tudo jogado fora.
+  const mostrarConversa = useTelaLarga();
+  const { data: chatMessages, loading: chatLoading } = useChatMessages(
+    mostrarConversa ? lead.id : undefined,
+    mostrarConversa ? (lead.phone ?? undefined) : undefined,
+  );
+
+  // Preferência pelo que o pai JÁ tem em memória: o Kanban carrega o ticket inteiro para desenhar
+  // o card, então buscar de novo seria uma ida ao banco por abertura de modal, e uma segunda
+  // versão do mesmo dado, que pode discordar do quadro. A busca fica de reserva para quem só tem
+  // o id do atendimento em mãos (a Central de Orçamentos).
+  const [dadosSDR, setDadosSDR] = useState<{ resumo?: unknown; itens?: unknown } | null>(
+    (dadosPreAtendimento && typeof dadosPreAtendimento === 'object') ? dadosPreAtendimento : null,
+  );
   useEffect(() => {
     let cancelado = false;
+    if (dadosPreAtendimento && typeof dadosPreAtendimento === 'object') { setDadosSDR(dadosPreAtendimento); return; }
     if (!ticketId) { setDadosSDR(null); return; }
     supabase.from('tickets').select('dados_pre_atendimento').eq('id', ticketId).maybeSingle()
-      .then(({ data }) => { if (!cancelado) setDadosSDR((data as any)?.dados_pre_atendimento ?? null); });
+      .then(({ data, error }) => {
+        if (cancelado) return;
+        // ⚠️ O erro NÃO pode ser engolido: sem ficha na tela, falha de leitura fica idêntica a
+        // "o pré-atendimento não coletou nada", e o vendedor relê a conversa inteira sem nunca
+        // saber que houve defeito. Registrar é o que transforma isso em algo que alguém enxerga.
+        if (error) {
+          logSystemError(
+            'orcamento_dados_pre_atendimento_ilegiveis',
+            'Não foi possível ler os dados coletados no pré-atendimento; o vendedor abriu o orçamento sem a ficha e vai ter que reler a conversa',
+            activeClinicId,
+            { ticket_id: ticketId, lead_id: lead.id, erro: error.message ?? String(error) },
+          );
+          setDadosSDR(null);
+          return;
+        }
+        setDadosSDR((data as any)?.dados_pre_atendimento ?? null);
+      });
     return () => { cancelado = true; };
-  }, [ticketId]);
-  const itensSDR = Array.isArray(dadosSDR?.itens) ? dadosSDR!.itens.filter(i => i?.campo && i?.valor) : [];
+  }, [ticketId, dadosPreAtendimento, lead.id]);
+
+  // Converte para texto ANTES de renderizar. A coluna é jsonb sem tipo garantido e já tem mais de
+  // um autor (o agente e uma recuperação feita à mão); um valor que não seja string derruba o
+  // React e o modal inteiro fica em branco, o que é bem pior do que um campo estranho.
+  const resumoSDR = (() => { const t = String(dadosSDR?.resumo ?? '').trim(); return t || null; })();
+  const itensSDR = Array.isArray(dadosSDR?.itens)
+    ? (dadosSDR!.itens as unknown[])
+        .map((i) => {
+          const o = (i ?? {}) as Record<string, unknown>;
+          return { campo: String(o.campo ?? '').trim(), valor: String(o.valor ?? '').trim() };
+        })
+        .filter((i) => i.campo && i.valor)
+    : [];
 
   // Fontes de item conforme a Configuração do Orçamento da clínica (padrão: ambas ligadas).
   const useProd = clinic?.quote_use_products !== false;
@@ -2057,24 +2121,25 @@ export function OrcamentoModal({ lead, ticketId, initialQuote, sessionIndex = 1,
             veio para orçar. */}
         <div className="flex-1 min-h-0 flex flex-col xl:flex-row overflow-hidden">
 
-        {/* COLUNA 1 — o que o pré-atendimento coletou. Rola sozinha, para pedido com muitos
-            campos não esticar o modal. Só aparece quando houve coleta. */}
-        {(itensSDR.length > 0 || dadosSDR?.resumo) && (
-          <div className="shrink-0 xl:w-[300px] xl:overflow-y-auto px-6 pt-5 pb-4 bg-teal-50/60 border-b xl:border-b-0 xl:border-r border-teal-100">
+        {/* COLUNA 1 — o que o pré-atendimento coletou. Rola sozinha EM QUALQUER LARGURA, e não só
+            no modo três colunas: empilhada no topo ela é `shrink-0`, então sem teto de altura um
+            pedido com muitos campos comeria o modal e deixaria o formulário numa fresta. */}
+        {(itensSDR.length > 0 || resumoSDR) && (
+          <div className="shrink-0 max-h-[38%] overflow-y-auto xl:max-h-none xl:w-[300px] px-6 pt-5 pb-4 bg-teal-50/60 border-b xl:border-b-0 xl:border-r border-teal-100">
             <p className="text-[10px] font-black text-teal-700 uppercase tracking-widest mb-2.5">
               Dados coletados no atendimento
             </p>
             {/* Os DOIS, não um ou outro. O resumo dá o caso em uma frase (é o que o vendedor lê
                 para entender o pedido); a ficha dá o valor exato de cada campo (é o que ele
                 confere para digitar). Cada um resolve uma coisa. */}
-            {dadosSDR?.resumo && (
-              <p className="text-sm text-slate-700 leading-snug">{dadosSDR.resumo}</p>
+            {resumoSDR && (
+              <p className="text-sm text-slate-700 leading-snug">{resumoSDR}</p>
             )}
             {itensSDR.length > 0 && (
               /* Um campo POR LINHA, rótulo à esquerda e valor à direita: lê-se como ficha técnica,
                  que é o que o vendedor precisa conferir item a item. Em duas colunas os valores
                  ficavam lado a lado e voltavam a parecer texto corrido. */
-              <dl className={cn("divide-y divide-teal-100", dadosSDR?.resumo && "mt-3 pt-3 border-t border-teal-200")}>
+              <dl className={cn("divide-y divide-teal-100", resumoSDR && "mt-3 pt-3 border-t border-teal-200")}>
                 {itensSDR.map((it, i) => (
                   <div key={`${it.campo}-${i}`} className="flex items-baseline gap-3 py-1.5">
                     <dt className="w-28 shrink-0 text-[11px] font-bold text-slate-500 uppercase tracking-wide">{it.campo}</dt>
@@ -2089,9 +2154,11 @@ export function OrcamentoModal({ lead, ticketId, initialQuote, sessionIndex = 1,
           </div>
         )}
 
-        {/* COLUNA 2 — o formulário do orçamento. Largura fixa, igual à do modal antigo: são campos
-            curtos, e alargar não melhora nada. */}
-        <div className="flex flex-col min-h-0 xl:w-[460px] xl:shrink-0 xl:border-r xl:border-slate-200">
+        {/* COLUNA 2 — o formulário do orçamento. Em três colunas tem largura fixa, igual à do modal
+            antigo: são campos curtos, e alargar não melhora nada. Empilhado, `flex-1` garante que
+            é ELE quem fica com a sobra de altura — antes a coluna dos dados tomava o espaço e o
+            formulário virava uma tira de rolagem. */}
+        <div className="flex-1 min-h-0 flex flex-col xl:flex-none xl:w-[460px] xl:shrink-0 xl:border-r xl:border-slate-200">
         <div className="p-6 space-y-4 overflow-y-auto">
           <div className="flex items-center justify-between">
             <div>
@@ -2674,8 +2741,11 @@ export function OrcamentoModal({ lead, ticketId, initialQuote, sessionIndex = 1,
         </div>
 
         {/* COLUNA 3 — a conversa. Ocupa o resto da largura de propósito: é texto corrido para ler,
-            enquanto as duas da esquerda são campo curto. */}
-        <div className="hidden xl:flex flex-1 min-w-0 flex-col bg-slate-50/70">
+            enquanto as duas da esquerda são campo curto.
+            NÃO é escondida por CSS: em tela estreita ela não é montada, senão continuaria buscando
+            as mensagens e observando o rolo para ninguém ver. */}
+        {mostrarConversa && (
+        <div className="flex flex-1 min-w-0 flex-col bg-slate-50/70">
           <div className="shrink-0 px-5 py-3 border-b border-slate-200 bg-white/70 flex items-center gap-2">
             <MessageSquare className="w-4 h-4 text-slate-400 shrink-0" />
             <p className="text-xs font-black text-slate-700 truncate">Conversa com {lead.name}</p>
@@ -2690,6 +2760,7 @@ export function OrcamentoModal({ lead, ticketId, initialQuote, sessionIndex = 1,
             emptyHint="O histórico aparece aqui assim que o contato escrever."
           />
         </div>
+        )}
         </div>
       </motion.div>
     </div>
@@ -5594,6 +5665,10 @@ export function LeadKanban() {
           key={`orc-${orcamentoLead.id}-${orcamentoLead.seq ?? 1}`}
           lead={orcamentoLead}
           ticketId={orcamentoLead.ticketId}
+          // O quadro já carregou o atendimento inteiro para desenhar o card: passar daqui evita
+          // uma ida ao banco por abertura e mantém UMA fonte só (o que o modal mostra é o que o
+          // card tem). Lido na hora, não guardado no estado, para acompanhar o quadro.
+          dadosPreAtendimento={tickets.find(t => t.id === orcamentoLead.ticketId)?.dados_pre_atendimento}
           initialQuote={orcamentoLead.initialQuote}
           sessionIndex={orcamentoLead.seq ?? 1}
           projetosDoCliente={projetosPorLead[orcamentoLead.id] ?? []}

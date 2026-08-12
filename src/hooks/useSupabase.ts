@@ -1077,6 +1077,10 @@ export interface Ticket {
   created_at: string;
   lead_phone: string | null;
   quote_data?: any | null;
+  /** O que o pré-atendimento coletou (resumo + campos). Fica no ATENDIMENTO, não no contato: o
+   *  mesmo cliente volta meses depois querendo outra coisa, e a medida antiga não pode reaparecer
+   *  no pedido novo. Sem tipo garantido no banco (jsonb), então converta antes de exibir. */
+  dados_pre_atendimento?: any | null;
   lead?: Lead;
 }
 
@@ -2402,11 +2406,17 @@ export interface ChatMessage {
   created_at: string;
 }
 
+/** Sufixo por INSTÂNCIA do hook. Ver o comentário do canal, mais abaixo: sem ele, dois componentes
+ *  abertos na mesma conversa compartilham a mesma inscrição e um derruba a do outro ao fechar. */
+let seqCanalConversa = 0;
+
 export function useChatMessages(leadId?: string, leadPhone?: string | null) {
   const { profile, activeClinicId } = useAuth();
   const [data, setData] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const idInstancia = useRef<number>(0);
+  if (idInstancia.current === 0) idInstancia.current = ++seqCanalConversa;
 
   const [clinicPhone, setClinicPhone] = useState<string | null>(null);
 
@@ -2508,7 +2518,14 @@ export function useChatMessages(leadId?: string, leadPhone?: string | null) {
     if (!activeClinicId) return;
     if (!leadId && !leadPhone) return;
 
-    const channelName = leadId ? `chat_lead_${leadId}` : `chat_phone_${leadPhone}`;
+    // ⚠️ O sufixo por instância é o que impede um componente de calar o outro. O supabase-js
+    // REAPROVEITA o canal quando o nome se repete (RealtimeClient.channel: se o tópico já existe,
+    // devolve o existente em vez de criar um novo) e `removeChannel` cancela a inscrição desse
+    // objeto compartilhado. Sem o sufixo, abrir a conversa do contato e o modal de orçamento do
+    // MESMO contato dava um canal só para os dois: fechar o modal deixava a conversa aberta na
+    // tela e MUDA, sem erro nenhum — o cliente escrevia e o vendedor concluía que ele sumiu.
+    const chaveConversa = leadId ? `lead_${leadId}` : `phone_${leadPhone}`;
+    const channelName = `chat_${chaveConversa}_i${idInstancia.current}`;
     const filter = leadId
       ? `lead_id=eq.${leadId}`
       : `phone=eq.${leadPhone}`;

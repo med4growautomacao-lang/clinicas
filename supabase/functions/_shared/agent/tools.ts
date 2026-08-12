@@ -345,17 +345,9 @@ export const TOOL_DEFS: Record<string, ToolDef> = {
       lead_phone: ctx.lead_phone,
       etapa: s(a.etapa),
       resumo: s(a.resumo),
-      // Higienizado aqui, nao no servidor: o modelo as vezes devolve item pela metade, e um
-      // {campo:"Altura"} sem valor viraria uma linha vazia na tela do vendedor.
-      dados: Array.isArray(a.dados)
-        ? (a.dados as unknown[])
-            .map((d) => {
-              const o = (d ?? {}) as Record<string, unknown>;
-              return { campo: s(o.campo), valor: s(o.valor) };
-            })
-            .filter((d) => d.campo && d.valor)
-            .slice(0, 15)
-        : [],
+      // Mesma funcao que a ai-scheduler chama antes de gravar. Higienizar nos dois pontos e
+      // deliberado (a acao tambem e alcancavel por outros caminhos), mas com UMA regra so.
+      dados: sanitizarDadosPreAtendimento(a.dados),
     }),
   },
 };
@@ -437,6 +429,37 @@ const ACENTOS_COMBINANTES = new RegExp("[\\u0300-\\u036f]", "g");
 export function normalizarTexto(v: unknown): string {
   return String(v ?? "").normalize("NFD").replace(ACENTOS_COMBINANTES, "")
     .toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/** Teto de campos numa transferencia. Nao e limite de negocio, e limite de tela: o vendedor le a
+ *  ficha de relance, e lista maior que isso vira rolagem que ninguem confere. */
+export const MAX_CAMPOS_PRE_ATENDIMENTO = 15;
+
+export interface CampoPreAtendimento {
+  campo: string;
+  valor: string;
+}
+
+/** FONTE UNICA da limpeza dos campos coletados no pre-atendimento, usada aqui (ao montar a chamada)
+ *  E na ai-scheduler (antes de gravar no ticket).
+ *
+ *  ⚠️ Existia em duas copias NAO equivalentes: esta e um filtro fraco no servidor, que so olhava
+ *  se o valor era truthy. Duas copias da mesma regra e como o teto sobe num lado e continua
+ *  cortando no outro — e como o servidor passa a parecer que valida sem validar forma nenhuma.
+ *
+ *  Converte para texto de proposito: o que sai daqui vai direto para a tela do vendedor, e valor
+ *  que nao for string quebra o render inteiro (modal em branco). */
+export function sanitizarDadosPreAtendimento(v: unknown): CampoPreAtendimento[] {
+  if (!Array.isArray(v)) return [];
+  return (v as unknown[])
+    .map((d) => {
+      const o = (d ?? {}) as Record<string, unknown>;
+      // O modelo as vezes devolve item pela metade, e um {campo:"Altura"} sem valor viraria
+      // uma linha vazia na ficha.
+      return { campo: s(o.campo) ?? "", valor: s(o.valor) ?? "" };
+    })
+    .filter((d) => d.campo !== "" && d.valor !== "")
+    .slice(0, MAX_CAMPOS_PRE_ATENDIMENTO);
 }
 
 /** A CHAVE do modo SDR e o TIPO do Prompt Fixo que a clinica usa (`prompt_templates.focus='sdr'`,

@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.7.1";
 // Gate do modo SDR: a MESMA função que o worker usa para decidir se a tool de transferência
 // aparece para o modelo. Importada em vez de recopiada — regra duplicada é regra que diverge.
-import { clinicaEmModoSdr, etapaProibida, normalizarTexto } from "../_shared/agent/tools.ts";
+import { clinicaEmModoSdr, etapaProibida, normalizarTexto, sanitizarDadosPreAtendimento } from "../_shared/agent/tools.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -1527,8 +1527,10 @@ serve(async (req) => {
       // move_lead_stage, que passa 'new_cycle' e partiria o atendimento em dois cards.
       let stage_changed = false;  // o card MUDOU de coluna nesta chamada
       let stage_ok = false;       // o card ESTÁ na coluna certa (inclui já estar lá antes)
+      // `dados_pre_atendimento` vem junto porque o passo 2b MESCLA em cima do que já existe, e
+      // para mesclar é preciso ter lido. Mesma consulta, custo zero.
       const { data: tTickets, error: tkErr } = await supabaseClient.from("tickets")
-        .select("id").eq("lead_id", lead.id).eq("status", "open")
+        .select("id, dados_pre_atendimento").eq("lead_id", lead.id).eq("status", "open")
         .order("opened_at", { ascending: false }).limit(1);
       const tTicket = tTickets && tTickets.length > 0 ? tTickets[0] : null;
       if (tkErr && !transfIsSim) {
@@ -1571,8 +1573,11 @@ serve(async (req) => {
         // calado seria pior: a equipe é avisada e o card não aparece na coluna.
         await registrarErro(
           "transferencia_sem_ticket",
-          "O SDR transferiu um contato que não tem atendimento aberto; não há card para mover (a equipe foi avisada assim mesmo)",
-          "warning", clinic_id, { lead_id: lead.id, telefone: lead.phone, etapa: destino.name },
+          "O SDR transferiu um contato que não tem atendimento aberto; não há card para mover nem onde guardar os dados coletados (a equipe foi avisada assim mesmo)",
+          "warning", clinic_id,
+          // O resumo e os campos vão nos detalhes de propósito: sem card, esta entrada é o ÚNICO
+          // lugar de onde a coleta pode ser recuperada depois.
+          { lead_id: lead.id, telefone: lead.phone, etapa: destino.name, resumo: String(resumo ?? "").trim() || null, campos: sanitizarDadosPreAtendimento(dados) },
         );
       }
 
@@ -1586,16 +1591,32 @@ serve(async (req) => {
       // Best-effort de propósito: se falhar, o contato JÁ foi transferido e a equipe JÁ foi avisada
       // com o resumo. Derrubar a transferência por causa da vitrine seria trocar o essencial pelo
       // conveniente. Mas registra na Central, senão o vendedor abre o card vazio sem saber por quê.
-      const itensDados = Array.isArray(dados)
-        ? (dados as any[]).filter((d) => d && d.campo && d.valor).slice(0, 15)
-        : [];
-      if (tTicket?.id && (itensDados.length > 0 || String(resumo ?? "").trim())) {
+      const itensDados = sanitizarDadosPreAtendimento(dados);
+      const resumoLimpo = String(resumo ?? "").trim() || null;
+      const temDadosParaGravar = itensDados.length > 0 || !!resumoLimpo;
+
+      if (tTicket?.id && temDadosParaGravar) {
+        // ⚠️ MERGE PARCIAL, nunca reconstruir o jsonb do zero (regra da casa; o padrão de regravar
+        // inteiro já causou 3 bugs de "salvar apaga campo"). Aqui a perda seria real: o campo já
+        // carrega marcas de origem gravadas por outro caminho, e uma segunda transferência que
+        // trouxesse só o resumo apagaria a ficha de campos inteira — o vendedor abriria o card e
+        // malha, altura e comprimento teriam sumido, sem erro nenhum.
+        const anteriorRaw = (tTicket as Record<string, unknown>).dados_pre_atendimento;
+        const anterior = (anteriorRaw && typeof anteriorRaw === "object" && !Array.isArray(anteriorRaw))
+          ? anteriorRaw as Record<string, unknown>
+          : {};
+        const itensAnteriores = Array.isArray(anterior.itens) ? anterior.itens : [];
         const { error: dadosErr } = await supabaseClient.from("tickets")
           .update({
             dados_pre_atendimento: {
-              resumo: String(resumo ?? "").trim() || null,
-              itens: itensDados,
-              em: new Date().toISOString(),
+              ...anterior,
+              // Coleta nova só substitui o que ela própria trouxe. Vazio NÃO apaga o que já havia:
+              // o modelo omitir um campo não é o cliente ter voltado atrás.
+              resumo: resumoLimpo ?? (anterior.resumo ?? null),
+              itens: itensDados.length > 0 ? itensDados : itensAnteriores,
+              // Horário de São Paulo, igual ao resto do sistema. Gravar em UTC aqui deixaria uma
+              // diferença de 3h esperando a primeira tela que exibisse "coletado às".
+              em: nowSPTransf,
             },
           })
           .eq("id", tTicket.id);
@@ -1604,9 +1625,22 @@ serve(async (req) => {
             "transferencia_dados_nao_gravados",
             "O SDR transferiu o contato mas os dados coletados não foram gravados no atendimento; o vendedor vai abrir o orçamento sem eles e terá que reler a conversa",
             "warning", clinic_id,
-            { lead_id: lead.id, ticket_id: tTicket.id, erro: dadosErr.message ?? String(dadosErr) },
+            // O resumo vai nos detalhes de propósito: é o que permite recuperar a ficha depois,
+            // em vez de o dado morrer junto com a falha.
+            { lead_id: lead.id, ticket_id: tTicket.id, resumo: resumoLimpo, campos: itensDados, erro: dadosErr.message ?? String(dadosErr) },
           );
         }
+      } else if (temDadosParaGravar && !tTicket?.id && !transfIsSim && (!destino || tkErr)) {
+        // Sem atendimento aberto não há onde guardar a ficha. O aviso de logo acima
+        // (`transferencia_sem_ticket`) já cobre o caso comum; este pega o que sobra — leitura da
+        // etapa falhou (destino nulo) ou leitura do ticket falhou —, senão a coleta some sem
+        // deixar rastro em lugar nenhum.
+        await registrarErro(
+          "transferencia_dados_sem_atendimento",
+          "O SDR coletou os dados do pedido mas não havia atendimento aberto para gravá-los; o vendedor vai abrir o orçamento sem a ficha e terá que reler a conversa",
+          "warning", clinic_id,
+          { lead_id: lead.id, telefone: lead.phone, resumo: resumoLimpo, campos: itensDados, leitura_do_ticket_falhou: !!tkErr },
+        );
       }
 
       // 3. Avisa a equipe. Diagnóstico ANTES: com sino_all e group_all desligados (ou sem grupo

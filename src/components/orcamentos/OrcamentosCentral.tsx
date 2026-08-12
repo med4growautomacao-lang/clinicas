@@ -369,6 +369,11 @@ export function OrcamentosCentral() {
           <OrcamentoModal
             // Sem `key` por seq: aqui o modal edita UMA proposta, não empilha propostas novas.
             lead={{ id: editTarget.lead_id, name: editTarget.client_name || editTarget.lead?.name || "", phone: editTarget.lead?.phone ?? null }}
+            // Sem isto a coluna "Dados coletados no atendimento" nunca aparecia AQUI: quem edita
+            // uma proposta pela Central via o modal largo e a conversa, e a ficha com malha,
+            // altura e comprimento vazia — justo o dado que o recurso existe para mostrar. A
+            // Central reusa este construtor de propósito, para as duas telas não divergirem.
+            ticketId={editTarget.ticket_id ?? undefined}
             // O snapshot é o orçamento inteiro (linhas, projeto, mensagens, formato): é o que faz o
             // construtor reabrir exatamente como foi salvo.
             initialQuote={editTarget.snapshot}

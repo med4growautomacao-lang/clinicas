@@ -1,0 +1,121 @@
+-- 20260312225018_clean_dirty_json_and_restore_option_b
+-- Exportado de supabase_migrations.schema_migrations em 11/08/2026 (backfill).
+-- JA APLICADA em producao nesta versao. Arquivo existe para o repo poder reconstruir o banco.
+
+-- 1. Restaurar Opção B (Remover a tabela extra e gatilhos da Opção A)
+DROP TRIGGER IF EXISTS tr_sync_n8n_memory ON public.n8n_historico_mensagens;
+DROP TABLE IF EXISTS public.n8n_historico_mensagens;
+
+-- 2. Garantir que clinic_id seja opcional novamente
+ALTER TABLE public.chat_messages ALTER COLUMN clinic_id DROP NOT NULL;
+
+-- 3. Limpar gatilhos manuais
+DROP TRIGGER IF EXISTS tr_manual_chat_logic ON public.chat_messages;
+DROP FUNCTION IF EXISTS public.handle_manual_chat_logic();
+
+-- 4. Recriar nossa Função Mestre e Gatilho Único (Option B)
+CREATE OR REPLACE FUNCTION public.handle_chat_message_master_logic()
+RETURNS TRIGGER AS $$
+DECLARE
+    json_data JSONB;
+    v_ai_enabled boolean;
+    v_global_active boolean;
+    v_ref_clinic_id UUID;
+    v_ref_lead_id UUID;
+    v_lead_phone TEXT;
+    v_clinic_phone TEXT;
+BEGIN
+    -- [A] LIMPEZA E FORMATAÇÃO DE JSON
+    IF (NEW.message IS NOT NULL) THEN
+        IF jsonb_typeof(NEW.message) = 'string' THEN
+            BEGIN
+                json_data := (NEW.message#>>'{}')::jsonb;
+                NEW.message := json_data;
+            EXCEPTION WHEN OTHERS THEN
+                json_data := NEW.message;
+            END;
+        ELSE
+            json_data := NEW.message;
+        END IF;
+
+        IF (NEW.sender IS NULL) THEN
+            DECLARE
+                msg_role TEXT := COALESCE(json_data->>'role', json_data->>'type');
+            BEGIN
+                IF (msg_role = 'user' OR msg_role = 'human') THEN
+                    NEW.sender := 'human';
+                    IF NEW.direction IS NULL THEN NEW.direction := 'inbound'; END IF;
+                ELSIF (msg_role IN ('ai', 'assistant', 'bot')) THEN
+                    NEW.sender := 'ai';
+                    IF NEW.direction IS NULL THEN NEW.direction := 'outbound'; END IF;
+                END IF;
+            END;
+        END IF;
+    END IF;
+
+    -- [B] DESCOBERTA DE CLÍNICA
+    IF NEW.clinic_id IS NULL AND NEW.session_id IS NOT NULL THEN
+        SELECT clinic_id INTO v_ref_clinic_id FROM public.chat_messages WHERE session_id = NEW.session_id AND clinic_id IS NOT NULL LIMIT 1;
+        IF v_ref_clinic_id IS NULL THEN
+            SELECT clinic_id INTO v_ref_clinic_id FROM public.whatsapp_instances WHERE starts_with(NEW.session_id, phone_number) LIMIT 1;
+        END IF;
+        NEW.clinic_id := v_ref_clinic_id;
+    END IF;
+
+    -- [C] CAPTURA/CRIAÇÃO DE LEAD
+    IF NEW.clinic_id IS NOT NULL AND (NEW.lead_id IS NULL OR NEW.phone IS NULL) THEN
+        -- Extrair telefone do lead do session_id
+        SELECT phone_number INTO v_clinic_phone FROM public.whatsapp_instances WHERE clinic_id = NEW.clinic_id LIMIT 1;
+        IF v_clinic_phone IS NOT NULL AND starts_with(NEW.session_id, v_clinic_phone) THEN
+            v_lead_phone := substr(NEW.session_id, length(v_clinic_phone) + 1);
+        ELSE
+            v_lead_phone := right(NEW.session_id, 12);
+        END IF;
+
+        IF v_lead_phone IS NOT NULL AND v_lead_phone <> '' THEN
+            SELECT id INTO v_ref_lead_id FROM public.leads WHERE clinic_id = NEW.clinic_id AND phone = v_lead_phone LIMIT 1;
+            IF v_ref_lead_id IS NULL THEN
+                INSERT INTO public.leads (clinic_id, name, phone, source)
+                VALUES (NEW.clinic_id, 'Lead ' || v_lead_phone, v_lead_phone, 'whatsapp')
+                RETURNING id INTO v_ref_lead_id;
+            END IF;
+            NEW.lead_id := COALESCE(NEW.lead_id, v_ref_lead_id);
+            NEW.phone := COALESCE(NEW.phone, v_lead_phone);
+        END IF;
+    END IF;
+
+    -- [D] CONTROLE DE TRANSBORDO
+    IF NEW.sender = 'ai' AND NEW.clinic_id IS NOT NULL THEN
+        SELECT auto_schedule INTO v_global_active FROM public.ai_config WHERE clinic_id = NEW.clinic_id;
+        IF v_global_active = false THEN
+            NEW.metadata := COALESCE(NEW.metadata, '{}'::jsonb) || jsonb_build_object('ai_blocked', true, 'block_reason', 'global_off');
+        END IF;
+
+        IF NEW.lead_id IS NOT NULL THEN
+            SELECT ai_enabled INTO v_ai_enabled FROM public.leads WHERE id = NEW.lead_id;
+            IF v_ai_enabled = false THEN
+                NEW.metadata := COALESCE(NEW.metadata, '{}'::jsonb) || jsonb_build_object('ai_blocked', true, 'block_reason', 'handoff_active');
+            END IF;
+        END IF;
+    END IF;
+
+    -- [E] AUTO-PAUSE IA
+    IF NEW.sender = 'human' AND NEW.direction = 'outbound' AND NEW.lead_id IS NOT NULL THEN
+        UPDATE public.leads SET ai_enabled = false WHERE id = NEW.lead_id;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS tr_chat_message_master_logic ON public.chat_messages;
+CREATE TRIGGER tr_chat_message_master_logic
+BEFORE INSERT ON public.chat_messages
+FOR EACH ROW
+EXECUTE FUNCTION public.handle_chat_message_master_logic();
+
+-- 5. CRÍTICO: LIMPAR AS MENSAGENS ANTIGAS NO BANCO
+-- O n8n falhava porque tentava ler histórico e via strings em vez de JSON
+UPDATE public.chat_messages
+SET message = (message#>>'{}')::jsonb
+WHERE jsonb_typeof(message) = 'string';

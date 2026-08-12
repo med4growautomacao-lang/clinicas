@@ -2064,11 +2064,17 @@ export function OrcamentoModal({ lead, ticketId, initialQuote, sessionIndex = 1,
             <p className="text-[10px] font-black text-teal-700 uppercase tracking-widest mb-2.5">
               Dados coletados no atendimento
             </p>
-            {itensSDR.length > 0 ? (
+            {/* Os DOIS, não um ou outro. O resumo dá o caso em uma frase (é o que o vendedor lê
+                para entender o pedido); a ficha dá o valor exato de cada campo (é o que ele
+                confere para digitar). Cada um resolve uma coisa. */}
+            {dadosSDR?.resumo && (
+              <p className="text-sm text-slate-700 leading-snug">{dadosSDR.resumo}</p>
+            )}
+            {itensSDR.length > 0 && (
               /* Um campo POR LINHA, rótulo à esquerda e valor à direita: lê-se como ficha técnica,
                  que é o que o vendedor precisa conferir item a item. Em duas colunas os valores
                  ficavam lado a lado e voltavam a parecer texto corrido. */
-              <dl className="divide-y divide-teal-100">
+              <dl className={cn("divide-y divide-teal-100", dadosSDR?.resumo && "mt-3 pt-3 border-t border-teal-200")}>
                 {itensSDR.map((it, i) => (
                   <div key={`${it.campo}-${i}`} className="flex items-baseline gap-3 py-1.5">
                     <dt className="w-28 shrink-0 text-[11px] font-bold text-slate-500 uppercase tracking-wide">{it.campo}</dt>
@@ -2076,10 +2082,6 @@ export function OrcamentoModal({ lead, ticketId, initialQuote, sessionIndex = 1,
                   </div>
                 ))}
               </dl>
-            ) : (
-              /* Sem os campos separados (modelo não montou a lista), mostra a linha que foi para
-                 a equipe. Pior que a grade, muito melhor que nada. */
-              <p className="text-sm text-slate-700 leading-snug">{dadosSDR?.resumo}</p>
             )}
             <p className="text-[10px] text-teal-700/70 mt-2.5">
               Informado pelo cliente na conversa. Confira antes de fechar o valor.

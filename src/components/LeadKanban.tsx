@@ -2046,21 +2046,21 @@ export function OrcamentoModal({ lead, ticketId, initialQuote, sessionIndex = 1,
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md lg:max-w-6xl overflow-hidden max-h-[90vh] flex flex-col"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md xl:max-w-[1500px] overflow-hidden max-h-[90vh] flex flex-col"
         onClick={e => e.stopPropagation()}
       >
         <div className="h-1.5 bg-blue-500 shrink-0" />
-        {/* Duas colunas a partir de lg: ESQUERDA os dados coletados + o formulário, DIREITA a
-            conversa (a mais larga, porque é a que se LÊ; o formulário é campo curto).
-            Abaixo de lg volta a coluna única e a conversa some: em tela pequena ela empurraria o
-            formulário para fora, e quem abre este modal veio para orçar. */}
-        <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
-        <div className="flex flex-col min-h-0 lg:w-[440px] lg:shrink-0 lg:border-r lg:border-slate-200">
-        {/* Dados coletados pelo pré-atendimento. Fica ACIMA do formulário e fora da área de
-            rolagem dele: é o que o vendedor consulta enquanto preenche, então sair da tela ao
-            rolar derrubaria o motivo de existir. Só aparece quando houve coleta. */}
+        {/* TRÊS colunas a partir de xl: dados coletados | formulário | conversa.
+            A conversa fica com o resto da largura porque é a única que se LÊ; as outras duas são
+            campo curto. Abaixo de xl vira coluna única, os dados sobem para o topo e a conversa
+            some: em tela estreita ela empurraria o formulário para fora, e quem abre este modal
+            veio para orçar. */}
+        <div className="flex-1 min-h-0 flex flex-col xl:flex-row overflow-hidden">
+
+        {/* COLUNA 1 — o que o pré-atendimento coletou. Rola sozinha, para pedido com muitos
+            campos não esticar o modal. Só aparece quando houve coleta. */}
         {(itensSDR.length > 0 || dadosSDR?.resumo) && (
-          <div className="shrink-0 px-6 pt-5 pb-4 bg-teal-50/60 border-b border-teal-100">
+          <div className="shrink-0 xl:w-[300px] xl:overflow-y-auto px-6 pt-5 pb-4 bg-teal-50/60 border-b xl:border-b-0 xl:border-r border-teal-100">
             <p className="text-[10px] font-black text-teal-700 uppercase tracking-widest mb-2.5">
               Dados coletados no atendimento
             </p>
@@ -2086,6 +2086,10 @@ export function OrcamentoModal({ lead, ticketId, initialQuote, sessionIndex = 1,
             </p>
           </div>
         )}
+
+        {/* COLUNA 2 — o formulário do orçamento. Largura fixa, igual à do modal antigo: são campos
+            curtos, e alargar não melhora nada. */}
+        <div className="flex flex-col min-h-0 xl:w-[460px] xl:shrink-0 xl:border-r xl:border-slate-200">
         <div className="p-6 space-y-4 overflow-y-auto">
           <div className="flex items-center justify-between">
             <div>
@@ -2667,9 +2671,9 @@ export function OrcamentoModal({ lead, ticketId, initialQuote, sessionIndex = 1,
         </div>
         </div>
 
-        {/* Coluna da conversa. Ocupa o resto da largura de propósito: é texto corrido para ler,
-            enquanto a esquerda é campo curto para preencher. */}
-        <div className="hidden lg:flex flex-1 min-w-0 flex-col bg-slate-50/70">
+        {/* COLUNA 3 — a conversa. Ocupa o resto da largura de propósito: é texto corrido para ler,
+            enquanto as duas da esquerda são campo curto. */}
+        <div className="hidden xl:flex flex-1 min-w-0 flex-col bg-slate-50/70">
           <div className="shrink-0 px-5 py-3 border-b border-slate-200 bg-white/70 flex items-center gap-2">
             <MessageSquare className="w-4 h-4 text-slate-400 shrink-0" />
             <p className="text-xs font-black text-slate-700 truncate">Conversa com {lead.name}</p>

@@ -39,7 +39,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { useFunnelStages, useLeads, useNotLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useProducts, Product, ProductInput, ProductAttribute, useQuoteImages, useAppointments, useDoctors, usePatients, useConsultationTypes, useProductionOrders, useInventoryItems, useOrcamentos, useClinicLossReasons, getVigenteOrcamento, logSystemError, Conversion, Lead, Ticket, TransitionRule } from "../hooks/useSupabase";
+import { useFunnelStages, useLeads, useNotLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useProducts, Product, ProductInput, ProductAttribute, useQuoteImages, useAppointments, useDoctors, usePatients, useConsultationTypes, useProductionOrders, useInventoryItems, useOrcamentos, useClinicLossReasons, useChatMessages, getVigenteOrcamento, logSystemError, Conversion, Lead, Ticket, TransitionRule } from "../hooks/useSupabase";
+import { ChatThread } from "./ChatThread";
 import { NotLeadPanel } from "./NotLeadPanel";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -1374,8 +1375,12 @@ function ProductPicker({ value, products, protocols, useProd, useProt, sourceNou
 // Exportado para a Central de Orçamentos reusar o MESMO construtor. Duplicar esta tela lá seria
 // manter dois orçamentos diferentes vivos (catálogo, alturas, cálculo, documento e envio), e eles
 // divergiriam na primeira mudança.
-export function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosDoCliente = [], onClose, onCancel, onConfirm, onSavedAndNew }: {
+export function OrcamentoModal({ lead, ticketId, initialQuote, sessionIndex = 1, projetosDoCliente = [], onClose, onCancel, onConfirm, onSavedAndNew }: {
   lead: { id: string; name: string; phone?: string | null };
+  // Atendimento aberto. É por ele que se lê o que o pré-atendimento coletou (malha, altura,
+  // comprimento): o dado é do ATENDIMENTO, não do contato — o mesmo cliente volta meses depois
+  // querendo outra tela, e a medida do pedido anterior não pode reaparecer aqui.
+  ticketId?: string;
   initialQuote?: any;
   // Projetos que este cliente já tem, para sugerir no campo e evitar que a mesma obra vire dois
   // nomes ("Obra Rua X" e "obra rua x"), o que quebraria o agrupamento e voltaria a inflar a soma.
@@ -1408,6 +1413,20 @@ export function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosD
   const iqImgSeededRef = useRef(false);       // restauração da seleção do orçamento salvo (1x)
   const [quickNewFor, setQuickNewFor] = useState<number | null>(null); // linha que está cadastrando produto novo
   const qtyRefs = useRef<Record<number, HTMLInputElement | null>>({}); // foca a quantidade ao selecionar o item
+
+  // ─── Contexto do atendimento: o que o pré-atendimento coletou + a conversa ──────────────────
+  // Os dois existem para o vendedor NÃO precisar sair daqui: antes ele fechava o orçamento, abria
+  // a conversa para achar a medida e voltava. Ele lê à direita e preenche à esquerda.
+  const { data: chatMessages, loading: chatLoading } = useChatMessages(lead.id, lead.phone ?? undefined);
+  const [dadosSDR, setDadosSDR] = useState<{ resumo?: string | null; itens?: { campo: string; valor: string }[] } | null>(null);
+  useEffect(() => {
+    let cancelado = false;
+    if (!ticketId) { setDadosSDR(null); return; }
+    supabase.from('tickets').select('dados_pre_atendimento').eq('id', ticketId).maybeSingle()
+      .then(({ data }) => { if (!cancelado) setDadosSDR((data as any)?.dados_pre_atendimento ?? null); });
+    return () => { cancelado = true; };
+  }, [ticketId]);
+  const itensSDR = Array.isArray(dadosSDR?.itens) ? dadosSDR!.itens.filter(i => i?.campo && i?.valor) : [];
 
   // Fontes de item conforme a Configuração do Orçamento da clínica (padrão: ambas ligadas).
   const useProd = clinic?.quote_use_products !== false;
@@ -2027,10 +2046,43 @@ export function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosD
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden max-h-[90vh] flex flex-col"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md lg:max-w-6xl overflow-hidden max-h-[90vh] flex flex-col"
         onClick={e => e.stopPropagation()}
       >
         <div className="h-1.5 bg-blue-500 shrink-0" />
+        {/* Duas colunas a partir de lg: ESQUERDA os dados coletados + o formulário, DIREITA a
+            conversa (a mais larga, porque é a que se LÊ; o formulário é campo curto).
+            Abaixo de lg volta a coluna única e a conversa some: em tela pequena ela empurraria o
+            formulário para fora, e quem abre este modal veio para orçar. */}
+        <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
+        <div className="flex flex-col min-h-0 lg:w-[440px] lg:shrink-0 lg:border-r lg:border-slate-200">
+        {/* Dados coletados pelo pré-atendimento. Fica ACIMA do formulário e fora da área de
+            rolagem dele: é o que o vendedor consulta enquanto preenche, então sair da tela ao
+            rolar derrubaria o motivo de existir. Só aparece quando houve coleta. */}
+        {(itensSDR.length > 0 || dadosSDR?.resumo) && (
+          <div className="shrink-0 px-6 pt-5 pb-4 bg-teal-50/60 border-b border-teal-100">
+            <p className="text-[10px] font-black text-teal-700 uppercase tracking-widest mb-2.5">
+              Dados coletados no atendimento
+            </p>
+            {itensSDR.length > 0 ? (
+              <dl className="grid grid-cols-2 gap-x-3 gap-y-2">
+                {itensSDR.map((it, i) => (
+                  <div key={`${it.campo}-${i}`} className="min-w-0">
+                    <dt className="text-[10px] font-bold text-slate-400 uppercase tracking-wide truncate">{it.campo}</dt>
+                    <dd className="text-sm font-black text-slate-800 break-words leading-tight">{it.valor}</dd>
+                  </div>
+                ))}
+              </dl>
+            ) : (
+              /* Sem os campos separados (modelo não montou a lista), mostra a linha que foi para
+                 a equipe. Pior que a grade, muito melhor que nada. */
+              <p className="text-sm text-slate-700 leading-snug">{dadosSDR?.resumo}</p>
+            )}
+            <p className="text-[10px] text-teal-700/70 mt-2.5">
+              Informado pelo cliente na conversa. Confira antes de fechar o valor.
+            </p>
+          </div>
+        )}
         <div className="p-6 space-y-4 overflow-y-auto">
           <div className="flex items-center justify-between">
             <div>
@@ -2609,6 +2661,26 @@ export function OrcamentoModal({ lead, initialQuote, sessionIndex = 1, projetosD
               </button>
             </div>
           )}
+        </div>
+        </div>
+
+        {/* Coluna da conversa. Ocupa o resto da largura de propósito: é texto corrido para ler,
+            enquanto a esquerda é campo curto para preencher. */}
+        <div className="hidden lg:flex flex-1 min-w-0 flex-col bg-slate-50/70">
+          <div className="shrink-0 px-5 py-3 border-b border-slate-200 bg-white/70 flex items-center gap-2">
+            <MessageSquare className="w-4 h-4 text-slate-400 shrink-0" />
+            <p className="text-xs font-black text-slate-700 truncate">Conversa com {lead.name}</p>
+            {lead.phone && <span className="text-[11px] text-slate-400 font-mono truncate">{lead.phone}</span>}
+          </div>
+          <ChatThread
+            messages={chatMessages}
+            loading={chatLoading}
+            leadName={lead.name}
+            className="flex-1 min-h-0"
+            emptyTitle="Nenhuma mensagem nesta conversa."
+            emptyHint="O histórico aparece aqui assim que o contato escrever."
+          />
+        </div>
         </div>
       </motion.div>
     </div>
@@ -5512,6 +5584,7 @@ export function LeadKanban() {
              proposta B, em vez de vazar em silêncio. */
           key={`orc-${orcamentoLead.id}-${orcamentoLead.seq ?? 1}`}
           lead={orcamentoLead}
+          ticketId={orcamentoLead.ticketId}
           initialQuote={orcamentoLead.initialQuote}
           sessionIndex={orcamentoLead.seq ?? 1}
           projetosDoCliente={projetosPorLead[orcamentoLead.id] ?? []}

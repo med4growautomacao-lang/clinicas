@@ -9,9 +9,21 @@
 
 import { comMonitor, registrarUsoIA, FEATURE } from "./llm-usage.ts";
 
+/** Campo simples de um parametro de tool. */
+export type JSONSchemaField = { type: string; description?: string; enum?: string[] };
+
 export type JSONSchema = {
   type: "object";
-  properties: Record<string, { type: string; description?: string; enum?: string[] }>;
+  properties: Record<string, JSONSchemaField & {
+    // ⚠️ `items` so existe quando `type: "array"`, e e OBRIGATORIO nesse caso: array sem `items`
+    // e um schema sem forma, e os tres providers recusam a requisicao inteira (nao so a tool).
+    // Os tres repassam `parameters` como veio (gemini: parameters, anthropic: input_schema,
+    // openai: parameters), entao o que estiver aqui chega intacto ao modelo.
+    items?: JSONSchemaField & {
+      properties?: Record<string, JSONSchemaField>;
+      required?: string[];
+    };
+  }>;
   required?: string[];
 };
 

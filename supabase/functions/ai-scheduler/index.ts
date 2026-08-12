@@ -1350,7 +1350,7 @@ serve(async (req) => {
       // fn_enforce_ticket_resolution_consistency gravar tickets.outcome='ganho' + outcome_at
       // sozinho — ou seja, uma alucinação viraria FATURAMENTO nos painéis, e ninguém veria até o
       // fechamento do mês. Etapa de desfecho é recusada mesmo que o modelo peça.
-      const { lead_phone, etapa, resumo } = payload;
+      const { lead_phone, etapa, resumo, dados } = payload;
       if (!lead_phone) {
         return new Response(JSON.stringify({ success: false, error: "lead_phone is required" }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
@@ -1574,6 +1574,39 @@ serve(async (req) => {
           "O SDR transferiu um contato que não tem atendimento aberto; não há card para mover (a equipe foi avisada assim mesmo)",
           "warning", clinic_id, { lead_id: lead.id, telefone: lead.phone, etapa: destino.name },
         );
+      }
+
+      // 2b. GRAVA OS DADOS COLETADOS NO ATENDIMENTO.
+      //
+      // É o que faz o vendedor abrir o orçamento e VER malha, altura e comprimento em campos
+      // separados, em vez de reler a conversa ou garimpar dentro da ficha em texto do contato.
+      // Fica no ticket (não no lead) porque o dado é DESTE atendimento: o mesmo cliente pode
+      // voltar meses depois querendo outra tela, e a medida antiga não pode vazar para o pedido novo.
+      //
+      // Best-effort de propósito: se falhar, o contato JÁ foi transferido e a equipe JÁ foi avisada
+      // com o resumo. Derrubar a transferência por causa da vitrine seria trocar o essencial pelo
+      // conveniente. Mas registra na Central, senão o vendedor abre o card vazio sem saber por quê.
+      const itensDados = Array.isArray(dados)
+        ? (dados as any[]).filter((d) => d && d.campo && d.valor).slice(0, 15)
+        : [];
+      if (tTicket?.id && (itensDados.length > 0 || String(resumo ?? "").trim())) {
+        const { error: dadosErr } = await supabaseClient.from("tickets")
+          .update({
+            dados_pre_atendimento: {
+              resumo: String(resumo ?? "").trim() || null,
+              itens: itensDados,
+              em: new Date().toISOString(),
+            },
+          })
+          .eq("id", tTicket.id);
+        if (dadosErr && !transfIsSim) {
+          await registrarErro(
+            "transferencia_dados_nao_gravados",
+            "O SDR transferiu o contato mas os dados coletados não foram gravados no atendimento; o vendedor vai abrir o orçamento sem eles e terá que reler a conversa",
+            "warning", clinic_id,
+            { lead_id: lead.id, ticket_id: tTicket.id, erro: dadosErr.message ?? String(dadosErr) },
+          );
+        }
       }
 
       // 3. Avisa a equipe. Diagnóstico ANTES: com sino_all e group_all desligados (ou sem grupo

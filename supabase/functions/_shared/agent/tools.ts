@@ -315,6 +315,27 @@ export const TOOL_DEFS: Record<string, ToolDef> = {
               "a equipe: sem saudacao, sem enrolacao, so os dados. Dado que faltou vai como " +
               "'nao informado', nunca chutado.",
           },
+          // ⚠️ Par campo/valor, e NAO um objeto de chaves fixas. Esta tool e compartilhada por
+          // todos os tenants de SDR: "malha" e "fio" so existem para quem vende tela, "metragem"
+          // so para quem vende piso. Cada empresa diz no prompt dela quais campos mandar, e a tela
+          // mostra o que vier. O `resumo` continua obrigatorio e serve de rede: se o modelo nao
+          // montar a lista, a equipe ainda recebe a linha.
+          dados: {
+            type: "array",
+            description:
+              "Os MESMOS dados do resumo, agora separados campo a campo, para a tela do orcamento " +
+              "mostrar em vez de o vendedor ter que ler um paragrafo. Um item por dado, usando os " +
+              "nomes de campo que a empresa pedir. Inclua so o que a pessoa informou de verdade: " +
+              "dado que faltou fica FORA da lista, nao entre com 'nao informado'.",
+            items: {
+              type: "object",
+              properties: {
+                campo: { type: "string", description: "Nome do dado, como a empresa chama (ex.: Altura)." },
+                valor: { type: "string", description: "O que a pessoa informou, com a unidade (ex.: 1,80 m)." },
+              },
+              required: ["campo", "valor"],
+            },
+          },
         },
         required: ["etapa", "resumo"],
       },
@@ -324,6 +345,17 @@ export const TOOL_DEFS: Record<string, ToolDef> = {
       lead_phone: ctx.lead_phone,
       etapa: s(a.etapa),
       resumo: s(a.resumo),
+      // Higienizado aqui, nao no servidor: o modelo as vezes devolve item pela metade, e um
+      // {campo:"Altura"} sem valor viraria uma linha vazia na tela do vendedor.
+      dados: Array.isArray(a.dados)
+        ? (a.dados as unknown[])
+            .map((d) => {
+              const o = (d ?? {}) as Record<string, unknown>;
+              return { campo: s(o.campo), valor: s(o.valor) };
+            })
+            .filter((d) => d.campo && d.valor)
+            .slice(0, 15)
+        : [],
     }),
   },
 };

@@ -1789,7 +1789,21 @@ export function useDashboardStats(dateRange?: { start: string; end: string }, or
         avgResponseTime: Number(r?.avgResponseTime || 0),
         avgSalesCycle: Number(r?.avgSalesCycle || 0),
         defaultTicket: Number(r?.defaultTicket || 0),
-        chartData: (r?.chartData || []) as any,
+        // Mapeamento explícito, não `as any`: é aqui que o nome de cada chave do jsonb é
+        // conferido uma vez só. Se uma migration renomear uma chave, a série cai para 0 num
+        // lugar só (e com default previsível), em vez de sumir em silêncio dentro do gráfico.
+        chartData: (Array.isArray(r?.chartData) ? r.chartData : []).map((d: any) => ({
+          date: String(d?.date ?? ''),
+          agendamentos: Number(d?.agendamentos || 0),
+          faturamento: Number(d?.faturamento || 0),
+          leads: Number(d?.leads || 0),
+          vendas: Number(d?.vendas || 0),
+          vendas_lancadas: Number(d?.vendas_lancadas || 0),
+          investimento: Number(d?.investimento || 0),
+          orcamentos: Number(d?.orcamentos || 0),
+          orcamentos_valor: Number(d?.orcamentos_valor || 0),
+          orcamentos_ganhos: Number(d?.orcamentos_ganhos || 0),
+        })),
       };
       setCached(cacheKey, mapped);   // cache pode gravar mesmo se superada (chave é correta)
       if (gen !== genRef.current) return;   // superada por uma chamada mais nova → não pinta

@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import "react-day-picker/dist/style.css";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import {
@@ -152,7 +152,9 @@ export function Dashboard() {
     { id: 'vendas_lancadas', label: 'VENDAS LANÇADAS (Nº)', type: 'number', color: '#a21caf' },
     { id: 'ticket_medio', label: 'TICKET MÉDIO', type: 'currency', color: '#2563eb' },
     { id: 'investimento', label: 'INVESTIMENTO', type: 'currency', color: '#f59e0b' },
-    { id: 'roas', label: 'ROAS', type: 'number', color: '#8b5cf6' },
+    // 'ratio' e não 'number': com 'number' o gráfico arredondava, e ROAS 2,35 virava "2" (e 0,4
+    // virava "0", que se lê como "não teve retorno"). O card ao lado sempre mostrou 2,35x.
+    { id: 'roas', label: 'ROAS', type: 'ratio', color: '#8b5cf6' },
     { id: 'leads', label: 'LEADS', type: 'number', color: '#4f46e5' },
     { id: 'agendamentos', label: 'AGENDADOS', type: 'number', color: '#0ea5e9' },
     // ⚠️ O id NÃO muda: é a chave de stats.chartData vinda da RPC. Só o rótulo, porque a contagem
@@ -166,8 +168,12 @@ export function Dashboard() {
     ] : []),
   ];
 
+  // ⚠️ A série PARA no dia de hoje. Com "este mês" selecionado no dia 12, a RPC devolve os 31
+  // dias e os 19 que ainda não aconteceram entram como zero: as barras vazias empurram a média
+  // para baixo e o gráfico mente sobre o desempenho do mês.
+  const hojeISO = format(new Date(), 'yyyy-MM-dd');
   const processedChartData = useMemo(() => {
-    return stats.chartData.map((d: any) => {
+    return stats.chartData.filter((d: any) => d.date <= hojeISO).map((d: any) => {
       // Formatar data dd/MM sem parseISO para evitar problemas de timezone
       const [, month, day] = d.date.split('-');
       return {
@@ -182,7 +188,41 @@ export function Dashboard() {
         orcamentos_conv: d.orcamentos > 0 ? Number(((d.orcamentos_ganhos / d.orcamentos) * 100).toFixed(1)) : 0,
       };
     });
-  }, [stats.chartData]);
+  }, [stats.chartData, hojeISO]);
+
+  // A métrica ativa não é o `selectedMetric` cru: trocando de clínica (as abas não desmontam,
+  // o estado sobrevive) a métrica de orçamento pode ter deixado de existir, e aí nenhum botão
+  // fica aceso enquanto o gráfico desenha outra coisa. Aqui ele volta para a primeira.
+  const activeMetric = chartMetrics.find(m => m.id === selectedMetric) || chartMetrics[0];
+  useEffect(() => {
+    if (!chartMetrics.some(m => m.id === selectedMetric)) setSelectedMetric(chartMetrics[0].id);
+  }, [isOutro, selectedMetric]);
+
+  // ⚠️ MÉDIA AGREGADA, não média das barras. Toda métrica que é uma razão (ticket médio, ROAS,
+  // taxa) tem que ser soma ÷ soma: a média de razões diárias dá o mesmo peso ao dia de 1 venda e
+  // ao de 20, e conta como zero o dia em que não houve venda. Era o que fazia a linha do gráfico
+  // discordar do card logo acima, no mesmo período e com os mesmos filtros.
+  const chartAverage = useMemo(() => {
+    const rows = processedChartData;
+    if (!rows.length) return null;
+    const soma = (k: string) => rows.reduce((a: number, d: any) => a + (Number(d[k]) || 0), 0);
+    switch (activeMetric.id) {
+      case 'ticket_medio': {
+        const n = soma('vendas_lancadas');
+        return n > 0 ? soma('faturamento') / n : 0;
+      }
+      case 'orcamentos_conv': {
+        const n = soma('orcamentos');
+        return n > 0 ? (soma('orcamentos_ganhos') / n) * 100 : 0;
+      }
+      case 'roas': {
+        const inv = soma('investimento');
+        return inv > 0 ? soma('faturamento') / inv : 0;
+      }
+      default:
+        return soma(activeMetric.id) / rows.length;
+    }
+  }, [processedChartData, activeMetric.id]);
 
   // Faturamento canônico = VENDAS LANÇADAS (salesValue). Fallback p/ totalConversionsValue
   // durante a transição do deploy (a RPC v2 já devolve salesValue).
@@ -380,7 +420,7 @@ export function Dashboard() {
                 onClick={() => setSelectedMetric(m.id)}
                 className={cn(
                   "whitespace-nowrap px-3 py-1.5 rounded-xl text-[9px] font-black tracking-widest transition-all",
-                  selectedMetric === m.id
+                  activeMetric.id === m.id
                     ? "bg-white text-teal-600 shadow-sm border border-slate-200"
                     : "text-slate-400 hover:text-slate-600"
                 )}
@@ -391,19 +431,13 @@ export function Dashboard() {
           </div>
         </CardHeader>
         <CardContent className="pl-2 pt-2">
-          {(() => {
-            // A série segue o activeMetric, não o selectedMetric: numa clínica sem Orçamentos a
-            // métrica salva na sessão pode não existir mais, e aí o gráfico desenharia zeros com
-            // o rótulo de outra métrica em vez de cair no padrão.
-            const activeMetric = chartMetrics.find(m => m.id === selectedMetric) || chartMetrics[0];
-            return (
-              <TrendBarChart
-                series={processedChartData.map((d: any) => ({ label: d.name, value: Number(d[activeMetric.id]) || 0 }))}
-                format={fmtByType(activeMetric.type)}
-                height={300}
-              />
-            );
-          })()}
+          <TrendBarChart
+            series={processedChartData.map((d: any) => ({ label: d.name, value: Number(d[activeMetric.id]) || 0 }))}
+            format={fmtByType(activeMetric.type)}
+            average={chartAverage}
+            color={activeMetric.color}
+            height={300}
+          />
         </CardContent>
       </Card>
     </div>

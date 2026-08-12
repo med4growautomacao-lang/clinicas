@@ -1629,6 +1629,9 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
       const invNA = selectedChannel.length > 0;
       return {
         name: p.label,
+        // Início do balde, usado só para cortar o gráfico em hoje (mês corrente não pode entrar
+        // inteiro: os dias que ainda não aconteceram zeram a barra e derrubam a média).
+        _inicio: format(p.start, 'yyyy-MM-dd'),
         leads: stats.leads,
         investment: invNA ? NaN : stats.investment,
         appointments: stats.appointments,
@@ -1636,6 +1639,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
         conv_value: stats.conv_value,
         sales_count: stats.sales_count,
         quotes_sent: stats.quotes_sent,
+        quotes_won: stats.quotes_won,
         quotes_win_rate: stats.quotes_sent > 0 ? (stats.quotes_won / stats.quotes_sent) * 100 : 0,
         ticket_medio: stats.sales_count > 0 ? stats.conv_value / stats.sales_count : 0,
         cpl: invNA ? NaN : (stats.leads > 0 ? stats.investment / stats.leads : 0),
@@ -1666,7 +1670,38 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
     });
   }, [periods, metricsByPeriod, comparisonMetricsByPeriod, getTotals, selectedPlatform, selectedChannel, adjChannel]);
 
-  const activeMetric = METRICS_CONFIG.find(m => m.id === selectedMetric) || METRICS_CONFIG[0];
+  // Métricas que estão REALMENTE nos botões (respeitam o ⚙️ e o módulo da clínica). A métrica
+  // ativa sai daqui: se o usuário esconde a que estava selecionada, o gráfico caía para zeros
+  // formatados com a unidade de outra métrica (leads virando "R$ 0"), sem botão nenhum aceso.
+  const pillIds: string[] = metricsOrder.filter((id: string) => visibleMetrics.includes(id));
+  const activeMetric =
+    METRICS_CONFIG.find(m => m.id === selectedMetric && pillIds.includes(m.id))
+    || METRICS_CONFIG.find(m => m.id === pillIds[0])
+    || METRICS_CONFIG[0];
+
+  // Série do gráfico cortada em hoje + MÉDIA AGREGADA (soma ÷ soma) para toda métrica que é
+  // razão. Média de razões diárias dá o mesmo peso a um dia de 1 lead e a um de 80, e é o que
+  // fazia a linha "méd" discordar do card logo acima.
+  const hojeISO = format(new Date(), 'yyyy-MM-dd');
+  const chartDataAteHoje = chartData.filter((d: any) => !d._inicio || d._inicio <= hojeISO);
+  const chartAverage = (() => {
+    const rows = chartDataAteHoje;
+    if (!rows.length) return null;
+    const soma = (k: string) => rows.reduce((a: number, d: any) => a + (Number.isFinite(Number(d[k])) ? Number(d[k]) : 0), 0);
+    const razao = (num: number, den: number, fator = 1) => (den > 0 ? (num / den) * fator : 0);
+    switch (activeMetric.id) {
+      case 'cpl':               return razao(soma('investment'), soma('leads'));
+      case 'cpapt':             return razao(soma('investment'), soma('appointments'));
+      case 'cpa':               return razao(soma('investment'), soma('convs'));
+      case 'roas':              return razao(soma('conv_value'), soma('investment'));
+      case 'lead_to_apt_rate':  return razao(soma('appointments'), soma('leads'), 100);
+      case 'lead_to_conv_rate': return razao(soma('convs'), soma('leads'), 100);
+      case 'apt_to_conv_rate':  return razao(soma('convs'), soma('appointments'), 100);
+      case 'ticket_medio':      return razao(soma('conv_value'), soma('sales_count'));
+      case 'quotes_win_rate':   return razao(soma('quotes_won'), soma('quotes_sent'), 100);
+      default:                  return soma(activeMetric.id) / rows.length;
+    }
+  })();
 
   const platformData = useMemo(() => {
     return [
@@ -1927,7 +1962,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
                     onClick={() => setSelectedMetric(id)}
                     className={cn(
                       "px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all",
-                      selectedMetric === id ? "bg-white text-teal-600 shadow-sm border border-slate-200" : "text-slate-400 hover:text-slate-600"
+                      activeMetric.id === id ? "bg-white text-teal-600 shadow-sm border border-slate-200" : "text-slate-400 hover:text-slate-600"
                     )}
                   >
                     {m.label}
@@ -1937,12 +1972,12 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
             </div>
           </CardHeader>
           {(() => {
-            const series = chartData.map((d: any) => ({
+            const series = chartDataAteHoje.map((d: any) => ({
               label: d.name,
-              value: Number(d[selectedMetric]) || 0,
-              value2: isComparing ? (Number(d[`${selectedMetric}_prev`]) || 0) : undefined,
+              value: Number(d[activeMetric.id]) || 0,
+              value2: isComparing ? (Number(d[`${activeMetric.id}_prev`]) || 0) : undefined,
             }));
-            return <TrendBarChart series={series} format={fmtByType(activeMetric.type)} height={260} />;
+            return <TrendBarChart series={series} format={fmtByType(activeMetric.type)} average={chartAverage} height={260} />;
           })()}
         </Card>
       </div>

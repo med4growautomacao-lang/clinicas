@@ -1,3 +1,23 @@
+-- ⚠️⚠️ ARQUIVO SUPERADO em 12/08/2026. NAO EDITE E NAO REAPLIQUE ESTE ARQUIVO.
+-- O corpo aqui esta 5 cirurgias atras do que roda em producao. Reaplicar apaga DE UMA VEZ, sem
+-- erro e sem diff, tudo isto: nº de vendas lancadas (salesCount), orcamentos enviados
+-- (quotesSent/quotesValue), taxa de conversao de orcamento (quotesWon) e as 4 series novas do
+-- grafico da Visao Geral (vendas_lancadas, orcamentos, orcamentos_valor, orcamentos_ganhos).
+--
+-- O corpo ATUAL = este arquivo + as migrations abaixo, nesta ordem (todas sao cirurgia de texto
+-- ancorada, entao um `db reset` reconstroi o corpo certo desde que a cadeia rode inteira e em
+-- ordem; cada uma FALHA se a ancora nao existir, em vez de aplicar pela metade):
+--   20260812124821_vendas_lancadas_numero_nos_paineis
+--   20260812131157_orcamentos_enviados_nos_paineis
+--   20260812133444_taxa_de_conversao_de_orcamentos
+--   20260812135438_grafico_vg_ganha_series_novas
+--   (get_org_clinics_metrics: 20260812132155_org_metrics_ticket_real_e_meta)
+--
+-- 📌 Para ler o corpo de verdade, leia o BANCO (`pg_get_functiondef`), nunca este arquivo.
+-- 📌 Quem for editar corpo inteiro de novo: gere um snapshot NOVO a partir da producao e marque
+-- este aqui como superado, como foi feito com 20260806212628.
+-- ============================================================================================
+
 -- ============================================================================================
 -- ESTADO ATUAL das funcoes de painel, em 06/08/2026. Este arquivo NAO introduz mudanca nenhuma:
 -- foi gerado a partir do que ja esta rodando em producao e reaplica exatamente o mesmo texto.

@@ -872,7 +872,10 @@ export function ComercialDashboard() {
   const projectedRoas = fin.investment > 0 && projectedRevenue != null ? projectedRevenue / fin.investment : null;
   const leadsDenomLabel = agent === "todos" ? "leads" : "leads atendidos";
 
-  type Kpi = { id: string; title: string; value: React.ReactNode; icon: any; color: string; bg: string; sub?: string; valueLabel?: string; value2?: React.ReactNode; value2Label?: string; value3?: React.ReactNode; value3Label?: string; agentScoped: boolean; originScoped: boolean };
+  // outcomeScoped=false: o card NÃO obedece ao toggle Ganho/Perdido. Só os orçamentos são assim
+  // (orçamento enviado não tem desfecho próprio), e por isso eles ganham o selo "geral" quando o
+  // toggle está ligado — sem o selo, o card mostraria 60 orçamentos numa tela que diz "Perdido".
+  type Kpi = { id: string; title: string; value: React.ReactNode; icon: any; color: string; bg: string; sub?: string; valueLabel?: string; value2?: React.ReactNode; value2Label?: string; value3?: React.ReactNode; value3Label?: string; agentScoped: boolean; originScoped: boolean; outcomeScoped?: boolean };
   const allKpis: Kpi[] = [
     { id: "leads", title: "Leads", value: leadsValue, icon: Users, color: "text-cyan-600", bg: "bg-cyan-50", sub: agent === "todos" ? "entraram no período" : agent === "ia" ? "maioria das respostas pela IA" : "maioria das respostas por humano", agentScoped: true, originScoped: true },
     { id: "nao_atendidos", title: "Não atendidos", value: data.leadsNotAttended ?? 0, icon: XCircle, color: "text-rose-600", bg: "bg-rose-50", sub: "entraram e ninguém respondeu", agentScoped: false, originScoped: true },
@@ -884,8 +887,8 @@ export function ComercialDashboard() {
     // Os dois números da venda no mesmo card: "vendas" = lançamentos, "clientes" = cards ganhos.
     // (Este strip não renderiza `sub`, então a explicação fica nos rótulos e não em texto morto.)
     { id: "vendas", title: "Vendas lançadas", value: salesCount, valueLabel: "vendas", value2: outcomes.won, value2Label: "clientes", icon: Receipt, color: "text-fuchsia-600", bg: "bg-fuchsia-50", agentScoped: true, originScoped: true },
-    { id: "orcamentos", title: "Orçamentos enviados", value: quotesSent, valueLabel: "enviados", value2: fmtBRL(quotesValue), value2Label: "valor", icon: FileText, color: "text-blue-600", bg: "bg-blue-50", agentScoped: true, originScoped: true },
-    { id: "orcamentos_conv", title: "Orçamento → Venda", value: quotesWinRate != null ? `${quotesWinRate.toFixed(1)}%` : "—", valueLabel: "conversão", value2: `${quotesWon} de ${quotesSent}`, value2Label: "viraram venda", icon: Percent, color: "text-emerald-600", bg: "bg-emerald-50", agentScoped: true, originScoped: true },
+    { id: "orcamentos", title: "Orçamentos enviados", value: quotesSent, valueLabel: "enviados", value2: fmtBRL(quotesValue), value2Label: "valor", icon: FileText, color: "text-blue-600", bg: "bg-blue-50", agentScoped: true, originScoped: true, outcomeScoped: false },
+    { id: "orcamentos_conv", title: "Orçamento → Venda", value: quotesWinRate != null ? `${quotesWinRate.toFixed(1)}%` : "—", valueLabel: "conversão", value2: `${quotesWon} de ${quotesSent}`, value2Label: "viraram venda", icon: Percent, color: "text-emerald-600", bg: "bg-emerald-50", agentScoped: true, originScoped: true, outcomeScoped: false },
     { id: "custo_agendamento", title: "Custo por Consulta", value: costPerRealizada != null ? fmtBRL(costPerRealizada) : "—", valueLabel: "parcial", value2: costPerAppt != null ? fmtBRL(costPerAppt) : "—", value2Label: "previsto", icon: Target, color: "text-rose-600", bg: "bg-rose-50", agentScoped: true, originScoped: true },
     { id: "cac", title: "CAC", value: cac != null ? fmtBRL(cac) : "—", valueLabel: "parcial", value2: cacPrevisto != null ? fmtBRL(cacPrevisto) : "—", value2Label: "previsto", icon: UserCheck, color: "text-rose-600", bg: "bg-rose-50", agentScoped: false, originScoped: true },
     // Real em cima (sai das vendas do recorte), meta embaixo (Dados da Clínica). O id NÃO muda:
@@ -1096,7 +1099,29 @@ export function ComercialDashboard() {
     </Card>
   );
 
-  const chartSeries = bucketDaily(data.daily, period);
+  // ⚠️ A série PARA em hoje: com "este mês" no filtro, a RPC devolve o mês inteiro e os dias que
+  // ainda não aconteceram entram zerados, achatando a média e a curva.
+  const hojeISO = format(new Date(), "yyyy-MM-dd");
+  const chartSeries = bucketDaily(data.daily.filter((d) => d.date <= hojeISO), period);
+  // ⚠️ MÉDIA AGREGADA: toda métrica que é razão vira soma ÷ soma. A média das barras dava peso
+  // igual ao dia de 1 venda e ao de 20, e contava dia sem venda como zero — era assim que a
+  // linha do gráfico discordava do card do mesmo período.
+  const chartAverage = (() => {
+    if (!chartSeries.length) return null;
+    const soma = (k: keyof DailyBucket) => chartSeries.reduce((a, d) => a + (Number(d[k]) || 0), 0);
+    const razao = (num: number, den: number, fator = 1) => (den > 0 ? (num / den) * fator : 0);
+    switch (chartMetric) {
+      case "convAgend":    return razao(soma("appointments"), soma("leads"), 100);
+      case "convConsulta": return razao(soma("realizadas"), soma("leads"), 100);
+      case "custoAgend":   return razao(soma("investment"), soma("appointments"));
+      case "cac":          return razao(soma("investment"), soma("ganhos"));
+      case "roasReal":     return razao(soma("faturamento"), soma("investment"));
+      case "roasProj":     return razao(soma("faturamentoProjetado"), soma("investment"));
+      // Meta configurada: é a mesma linha reta todo dia, a média é o próprio valor.
+      case "ticketMedio":  return fin.defaultTicket;
+      default:             return chartSeries.reduce((a, d) => a + chartValue(d, chartMetric, fin.defaultTicket), 0) / chartSeries.length;
+    }
+  })();
   const sectionTrend = (
     <Card key="trend" className="border border-slate-200 shadow-sm flex flex-col">
       <CardHeader className="bg-slate-50 border-b border-slate-100 py-3 flex flex-row items-center justify-between">
@@ -1124,7 +1149,7 @@ export function ComercialDashboard() {
         </div>
       </CardHeader>
       <CardContent className="p-6 pt-7">
-        <TrendBarChart series={chartSeries.map((d) => ({ label: d.label, value: chartValue(d, chartMetric, fin.defaultTicket) }))} height={176} format={fmtByType(CHART_METRICS.find((m) => m.value === chartMetric)?.type)} />
+        <TrendBarChart series={chartSeries.map((d) => ({ label: d.label, value: chartValue(d, chartMetric, fin.defaultTicket) }))} height={176} average={chartAverage} format={fmtByType(CHART_METRICS.find((m) => m.value === chartMetric)?.type)} />
       </CardContent>
     </Card>
   );
@@ -1405,7 +1430,7 @@ export function ComercialDashboard() {
             <Card className="h-full flex flex-col bg-white border-slate-200 shadow-lg rounded-2xl p-4 overflow-hidden group hover:shadow-xl transition-all">
               <div className="flex items-start justify-between">
                 <div className={`p-2 rounded-xl ${stat.bg}`}><stat.icon className={`w-4 h-4 ${stat.color}`} /></div>
-                {((agent !== "todos" && !stat.agentScoped) || (origin.length > 0 && !stat.originScoped)) && (
+                {((agent !== "todos" && !stat.agentScoped) || (origin.length > 0 && !stat.originScoped) || (outcomeFilter !== "ambos" && stat.outcomeScoped === false)) && (
                   <span className="text-[8px] font-black uppercase tracking-wider text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full" title="Não atribuível ao filtro ativo — valor geral da clínica">geral</span>
                 )}
               </div>

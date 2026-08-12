@@ -25,15 +25,26 @@ export function TrendBarChart({
   format = (n) => `${Math.round(n)}`,
   height = 200,
   maxLabels = 12,
+  average,
+  color,
 }: {
   series: TrendPoint[];
   format?: (n: number) => string;
   height?: number;
   maxLabels?: number;
+  // ⚠️ Média AGREGADA, calculada por quem chama. Métrica que é uma RAZÃO (ticket médio, ROAS,
+  // taxa de conversão) NÃO pode usar a média das barras: média de razões dá peso igual a um dia
+  // com 1 venda e a um dia com 20, e ainda divide pelos dias sem venda nenhuma. Medido em
+  // 12/08/2026: ticket médio de julho da Metaltres era R$ 1.900,69 no card e a média das barras
+  // dizia R$ 891,76 (16 dias com venda em 31). Quando vem `average`, é ele que vale.
+  average?: number | null;
+  color?: string;
 }) {
   const allVals = series.flatMap((d) => [d.value, ...(d.value2 != null ? [d.value2] : [])]);
   const maxVal = Math.max(...allVals, 1);
-  const avgVal = series.length ? series.reduce((a, d) => a + d.value, 0) / series.length : 0;
+  const avgVal = average != null
+    ? average
+    : (series.length ? series.reduce((a, d) => a + d.value, 0) / series.length : 0);
   const labelStep = Math.max(1, Math.ceil(series.length / maxLabels));
   const hasCompare = series.some((d) => d.value2 != null);
 
@@ -68,9 +79,14 @@ export function TrendBarChart({
                   animate={{ height: Math.max((d.value / maxVal) * height, d.value > 0 ? 4 : 1) }}
                   transition={{ delay: i * 0.02, duration: 0.5 }}
                   className={cn(
-                    "bg-gradient-to-t from-teal-500/30 to-teal-500/10 group-hover:from-teal-500/50 group-hover:to-teal-500/20 rounded-t-md relative flex justify-center border-t-2 border-teal-500",
+                    "rounded-t-md relative flex justify-center border-t-2 transition-opacity group-hover:opacity-80",
+                    // Sem cor da métrica, mantém o teal de sempre (Comercial e Marketing usam assim).
+                    color
+                      ? "border-transparent"
+                      : "bg-gradient-to-t from-teal-500/30 to-teal-500/10 group-hover:from-teal-500/50 group-hover:to-teal-500/20 border-teal-500",
                     hasCompare ? "flex-1" : "w-full"
                   )}
+                  style={color ? { background: `linear-gradient(to top, ${color}4d, ${color}14)`, borderTopColor: color } : undefined}
                 >
                   <div className="absolute -top-7 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900 text-white text-[10px] font-bold px-2 py-1 rounded whitespace-nowrap z-30">{format(d.value)}</div>
                 </motion.div>

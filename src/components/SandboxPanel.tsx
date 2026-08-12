@@ -34,6 +34,10 @@ export function SandboxPanel({ clinicId }: { clinicId: string }) {
   const [sending, setSending] = useState(false);
   const [waiting, setWaiting] = useState(false);
   const [resetting, setResetting] = useState(false);
+  // A IA foi pausada PARA ESTE CONTATO (transferência do SDR ou transbordo). O sandbox usa a mesma
+  // régua da produção e para de responder — sem este aviso, o silêncio pareceria o simulador
+  // quebrado, quando na verdade é o comportamento correto sendo reproduzido.
+  const [iaPausada, setIaPausada] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, waiting]);
@@ -113,7 +117,11 @@ export function SandboxPanel({ clinicId }: { clinicId: string }) {
       });
       if (error || !(data as any)?.ok) throw new Error((data as any)?.error || error?.message || 'falha');
       setSessionId((data as any).session_id as string);
-      setWaiting(true);
+      // Com a IA pausada o backend não enfileira turno nenhum: não faz sentido mostrar "digitando…"
+      // esperando uma resposta que, corretamente, não vem.
+      const pausada = (data as any)?.ia_pausada === true;
+      setIaPausada(pausada);
+      setWaiting(!pausada);
     } catch (e: any) {
       showToast(`Não deu para enviar: ${String(e?.message ?? e)}`, 'error');
       setInput(text);
@@ -130,7 +138,7 @@ export function SandboxPanel({ clinicId }: { clinicId: string }) {
         body: { action: 'reset', clinic_id: clinicId, delete_lead: true },
       });
       if (error || !(data as any)?.ok) throw new Error((data as any)?.error || error?.message || 'falha');
-      setSessionId(null); setMessages([]); setWaiting(false);
+      setSessionId(null); setMessages([]); setWaiting(false); setIaPausada(false);
       showToast('Sessão de teste reiniciada.', 'success');
     } catch (e: any) {
       showToast(`Não deu para reiniciar: ${String(e?.message ?? e)}`, 'error');
@@ -194,6 +202,18 @@ export function SandboxPanel({ clinicId }: { clinicId: string }) {
             <div className="flex justify-start">
               <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-sm px-3.5 py-2.5 shadow-sm">
                 <Loader2 className="w-4 h-4 text-teal-500 animate-spin" />
+              </div>
+            </div>
+          )}
+          {iaPausada && (
+            <div className="flex justify-center">
+              <div className="max-w-md text-center bg-amber-50 border border-amber-200 rounded-xl px-3.5 py-2.5">
+                <p className="text-xs font-bold text-amber-900">A IA está pausada para este contato</p>
+                <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
+                  O agente passou o atendimento para uma pessoa (transferência ou transbordo) e, a partir
+                  daí, não responde mais este contato. <strong>É assim que acontece com o cliente de
+                  verdade.</strong> Para testar de novo do começo, use <strong>Reiniciar</strong>.
+                </p>
               </div>
             </div>
           )}

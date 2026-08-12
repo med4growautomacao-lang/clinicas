@@ -890,7 +890,11 @@ function PromptTemplateModal({ template, onSubmit, onClose }: {
   const handle = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
-    const ok = await onSubmit({ ...form, focus: form.focus.trim() || 'clinica' });
+    // Normaliza para minúscula ANTES de salvar. O tipo é comparado em minúscula em três lugares
+    // (o gate do SDR no backend, o selo colorido e a lista suspensa desta tela), e um "SDR" digitado
+    // à mão em "Outro (personalizado)" passava no backend e falhava nos dois do front: a linha
+    // aparecia com selo cinza e, ao reabrir, o campo caía no texto livre em vez da lista.
+    const ok = await onSubmit({ ...form, focus: form.focus.trim().toLowerCase() || 'clinica' });
     setSaving(false);
     if (ok) onClose();
   };
@@ -938,6 +942,22 @@ function PromptTemplateModal({ template, onSubmit, onClose }: {
               )}
             </div>
           </div>
+
+          {/* O Tipo "SDR" não é rótulo: é a CHAVE que entrega ao agente a ferramenta de transferir
+              (ai-scheduler › transfer_to_specialist, gate em _shared/agent/tools.ts). Sem dizer isto
+              aqui, a regra vira folclore e alguém troca o Tipo achando que só muda a cor do selo. */}
+          {form.focus.trim().toLowerCase() === 'sdr' && (
+            <div className="flex items-start gap-2 p-3 bg-blue-50 border border-blue-200 rounded-xl">
+              <Sparkles className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+              <p className="text-xs text-blue-800 leading-relaxed">
+                <strong>O tipo SDR liga a transferência para o especialista.</strong> Toda clínica que usar
+                este modelo ganha a ferramenta que passa o contato para um humano: ela move o card para a
+                etapa que o prompt indicar, <strong>pausa a IA daquele lead</strong> e avisa a equipe
+                (notificação "Solicitação de orçamento"). Trocar o tipo para outro valor tira a ferramenta
+                do agente. Etapas de venda, perda e agendamento nunca podem ser o destino.
+              </p>
+            </div>
+          )}
 
           <div>
             <div className="flex items-center justify-between mb-1.5">

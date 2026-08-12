@@ -23,7 +23,7 @@
 // Consumo de IA (e o custo por clinica) com gasto de laboratorio.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.7.1";
-import { agentToolSpecs, carregarMotivosPerda, TOOL_DEFS, type SessionCtx } from "../_shared/agent/tools.ts";
+import { agentToolSpecs, carregarEtapasTransferencia, carregarMotivosPerda, TOOL_DEFS, type SessionCtx } from "../_shared/agent/tools.ts";
 import { assembleSystemPrompt, fetchAgentContext } from "../_shared/agent/prompt.ts";
 import { loadConversation, MEMORY_WINDOW } from "../_shared/agent/memory.ts";
 import { looksTechnical, sanitizeForPatient, stripCodeFences } from "../_shared/agent/guard.ts";
@@ -262,6 +262,31 @@ async function executarNaBancada(
         success: true, readable_summary: `Atendimento encerrado como PERDIDO (motivo: ${a.motivo}).`,
         next_step: "Despeca-se com gentileza, explicando brevemente o motivo, e NAO ofereca agendamento.",
       },
+    // Mesma regra do ENCERRAR_COMO_PERDIDO: espelhar as RECUSAS, nao so o caminho feliz. Sem esta
+    // entrada a tool caia no `?? {success:true}` do final e a bancada dava acerto para chamada sem
+    // etapa e sem resumo, que a producao recusa — e o modelo nunca recebia o next_step de SILENCIO,
+    // que e justamente o comportamento pos-transferencia que se quer medir.
+    TRANSFERIR_PARA_ESPECIALISTA: !a.etapa
+      ? {
+        success: false, error_code: "stage_not_found",
+        error: "E obrigatorio dizer para qual etapa mover o card.",
+        next_step: "Chame TRANSFERIR_PARA_ESPECIALISTA de novo informando `etapa` com um dos nomes da lista.",
+      }
+      : !String(a.resumo ?? "").trim()
+      ? {
+        success: false, error_code: "resumo_vazio",
+        error: "E obrigatorio mandar os dados coletados em `resumo`.",
+        next_step: "Chame TRANSFERIR_PARA_ESPECIALISTA de novo preenchendo `resumo` com os dados coletados em uma linha.",
+      }
+      : {
+        success: true, applied: true, etapa: a.etapa, stage_changed: true, stage_ok: true,
+        readable_summary: `Contato passado ao especialista (card em "${a.etapa}").`,
+        next_step:
+          "Feito. Diga ao cliente, em UMA mensagem curta, que voce passou os dados para o especialista " +
+          "e que ele retorna o mais breve possivel. NAO prometa prazo, NAO passe preco final, NAO faca " +
+          "mais perguntas. Esta e sua ULTIMA mensagem neste atendimento: a partir daqui voce esta em " +
+          "silencio para este contato.",
+      },
   };
   return { output: JSON.stringify(canned[call.name] ?? { success: true }), simulada: true };
 }
@@ -328,6 +353,8 @@ async function rodar(supabase: any, corpo: any) {
   // Cache por clinica: o catalogo nao muda no meio de uma rodada, e sem isto era 1 RPC por
   // par (caso x modelo).
   const motivosPorClinica = new Map<string, Awaited<ReturnType<typeof carregarMotivosPerda>>>();
+  // Mesmo cache para as etapas: elas decidem se a TRANSFERIR_PARA_ESPECIALISTA existe no spec.
+  const etapasPorClinica = new Map<string, Awaited<ReturnType<typeof carregarEtapasTransferencia>>>();
 
   for (const par of (pares ?? [])) {
     if (Date.now() - t0 > budgetMs) {
@@ -361,7 +388,23 @@ async function rodar(supabase: any, corpo: any) {
         if (updErr) console.error("ai-bench: nao consegui marcar o par como error", updErr.message);
         continue;
       }
-      const tools = agentToolSpecs(catalogo.lista);
+      // As etapas seguem a MESMA regra do catalogo de motivos, e pelo mesmo motivo: sem elas a
+      // TRANSFERIR_PARA_ESPECIALISTA nao entra no spec, e um caso de clinica SDR seria julgado numa
+      // superficie onde transferir era impossivel. O modelo levaria a culpa por nao fazer o que
+      // ninguem ofereceu a ele, e o ranking sairia errado justo no fluxo que se quer medir.
+      const catalogoEtapas = etapasPorClinica.get(caso.clinic_id) ?? await (async () => {
+        const e = await carregarEtapasTransferencia(supabase, caso.clinic_id);
+        etapasPorClinica.set(caso.clinic_id, e);
+        return e;
+      })();
+      if (catalogoEtapas.erro) {
+        const { error: updErr } = await supabase.from("ai_bench_results").update({
+          status: "error", error: `etapas do funil indisponiveis: ${catalogoEtapas.erro}`,
+        }).eq("id", par.id);
+        if (updErr) console.error("ai-bench: nao consegui marcar o par como error", updErr.message);
+        continue;
+      }
+      const tools = agentToolSpecs(catalogo.lista, catalogoEtapas.lista);
       const messages = caso.messages as AgentMsg[];
       const runner: Runner = par.provider === "openai"
         ? new OpenAIRunner(key, par.model, caso.system_prompt, messages, tools)

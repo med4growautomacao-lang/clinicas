@@ -62,6 +62,10 @@ export function buildHandoffBlock(rules: HandoffRule[] | null | undefined, enabl
 
 export interface AgentContext {
   combinedPrompt: string;
+  /** `focus` do Prompt Fixo da clinica, da MESMA linha da mesma view que traz o prompt. E a chave
+   *  do modo SDR (ver `clinicaEmModoSdr`), e vem carona aqui de proposito: ler a view de novo so
+   *  para isso era uma segunda ida ao banco por turno, em 34 tenants, 33 deles nem SDR. */
+  templateFocus: string | null;
   aiSummary: string;
   /** memoria longa do agente (leads.ai_long_memory), escrita por _shared/agent/long-memory.ts */
   longMemory: string;
@@ -133,11 +137,12 @@ export async function fetchAgentContext(
     ? supabase.from("leads").select(cols).eq("id", leadId).maybeSingle()
     : supabase.from("leads").select(cols).eq("clinic_id", clinicId).eq("session_id", sessionId).maybeSingle();
   const [{ data: promptRow }, { data: leadRow }] = await Promise.all([
-    supabase.from("v_clinic_ai_prompt").select("combined_prompt").eq("clinic_id", clinicId).maybeSingle(),
+    supabase.from("v_clinic_ai_prompt").select("combined_prompt, template_focus").eq("clinic_id", clinicId).maybeSingle(),
     leadQuery,
   ]);
   return {
     combinedPrompt: promptRow?.combined_prompt || "",
+    templateFocus: promptRow?.template_focus ?? null,
     aiSummary: leadRow?.ai_summary || "",
     longMemory: leadRow?.ai_long_memory || "",
     handoffRules,

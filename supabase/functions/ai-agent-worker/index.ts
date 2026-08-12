@@ -9,7 +9,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.7.1";
 import { runAgentTurn, type AgentMsg, type ModelConfig } from "../_shared/llm.ts";
 import { registrarUsoIA, FEATURE } from "../_shared/llm-usage.ts";
-import { agentToolSpecs, carregarMotivosPerda, executeToolCall, type SessionCtx } from "../_shared/agent/tools.ts";
+import { agentToolSpecs, carregarEtapasTransferencia, carregarMotivosPerda, etapaProibida, executeToolCall, type SessionCtx } from "../_shared/agent/tools.ts";
 import { assembleSystemPrompt, fetchAgentContext } from "../_shared/agent/prompt.ts";
 import { splitIntoBubbles } from "../_shared/agent/split.ts";
 import { loadConversation, MEMORY_WINDOW, saveAiResponse } from "../_shared/agent/memory.ts";
@@ -228,13 +228,84 @@ async function formatForVoice(supabase: any, cfg: ModelConfig, clinicId: string 
 }
 
 // Transicao de etapa por IA — reescrita CERTA (via ticket, nao leads.stage_id cru).
+//
+// ⚠️ ISTO CASA SUBSTRING NA FRASE QUE O CLIENTE VAI LER, e por isso NAO pode mover para etapa de
+// desfecho, de conversao ou de agenda. Medido em 12/08/2026: 33 regras cadastradas miram
+// Ganho/Agendado/Perdido, e uma delas tem a palavra-chave "PEDIDO" apontando para Ganho numa
+// clinica com a IA habilitada. "Seu pedido foi para o especialista" viraria VENDA REGISTRADA
+// (fn_enforce_ticket_resolution_consistency grava outcome='ganho' + outcome_at sozinho), com
+// faturamento inventado no painel e ninguem sabendo ate o fechamento do mes.
+//
+// O bloqueio nao e regressao: `select count(*) from lead_stage_history where source='ia'` = 0 em
+// toda a base, ou seja este caminho nunca moveu um card. Ele existia e nunca foi exercitado.
+// Quem registra venda e o Kanban ou a Central de Orcamentos, com gente decidindo.
+const hayInclui = (texto: string, kw: unknown) => texto.toLowerCase().includes(String(kw).toLowerCase());
+
+/** A tool que acabou de rodar DECIDIU a etapa deste card?
+ *
+ *  Sao TRES as tools que mexem em etapa, nao duas: a transferencia do SDR, o encerramento como
+ *  perdido (o trigger de invariante reescreve o stage_id) e o transbordo (quando a regra da clinica
+ *  tem `move_to_stage`). Deixar o transbordo de fora fazia o casador de palavra-chave desfazer, por
+ *  acidente, a etapa que o transbordo tinha acabado de escolher.
+ *
+ *  Olha o RESULTADO, nao o nome: chamada recusada nao decidiu nada. Nunca lanca — resultado
+ *  ilegivel conta como "nao decidiu", que so devolve o comportamento antigo. */
+function mexeuNaEtapa(nome: string, resultado: string): boolean {
+  if (nome !== "TRANSFERIR_PARA_ESPECIALISTA" && nome !== "ENCERRAR_COMO_PERDIDO" && nome !== "ACIONAR_HANDOFF") return false;
+  try {
+    const r = JSON.parse(resultado || "{}");
+    if (r?.success !== true) return false;
+    // close_as_lost nao devolve flag de etapa: o desfecho SEMPRE reescreve o stage_id por trigger.
+    if (nome === "ENCERRAR_COMO_PERDIDO") return true;
+    // ⚠️ Para o transbordo, `applied` conta mesmo sem ter movido card: quando ele age, o contato
+    // passou a ser de um humano e a despedida que vai sair e texto CONFIGURADO pela clinica. Deixar
+    // um `includes` de palavra solta opinar sobre o card em cima dessa frase e o mesmo acidente que
+    // esta guarda existe para evitar, so que com outro autor.
+    return r?.stage_changed === true || r?.stage_ok === true || r?.applied === true;
+  } catch { return false; }
+}
+
 async function applyStageTransition(supabase: any, clinicId: string, leadId: string | null, text: string): Promise<void> {
   if (!leadId || !text) return;
   const { data: rules } = await supabase.from("stage_transition_rules").select("keywords, target_stage_id").eq("clinic_id", clinicId);
   if (!rules || rules.length === 0) return;
-  const hay = text.toLowerCase();
-  const hit = rules.find((r: any) => r.keywords && r.target_stage_id && hay.includes(String(r.keywords).toLowerCase()));
-  if (!hit) return;
+  const candidatas = rules.filter((r: any) => r.keywords && r.target_stage_id && hayInclui(text, r.keywords));
+  if (candidatas.length === 0) return;
+
+  // ⚠️ As etapas proibidas saem da lista ANTES da escolha, nao depois. Barrar depois de escolher
+  // fazia a primeira regra proibida ESCONDER as outras que casaram no mesmo texto: a clinica com
+  // "orcamento -> Negociacao" e "pedido -> Ganho" perdia a primeira porque a segunda veio antes
+  // num select sem ordem. Antes desta guarda o card ao menos andava.
+  const { data: alvos, error: alvoErr } = await supabase.from("funnel_stages")
+    .select("id, name, slug, is_conversion").eq("clinic_id", clinicId)
+    .in("id", candidatas.map((r: any) => r.target_stage_id));
+  if (alvoErr) {
+    // Sem isto, falha de leitura virava "a regra da clinica e invalida" na Central, e o operador
+    // ia consertar uma regra correta enquanto a causa real (consulta falhando) nunca aparecia.
+    registrarErro(supabase, "regra_etapa_ilegivel",
+      "Nao consegui ler a etapa de destino das regras de palavra-chave; nenhuma transicao automatica foi aplicada neste turno",
+      "warning", clinicId, { lead_id: leadId, erro: String(alvoErr.message ?? alvoErr).slice(0, 300) },
+    ).catch(() => {});
+    return;
+  }
+  const porId = new Map<string, any>((alvos ?? []).map((e: any) => [e.id, e]));
+  const permitidas = candidatas.filter((r: any) => !etapaProibida(porId.get(r.target_stage_id)));
+
+  if (permitidas.length < candidatas.length) {
+    // ⚠️ REDACAO IMPORTA. A regra NAO esta errada: o gatilho do banco, disparado quando a EQUIPE
+    // digita a palavra, move para essas etapas 692 vezes em 30 dias, de proposito. O que muda aqui
+    // e so quem escreveu a frase. Acusar a configuracao mandaria o dono consertar o que funciona
+    // (§0.7: nao relatar configuracao como defeito).
+    const barradas = candidatas.filter((r: any) => etapaProibida(porId.get(r.target_stage_id)));
+    registrarErro(supabase, "regra_etapa_ignorada_para_ia",
+      `A IA escreveu uma frase que casa com uma regra de palavra-chave cujo destino registra venda, perda ou agendamento ("${porId.get(barradas[0].target_stage_id)?.name ?? "?"}"). A IA NAO move card para essas etapas: desfecho nao se decide por palavra dentro de uma frase que o proprio sistema mandou escrever. A mesma regra continua valendo normalmente quando a EQUIPE digita a palavra.`,
+      "warning", clinicId,
+      { lead_id: leadId, keyword: String(barradas[0].keywords).slice(0, 120), etapa: porId.get(barradas[0].target_stage_id)?.name ?? null },
+    ).catch(() => {});
+  }
+  if (permitidas.length === 0) return;
+  const hit = permitidas[0];
+
   const { data: ticket } = await supabase.from("tickets").select("id").eq("lead_id", leadId).eq("status", "open").order("opened_at", { ascending: false }).limit(1).maybeSingle();
   if (!ticket?.id) return;
   await supabase.rpc("set_ticket_stage", { p_ticket_id: ticket.id, p_new_stage_id: hit.target_stage_id, p_source: "ia", p_on_resolved: "block" });
@@ -281,8 +352,12 @@ async function processTurn(supabase: any, turn: { session_id: string; clinic_id:
       fetchAgentContext(supabase, clinicId, turn.session_id, ctx.handoff_rules ?? [], !!ctx.handoff_enabled, ctx.lead_id ?? null),
       carregarMotivosPerda(supabase, clinicId),
     ]);
+    // Etapas do funil: viram o `enum` da TRANSFERIR_PARA_ESPECIALISTA e decidem se ela existe neste
+    // turno. Roda DEPOIS do contexto, e nao em paralelo, para reaproveitar o `template_focus` que
+    // ja veio junto do prompt: clinica fora do modo SDR (33 das 34) sai sem NENHUMA consulta extra.
+    const etapas = await carregarEtapasTransferencia(supabase, clinicId, agentCtx.templateFocus);
     const system = assembleSystemPrompt(agentCtx);
-    const tools = agentToolSpecs(motivos.lista);
+    const tools = agentToolSpecs(motivos.lista, etapas.lista);
     // ⚠️ Sem `await`: isto roda em TODO turno enquanto a condicao durar, e segurar o paciente numa
     // gravacao de log e pagar com tempo de resposta por um problema que nao e dele.
     if (motivos.erro) {
@@ -291,6 +366,23 @@ async function processTurn(supabase: any, turn: { session_id: string; clinic_id:
       registrarErro(supabase, "catalogo_motivos_falhou", "Nao consegui LER os motivos de perda da clinica; ate isso voltar a IA NAO consegue encerrar atendimento como perdido (o encerramento e recusado e ela segue conversando)", "error", clinicId, { session_id: turn.session_id, erro: motivos.erro }).catch(() => {});
     } else if (motivos.lista.filter((m) => m.ia_pode_escolher).length === 0) {
       registrarErro(supabase, "catalogo_motivos_vazio", "A clinica nao tem nenhum motivo de perda habilitado para a IA; encerramentos vao sair sem motivo", "error", clinicId, { session_id: turn.session_id }).catch(() => {});
+    }
+    // Falha de leitura SEMPRE registra: nesse caso nao se sabe se a clinica usa o SDR, e engolir
+    // seria perder o defeito calado. Ja "lista vazia" so reclama quando a clinica LIGOU o SDR
+    // (`ativo`): sem a chave, lista vazia e o estado normal de 33 dos 34 tenants, e alertar por
+    // isso viraria ruido diario na Central — que e como um monitoramento morre.
+    if (etapas.erro) {
+      // A mensagem diz QUAL leitura falhou. Antes as duas saiam com o texto do funil, e uma falha
+      // ao ler o Prompt Fixo mandava o operador conferir a coluna errada do problema errado.
+      const doGate = etapas.erroDe === "gate";
+      registrarErro(supabase,
+        doGate ? "modo_sdr_ilegivel" : "etapas_transferencia_falhou",
+        doGate
+          ? "Nao consegui LER o Prompt Fixo da clinica para saber se ela opera em modo SDR; enquanto isso a transferencia para o vendedor humano fica indisponivel"
+          : "Nao consegui LER as etapas do funil da clinica; ate isso voltar o SDR NAO consegue transferir o contato para o vendedor humano (o card fica parado na entrada)",
+        "error", clinicId, { session_id: turn.session_id, erro: etapas.erro }).catch(() => {});
+    } else if (etapas.ativo && etapas.lista.length === 0) {
+      registrarErro(supabase, "etapas_transferencia_vazio", "A clinica tem o SDR ligado mas nenhuma etapa de funil elegivel para transferencia; o SDR vai coletar os dados e nao vai conseguir passar o card adiante", "error", clinicId, { session_id: turn.session_id }).catch(() => {});
     }
 
     const messages = await loadConversation(supabase, turn.session_id, MEMORY_WINDOW, buffer);
@@ -301,6 +393,7 @@ async function processTurn(supabase: any, turn: { session_id: string; clinic_id:
     // agendamento criado sem o paciente ter sido avisado.
     let finalText = "";
     const toolsExecutadas: string[] = [];
+    let etapaDecididaPorTool = false;
     for (let iter = 0; iter < MAX_TOOL_ITERS; iter++) {
       const out = await modelTurn(supabase, cfg, system, messages, tools, clinicId, ctx.lead_id ?? null);
       if (out.toolCalls.length === 0) { finalText = out.text; break; }
@@ -312,6 +405,12 @@ async function processTurn(supabase: any, turn: { session_id: string; clinic_id:
       const results = await Promise.all(out.toolCalls.map((c) => executeToolCall(c, session)));
       out.toolCalls.forEach((c, i) => {
         toolsExecutadas.push(c.name);
+        // ⚠️ Guardar o NOME da tool nao diz se ela FEZ alguma coisa. Uma chamada recusada
+        // (motivo faltando, etapa inexistente, modo SDR desligado) tambem entra em
+        // `toolsExecutadas`, e usar essa lista para decidir "a etapa ja foi decidida" desligava o
+        // casador de palavra-chave do turno inteiro sem ninguem ter decidido etapa nenhuma.
+        // Aqui olhamos o RESULTADO: so conta quem realmente mexeu no card.
+        if (mexeuNaEtapa(c.name, results[i])) etapaDecididaPorTool = true;
         messages.push({ role: "tool", callId: c.id, name: c.name, result: results[i] });
       });
 
@@ -413,7 +512,14 @@ async function processTurn(supabase: any, turn: { session_id: string; clinic_id:
     }
 
     await saveAiResponse(supabase, turn.session_id, finalText);
-    await applyStageTransition(supabase, clinicId, ctx.lead_id ?? null, finalText);
+    // ⚠️ Quando uma tool JA decidiu a etapa neste turno, o casador de palavra-chave nao opina.
+    // A despedida do SDR ("passei seu pedido para o especialista") e um texto OBRIGATORIO que o
+    // proprio sistema manda escrever, entao deixa-lo passar por um `includes` de palavra solta e
+    // convidar a regra da clinica a desfazer, por acidente, a etapa que o servidor acabou de
+    // escolher com validacao. Ver `mexeuNaEtapa`: sao tres tools, e vale o RESULTADO, nao a chamada.
+    if (!etapaDecididaPorTool) {
+      await applyStageTransition(supabase, clinicId, ctx.lead_id ?? null, finalText);
+    }
 
     // Memoria longa: guarda o FATO que a janela de conversa vai esquecer daqui a poucas trocas
     // (MEMORY_WINDOW e curta de proposito). Roda aqui, no fim, por dois motivos: o paciente ja

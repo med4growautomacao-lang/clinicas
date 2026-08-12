@@ -1991,6 +1991,10 @@ export type NotificationEventKey =
   // Paciente pediu para pagar no cartão: a IA não envia link (esse dado não existe no
   // sistema), ela chama SOLICITAR_LINK_CARTAO e quem envia é a equipe.
   | 'link_cartao'
+  // SDR de pré-atendimento terminou a coleta e passou o contato ao vendedor humano
+  // (TRANSFERIR_PARA_ESPECIALISTA). O aviso carrega o RESUMO dos dados coletados, que é o
+  // que o vendedor precisa para montar o orçamento sem reler a conversa inteira.
+  | 'solicitacao_orcamento'
   // Aviso de SERVIÇO, não de negócio: por isso é o único que NÃO obedece a
   // group_all/sino_all (avisar_queda_whatsapp lê só a chave do próprio evento).
   // Medido em 03/08/2026: 1 de 28 clínicas tinha os gerais ligados, então

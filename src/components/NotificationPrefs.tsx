@@ -7,7 +7,7 @@ import type { NotificationPrefs as Prefs, NotificationEventKey } from '../hooks/
 import {
   BellRing, MessageSquareWarning, CalendarDays, CalendarCheck, CalendarClock,
   CalendarX, Receipt, PartyPopper, AlertTriangle, Clock, Users, Save,
-  Loader2, CheckCircle2, Smartphone, Info, WifiOff, CreditCard,
+  Loader2, CheckCircle2, Smartphone, Info, WifiOff, CreditCard, Ruler,
 } from 'lucide-react';
 
 // UI de Configuração de Notificações (Configurações › Notificações, abaixo do Grupo).
@@ -41,6 +41,7 @@ const EVENTS: { key: NotificationEventKey; label: string; desc: string; Icon: ty
   { key: 'cancelamento',     label: 'Cancelamento',            desc: 'Consulta cancelada',          Icon: CalendarX },
   { key: 'comprovante',      label: 'Comprovante de pagamento', desc: 'Paciente enviou comprovante', Icon: Receipt },
   { key: 'link_cartao',      label: 'Link do cartão pendente', desc: 'Paciente quer pagar no cartão', Icon: CreditCard },
+  { key: 'solicitacao_orcamento', label: 'Solicitação de orçamento', desc: 'Pré-atendimento coletou os dados', Icon: Ruler },
   { key: 'venda',            label: 'Venda realizada',         desc: 'Ticket ganho',                Icon: PartyPopper },
   { key: 'nao_atendido',     label: 'Lead não atendido (SLA)', desc: 'Ninguém respondeu no prazo',  Icon: AlertTriangle },
   { key: 'whatsapp_desconectado', label: 'WhatsApp desconectado', desc: 'A conexão do WhatsApp caiu', Icon: WifiOff, servico: true, grupoPadrao: false },

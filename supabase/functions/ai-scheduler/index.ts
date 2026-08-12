@@ -1,5 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.7.1";
+// Gate do modo SDR: a MESMA função que o worker usa para decidir se a tool de transferência
+// aparece para o modelo. Importada em vez de recopiada — regra duplicada é regra que diverge.
+import { clinicaEmModoSdr, etapaProibida, normalizarTexto } from "../_shared/agent/tools.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -1132,16 +1135,34 @@ serve(async (req) => {
           .limit(1)
           .maybeSingle();
         if (openTicket?.id) {
-          const { data: moveRes } = await supabaseClient.rpc("set_ticket_stage", {
-            p_ticket_id: openTicket.id,
-            p_new_stage_id: matched.move_to_stage,
-            p_source: "ia",
-            p_on_resolved: "block",
-          });
-          const res = moveRes as any;
-          if (res?.success && !res?.blocked && !res?.noop) {
-            actionsTaken.push("stage_moved");
-            stage_changed = true;
+          // ⚠️ MESMA régua da transferência do SDR: a IA não manda card para etapa de desfecho,
+          // agendamento ou conversão. Aqui o destino vem do cadastro `handoff_rules` da clínica,
+          // não do modelo, mas o efeito é idêntico: apontar uma regra de transbordo para "Ganho"
+          // faz o trigger de invariante gravar tickets.outcome='ganho' + outcome_at sozinho, e
+          // vira faturamento no painel sem ninguém aprovar. Nenhuma regra em produção aponta para
+          // lá hoje (conferido em ai_config.handoff_rules), então isto é trava, não conserto.
+          const { data: alvoHandoff } = await supabaseClient.from("funnel_stages")
+            .select("id, name, slug, is_conversion").eq("id", matched.move_to_stage)
+            .eq("clinic_id", clinic_id).maybeSingle();
+          if (etapaProibida(alvoHandoff)) {
+            await registrarErro(
+              "handoff_etapa_bloqueada",
+              `A regra de transbordo aponta para "${(alvoHandoff as any)?.name ?? "etapa desconhecida"}", que registra venda, perda ou agendamento. O card NÃO foi movido: desfecho não se decide por transbordo. Aponte a regra para uma etapa intermediária.`,
+              "warning", clinic_id,
+              { lead_id: lead.id, etapa_id: matched.move_to_stage, etapa: (alvoHandoff as any)?.name ?? null },
+            );
+          } else {
+            const { data: moveRes } = await supabaseClient.rpc("set_ticket_stage", {
+              p_ticket_id: openTicket.id,
+              p_new_stage_id: matched.move_to_stage,
+              p_source: "ia",
+              p_on_resolved: "block",
+            });
+            const res = moveRes as any;
+            if (res?.success && !res?.blocked && !res?.noop) {
+              actionsTaken.push("stage_moved");
+              stage_changed = true;
+            }
           }
         }
       }
@@ -1317,6 +1338,358 @@ serve(async (req) => {
             "Diga ao paciente que o link do cartão vem por aqui pela equipe, sem prometer prazo. " +
             "NÃO envie link, NÃO informe valor de taxa nem de parcela, NÃO ofereça outra chave de " +
             "pagamento. Depois siga a conversa normalmente.",
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
+      );
+    } else if (action === "transfer_to_specialist") {
+      // SDR: fim do PRÉ-atendimento. Move o card para a etapa escolhida, pausa a IA para este lead
+      // e avisa a equipe com o resumo dos dados coletados. É o "passei para o especialista".
+      //
+      // ⚠️ O destino é validado AQUI, não no enum do modelo. O enum é dica ao provedor (o Gemini
+      // pode devolver valor fora dele), e mover um card para 'ganho' faz o trigger
+      // fn_enforce_ticket_resolution_consistency gravar tickets.outcome='ganho' + outcome_at
+      // sozinho — ou seja, uma alucinação viraria FATURAMENTO nos painéis, e ninguém veria até o
+      // fechamento do mês. Etapa de desfecho é recusada mesmo que o modelo peça.
+      const { lead_phone, etapa, resumo } = payload;
+      if (!lead_phone) {
+        return new Response(JSON.stringify({ success: false, error: "lead_phone is required" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+      }
+
+      // A regra de etapa proibida (`etapaProibida`) e o normalizador de acento (`normalizarTexto`)
+      // vêm IMPORTADOS de _shared/agent/tools.ts, o mesmo módulo que monta o enum. Revalidar no
+      // servidor é a defesa correta; recopiar a regra é só criar uma segunda verdade que envelhece
+      // sozinha. Se um slug novo entrar lá, o worker para de oferecer E o servidor para de aceitar,
+      // no mesmo commit.
+      const norm = normalizarTexto;
+
+      // GATE, revalidado no servidor pela MESMA função que o worker usa para decidir se a tool
+      // entra no spec (clinicaEmModoSdr). Revalidar é defesa em profundidade barata:
+      // `executeToolCall` resolve a tool pelo NOME, sem allowlist do turno, então um modelo que
+      // "lembrasse" o nome chamaria assim mesmo.
+      //
+      // ⚠️ "Não consegui ler" e "não é SDR" são respostas DIFERENTES, com códigos diferentes. Um
+      // timeout de banco respondido como "esta empresa não é SDR" mandava o agente desistir de vez
+      // e jogar fora os dados que ele já tinha coletado, sem caminho de volta.
+      const modoSdr = await clinicaEmModoSdr(supabaseClient, clinic_id);
+      if (modoSdr.erro) {
+        await registrarErro(
+          "transferencia_gate_ilegivel",
+          "O SDR tentou transferir e não consegui ler o Prompt Fixo da clínica para confirmar o modo SDR; a transferência não aconteceu nesta tentativa",
+          "error", clinic_id, { erro: modoSdr.erro },
+        );
+        return new Response(JSON.stringify({
+          success: false, error_code: "gate_unavailable",
+          error: "Não consegui confirmar a configuração da empresa agora.",
+          next_step: "Tente TRANSFERIR_PARA_ESPECIALISTA mais UMA vez. Se falhar de novo, diga ao cliente que anotou tudo e que o especialista retorna, e encerre.",
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+      }
+      if (!modoSdr.sdr) {
+        return new Response(JSON.stringify({
+          success: false, error_code: "sdr_disabled",
+          error: "Esta empresa não opera em modo SDR (o Prompt Fixo dela não é do tipo SDR).",
+          next_step: "Continue a conversa normalmente e NÃO mencione transferência.",
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+      }
+
+      // Lookup por telefone NORMALIZADO (a sessão pode vir com/sem o 9º dígito) — mesmo padrão
+      // do trigger_handoff, do request_card_link e do close_as_lost.
+      //
+      // ⚠️ O erro é capturado, não engolido. Telefone duplicado na mesma clínica (acontece: lead de
+      // formulário sem DDD escapa do índice de unicidade) faz o maybeSingle devolver ERRO com
+      // data=null, e sem separar os dois o agente concluía "esse cliente não existe" para alguém
+      // que existe duas vezes, sem nada na Central para ninguém desconfiar.
+      const { data: tLookup } = await supabaseClient.rpc("find_patient_by_phone", { p_clinic_id: clinic_id, p_phone: lead_phone });
+      const canonicalLeadPhone = (tLookup as any)?.canonical_phone || lead_phone;
+      const { data: lead, error: leadErr } = await supabaseClient.from("leads")
+        .select("id, name, phone, is_simulation").eq("clinic_id", clinic_id).eq("phone", canonicalLeadPhone).maybeSingle();
+      if (leadErr) {
+        await registrarErro(
+          "transferencia_lead_ilegivel",
+          "O SDR tentou transferir e a busca do contato falhou (pode ser telefone duplicado nesta clínica); a transferência não aconteceu",
+          "error", clinic_id, { telefone: canonicalLeadPhone, erro: leadErr.message ?? String(leadErr) },
+        );
+        return new Response(JSON.stringify({
+          success: false, error_code: "lead_lookup_failed",
+          error: "Não consegui localizar o cadastro deste contato agora.",
+          next_step: "Tente TRANSFERIR_PARA_ESPECIALISTA mais UMA vez. Se falhar de novo, diga ao cliente que anotou tudo e que o especialista retorna, e encerre.",
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+      }
+      if (!lead) {
+        return new Response(JSON.stringify({ success: false, error_code: "lead_not_found", error: "Lead não encontrado para esse telefone" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+      }
+      const transfIsSim = !!(lead as any).is_simulation;
+
+      // Resolve a etapa pelo NOME (é o que vai no enum, porque etapa criada pela tela nasce com
+      // slug NULL). Cai para o slug se o modelo mandar o slug. Sem acento e sem caixa.
+      const { data: stages, error: stErr } = await supabaseClient.from("funnel_stages")
+        .select("id, name, slug, is_hidden, is_conversion").eq("clinic_id", clinic_id).order("position", { ascending: true });
+
+      // ⚠️ Falha de leitura NÃO aborta a transferência, e essa escolha é deliberada. Abortar
+      // deixava o pior estado possível: o modelo já vai se despedir, e o contato ficaria com a IA
+      // ligada, o card parado e ninguém avisado. Aqui a transferência DEGRADA: o card não anda,
+      // mas a IA para e a equipe recebe o resumo, então um humano assume. O card errado é
+      // conserto de um arrasto no Kanban; contato esquecido é cliente perdido.
+      // ⚠️ Todos os alertas daqui para baixo checam `transfIsSim`: lead de simulação é o Super Admin
+      // testando, e acender a Central com o MESMO fingerprint de um incidente real faz ele caçar um
+      // problema que ele mesmo acabou de provocar. É a régua que o notify_ops já usa.
+      let destino: any = null;
+      if (stErr) {
+        if (!transfIsSim) {
+          await registrarErro(
+            "transferencia_etapas_ilegiveis",
+            "O SDR transferiu o contato mas não consegui ler as etapas do funil; o card NÃO mudou de coluna (a equipe foi avisada assim mesmo)",
+            "error", clinic_id, { lead_id: lead.id, erro: stErr.message ?? String(stErr) },
+          );
+        }
+      } else {
+        const elegiveis = (stages ?? []).filter((e: any) =>
+          e?.id && e?.name && e.is_hidden !== true && !etapaProibida(e));
+        const alvo = norm(etapa);
+        destino = elegiveis.find((e: any) => norm(e.name) === alvo)
+          ?? elegiveis.find((e: any) => e.slug && norm(e.slug) === alvo);
+
+        if (!destino) {
+          // Etapa proibida pedida explicitamente é RECUSA de segurança, não "não achei": vale um
+          // código próprio, para o modelo parar de insistir no mesmo valor em vez de tentar de novo.
+          const pediuProibida = (stages ?? []).some((e: any) =>
+            (norm(e.name) === alvo || (e.slug && norm(e.slug) === alvo)) && etapaProibida(e));
+          // ⚠️ Este é o caminho de degradação MAIS PROVÁVEL (o enum é dica ao provedor, não trava),
+          // e era o único mudo: o agente já ia se despedir, e o contato ficava com a IA ligada, o
+          // card parado e ninguém avisado. Silêncio aqui é o modo de falha que a §0.5 proíbe.
+          if (!transfIsSim) {
+            await registrarErro(
+              "transferencia_etapa_invalida",
+              `O SDR tentou transferir para a etapa "${etapa}", que ${pediuProibida ? "registra desfecho e não pode receber card por IA" : "não existe nesta empresa"}; a transferência não aconteceu nesta tentativa`,
+              "warning", clinic_id,
+              { lead_id: lead.id, etapa_pedida: etapa, disponiveis: elegiveis.map((e: any) => e.name), resumo: String(resumo ?? "").slice(0, 500) },
+            );
+          }
+          return new Response(JSON.stringify({
+            success: false,
+            error_code: pediuProibida ? "stage_forbidden" : "stage_not_found",
+            error: pediuProibida
+              ? `A etapa "${etapa}" registra desfecho ou conversão e não pode ser usada para transferência.`
+              : `Etapa "${etapa}" não existe nesta empresa.`,
+            etapas_disponiveis: elegiveis.map((e: any) => e.name),
+            next_step: "Chame TRANSFERIR_PARA_ESPECIALISTA de novo usando EXATAMENTE um dos nomes de `etapas_disponiveis`.",
+          }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+        }
+      }
+
+      // 1. TOMADA DE POSSE ATÔMICA + pausa da IA, no mesmo comando.
+      //
+      // ⚠️ Ler o estado e decidir depois (check-then-act) NÃO segura duas chamadas em paralelo, que
+      // é justamente o caso que a trava existe para cobrir: o worker executa as tool calls do turno
+      // em Promise.all, então as duas leem "ainda não transferido" antes de qualquer uma escrever.
+      // Aqui quem escreve é o próprio filtro: `not ai_enabled is false` só casa uma vez, e o
+      // perdedor recebe zero linhas. É a diferença entre uma trava e a aparência de uma.
+      //
+      // A condição é `is not false` (e não `= true`) de propósito: lead com ai_enabled NULL conversa
+      // normalmente (ingest_wa_message usa a MESMA régua), e `= true` recusaria a transferência dele.
+      //
+      // handoff_triggered_at, além de parar o agente, é o sinal que impede o follow-up de
+      // reengajamento de cutucar quem já está em atendimento humano. Coluna timestamp SEM timezone,
+      // gravada em horário de São Paulo.
+      const nowSPTransf = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString().replace("Z", "");
+      const { data: claimed, error: pauseErr } = await supabaseClient.from("leads")
+        .update({ ai_enabled: false, handoff_triggered_at: nowSPTransf })
+        .eq("id", lead.id).not("ai_enabled", "is", false)
+        .select("id");
+      if (pauseErr && !transfIsSim) {
+        // IA não pausada = ela continua respondendo depois de dizer "passei para o especialista",
+        // que é exatamente a incoerência que mais assusta o cliente.
+        await registrarErro(
+          "transferencia_pausa_ia_falhou",
+          "O SDR transferiu o contato mas NÃO consegui pausar a IA; ela pode continuar respondendo por cima do vendedor",
+          "critical", clinic_id,
+          { lead_id: lead.id, erro: pauseErr.message ?? String(pauseErr) },
+        );
+      }
+
+      // Perdeu a posse: alguém já pausou este lead neste instante. Duas causas possíveis (outra
+      // transferência em paralelo, ou um transbordo no mesmo turno) e, nas duas, alguém JÁ está
+      // cuidando deste contato e JÁ avisou a equipe pelo caminho dele.
+      //
+      // ⚠️ A versão anterior consultava `notifications` para decidir. Não funciona: o notify_ops só
+      // grava lá quando o SINO da clínica está ligado, e 27 das 28 clínicas ativas estão com sino e
+      // grupo desligados. A consulta voltaria vazia quase sempre e a "trava" deixaria passar.
+      //
+      // O card ainda é movido (é idempotente e o vendedor precisa achá-lo na coluna certa), mas o
+      // aviso NÃO é repetido. E o dado não se perde por isso: a ficha do contato (leads.ai_long_memory,
+      // gravada a cada turno e nunca apagada) aparece no próprio card do Kanban.
+      const perdeuPosse = !pauseErr && (claimed ?? []).length === 0;
+
+      // 2. Move o card. A etapa vive no ticket ABERTO (tickets.stage_id, não em leads.stage_id).
+      // p_source='ia' audita a origem no histórico; p_on_resolved='block' nunca mexe em ticket já
+      // resolvido (não desganha venda) e NÃO abre ciclo novo — por isso set_ticket_stage e nunca
+      // move_lead_stage, que passa 'new_cycle' e partiria o atendimento em dois cards.
+      let stage_changed = false;  // o card MUDOU de coluna nesta chamada
+      let stage_ok = false;       // o card ESTÁ na coluna certa (inclui já estar lá antes)
+      const { data: tTickets, error: tkErr } = await supabaseClient.from("tickets")
+        .select("id").eq("lead_id", lead.id).eq("status", "open")
+        .order("opened_at", { ascending: false }).limit(1);
+      const tTicket = tTickets && tTickets.length > 0 ? tTickets[0] : null;
+      if (tkErr && !transfIsSim) {
+        // Sem isto, uma consulta que FALHOU virava a afirmação "este contato não tem atendimento
+        // aberto", e o operador ia procurar um card sumido que existe.
+        await registrarErro(
+          "transferencia_ticket_ilegivel",
+          "O SDR transferiu o contato e a busca do atendimento aberto falhou; o card não foi movido (a equipe foi avisada assim mesmo)",
+          "error", clinic_id, { lead_id: lead.id, erro: tkErr.message ?? String(tkErr) },
+        );
+      }
+      if (destino && tTicket?.id) {
+        const { data: moveRes, error: moveErr } = await supabaseClient.rpc("set_ticket_stage", {
+          p_ticket_id: tTicket.id,
+          p_new_stage_id: destino.id,
+          p_source: "ia",
+          p_on_resolved: "block",
+        });
+        const mv = moveRes as any;
+        stage_changed = !!(mv?.success && !mv?.blocked && !mv?.noop);
+        // `noop` = o card JÁ ESTAVA na coluna de destino. Para o aviso à equipe isso é sucesso, não
+        // falha: tratá-lo como falha escondia a coluna justo no caso em que ela estava certa, e o
+        // vendedor ficava sem saber onde procurar.
+        stage_ok = !!(mv?.success && !mv?.blocked);
+        // ⚠️ `blocked` vem com success=TRUE (o ticket já tinha desfecho e a RPC recusa por
+        // segurança). Sem testá-lo à parte, o card não anda e nada acende: a equipe leria no
+        // grupo uma coluna onde o card não está.
+        if ((moveErr || (mv && mv.success === false) || mv?.blocked === true) && !transfIsSim) {
+          await registrarErro(
+            "transferencia_etapa_falhou",
+            mv?.blocked === true
+              ? "O SDR transferiu um contato cujo atendimento JÁ tinha desfecho; o card ficou onde estava (a equipe foi avisada assim mesmo)"
+              : "O SDR transferiu o contato mas o card NÃO mudou de etapa; ele fica invisível na fila do vendedor",
+            mv?.blocked === true ? "warning" : "error", clinic_id,
+            { lead_id: lead.id, ticket_id: tTicket.id, etapa: destino.name, blocked: mv?.blocked === true, erro: moveErr?.message ?? mv?.error ?? null },
+          );
+        }
+      } else if (destino && !tTicket?.id && !tkErr && !transfIsSim) {
+        // Sem ticket aberto não há onde gravar etapa. Raro (o card nasce junto da conversa), mas
+        // calado seria pior: a equipe é avisada e o card não aparece na coluna.
+        await registrarErro(
+          "transferencia_sem_ticket",
+          "O SDR transferiu um contato que não tem atendimento aberto; não há card para mover (a equipe foi avisada assim mesmo)",
+          "warning", clinic_id, { lead_id: lead.id, telefone: lead.phone, etapa: destino.name },
+        );
+      }
+
+      // 3. Avisa a equipe. Diagnóstico ANTES: com sino_all e group_all desligados (ou sem grupo
+      // cadastrado) o notify_ops não entrega em canal nenhum e não reclama. Sem esta checagem o
+      // pedido de orçamento sumiria em silêncio. Não é defeito de código, é chave desligada —
+      // por isso warning, e por isso o card já foi movido antes: a fila do Kanban é o backup.
+      //
+      // ⚠️ O erro é capturado: com a leitura falhando, todos os `?? true` abaixo diziam "está tudo
+      // ligado" e o alerta de "não tem para onde avisar" nunca sairia — justo o alerta que este
+      // bloco existe para produzir.
+      const { data: prefClinicT, error: prefErr } = await supabaseClient.from("clinics")
+        .select("notification_prefs, notification_group_id").eq("id", clinic_id).maybeSingle();
+      if (prefErr && !transfIsSim) {
+        await registrarErro(
+          "transferencia_prefs_ilegiveis",
+          "Não consegui ler as preferências de notificação da clínica ao transferir; não dá para saber se o aviso do orçamento chegou a alguém",
+          "warning", clinic_id, { lead_id: lead.id, erro: prefErr.message ?? String(prefErr) },
+        );
+      }
+      const prefsT = (prefClinicT?.notification_prefs ?? {}) as Record<string, any>;
+      const evT = (prefsT?.events as any)?.solicitacao_orcamento ?? {};
+      const sinoOnT = (prefsT.sino_all ?? true) !== false && (evT.sino ?? true) !== false;
+      const grupoOnT = (prefsT.group_all ?? true) !== false && (evT.grupo ?? true) !== false
+        && !!prefClinicT?.notification_group_id;
+      const nomeT = String(lead.name ?? "").trim();
+      const quemT = nomeT || lead.phone;
+      const cabecalhoT = nomeT ? `${nomeT}\n${lead.phone}` : String(lead.phone ?? "");
+      const resumoT = String(resumo || "").trim();
+
+      // ⚠️ SEM CANAL, O RESUMO VAI PARA A CENTRAL. Medido em 12/08/2026: 27 das 28 clínicas ativas
+      // estão com sino e grupo desligados, então este é o caso COMUM, não a exceção. O dado do
+      // atendimento não se perde (a ficha do contato, leads.ai_long_memory, é gravada a cada turno,
+      // nunca apagada, e aparece no próprio card do Kanban), mas o resumo curto que o modelo montou
+      // só existe nesta chamada: sem gravá-lo aqui, ele evapora. Vai no contexto do alerta, que é
+      // registro durável e já é onde o operador olha.
+      const semCanalT = !sinoOnT && !grupoOnT;
+      if (semCanalT && !transfIsSim) {
+        await registrarErro(
+          "solicitacao_orcamento_sem_canal",
+          "O SDR terminou a coleta e o aviso não tem para onde ir (sino e grupo desligados nesta clínica). O card foi movido no Kanban e os dados coletados estão no contexto deste alerta e na ficha do contato.",
+          "warning", clinic_id,
+          {
+            lead_id: lead.id, telefone: lead.phone, nome: nomeT || null,
+            etapa: destino?.name ?? null,
+            dados_coletados: resumoT || null,
+            sino_all: prefsT.sino_all ?? true, group_all: prefsT.group_all ?? true,
+          },
+        );
+      }
+
+      // ⚠️ O resumo É a entrega desta feature: é com ele que o vendedor orça sem reler a conversa.
+      // Chegar vazio não impede a transferência (deixar o contato para trás é pior que entregá-lo
+      // sem ficha), mas TEM que aparecer, senão o defeito fica invisível: a equipe recebe um aviso
+      // oco, a IA já está desligada e ninguém mais consegue perguntar ao cliente.
+      if (!resumoT && !transfIsSim) {
+        await registrarErro(
+          "transferencia_resumo_vazio",
+          "O SDR transferiu o contato SEM os dados coletados; o vendedor recebeu só nome e telefone e vai ter que abrir o card para ler a ficha do contato",
+          "warning", clinic_id, { lead_id: lead.id, telefone: lead.phone, etapa: destino?.name ?? null },
+        );
+      }
+
+      // Só afirma a coluna quando o card ESTÁ mesmo lá (inclui já estar antes, ver stage_ok).
+      // Dizer "Card em: X" sem isso manda o vendedor procurar numa coluna vazia, e ele conclui que
+      // o sistema perdeu o lead.
+      const ondeT = stage_ok && destino ? `\n\n_Card em: ${destino.name}_` : "";
+      let avisadoT = false;
+      // Quem perdeu a posse NÃO reavisa: o dono da posse já avisou pelo caminho dele, e duas
+      // mensagens iguais no grupo para o mesmo contato confundem mais do que ajudam.
+      if (!perdeuPosse) {
+        // ⚠️ Sem try/catch: o supabase-js NÃO lança em erro de RPC, devolve `{ error }`. Um
+        // try/catch aqui é código morto que finge cobertura — o alerta nunca dispararia e a falha
+        // do aviso sairia calada, que é o modo de falha que este sistema mais paga caro (§0.5).
+        const { error: notifyErr } = await supabaseClient.rpc("notify_ops", {
+          p_clinic_id: clinic_id,
+          p_event: "solicitacao_orcamento",
+          p_title: "Solicitação de orçamento",
+          p_body: `${quemT} — ${resumoT || "dados coletados pelo pré-atendimento"}`,
+          p_level: "warning",
+          p_lead_id: lead.id,
+          p_ticket_id: tTicket?.id ?? null,
+          p_notify_group: true,
+          p_group_text: `📐 *Solicitação de orçamento*\n${cabecalhoT}\n\n${resumoT || "Dados coletados pelo pré-atendimento."}${ondeT}`,
+        });
+        if (notifyErr) {
+          await registrarErro(
+            "aviso_solicitacao_orcamento_falhou",
+            "Não deu para avisar a equipe que o pré-atendimento terminou; o cliente está esperando um orçamento que ninguém sabe que foi pedido",
+            "critical", clinic_id,
+            { lead_id: lead.id, telefone: lead.phone, etapa: destino?.name ?? null, dados_coletados: resumoT || null, erro: notifyErr.message ?? String(notifyErr) },
+          );
+        } else {
+          // ⚠️ `notified` só é verdade quando havia CANAL. O notify_ops devolve sucesso mesmo sem
+          // entregar em lugar nenhum (é o comportamento dele quando as chaves estão desligadas), e
+          // reportar `notified: true` nesse caso fazia o retorno afirmar uma entrega que não houve.
+          avisadoT = sinoOnT || grupoOnT;
+        }
+      }
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          applied: !perdeuPosse,
+          etapa: destino?.name ?? null,
+          stage_changed,
+          stage_ok,
+          notified: avisadoT,
+          canais: { sino: sinoOnT, grupo: grupoOnT },
+          // A redação NÃO muda conforme deu certo ou não: o que o cliente ouve é sempre "está com
+          // o especialista". Dizer "a equipe foi avisada" seria prometer em nome de um canal que
+          // pode estar desligado, e o cliente não tem nada a ver com isso.
+          next_step:
+            "Feito. Diga ao cliente, em UMA mensagem curta, que você passou os dados para o especialista " +
+            "e que ele retorna o mais breve possível. NÃO prometa prazo, NÃO passe preço final, NÃO faça " +
+            "mais perguntas. Esta é sua ÚLTIMA mensagem neste atendimento: a partir daqui você está em " +
+            "silêncio para este contato.",
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
       );

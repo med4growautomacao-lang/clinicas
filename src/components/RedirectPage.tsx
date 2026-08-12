@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 
-const EDGE_URL = 'https://yzpclhuifquhfqpiwysh.supabase.co/functions/v1/whatsapp-redirect';
+import { FUNCTIONS_URL } from '../lib/env';
+
+const EDGE_URL = `${FUNCTIONS_URL}/whatsapp-redirect`;
 const RAST_COOKIE_TTL = 63072000; // 2 anos, igual ao script do site
 
 // O cookie vive neste domínio; a edge roda em outro (supabase.co) e não o enxerga. Então é esta

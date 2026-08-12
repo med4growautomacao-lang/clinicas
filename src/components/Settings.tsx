@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { FUNCTIONS_URL } from "../lib/env";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import {
@@ -1757,12 +1758,12 @@ function ClinicSettings({ data, onChange }: { data: Partial<Clinic>, onChange: (
     );
 }
 
-// Base pública das edges nativas (mesma origem usada em ConnectPage/RedirectPage).
-const EXTERNAL_FORMS_INGEST_URL = 'https://yzpclhuifquhfqpiwysh.supabase.co/functions/v1/external-forms-ingest';
-const EXTERNAL_CRM_STATUS_URL = 'https://yzpclhuifquhfqpiwysh.supabase.co/functions/v1/external-crm-status';
+// Base pública das edges nativas (mesma origem usada em ConnectPage/RedirectPage), vinda de lib/env.
+const EXTERNAL_FORMS_INGEST_URL = `${FUNCTIONS_URL}/external-forms-ingest`;
+const EXTERNAL_CRM_STATUS_URL = `${FUNCTIONS_URL}/external-crm-status`;
 // Serve o script de rastreamento POR CLÍNICA (placeholders resolvidos na edge). O site cola só a
 // linha do <script src> — atualizar o script no banco atualiza todos os sites sozinho.
-const SITE_SCRIPT_URL = 'https://yzpclhuifquhfqpiwysh.supabase.co/functions/v1/site-script';
+const SITE_SCRIPT_URL = `${FUNCTIONS_URL}/site-script`;
 
 interface ExternalIntegrationRow {
     capture_token: string;

@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { Loader2, CheckCircle2, QrCode, Smartphone, Info, RefreshCw, XCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const SUPABASE_FUNCTIONS_URL = 'https://yzpclhuifquhfqpiwysh.supabase.co/functions/v1';
+import { FUNCTIONS_URL as SUPABASE_FUNCTIONS_URL } from '../lib/env';
+
 const QR_PUBLIC_URL = `${SUPABASE_FUNCTIONS_URL}/whatsapp-qr-public`;
 const ORCHESTRATOR_URL = `${SUPABASE_FUNCTIONS_URL}/whatsapp-orchestrator`;
 const ATTEMPT_TIMEOUT_SECONDS = 120;

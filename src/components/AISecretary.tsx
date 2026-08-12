@@ -3257,6 +3257,7 @@ function PromptLayersExplainer() {
 }
 
 function ConfigView() {
+  const { activeClinicId } = useAuth();
   const { aiConfig, updateAI, loading } = useSettings();
   const { templates: promptTemplates } = usePromptTemplates();
   const activeTemplates = useMemo(() => promptTemplates.filter(t => t.is_active), [promptTemplates]);
@@ -3287,7 +3288,10 @@ function ConfigView() {
     setResetConfirm(null);
     try {
       const rpcName = mode === 'full' ? 'test_reset_full' : 'test_reset_for_rebook';
-      const { data, error } = await supabase.rpc(rpcName, { p_phone: phone });
+      // p_clinic_id prende o apagamento à clínica aberta na tela. Sem ele, um número cadastrado
+      // como teste em várias clínicas (o caso do dono) era reiniciado em TODAS de uma vez:
+      // medido em 12/08/2026, um clique alcançava 7 clínicas.
+      const { data, error } = await supabase.rpc(rpcName, { p_phone: phone, p_clinic_id: activeClinicId });
       if (error) throw error;
 
       const labels: Record<string, [string, string]> = {
@@ -3308,10 +3312,13 @@ function ConfigView() {
           const [s, p] = labels[k] || [k, k];
           return `${n} ${Number(n) === 1 ? s : p}`;
         });
-      const summary = parts.length ? parts.join(' · ') : 'Nada a apagar';
+      const summary = parts.length ? parts.join(' · ') : 'o contato já estava limpo nesta clínica';
       showToast(`Reset (${label}) — ${summary}`, 'success');
     } catch (err: any) {
-      showToast(`Erro no reset: ${err.message}`, 'error');
+      // A RPC recusa e EXPLICA (número fora da lista de teste, ou cargo sem permissão). Mostrar a
+      // mensagem dela vale mais que um "erro" genérico: antes, recusa e "nada a apagar" ficavam
+      // indistinguíveis para quem clicava.
+      showToast(err?.message || 'Não foi possível reiniciar o contato de teste.', 'error');
     } finally {
       setResetting(null);
     }
@@ -3735,7 +3742,7 @@ function ConfigView() {
                 </div>
 
                 <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-[11px] text-slate-500 leading-relaxed">
-                  <strong className="text-slate-700">Como funciona:</strong> o n8n detecta a frase exata enviada por um número da lista acima e chama a RPC <code className="font-mono bg-white px-1 rounded">test_reset_full</code> ou <code className="font-mono bg-white px-1 rounded">test_reset_for_rebook</code> no Supabase. As frases são case-insensitive (deixe minúsculas no n8n).
+                  <strong className="text-slate-700">Como funciona:</strong> o reset acontece pelos botões <strong>ZERAR</strong> e <strong>REAGEND.</strong> ao lado de cada número, e vale só para a clínica aberta nesta tela. O número precisa estar na lista acima, e apenas gestor pode executar. ⚠️ As frases abaixo dependiam do n8n, que não é mais usado: <strong>estão inativas</strong> e ficam aqui só até a migração do fluxo.
                 </div>
               </div>
             </div>

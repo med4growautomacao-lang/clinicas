@@ -40,6 +40,7 @@ import {
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { useFunnelStages, useLeads, useNotLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useProducts, Product, ProductInput, ProductAttribute, useQuoteImages, useAppointments, useDoctors, usePatients, useConsultationTypes, useProductionOrders, useInventoryItems, useOrcamentos, useClinicLossReasons, useChatMessages, getVigenteOrcamento, logSystemError, Conversion, Lead, Ticket, TransitionRule } from "../hooks/useSupabase";
+import { useTelaLarga } from "../hooks/useTelaLarga";
 import { ChatThread } from "./ChatThread";
 import { NotLeadPanel } from "./NotLeadPanel";
 import { supabase } from "../lib/supabase";
@@ -1375,23 +1376,6 @@ function ProductPicker({ value, products, protocols, useProd, useProt, sourceNou
 // Exportado para a Central de Orçamentos reusar o MESMO construtor. Duplicar esta tela lá seria
 // manter dois orçamentos diferentes vivos (catálogo, alturas, cálculo, documento e envio), e eles
 // divergiriam na primeira mudança.
-/** A tela comporta as três colunas? Espelha o breakpoint `xl` do Tailwind (1280px), e existe para
- *  o COMPORTAMENTO acompanhar o layout: esconder a conversa com `hidden xl:flex` tira do olho, mas
- *  o componente continua montado, buscando e observando. Aqui ele nem é criado. */
-function useTelaLarga(): boolean {
-  const consulta = '(min-width: 1280px)';
-  const [larga, setLarga] = useState(() => typeof window !== 'undefined' && window.matchMedia(consulta).matches);
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const mq = window.matchMedia(consulta);
-    const aoMudar = (e: MediaQueryListEvent) => setLarga(e.matches);
-    setLarga(mq.matches);
-    mq.addEventListener('change', aoMudar);
-    return () => mq.removeEventListener('change', aoMudar);
-  }, []);
-  return larga;
-}
-
 export function OrcamentoModal({ lead, ticketId, dadosPreAtendimento, initialQuote, sessionIndex = 1, projetosDoCliente = [], onClose, onCancel, onConfirm, onSavedAndNew }: {
   lead: { id: string; name: string; phone?: string | null };
   // Atendimento aberto. É por ele que se lê o que o pré-atendimento coletou (malha, altura,
@@ -1438,9 +1422,11 @@ export function OrcamentoModal({ lead, ticketId, dadosPreAtendimento, initialQuo
   // Os dois existem para o vendedor NÃO precisar sair daqui: antes ele fechava o orçamento, abria
   // a conversa para achar a medida e voltava. Ele lê à direita e preenche à esquerda.
   //
-  // A conversa SÓ é buscada quando a coluna dela cabe na tela. Abaixo de 1280px ela não é exibida,
-  // e buscar assim mesmo custava, a cada abertura do modal, uma consulta de 200 mensagens com os
-  // campos de mídia, uma inscrição de tempo real e o observador do rolo — tudo jogado fora.
+  // A conversa SÓ é buscada quando a coluna dela cabe na tela (o modo largo do Tailwind). Fora
+  // dele ela não é exibida, e buscar assim mesmo custava, a cada abertura do modal, uma consulta de
+  // 200 mensagens com os campos de mídia, uma inscrição de tempo real e o observador do rolo, tudo
+  // jogado fora. Pode virar e desvirar em tempo de execução; quem cuida disso é o useChatMessages,
+  // que nomeia cada inscrição de forma nova justamente para aguentar desligar e religar.
   const mostrarConversa = useTelaLarga();
   const { data: chatMessages, loading: chatLoading } = useChatMessages(
     mostrarConversa ? lead.id : undefined,
@@ -1454,9 +1440,17 @@ export function OrcamentoModal({ lead, ticketId, dadosPreAtendimento, initialQuo
   const [dadosSDR, setDadosSDR] = useState<{ resumo?: unknown; itens?: unknown } | null>(
     (dadosPreAtendimento && typeof dadosPreAtendimento === 'object') ? dadosPreAtendimento : null,
   );
+  // ⚠️ Comparação por CONTEÚDO, não pelo objeto. O quadro recarrega os atendimentos a cada 30s (e a
+  // cada atualização ao vivo, e ao voltar para a aba) e devolve objetos NOVOS com o mesmo conteúdo.
+  // Dependendo do objeto, o efeito disparava a cada recarga e redesenhava o modal inteiro, com a
+  // conversa junto, enquanto o vendedor digitava o orçamento. Em texto, conteúdo igual é igual.
+  const dadosPropSerial = useMemo(
+    () => (dadosPreAtendimento && typeof dadosPreAtendimento === 'object') ? JSON.stringify(dadosPreAtendimento) : '',
+    [dadosPreAtendimento],
+  );
   useEffect(() => {
     let cancelado = false;
-    if (dadosPreAtendimento && typeof dadosPreAtendimento === 'object') { setDadosSDR(dadosPreAtendimento); return; }
+    if (dadosPropSerial) { setDadosSDR(JSON.parse(dadosPropSerial)); return; }
     if (!ticketId) { setDadosSDR(null); return; }
     supabase.from('tickets').select('dados_pre_atendimento').eq('id', ticketId).maybeSingle()
       .then(({ data, error }) => {
@@ -1466,7 +1460,7 @@ export function OrcamentoModal({ lead, ticketId, dadosPreAtendimento, initialQuo
         // saber que houve defeito. Registrar é o que transforma isso em algo que alguém enxerga.
         if (error) {
           logSystemError(
-            'orcamento_dados_pre_atendimento_ilegiveis',
+            'ORCAMENTO_DADOS_PRE_ATENDIMENTO_ILEGIVEIS',
             'Não foi possível ler os dados coletados no pré-atendimento; o vendedor abriu o orçamento sem a ficha e vai ter que reler a conversa',
             activeClinicId,
             { ticket_id: ticketId, lead_id: lead.id, erro: error.message ?? String(error) },
@@ -1477,11 +1471,18 @@ export function OrcamentoModal({ lead, ticketId, dadosPreAtendimento, initialQuo
         setDadosSDR((data as any)?.dados_pre_atendimento ?? null);
       });
     return () => { cancelado = true; };
-  }, [ticketId, dadosPreAtendimento, lead.id]);
+  }, [ticketId, dadosPropSerial, lead.id, activeClinicId]);
 
   // Converte para texto ANTES de renderizar. A coluna é jsonb sem tipo garantido e já tem mais de
   // um autor (o agente e uma recuperação feita à mão); um valor que não seja string derruba o
   // React e o modal inteiro fica em branco, o que é bem pior do que um campo estranho.
+  //
+  // ⚠️ O teto de campos é repetido aqui de propósito. A regra canônica é do servidor
+  // (MAX_CAMPOS_PRE_ATENDIMENTO, em supabase/functions/_shared/agent/tools.ts), que o Vite não
+  // consegue importar; mas a coluna é jsonb sem trava, então uma linha gravada por outro caminho
+  // com 60 pares viraria 60 linhas numa coluna que rola. O teto existe para a ficha ser conferível
+  // de relance. Ao mudar um dos dois, mude o outro.
+  const MAX_CAMPOS_FICHA = 15;
   const resumoSDR = (() => { const t = String(dadosSDR?.resumo ?? '').trim(); return t || null; })();
   const itensSDR = Array.isArray(dadosSDR?.itens)
     ? (dadosSDR!.itens as unknown[])
@@ -1490,6 +1491,7 @@ export function OrcamentoModal({ lead, ticketId, dadosPreAtendimento, initialQuo
           return { campo: String(o.campo ?? '').trim(), valor: String(o.valor ?? '').trim() };
         })
         .filter((i) => i.campo && i.valor)
+        .slice(0, MAX_CAMPOS_FICHA)
     : [];
 
   // Fontes de item conforme a Configuração do Orçamento da clínica (padrão: ambas ligadas).

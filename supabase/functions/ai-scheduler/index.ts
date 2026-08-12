@@ -1527,10 +1527,16 @@ serve(async (req) => {
       // move_lead_stage, que passa 'new_cycle' e partiria o atendimento em dois cards.
       let stage_changed = false;  // o card MUDOU de coluna nesta chamada
       let stage_ok = false;       // o card ESTÁ na coluna certa (inclui já estar lá antes)
-      // `dados_pre_atendimento` vem junto porque o passo 2b MESCLA em cima do que já existe, e
-      // para mesclar é preciso ter lido. Mesma consulta, custo zero.
+
+      // Limpeza dos dados coletados: UMA VEZ, aqui em cima. Os três avisos abaixo e a gravação
+      // usam este mesmo resultado — calcular de novo em cada ponto é como as regras divergem
+      // (um ganha um teto, o outro não) e é o que a função compartilhada existe para evitar.
+      const itensDados = sanitizarDadosPreAtendimento(dados);
+      const resumoLimpo = String(resumo ?? "").trim() || null;
+      const temDadosParaGravar = itensDados.length > 0 || !!resumoLimpo;
+
       const { data: tTickets, error: tkErr } = await supabaseClient.from("tickets")
-        .select("id, dados_pre_atendimento").eq("lead_id", lead.id).eq("status", "open")
+        .select("id").eq("lead_id", lead.id).eq("status", "open")
         .order("opened_at", { ascending: false }).limit(1);
       const tTicket = tTickets && tTickets.length > 0 ? tTickets[0] : null;
       if (tkErr && !transfIsSim) {
@@ -1575,9 +1581,12 @@ serve(async (req) => {
           "transferencia_sem_ticket",
           "O SDR transferiu um contato que não tem atendimento aberto; não há card para mover nem onde guardar os dados coletados (a equipe foi avisada assim mesmo)",
           "warning", clinic_id,
-          // O resumo e os campos vão nos detalhes de propósito: sem card, esta entrada é o ÚNICO
-          // lugar de onde a coleta pode ser recuperada depois.
-          { lead_id: lead.id, telefone: lead.phone, etapa: destino.name, resumo: String(resumo ?? "").trim() || null, campos: sanitizarDadosPreAtendimento(dados) },
+          // O resumo e os campos vão nos detalhes de propósito: sem card, não há onde gravá-los, e
+          // aqui pelo menos ficam legíveis para quem for atrás. Não é cofre: erro resolvido sai do
+          // painel (vai para system_errors_archive), então o operador que resolver esta entrada
+          // sem copiar os dados vai precisar do arquivo. A cópia durável do que o contato disse
+          // continua sendo a ficha do contato (leads.ai_long_memory) e a própria conversa.
+          { lead_id: lead.id, telefone: lead.phone, etapa: destino.name, resumo: resumoLimpo, campos: itensDados },
         );
       }
 
@@ -1587,39 +1596,24 @@ serve(async (req) => {
       // separados, em vez de reler a conversa ou garimpar dentro da ficha em texto do contato.
       // Fica no ticket (não no lead) porque o dado é DESTE atendimento: o mesmo cliente pode
       // voltar meses depois querendo outra tela, e a medida antiga não pode vazar para o pedido novo.
-      //
-      // Best-effort de propósito: se falhar, o contato JÁ foi transferido e a equipe JÁ foi avisada
-      // com o resumo. Derrubar a transferência por causa da vitrine seria trocar o essencial pelo
-      // conveniente. Mas registra na Central, senão o vendedor abre o card vazio sem saber por quê.
-      const itensDados = sanitizarDadosPreAtendimento(dados);
-      const resumoLimpo = String(resumo ?? "").trim() || null;
-      const temDadosParaGravar = itensDados.length > 0 || !!resumoLimpo;
-
       if (tTicket?.id && temDadosParaGravar) {
-        // ⚠️ MERGE PARCIAL, nunca reconstruir o jsonb do zero (regra da casa; o padrão de regravar
-        // inteiro já causou 3 bugs de "salvar apaga campo"). Aqui a perda seria real: o campo já
-        // carrega marcas de origem gravadas por outro caminho, e uma segunda transferência que
-        // trouxesse só o resumo apagaria a ficha de campos inteira — o vendedor abriria o card e
-        // malha, altura e comprimento teriam sumido, sem erro nenhum.
-        const anteriorRaw = (tTicket as Record<string, unknown>).dados_pre_atendimento;
-        const anterior = (anteriorRaw && typeof anteriorRaw === "object" && !Array.isArray(anteriorRaw))
-          ? anteriorRaw as Record<string, unknown>
-          : {};
-        const itensAnteriores = Array.isArray(anterior.itens) ? anterior.itens : [];
-        const { error: dadosErr } = await supabaseClient.from("tickets")
-          .update({
-            dados_pre_atendimento: {
-              ...anterior,
-              // Coleta nova só substitui o que ela própria trouxe. Vazio NÃO apaga o que já havia:
-              // o modelo omitir um campo não é o cliente ter voltado atrás.
-              resumo: resumoLimpo ?? (anterior.resumo ?? null),
-              itens: itensDados.length > 0 ? itensDados : itensAnteriores,
-              // Horário de São Paulo, igual ao resto do sistema. Gravar em UTC aqui deixaria uma
-              // diferença de 3h esperando a primeira tela que exibisse "coletado às".
-              em: nowSPTransf,
-            },
-          })
-          .eq("id", tTicket.id);
+        // ⚠️ O MERGE MORA NO BANCO, numa instrução só (ticket_merge_dados_pre_atendimento).
+        //
+        // Aqui já foi ler-modificar-gravar do lado de cá, e era errado de duas formas, as duas
+        // mudas: a lista de campos era trocada INTEIRA (coleta nova só com a altura apagava malha
+        // e comprimento) e duas transferências simultâneas se atropelavam, porque a leitura e a
+        // gravação ficavam a vários passos de distância — e o worker executa as tool calls do
+        // turno em paralelo, então não é hipótese. Sob a trava da linha, no banco, os dois somem.
+        //
+        // Best-effort de propósito: se falhar, o contato JÁ foi transferido e a equipe JÁ foi
+        // avisada com o resumo. Derrubar a transferência por causa da vitrine seria trocar o
+        // essencial pelo conveniente. Mas registra na Central, senão o vendedor abre o card vazio
+        // sem saber por quê.
+        const { error: dadosErr } = await supabaseClient.rpc("ticket_merge_dados_pre_atendimento", {
+          p_ticket_id: tTicket.id,
+          p_resumo: resumoLimpo,
+          p_itens: itensDados,
+        });
         if (dadosErr && !transfIsSim) {
           await registrarErro(
             "transferencia_dados_nao_gravados",
@@ -1668,7 +1662,7 @@ serve(async (req) => {
       const nomeT = String(lead.name ?? "").trim();
       const quemT = nomeT || lead.phone;
       const cabecalhoT = nomeT ? `${nomeT}\n${lead.phone}` : String(lead.phone ?? "");
-      const resumoT = String(resumo || "").trim();
+      const resumoT = resumoLimpo ?? "";   // mesmo texto que foi gravado no atendimento, não outra limpeza
 
       // ⚠️ SEM CANAL, O RESUMO VAI PARA A CENTRAL. Medido em 12/08/2026: 27 das 28 clínicas ativas
       // estão com sino e grupo desligados, então este é o caso COMUM, não a exceção. O dado do

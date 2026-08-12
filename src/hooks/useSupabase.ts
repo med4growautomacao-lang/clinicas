@@ -2406,8 +2406,13 @@ export interface ChatMessage {
   created_at: string;
 }
 
-/** Sufixo por INSTÂNCIA do hook. Ver o comentário do canal, mais abaixo: sem ele, dois componentes
- *  abertos na mesma conversa compartilham a mesma inscrição e um derruba a do outro ao fechar. */
+/** Sufixo por INSCRIÇÃO (não por componente). Ver o comentário do canal, mais abaixo: um nome novo
+ *  a cada inscrição é o que impede DUAS armadilhas do supabase-js de uma vez — o compartilhamento
+ *  do canal entre componentes e a religação que não pega.
+ *
+ *  Só é incrementado DENTRO do efeito, nunca durante o desenho da tela: mexer em variável de módulo
+ *  enquanto o React renderiza é efeito colateral impuro, e o React pode descartar e refazer um
+ *  desenho quando quiser. */
 let seqCanalConversa = 0;
 
 export function useChatMessages(leadId?: string, leadPhone?: string | null) {
@@ -2415,20 +2420,22 @@ export function useChatMessages(leadId?: string, leadPhone?: string | null) {
   const [data, setData] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const idInstancia = useRef<number>(0);
-  if (idInstancia.current === 0) idInstancia.current = ++seqCanalConversa;
 
   const [clinicPhone, setClinicPhone] = useState<string | null>(null);
 
   useEffect(() => {
     if (!activeClinicId) return;
+    // Mesma guarda da busca de mensagens: sem conversa alvo, este hook está desligado, e o número
+    // da clínica só serve ao `send()`. Sem isto, a tela que desliga o hook de propósito (o modal de
+    // orçamento em tela estreita, onde a conversa nem é exibida) ainda pagava esta consulta.
+    if (!leadId && !leadPhone) return;
     supabase
       .from('whatsapp_instances')
       .select('phone_number')
       .eq('clinic_id', activeClinicId)
       .maybeSingle()
       .then(({ data }) => setClinicPhone(data?.phone_number || null));
-  }, [activeClinicId]);
+  }, [activeClinicId, leadId, leadPhone]);
 
   const parseMessage = (msg: any): any => {
     try {
@@ -2518,14 +2525,23 @@ export function useChatMessages(leadId?: string, leadPhone?: string | null) {
     if (!activeClinicId) return;
     if (!leadId && !leadPhone) return;
 
-    // ⚠️ O sufixo por instância é o que impede um componente de calar o outro. O supabase-js
-    // REAPROVEITA o canal quando o nome se repete (RealtimeClient.channel: se o tópico já existe,
-    // devolve o existente em vez de criar um novo) e `removeChannel` cancela a inscrição desse
-    // objeto compartilhado. Sem o sufixo, abrir a conversa do contato e o modal de orçamento do
-    // MESMO contato dava um canal só para os dois: fechar o modal deixava a conversa aberta na
-    // tela e MUDA, sem erro nenhum — o cliente escrevia e o vendedor concluía que ele sumiu.
+    // ⚠️ NOME NOVO A CADA INSCRIÇÃO. O supabase-js REAPROVEITA o canal quando o nome se repete
+    // (RealtimeClient.channel: se o tópico já existe, devolve o existente em vez de criar outro),
+    // e isso quebra de duas formas, as duas mudas:
+    //
+    //   1. Dois componentes na MESMA conversa (a conversa aberta no card e o modal de orçamento do
+    //      mesmo contato) ficavam com um canal só. Fechar um cancelava a inscrição do outro: a
+    //      conversa continuava na tela e parava de receber, e o vendedor concluía que o cliente
+    //      sumiu.
+    //   2. Desligar e religar RÁPIDO com o mesmo nome não pega. `unsubscribe()` marca o canal como
+    //      "saindo" na hora e só o remove quando o servidor confirma; `subscribe()` só faz algo se
+    //      o canal estiver FECHADO. No intervalo entre os dois, religar é ignorado sem erro — que é
+    //      exatamente o que acontece ao cruzar a largura de tela que monta e desmonta a conversa.
+    //
+    // Nome novo a cada inscrição sai dos dois: não colide com o de ninguém, nem com o próprio
+    // canal anterior ainda saindo. O filtro é por lead/telefone, então o nome pode ser descartável.
     const chaveConversa = leadId ? `lead_${leadId}` : `phone_${leadPhone}`;
-    const channelName = `chat_${chaveConversa}_i${idInstancia.current}`;
+    const channelName = `chat_${chaveConversa}_s${++seqCanalConversa}`;
     const filter = leadId
       ? `lead_id=eq.${leadId}`
       : `phone=eq.${leadPhone}`;

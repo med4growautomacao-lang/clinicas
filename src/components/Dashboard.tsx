@@ -10,6 +10,7 @@ import {
   Loader2,
   ShoppingCart,
   Receipt,
+  Percent,
   DollarSign,
   Target,
   Bot,
@@ -194,7 +195,13 @@ export function Dashboard() {
     { title: "Leads", value: `${stats.totalLeads}`, trend: "Novos no período", icon: MessageSquare, color: "bg-indigo-50 text-indigo-600" },
     { title: "Agendados", value: `${stats.totalAppointments}`, trend: "Gerados (agenda ∪ funil)", icon: CalendarCheck, color: "bg-sky-50 text-sky-600" },
     // Quantidade em destaque, valor somado embaixo. Conta pelo dia do ENVIO (sent_at).
-    ...(isOutro ? [{ title: "Orçamentos enviados", value: `${stats.quotesSent}`, trend: `${fmtBRL0(stats.quotesValue)} enviados no período`, icon: FileText, color: "bg-blue-50 text-blue-600" }] : []),
+    ...(isOutro ? [
+      { title: "Orçamentos enviados", value: `${stats.quotesSent}`, trend: `${fmtBRL0(stats.quotesValue)} enviados no período`, icon: FileText, color: "bg-blue-50 text-blue-600" },
+      // Taxa por COORTE: dos orçamentos enviados no período, quantos viraram venda. O "X de Y"
+      // embaixo não é enfeite — orçamento enviado ontem ainda não teve tempo de fechar, e sem o
+      // denominador a porcentagem do mês corrente parece queda de desempenho.
+      { title: "Orçamento → Venda", value: stats.quotesSent > 0 ? `${((stats.quotesWon / stats.quotesSent) * 100).toFixed(1).replace('.', ',')}%` : "—", trend: `${stats.quotesWon} de ${stats.quotesSent} viraram venda`, icon: Percent, color: "bg-emerald-50 text-emerald-600" },
+    ] : []),
     // ⚠️ Este número conta CARDS ganhos, ou seja, clientes que compraram, não vendas lançadas: o
     // mesmo cliente pode fechar vários negócios no mesmo card e continua contando 1. Faturamento
     // (acima) sai de conversions e soma todas. Não "corrigir" a conta: o rótulo é que estava velho.

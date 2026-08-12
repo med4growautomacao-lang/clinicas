@@ -40,7 +40,8 @@ import {
   Video,
   Play,
   ExternalLink,
-  Receipt
+  Receipt,
+  Percent
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -125,6 +126,8 @@ const METRICS_CONFIG = [
   { id: 'ticket_medio', label: 'Ticket Médio', color: '#2563eb', type: 'currency', icon: DollarSign, bgColor: 'bg-blue-50 text-blue-600' },
   // Só WakeDesk tem Central de Orçamentos: numa clínica a métrica é filtrada da lista e do ⚙️.
   { id: 'quotes_sent', label: 'Orçamentos enviados', color: '#0284c7', type: 'number', icon: FileText, bgColor: 'bg-sky-50 text-sky-600' },
+  // Coorte pelo ENVIO: dos orçamentos enviados no período, quantos viraram venda.
+  { id: 'quotes_win_rate', label: 'Orçamento → Venda', color: '#059669', type: 'percent', icon: Percent, bgColor: 'bg-emerald-50 text-emerald-600' },
   { id: 'roas', label: 'ROAS', color: '#ea580c', type: 'ratio', icon: TrendingUp, bgColor: 'bg-orange-50 text-orange-600' },
   { id: 'lead_to_apt_rate', label: 'Lead p/ Agend.', color: '#0ea5e9', type: 'percent', icon: Activity, bgColor: 'bg-sky-50 text-sky-600' },
   { id: 'lead_to_conv_rate', label: 'Lead p/ Cliente', color: '#06b6d4', type: 'percent', icon: Activity, bgColor: 'bg-cyan-50 text-cyan-600' },
@@ -432,7 +435,7 @@ export function MarketingAnalytics() {
   const [selectedChannel, setSelectedChannel] = useState<string[]>([]);
 
   // Ordem exibida = ordem salva MENOS as métricas de módulo que esta clínica não tem.
-  const semModuloAusente = useCallback((ids: string[]) => ids.filter((id) => id !== 'quotes_sent' || isOutro), [isOutro]);
+  const semModuloAusente = useCallback((ids: string[]) => ids.filter((id) => !id.startsWith('quotes_') || isOutro), [isOutro]);
   const [dashboardVisibleMetrics, setDashboardVisibleMetrics] = useState<string[]>(() => loadVisibleMetrics('mkt_dash_visible_metrics', 'mkt_dash_metrics_order'));
   const [dashboardMetricsOrder, setDashboardMetricsOrder] = useState<string[]>(() => loadMetricsOrder('mkt_dash_metrics_order'));
   const [tableVisibleMetrics, setTableVisibleMetrics] = useState<string[]>(() => loadVisibleMetrics('mkt_table_visible_metrics', 'mkt_table_metrics_order'));
@@ -667,11 +670,11 @@ export function MarketingAnalytics() {
     // sales_count tem o nome do id da métrica de propósito: é o que faz a linha da TABELA
     // (MetricRow) achar o valor pelo caminho genérico, sem mais um `else if` para manter.
     const mkStat = () => ({
-      leads: 0, convs: 0, investment: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, appointments: 0, whatsapp_leads: 0, forms_leads: 0,
+      leads: 0, convs: 0, investment: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, quotes_won: 0, appointments: 0, whatsapp_leads: 0, forms_leads: 0,
       ch: {
-        forms:    { leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, appointments: 0 },
-        whatsapp: { leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, appointments: 0 },
-        balcao:   { leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, appointments: 0 },
+        forms:    { leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, quotes_won: 0, appointments: 0 },
+        whatsapp: { leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, quotes_won: 0, appointments: 0 },
+        balcao:   { leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, quotes_won: 0, appointments: 0 },
       },
     });
 
@@ -740,6 +743,11 @@ export function MarketingAnalytics() {
         if (vQuotes > 0) {
           stats[pKey][platform].quotes_value += vQuotes;
           stats[pKey][platform].ch[ch].quotes_value += vQuotes;
+        }
+        const nQuotesWon = Number(row.quotes_won) || 0;
+        if (nQuotesWon > 0) {
+          stats[pKey][platform].quotes_won += nQuotesWon;
+          stats[pKey][platform].ch[ch].quotes_won += nQuotesWon;
         }
         // Conversões e Agendamentos: MESMA fonte da verdade que VG/Comercial —
         // wins = tickets.outcome='ganho'; scheduled = união agendamento∪etapa (dedupe).
@@ -1480,12 +1488,12 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
   // Ajusta uma linha de stats (por plataforma ou já somada) ao canal selecionado.
   // Investimento não tem canal — fica sempre cheio.
   const adjChannel = useCallback((s: any) => {
-    if (!s) return { investment: 0, leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, appointments: 0 };
+    if (!s) return { investment: 0, leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, quotes_won: 0, appointments: 0 };
     if (selectedChannel.length === 0) {
-      return { investment: s.investment || 0, leads: s.leads || 0, convs: s.convs || 0, conv_value: s.conv_value || 0, sales_count: s.sales_count || 0, quotes_sent: s.quotes_sent || 0, quotes_value: s.quotes_value || 0, appointments: s.appointments || 0 };
+      return { investment: s.investment || 0, leads: s.leads || 0, convs: s.convs || 0, conv_value: s.conv_value || 0, sales_count: s.sales_count || 0, quotes_sent: s.quotes_sent || 0, quotes_value: s.quotes_value || 0, quotes_won: s.quotes_won || 0, appointments: s.appointments || 0 };
     }
     // Soma os canais selecionados (investimento não tem canal -> fica cheio)
-    const acc = { investment: s.investment || 0, leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, appointments: 0 };
+    const acc = { investment: s.investment || 0, leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, quotes_won: 0, appointments: 0 };
     selectedChannel.forEach((ch) => {
       const c = s.ch?.[ch] || {};
       acc.leads += c.leads || 0;
@@ -1494,6 +1502,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
       acc.sales_count += c.sales_count || 0;
       acc.quotes_sent += c.quotes_sent || 0;
       acc.quotes_value += c.quotes_value || 0;
+      acc.quotes_won += c.quotes_won || 0;
       acc.appointments += c.appointments || 0;
     });
     return acc;
@@ -1501,8 +1510,8 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
 
   const getTotals = useCallback((metricSet: any) => {
     const res: any = {
-      investment: 0, leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, appointments: 0,
-      ch: { forms: { leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, appointments: 0 }, whatsapp: { leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, appointments: 0 }, balcao: { leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, appointments: 0 } },
+      investment: 0, leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, quotes_won: 0, appointments: 0,
+      ch: { forms: { leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, quotes_won: 0, appointments: 0 }, whatsapp: { leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, quotes_won: 0, appointments: 0 }, balcao: { leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, quotes_won: 0, appointments: 0 } },
     };
     if (!metricSet) return res;
     Object.values(metricSet).forEach((p: any) => {
@@ -1513,6 +1522,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
       res.sales_count += p.sales_count || 0;
       res.quotes_sent += p.quotes_sent || 0;
       res.quotes_value += p.quotes_value || 0;
+      res.quotes_won += p.quotes_won || 0;
       res.appointments += p.appointments || 0;
       (['forms', 'whatsapp', 'balcao'] as const).forEach((ch) => {
         const c = p.ch?.[ch] || {};
@@ -1522,6 +1532,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
         res.ch[ch].sales_count += c.sales_count || 0;
         res.ch[ch].quotes_sent += c.quotes_sent || 0;
         res.ch[ch].quotes_value += c.quotes_value || 0;
+        res.ch[ch].quotes_won += c.quotes_won || 0;
         res.ch[ch].appointments += c.appointments || 0;
       });
     });
@@ -1531,7 +1542,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
   // Sum across ALL periods in the range, respecting the selected platform
   const currentTotals = useMemo(() => {
     const res = {
-      investment: 0, leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, appointments: 0,
+      investment: 0, leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, quotes_won: 0, appointments: 0,
       whatsapp: 0, forms: 0,
       breakdown: {
         meta_ads: { leads: 0, whatsapp: 0, forms: 0 },
@@ -1561,6 +1572,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
           res.sales_count += a.sales_count;
           res.quotes_sent += a.quotes_sent;
           res.quotes_value += a.quotes_value;
+          res.quotes_won += a.quotes_won;
           res.appointments += a.appointments;
           res.whatsapp += s.ch?.whatsapp?.leads || 0;
           res.forms += s.ch?.forms?.leads || 0;
@@ -1571,7 +1583,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
   }, [periods, metricsByPeriod, selectedPlatform, selectedChannel, adjChannel]);
 
   const prevTotals = useMemo(() => {
-    const res = { investment: 0, leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, appointments: 0 };
+    const res = { investment: 0, leads: 0, convs: 0, conv_value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, quotes_won: 0, appointments: 0 };
     if (!isComparing) return res;
     periods.forEach((p: any) => {
       const dayStats = comparisonMetricsByPeriod[p.label];
@@ -1590,6 +1602,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
           res.sales_count += a.sales_count;
           res.quotes_sent += a.quotes_sent;
           res.quotes_value += a.quotes_value;
+          res.quotes_won += a.quotes_won;
           res.appointments += a.appointments;
         }
       });
@@ -1623,6 +1636,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
         conv_value: stats.conv_value,
         sales_count: stats.sales_count,
         quotes_sent: stats.quotes_sent,
+        quotes_win_rate: stats.quotes_sent > 0 ? (stats.quotes_won / stats.quotes_sent) * 100 : 0,
         ticket_medio: stats.sales_count > 0 ? stats.conv_value / stats.sales_count : 0,
         cpl: invNA ? NaN : (stats.leads > 0 ? stats.investment / stats.leads : 0),
         cpapt: invNA ? NaN : (stats.appointments > 0 ? stats.investment / stats.appointments : 0),
@@ -1639,6 +1653,7 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
         conv_value_prev: compStats.conv_value,
         sales_count_prev: compStats.sales_count,
         quotes_sent_prev: compStats.quotes_sent,
+        quotes_win_rate_prev: compStats.quotes_sent > 0 ? (compStats.quotes_won / compStats.quotes_sent) * 100 : 0,
         ticket_medio_prev: compStats.sales_count > 0 ? compStats.conv_value / compStats.sales_count : 0,
         cpl_prev: invNA ? NaN : (compStats.leads > 0 ? compStats.investment / compStats.leads : 0),
         cpapt_prev: invNA ? NaN : (compStats.appointments > 0 ? compStats.investment / compStats.appointments : 0),
@@ -1722,6 +1737,10 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
           else if (id === 'conv_value') { value = currentTotals.conv_value; prevValue = isComparing ? prevTotals.conv_value : null; }
           else if (id === 'sales_count') { value = currentTotals.sales_count; prevValue = isComparing ? prevTotals.sales_count : null; }
           else if (id === 'quotes_sent') { value = currentTotals.quotes_sent; prevValue = isComparing ? prevTotals.quotes_sent : null; }
+          else if (id === 'quotes_win_rate') {
+            value = currentTotals.quotes_sent > 0 ? (currentTotals.quotes_won / currentTotals.quotes_sent) * 100 : NaN;
+            prevValue = isComparing ? (prevTotals.quotes_sent > 0 ? (prevTotals.quotes_won / prevTotals.quotes_sent) * 100 : null) : null;
+          }
           else if (id === 'ticket_medio') {
             // REAL: valor lançado ÷ nº de vendas lançadas. Sem venda no período não existe ticket
             // real — NaN vira "—" no StatCard, e a meta continua no rodapé.
@@ -1773,6 +1792,8 @@ function DashboardView({ periods, metricsByPeriod, comparisonMetricsByPeriod, is
             ? (metaTicket > 0 ? `Meta: R$ ${metaTicket.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : 'Meta não definida')
             : id === 'quotes_sent'
             ? `R$ ${currentTotals.quotes_value.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} enviados`
+            : id === 'quotes_win_rate'
+            ? `${currentTotals.quotes_won} de ${currentTotals.quotes_sent} viraram venda`
             : undefined;
 
           return (
@@ -3380,6 +3401,12 @@ function MetricRow({ label, periods, metrics, compareMetrics, isComparing, platf
         else if (valueKey === 'leads') { val = currentLeads; pVal = prevLeads; }
         else if (valueKey === 'appointments') { val = currentApts; pVal = prevMetrics?.appointments || 0; }
         else if (valueKey === 'convs') { val = currentConvs; pVal = prevMetrics?.convs || 0; }
+        else if (valueKey === 'quotes_win_rate') {
+          const env = dayMetrics?.quotes_sent || 0;
+          const envPrev = prevMetrics?.quotes_sent || 0;
+          val = env > 0 ? ((dayMetrics?.quotes_won || 0) / env) * 100 : 0;
+          pVal = envPrev > 0 ? ((prevMetrics?.quotes_won || 0) / envPrev) * 100 : 0;
+        }
         else if (valueKey === 'ticket_medio') {
           // Ticket REAL da linha: valor lançado ÷ nº de vendas lançadas do dia/plataforma.
           const n = dayMetrics?.sales_count || 0;
@@ -3394,7 +3421,7 @@ function MetricRow({ label, periods, metrics, compareMetrics, isComparing, platf
         // Linhas que o editor NÃO deixa digitar. 'sales_count' entra aqui porque não existe
         // override manual de contagem de vendas: um input aqui aceitaria o número e o descartaria
         // no salvar, que é pior do que não ter campo.
-        const isCalculated = ['cpl', 'cpa', 'cpapt', 'roas', 'sales_count', 'ticket_medio', 'quotes_sent'].includes(valueKey);
+        const isCalculated = ['cpl', 'cpa', 'cpapt', 'roas', 'sales_count', 'ticket_medio', 'quotes_sent', 'quotes_win_rate'].includes(valueKey);
 
         if (isEditing && period === 'dia' && valueKey && !isCalculated) {
           const isMoney = valueKey === 'investment' || valueKey === 'conversions_value' || valueKey === 'conv_value';
@@ -3462,7 +3489,7 @@ function SummaryMetricRow({ label, periods, metrics, compareMetrics, isComparing
         const platforms = ['meta_ads', 'google_ads', 'no_track'] as Platform[];
 
         const getTotals = (s: any) => {
-          const res = { leads: 0, convs: 0, investment: 0, value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, appointments: 0 };
+          const res = { leads: 0, convs: 0, investment: 0, value: 0, sales_count: 0, quotes_sent: 0, quotes_value: 0, quotes_won: 0, appointments: 0 };
           platforms.forEach(pl => {
             res.leads += s?.[pl]?.leads || 0;
             res.convs += s?.[pl]?.convs || 0;
@@ -3471,6 +3498,7 @@ function SummaryMetricRow({ label, periods, metrics, compareMetrics, isComparing
             res.sales_count += s?.[pl]?.sales_count || 0;
             res.quotes_sent += s?.[pl]?.quotes_sent || 0;
             res.quotes_value += s?.[pl]?.quotes_value || 0;
+            res.quotes_won += s?.[pl]?.quotes_won || 0;
             res.appointments += s?.[pl]?.appointments || 0;
           });
           return res;
@@ -3489,6 +3517,7 @@ function SummaryMetricRow({ label, periods, metrics, compareMetrics, isComparing
         else if (type === 'conv_value') { val = current.value; formatType = 'curr'; }
         else if (type === 'sales_count') val = current.sales_count;
         else if (type === 'quotes_sent') val = current.quotes_sent;
+        else if (type === 'quotes_win_rate') { val = current.quotes_sent > 0 ? (current.quotes_won / current.quotes_sent) * 100 : 0; formatType = 'perc'; }
         else if (type === 'ticket_medio') { val = current.sales_count > 0 ? current.value / current.sales_count : 0; formatType = 'curr'; }
         else if (type === 'cpl') { val = current.leads > 0 ? current.investment / current.leads : 0; formatType = 'curr'; }
         else if (type === 'cpapt') { val = current.appointments > 0 ? current.investment / current.appointments : 0; formatType = 'curr'; }

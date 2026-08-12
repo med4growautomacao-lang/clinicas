@@ -74,7 +74,7 @@ interface CommercialData {
   sla: { breaches: number; firstResponseMin: number; responseMin: number; overBreachMin: number; responseCycles: number; slaMinutes: number };
   // salesCount = quantas VENDAS foram lançadas no recorte (o mesmo card pode ter várias);
   // outcomes.won = quantos CARDS ganhos. Números diferentes de propósito.
-  finance: { revenue: number; revenueScoped: number; salesCount?: number; investment: number; investmentTotal: number; convertedValue: number; salesCycleDays: number; attendedConsults: number; defaultTicket: number; quotesSent?: number; quotesValue?: number };
+  finance: { revenue: number; revenueScoped: number; salesCount?: number; investment: number; investmentTotal: number; convertedValue: number; salesCycleDays: number; attendedConsults: number; defaultTicket: number; quotesSent?: number; quotesValue?: number; quotesWon?: number };
   outcomes: { won: number; lost: number; lossReasons: { reason: string; count: number }[] };
   agent: AgentFilter;
   csat: { type: string; answered: number; avg: number | null; distribution: { score: number; count: number }[] };
@@ -154,6 +154,7 @@ const METRICS_CONFIG: { id: string; label: string }[] = [
   // Só WakeDesk (category='outro') tem Central de Orçamentos. Numa clínica esta métrica é
   // filtrada da lista, para não sobrar um card zerado nem uma opção que não faz nada no ⚙️.
   { id: "orcamentos", label: "Orçamentos enviados" },
+  { id: "orcamentos_conv", label: "Orçamento → Venda" },
   { id: "custo_agendamento", label: "Custo por Agendamento" },
   { id: "cac", label: "CAC" },
   { id: "ticket_config", label: "Ticket Médio (real x meta)" },
@@ -858,6 +859,10 @@ export function ComercialDashboard() {
   // Orçamentos enviados no recorte (só WakeDesk usa a Central de Orçamentos).
   const quotesSent = fin.quotesSent ?? 0;
   const quotesValue = fin.quotesValue ?? 0;
+  // Coorte: dos orçamentos ENVIADOS no recorte, quantos viraram venda (aprovação na Central ou
+  // card ganho). Denominador sempre à vista, porque orçamento novo ainda não teve tempo de fechar.
+  const quotesWon = fin.quotesWon ?? 0;
+  const quotesWinRate = quotesSent > 0 ? (quotesWon / quotesSent) * 100 : null;
   // Sem lançamento no financeiro: há consultas realizadas mas nenhuma receita registrada (clínica não
   // lança pagamentos). Mostra "—" em vez de "R$ 0,00" para não parecer que faturou zero.
   const noRevenueRecorded = realRevenue <= 0 && attended > 0;
@@ -880,6 +885,7 @@ export function ComercialDashboard() {
     // (Este strip não renderiza `sub`, então a explicação fica nos rótulos e não em texto morto.)
     { id: "vendas", title: "Vendas lançadas", value: salesCount, valueLabel: "vendas", value2: outcomes.won, value2Label: "clientes", icon: Receipt, color: "text-fuchsia-600", bg: "bg-fuchsia-50", agentScoped: true, originScoped: true },
     { id: "orcamentos", title: "Orçamentos enviados", value: quotesSent, valueLabel: "enviados", value2: fmtBRL(quotesValue), value2Label: "valor", icon: FileText, color: "text-blue-600", bg: "bg-blue-50", agentScoped: true, originScoped: true },
+    { id: "orcamentos_conv", title: "Orçamento → Venda", value: quotesWinRate != null ? `${quotesWinRate.toFixed(1)}%` : "—", valueLabel: "conversão", value2: `${quotesWon} de ${quotesSent}`, value2Label: "viraram venda", icon: Percent, color: "text-emerald-600", bg: "bg-emerald-50", agentScoped: true, originScoped: true },
     { id: "custo_agendamento", title: "Custo por Consulta", value: costPerRealizada != null ? fmtBRL(costPerRealizada) : "—", valueLabel: "parcial", value2: costPerAppt != null ? fmtBRL(costPerAppt) : "—", value2Label: "previsto", icon: Target, color: "text-rose-600", bg: "bg-rose-50", agentScoped: true, originScoped: true },
     { id: "cac", title: "CAC", value: cac != null ? fmtBRL(cac) : "—", valueLabel: "parcial", value2: cacPrevisto != null ? fmtBRL(cacPrevisto) : "—", value2Label: "previsto", icon: UserCheck, color: "text-rose-600", bg: "bg-rose-50", agentScoped: false, originScoped: true },
     // Real em cima (sai das vendas do recorte), meta embaixo (Dados da Clínica). O id NÃO muda:
@@ -890,7 +896,7 @@ export function ComercialDashboard() {
   const kpiById = Object.fromEntries(allKpis.map((k) => [k.id, k]));
   // Métrica de módulo que a clínica não tem sai da lista INTEIRA (card e ⚙️), em vez de aparecer
   // zerada. Hoje só "orcamentos" é assim; é o mesmo critério do menu lateral (category='outro').
-  const metricsOrderDisponivel = metricsOrder.filter((id) => id !== "orcamentos" || isOutro);
+  const metricsOrderDisponivel = metricsOrder.filter((id) => !id.startsWith("orcamentos") || isOutro);
   const headlineKpis = metricsOrderDisponivel.filter((id) => visibleMetrics.includes(id)).map((id) => kpiById[id]).filter(Boolean) as Kpi[];
 
   // ===== Seções =====

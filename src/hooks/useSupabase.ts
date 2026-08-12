@@ -1441,6 +1441,7 @@ export interface MarketingKpiRow {
   scheduled: number;   // v_kpi_scheduled = união agendamento∪etapa dedupe — Agendamentos
   quotes: number;        // v_kpi_quotes (sent_at) — orçamentos ENVIADOS (só WakeDesk usa)
   quotes_value: number;  // soma do total desses orçamentos
+  quotes_won: number;    // quantos DESSES enviados viraram venda (coorte pelo envio)
 }
 
 export function useMarketingKpis(start: string | null, end: string | null) {
@@ -1449,7 +1450,7 @@ export function useMarketingKpis(start: string | null, end: string | null) {
   return useRpcRows<MarketingKpiRow>(
     'marketing_kpis',
     start && end ? { p_start: start, p_end: end } : null,
-    (r) => ({ ...r, leads: Number(r.leads) || 0, conv_value: Number(r.conv_value) || 0, sales: Number(r.sales) || 0, wins: Number(r.wins) || 0, scheduled: Number(r.scheduled) || 0, quotes: Number(r.quotes) || 0, quotes_value: Number(r.quotes_value) || 0 })
+    (r) => ({ ...r, leads: Number(r.leads) || 0, conv_value: Number(r.conv_value) || 0, sales: Number(r.sales) || 0, wins: Number(r.wins) || 0, scheduled: Number(r.scheduled) || 0, quotes: Number(r.quotes) || 0, quotes_value: Number(r.quotes_value) || 0, quotes_won: Number(r.quotes_won) || 0 })
   );
 }
 
@@ -1694,6 +1695,7 @@ export interface DashboardStats {
   salesCount: number;          // LANÇAMENTOS de venda (o mesmo card pode ter vários) — pareia com salesValue
   quotesSent: number;          // orçamentos ENVIADOS no período (v_kpi_quotes, eixo sent_at)
   quotesValue: number;         // soma do total desses orçamentos
+  quotesWon: number;           // quantos DESSES enviados viraram venda (coorte, não "aprovados no mês")
   totalInvestment: number | null;   // null = não atribuível (filtro de canal/agente ativo) → UI mostra "—"
   totalSlaBreaches: number;
   avgResponseTime: number; // minutes
@@ -1723,6 +1725,7 @@ export function useDashboardStats(dateRange?: { start: string; end: string }, or
     salesCount: 0,
     quotesSent: 0,
     quotesValue: 0,
+    quotesWon: 0,
     totalInvestment: 0,
     totalSlaBreaches: 0,
     avgResponseTime: 0,
@@ -1776,6 +1779,7 @@ export function useDashboardStats(dateRange?: { start: string; end: string }, or
         salesCount: Number(r?.salesCount || 0),
         quotesSent: Number(r?.quotesSent || 0),
         quotesValue: Number(r?.quotesValue || 0),
+        quotesWon: Number(r?.quotesWon || 0),
         totalInvestment: r?.totalInvestment == null ? null : Number(r.totalInvestment),
         totalSlaBreaches: r?.totalSlaBreaches || 0,
         avgResponseTime: Number(r?.avgResponseTime || 0),

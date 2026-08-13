@@ -28,6 +28,28 @@ body {
   color: #1e293b;
 }
 
+/* Conversa não lida: o contato falou e ninguém da equipe abriu ainda.
+   Pisca o CONTORNO, não o conteúdo — `animate-pulse` some com o texto do card no meio do ciclo,
+   e cartão apagando e acendendo o nome do cliente cansa mais do que avisa.
+   `prefers-reduced-motion` desliga o movimento e deixa a borda vermelha fixa: o aviso continua
+   visível para quem não pode ver animação, que é o ponto. */
+@keyframes pisca-nao-lida {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(225, 29, 72, 0.55); border-color: rgb(253, 164, 175); }
+  50%      { box-shadow: 0 0 0 4px rgba(225, 29, 72, 0.28); border-color: rgb(225, 29, 72); }
+}
+
+.pisca-nao-lida {
+  animation: pisca-nao-lida 1.15s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pisca-nao-lida {
+    animation: none;
+    box-shadow: 0 0 0 2px rgba(225, 29, 72, 0.45);
+    border-color: rgb(225, 29, 72);
+  }
+}
+
 .custom-scrollbar {
   scrollbar-width: thin;
   scrollbar-color: #94a3b8 #e2e8f0;

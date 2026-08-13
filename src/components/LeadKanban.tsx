@@ -486,15 +486,23 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
     }
   }, [dragEdgeLoop]);
 
+  // ⚠️ Limpeza INCONDICIONAL do que o pan escreve no elemento. Antes isso morava dentro do
+  // `if (isPanning)` do stopPan, e havia um caminho que saía sem limpar: quando o arraste de card
+  // assumia, o `onDragStart` zerava `isPanning` e o `stopPan` do mouseup seguinte voltava no
+  // `return` — deixando `user-select: none` grudado no quadro **para o resto da sessão**. A partir
+  // daí o navegador passa a tratar o conteúdo como não selecionável, e no Chrome/Firefox isso
+  // atrapalha o próprio `draggable` dos filhos: o card não levanta mais e só um F5 resolve.
+  const limparEstiloDoPan = useCallback(() => {
+    if (!outerRef.current) return;
+    outerRef.current.style.cursor = '';
+    outerRef.current.style.userSelect = '';
+  }, []);
+
   const stopPan = useCallback(() => {
     isPendingPan.current = false;
-    if (!isPanning.current) return;
     isPanning.current = false;
-    if (outerRef.current) {
-      outerRef.current.style.cursor = '';
-      outerRef.current.style.userSelect = '';
-    }
-  }, []);
+    limparEstiloDoPan();
+  }, [limparEstiloDoPan]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -545,6 +553,14 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
     if (rafId.current) { cancelAnimationFrame(rafId.current); rafId.current = null; }
     velocity.current = 0;
     pendingDx.current = 0;
+    // ⚠️ Apertou EM CIMA DE UM CARD: o gesto é arrastar o card, não arrastar o quadro. Sem esta
+    // linha os dois disputavam o mesmo movimento de mouse: o pan dispara aos 5 px, ANTES de o
+    // navegador decidir que começou um arraste (o `isCardDragging` só vira true no dragstart, que
+    // vem depois). Resultado: no instante em que a pessoa puxa o card, o quadro inteiro desliza
+    // para o lado embaixo do cursor, o card fica onde estava e o arraste morre no meio — que é
+    // exatamente o "não consigo pegar o card, ele não se mexe".
+    // Arrastar o quadro continua igual: começa em qualquer lugar que NÃO seja um card.
+    if (target.closest('[draggable="true"]')) { isPendingPan.current = false; return; }
     mouseDownX.current = e.pageX;
     lastX.current = e.pageX;
     isPendingPan.current = true;
@@ -561,15 +577,15 @@ function KanbanScrollContainer({ children }: { children: React.ReactNode }) {
     isPendingPan.current = false;
     velocity.current = 0;
     pendingDx.current = 0;
-    if (outerRef.current) outerRef.current.style.cursor = '';
-  }, []);
+    limparEstiloDoPan();
+  }, [limparEstiloDoPan]);
 
   const onDragEnd = useCallback(() => {
     isCardDragging.current = false;
     dragEdgeDir.current = 0;
     if (dragEdgeRaf.current) { cancelAnimationFrame(dragEdgeRaf.current); dragEdgeRaf.current = null; }
-    if (outerRef.current) outerRef.current.style.cursor = '';
-  }, []);
+    limparEstiloDoPan();
+  }, [limparEstiloDoPan]);
 
   return (
     <div className="flex flex-col h-full">
@@ -3490,6 +3506,9 @@ export function LeadKanban() {
   const [sourceFilter, setSourceFilter] = useState<'all' | 'meta' | 'google' | 'sem_origem'>('all');
   const [channelFilter, setChannelFilter] = useState<'all' | 'forms' | 'whatsapp' | 'balcao'>('all');
   const [showResolved, setShowResolved] = useState(false);
+  // Só os cards com mensagem do contato que ninguém leu. Não fica guardado entre sessões de
+  // propósito: é um modo de trabalho ("agora vou zerar a fila"), não uma preferência de tela.
+  const [naoLidosOnly, setNaoLidosOnly] = useState(false);
   const [showNotLeadPanel, setShowNotLeadPanel] = useState(false);
   const [confirmingNotLeadId, setConfirmingNotLeadId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -3581,6 +3600,16 @@ export function LeadKanban() {
     setDraggedLead(ticket);
     e.dataTransfer.setData("ticketId", ticket.id);
     e.dataTransfer.effectAllowed = "move";
+    // Fantasma do arraste apontado NA MÃO. O quadro inteiro vive numa camada de composição própria
+    // (o `will-change: transform` que faz o rolo horizontal ser fluido) e o card ainda ganha um
+    // `translateY` do hover: nessa combinação o Chrome às vezes fotografa o card em branco, e aí a
+    // pessoa arrasta sem ver nada acompanhar o cursor — indistinguível de "não pegou".
+    // Mandar o próprio elemento, com o deslocamento de onde o mouse pegou, tira a foto do palpite.
+    const el = e.currentTarget as HTMLElement;
+    try {
+      const r = el.getBoundingClientRect();
+      e.dataTransfer.setDragImage(el, e.clientX - r.left, e.clientY - r.top);
+    } catch { /* navegador sem setDragImage: fica o fantasma padrão */ }
   };
 
   const handleDragOver = (e: React.DragEvent, stageId: string) => {
@@ -3982,8 +4011,11 @@ export function LeadKanban() {
       : tickets;
     // Ignora tickets órfãos (lead deletado → lead_id virou NULL por SET NULL)
     // e os marcados como "Não Lead" (vivem só no painel de anexo, fora do funil).
-    const base = ((showResolved || hasSearch) ? source : source.filter(t => t.status !== 'closed'))
+    const base0 = ((showResolved || hasSearch) ? source : source.filter(t => t.status !== 'closed'))
       .filter(t => t.lead && !t.lead.is_not_lead);
+    // "Não lidos": recorte no quadro inteiro, não por coluna — a mensagem sem resposta pode estar
+    // em qualquer etapa, e é o quadro esvaziando que mostra o tamanho real da fila.
+    const base = naoLidosOnly ? base0.filter(t => !!t.lead.unread_since && t.status !== 'closed') : base0;
     if (!hasSourceFilter && !hasChannelFilter && !hasEntryFilter && !hasConvFilter && !hasSearch && !hasUtm) return base;
 
     return base.filter(ticket => {
@@ -3993,11 +4025,17 @@ export function LeadKanban() {
       }
       return ticketFacets(ticket);
     });
-  }, [tickets, searchTickets, ticketFacets, showResolved, searchQuery, sourceFilter, channelFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo, utmFilters]);
+  }, [tickets, searchTickets, ticketFacets, showResolved, searchQuery, sourceFilter, channelFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo, utmFilters, naoLidosOnly]);
 
-  const hasActiveFilters = sourceFilter !== 'all' || channelFilter !== 'all' || entryDateFrom || entryDateTo || convDateFrom || convDateTo || searchQuery.trim().length > 0 || Object.values(utmFilters).some(a => a.length > 0);
+  // Contador do botão: sai do MESMO quadro que já está na tela (nada de consulta nova). Conta
+  // cards abertos, não contatos — é a fila de trabalho do funil.
+  const totalNaoLidos = React.useMemo(
+    () => tickets.filter(t => t.lead && !t.lead.is_not_lead && t.status !== 'closed' && !!t.lead.unread_since).length,
+    [tickets]);
 
-  React.useEffect(() => { setColumnPages({}); }, [sourceFilter, channelFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo, searchQuery, utmFilters]);
+  const hasActiveFilters = sourceFilter !== 'all' || channelFilter !== 'all' || entryDateFrom || entryDateTo || convDateFrom || convDateTo || searchQuery.trim().length > 0 || Object.values(utmFilters).some(a => a.length > 0) || naoLidosOnly;
+
+  React.useEffect(() => { setColumnPages({}); }, [sourceFilter, channelFilter, entryDateFrom, entryDateTo, convDateFrom, convDateTo, searchQuery, utmFilters, naoLidosOnly]);
 
   if (stagesLoading || ticketsLoading) {
     return (
@@ -4393,6 +4431,35 @@ export function LeadKanban() {
     <div className="flex flex-col h-full gap-4">
       {/* ── Cabeçalho + Filtros ── */}
       <div className="flex items-center gap-2 shrink-0">
+        {/* Não lidos: primeiro da barra porque é fila de trabalho, não recorte de análise.
+            Fica visível mesmo zerado (com o contador escondido) para não virar botão fantasma que
+            aparece e some conforme chega mensagem. */}
+        <button
+          onClick={() => setNaoLidosOnly(v => !v)}
+          title={totalNaoLidos > 0
+            ? `${totalNaoLidos} ${totalNaoLidos === 1 ? 'conversa não lida' : 'conversas não lidas'} — o contato falou e ninguém da equipe abriu ainda`
+            : 'Nenhuma conversa esperando leitura'}
+          className={cn(
+            "flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-bold border shadow-sm transition-all shrink-0",
+            naoLidosOnly
+              ? "bg-rose-600 border-rose-700 text-white"
+              : totalNaoLidos > 0
+                ? "bg-white border-rose-200 text-rose-600 hover:bg-rose-50"
+                : "bg-white border-slate-200 text-slate-400 hover:text-slate-600"
+          )}
+        >
+          <MessageSquare className={cn("w-3 h-3", !naoLidosOnly && totalNaoLidos > 0 && "animate-pulse")} />
+          Não lidos
+          {totalNaoLidos > 0 && (
+            <span className={cn(
+              "min-w-[16px] px-1 rounded-full text-[9px] font-black tabular-nums",
+              naoLidosOnly ? "bg-white text-rose-700" : "bg-rose-600 text-white"
+            )}>
+              {totalNaoLidos}
+            </span>
+          )}
+        </button>
+
         {/* Filtro de origem */}
         <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-xl p-0.5 shadow-sm">
           {([
@@ -4481,7 +4548,7 @@ export function LeadKanban() {
 
         {hasActiveFilters && (
           <button
-            onClick={() => { setSourceFilter('all'); setChannelFilter('all'); setEntryDateFrom(''); setEntryDateTo(''); setConvDateFrom(''); setConvDateTo(''); setSearchQuery(''); setUtmFilters({}); }}
+            onClick={() => { setSourceFilter('all'); setChannelFilter('all'); setEntryDateFrom(''); setEntryDateTo(''); setConvDateFrom(''); setConvDateTo(''); setSearchQuery(''); setUtmFilters({}); setNaoLidosOnly(false); }}
             className="text-[10px] font-bold text-rose-500 hover:text-rose-700 uppercase tracking-wider flex items-center gap-1 shrink-0"
             title="Limpar Filtros"
           >
@@ -4550,7 +4617,18 @@ export function LeadKanban() {
             const visibleTickets = stageTickets.slice(0, visibleCount);
             const hasMoreInColumn = visibleCount < stageTickets.length;
             return (
-              <div key={stage.id} className="w-[300px] shrink-0 flex flex-col gap-2 h-full">
+              <div
+                key={stage.id}
+                className="w-[300px] shrink-0 flex flex-col gap-2 h-full"
+                // Soltar vale na COLUNA INTEIRA, não só na área dos cards. O título, o botão de
+                // adicionar e o vão entre eles não tinham `onDrop`: soltar ali era soltar no nada
+                // (o navegador recusa o drop e o card volta ao lugar), e a diferença é de poucos
+                // pixels — parece que "às vezes não arrasta". Os eventos borbulham dos cards, então
+                // um só par aqui atende a coluna toda.
+                onDragOver={(e) => handleDragOver(e, stage.id)}
+                onDragLeave={() => setDragOverStage(null)}
+                onDrop={(e) => handleDrop(e, stage.id)}
+              >
                 <div className="flex items-center gap-2 px-2" draggable={false} onDragStart={e => e.preventDefault()}>
                   <div className={cn("w-2 h-2 shrink-0 rounded-full", stageColors[stage.color || 'bg-slate-500'] || 'bg-slate-500')} />
                   <h3 className="font-bold text-slate-700 text-xs uppercase tracking-wider truncate flex-1">{stage.name}</h3>
@@ -4578,9 +4656,6 @@ export function LeadKanban() {
                     "flex-1 min-h-0 bg-slate-100/50 rounded-xl p-3 flex flex-col gap-3 overflow-y-auto overflow-x-hidden custom-scrollbar transition-colors border-2 border-transparent",
                     dragOverStage === stage.id && "bg-teal-50 border-teal-200"
                   )}
-                  onDragOver={(e) => handleDragOver(e, stage.id)}
-                  onDragLeave={() => setDragOverStage(null)}
-                  onDrop={(e) => handleDrop(e, stage.id)}
                   onDragStart={e => { if (!(e.target as HTMLElement).closest('[draggable="true"]')) e.preventDefault(); }}
                   onScroll={(e) => {
                     const el = e.currentTarget;
@@ -4629,6 +4704,10 @@ export function LeadKanban() {
                     const precisaResponder = !frozen && !!lead.last_message_at && (
                       !lead.last_outbound_at || parseISO(lead.last_message_at) > parseISO(lead.last_outbound_at)
                     );
+                    // NÃO LIDA ≠ "Responder Lead". `precisaResponder` acima olha quem falou por
+                    // último, e a resposta da IA o apaga; este aqui só apaga quando GENTE abre a
+                    // conversa (ou responde). É o card que fica piscando em vermelho.
+                    const naoLido = !!lead.unread_since;
                     const outcomeLabel: Record<string, string> = { ganho: 'Ganho', perdido: 'Perdido' };
                     return (
                       <motion.div
@@ -4645,6 +4724,12 @@ export function LeadKanban() {
                           draggedLead?.id === ticket.id && "opacity-50",
                           semMotivo && "animate-pulse",
                           isSyncStage && "animate-pulse ring-2 ring-rose-500/80 !bg-rose-50 !border-rose-300",
+                          // Contato respondeu e ninguém leu: pisca o contorno em vermelho até
+                          // alguém abrir a conversa. A classe é CSS da casa (index.css), não
+                          // utilitário do Tailwind — por isso o `cn` não a mistura com as cores de
+                          // origem logo abaixo, e a borda animada vence a estática na cascata.
+                          // Card arquivado não pisca: atendimento encerrado não é fila de trabalho.
+                          naoLido && !isClosed && "pisca-nao-lida",
                           isClosed ? "bg-slate-50/80 border-slate-200"
                             : ticket.outcome === 'ganho' ? "bg-emerald-50 border-emerald-200"
                               : ticket.outcome === 'perdido' ? "bg-rose-50 border-rose-200"
@@ -4907,8 +4992,19 @@ export function LeadKanban() {
                         )}
 
                         {/* Badges de status */}
-                        {(aguardando || precisaResponder || slaBreach > 0 || lead.whatsapp_invalid) && (
+                        {(naoLido || aguardando || precisaResponder || slaBreach > 0 || lead.whatsapp_invalid) && (
                           <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                            {/* Primeiro da fila: é o único que exige ação humana AGORA. Traz o
+                                relógio junto porque "não lida" sem "há quanto tempo" não prioriza. */}
+                            {naoLido && !isClosed && (
+                              <span
+                                className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded border bg-rose-600 border-rose-700 text-white flex items-center gap-1"
+                                title={`Mensagem do contato sem leitura desde ${format(parseISO(lead.unread_since!), "dd/MM 'às' HH:mm")}. Some quando alguém abrir a conversa ou responder.`}
+                              >
+                                <MessageSquare className="w-2.5 h-2.5 shrink-0" />
+                                Não lida · {formatDistanceToNow(parseISO(lead.unread_since!), { locale: ptBR })}
+                              </span>
+                            )}
                             {lead.whatsapp_invalid && (
                               <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border bg-rose-50 border-rose-200 text-rose-600 flex items-center gap-1" title="Número não está no WhatsApp — envio automático não é possível">
                                 <PhoneOff className="w-2.5 h-2.5 shrink-0" />
@@ -5704,6 +5800,13 @@ export function LeadKanban() {
           sessionIndex={orcamentoLead.seq ?? 1}
           projetosDoCliente={projetosPorLead[orcamentoLead.id] ?? []}
           onClose={() => setOrcamentoLead(null)}
+          // ⚠️ FECHAR DESFAZ O ARRASTE, E ISSO É DECISÃO DO DONO (13/08/2026, reafirmada depois de
+          // medida). As três saídas do modal (X, clicar fora e Cancelar) devolvem o card para a
+          // etapa anterior: card em "Orçamento Enviado" sem proposta registrada é card mentindo
+          // sobre o funil, e o desfazer é o que impede isso.
+          // Custo conhecido e aceito: na Metaltres, 33 das 100 entradas na etapa em 7 dias voltaram
+          // em média 34s depois, em 23 cards diferentes. **NÃO "consertar"** achando que é bug de
+          // arraste; se um dia mudar, o que muda junto é a exigência de preencher a proposta.
           onCancel={() => {
             const { ticketId, prevStageId } = orcamentoLead;
             setOrcamentoLead(null);

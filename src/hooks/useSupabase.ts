@@ -683,6 +683,10 @@ export interface Lead {
   last_message_at: string | null;
   last_outbound_at: string | null;
   last_activity_at: string | null;
+  /** Conversa NÃO LIDA: instante da primeira mensagem do contato que nenhum humano viu (null = lida).
+   *  Diferente de `last_message_at > last_outbound_at`: a resposta da IA zera aquela conta, esta só
+   *  é zerada por gente (abrir a conversa na tela ou responder). É o que faz o card piscar. */
+  unread_since: string | null;
   ctwa_clid: string | null;
   fb_clid: string | null;
   g_clid: string | null;
@@ -874,24 +878,47 @@ export function useFollowupSteps() {
   return { steps, loading, addStep, updateStep, removeStep, setClosing, refetch: fetch };
 }
 
-export function useLeads(options?: { pageSize?: number }) {
+export function useLeads(options?: { pageSize?: number; unreadOnly?: boolean; withUnreadCount?: boolean }) {
   const PAGE_SIZE = options?.pageSize ?? null;
+  // Filtro "Não lidos". ⚠️ Server-side DE PROPÓSITO: a lista de Conversas carrega 20 por vez, e
+  // filtrar no cliente só olharia essas 20 — a conversa não lida da página 3 ficaria invisível
+  // justamente no filtro criado para achá-la.
+  const unreadOnly = options?.unreadOnly ?? false;
+  // Contagem só para quem desenha o badge. Este hook é montado 3 ou 4 vezes na mesma tela (quadro,
+  // gaveta da conversa, modais), e recarrega a cada mudança em `leads`: sem a chave, toda mensagem
+  // recebida dispararia a contagem uma vez por instância, para ninguém ver.
+  const withUnreadCount = options?.withUnreadCount ?? false;
   const { profile, activeClinicId } = useAuth();
   const [data, setData] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [unreadCount, setUnreadCount] = useState(0);
   const loadedCountRef = useRef(0);
 
   const baseQuery = useCallback(() => {
-    return supabase
+    const q = supabase
       .from('leads')
       .select('*')
-      .eq('clinic_id', activeClinicId!)
+      .eq('clinic_id', activeClinicId!);
+    return (unreadOnly ? q.not('unread_since', 'is', null) : q)
       .order('last_activity_at', { ascending: false, nullsFirst: false })
       .order('updated_at', { ascending: false, nullsFirst: false });
-  }, [activeClinicId]);
+  }, [activeClinicId, unreadOnly]);
+
+  // Contagem do badge. `head: true` = só o número, sem trazer linha nenhuma; o índice parcial
+  // `idx_leads_unread_since` cobre exatamente este filtro.
+  const fetchUnreadCount = useCallback(async () => {
+    if (!activeClinicId || !withUnreadCount) return;
+    const { count, error } = await supabase
+      .from('leads')
+      .select('id', { count: 'exact', head: true })
+      .eq('clinic_id', activeClinicId)
+      .eq('is_not_lead', false)
+      .not('unread_since', 'is', null);
+    if (!error) setUnreadCount(count ?? 0);
+  }, [activeClinicId, withUnreadCount]);
 
   const fetch = useCallback(async (silent = false) => {
     if (!activeClinicId) return;
@@ -931,6 +958,7 @@ export function useLeads(options?: { pageSize?: number }) {
 
   useEffect(() => {
     fetch();
+    fetchUnreadCount();
     if (!activeClinicId) return;
 
     const channel = supabase
@@ -942,11 +970,12 @@ export function useLeads(options?: { pageSize?: number }) {
         filter: `clinic_id=eq.${activeClinicId}`
       }, () => {
         fetch(true);
+        fetchUnreadCount();
       })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [fetch, activeClinicId]);
+  }, [fetch, fetchUnreadCount, activeClinicId]);
 
   const create = async (lead: Partial<Lead>) => {
     if (!activeClinicId) return null;
@@ -1007,7 +1036,7 @@ export function useLeads(options?: { pageSize?: number }) {
   const restoreLead = async (id: string) =>
     update(id, { is_not_lead: false, ai_enabled: true, followup_enabled: true, not_lead_at: null });
 
-  return { data, loading, loadingMore, hasMore, error, refetch: fetch, loadMore, create, createWithTicket, update, remove, markNotLead, restoreLead };
+  return { data, loading, loadingMore, hasMore, error, unreadCount, refetch: fetch, loadMore, create, createWithTicket, update, remove, markNotLead, restoreLead };
 }
 
 // Leads marcados como "Não Lead" (caixa de anexo do Kanban e de Conversas).
@@ -1106,6 +1135,8 @@ export type LeadResumo = Pick<Lead,
   | 'ctwa_clid' | 'fb_clid' | 'rast_id' | 'avatar_url'
   | 'converted_patient_id' | 'sla_breach_count'
   | 'last_activity_at' | 'last_message_at' | 'last_outbound_at' | 'created_at' | 'updated_at'
+  // Conversa não lida: o card pisca por ela e o filtro "Não lidos" do quadro conta por ela.
+  | 'unread_since'
   // Marcas de campanha: o card mostra os chips de origem.
   | 'fb_campaign_name' | 'fb_adset_name' | 'fb_ad_name'
   | 'g_campaign_name' | 'g_adset_name' | 'g_ad_name' | 'g_source_name' | 'g_term_name'>;
@@ -1114,8 +1145,26 @@ export type LeadResumo = Pick<Lead,
 export const LEAD_RESUMO_COLS =
   'id, name, phone, email, source, capture_channel, estimated_value, whatsapp_invalid, is_not_lead, ai_enabled, ' +
   'loss_reason, ctwa_clid, fb_clid, rast_id, avatar_url, converted_patient_id, sla_breach_count, ' +
-  'last_activity_at, last_message_at, last_outbound_at, created_at, updated_at, ' +
+  'last_activity_at, last_message_at, last_outbound_at, unread_since, created_at, updated_at, ' +
   'fb_campaign_name, fb_adset_name, fb_ad_name, g_campaign_name, g_adset_name, g_ad_name, g_source_name, g_term_name';
+
+/** Marca a conversa do contato como LIDA por um humano (apaga o piscar do card e de Conversas).
+ *  ⚠️ O `.not('unread_since','is',null)` não é enfeite: sem ele toda abertura de conversa viraria
+ *  um UPDATE em `leads`, e todo UPDATE em `leads` acorda o realtime que recarrega o quadro inteiro
+ *  (4 mil linhas na Metaltres). Com ele, só escreve quando há de fato algo a apagar. */
+export async function marcarConversaLida(leadId: string): Promise<void> {
+  const { error } = await supabase
+    .from('leads')
+    .update({ unread_since: null })
+    .eq('id', leadId)
+    .not('unread_since', 'is', null);
+  // Falhar aqui não perde dado, mas deixa o card piscando para sempre — e ninguém descobriria
+  // o motivo sem a Central (a tela não tem como mostrar erro de algo que roda ao abrir).
+  if (error) {
+    logSystemError('CONVERSA_LIDA_FAIL', `Não consegui marcar a conversa ${leadId} como lida`, null,
+      { lead_id: leadId, error: error.message }, 'warning');
+  }
+}
 
 /** O contato INTEIRO, sob demanda. Use ao abrir tela que edita ou exibe o cadastro completo:
  *  o quadro só traz o resumo. Devolve null (e acende a Central) quando falha. */
@@ -1571,6 +1620,38 @@ export function useTickets() {
     const channel = supabase
       .channel(`tickets_realtime_${activeClinicId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets', filter: `clinic_id=eq.${activeClinicId}` }, () => { scheduleSilentFetch(); })
+      // ── Contato mudou: remenda o card em memória, NÃO recarrega o quadro ──────
+      // O card desenha "não lida", "Aguardando"/"Responder" e o relógio do SLA a partir do contato
+      // embutido no ticket, e nada disso mexe na tabela `tickets`: sem este ramo, mensagem que
+      // chega agora só faria o card piscar no polling de 30s — tarde demais para um aviso que
+      // existe para ser respondido na hora.
+      // ⚠️ Remendo em memória DE PROPÓSITO. Chamar o refetch aqui recarregaria as 4 mil linhas do
+      // quadro a cada mensagem trocada, e numa clínica movimentada isso é o dia inteiro.
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'leads', filter: `clinic_id=eq.${activeClinicId}` }, (payload) => {
+        const novo = payload.new as Partial<Lead> & { id?: string };
+        if (!novo?.id) return;
+        setTickets(prev => {
+          let mudou = false;
+          const proximo = prev.map(t => {
+            if (t.lead?.id !== novo.id) return t;
+            if (t.lead.unread_since === (novo.unread_since ?? null)
+              && t.lead.last_message_at === (novo.last_message_at ?? null)
+              && t.lead.last_outbound_at === (novo.last_outbound_at ?? null)
+              && t.lead.last_activity_at === (novo.last_activity_at ?? null)) return t;
+            mudou = true;
+            return { ...t, lead: {
+              ...t.lead,
+              unread_since: novo.unread_since ?? null,
+              last_message_at: novo.last_message_at ?? null,
+              last_outbound_at: novo.last_outbound_at ?? null,
+              last_activity_at: novo.last_activity_at ?? null,
+            } };
+          });
+          // Sem mudança nestes campos (edição de nome, telefone…), devolve o MESMO array: o quadro
+          // inteiro re-renderizaria a cada update de contato à toa.
+          return mudou ? proximo : prev;
+        });
+      })
       .subscribe();
 
     // Polling defensivo: cobre WebSocket caído / aba em background
@@ -2619,6 +2700,18 @@ export function useChatMessages(leadId?: string, leadPhone?: string | null) {
 
     return () => { supabase.removeChannel(channel); };
   }, [fetch, activeClinicId, leadId, leadPhone]);
+
+  // ── Conversa aberta na tela = conversa LIDA ────────────────────────────────
+  // Mora aqui, e não em cada tela, porque são três exibindo a mesma conversa (aba Conversas, o
+  // chat do card no Kanban e o modal de orçamento): a que esquecesse de marcar deixaria o card
+  // piscando com alguém olhando para ele.
+  // A dependência é a ÚLTIMA mensagem, não só o lead: assim a mensagem que chega com a conversa
+  // já aberta também nasce lida, em vez de fazer piscar o card na cara de quem está lendo.
+  const ultimaMsgId = data.length ? data[data.length - 1].id : null;
+  useEffect(() => {
+    if (!leadId) return;
+    marcarConversaLida(leadId);
+  }, [leadId, ultimaMsgId]);
 
   // Envia texto ao lead pelo WhatsApp da clínica via edge `chat-send` (uazapi) — a edge
   // é quem grava em chat_messages, com sender='human'. Gravar aqui pelo cliente colocaria

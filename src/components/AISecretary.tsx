@@ -2809,7 +2809,11 @@ export function AISecretary() {
 
 function ChatsView() {
   const { activeClinicId } = useAuth();
-  const { data: leads, loading: leadsLoading, loadingMore, hasMore, loadMore, update: updateLead } = useLeads({ pageSize: 20 });
+  // "Não lidos" vai para o HOOK, não para um filter aqui: a lista carrega 20 por vez, e filtrar no
+  // cliente só olharia essas 20 — a conversa não lida da página 3 sumiria justo no filtro feito
+  // para achá-la. O hook aplica o recorte na consulta e pagina dentro dele.
+  const [naoLidosOnly, setNaoLidosOnly] = useState(false);
+  const { data: leads, loading: leadsLoading, loadingMore, hasMore, loadMore, update: updateLead, unreadCount } = useLeads({ pageSize: 20, unreadOnly: naoLidosOnly, withUnreadCount: true });
   const { data: notLeads, restore: restoreNotLead } = useNotLeads();
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [leadSearch, setLeadSearch] = useState('');
@@ -2840,13 +2844,31 @@ function ChatsView() {
     return () => { cancelled = true; clearTimeout(handle); };
   }, [leadSearch, activeClinicId]);
 
-  const filteredLeads = useMemo(() => {
+  const leadsListados = useMemo(() => {
     // Não Leads não aparecem na lista de conversas (vivem só no painel de anexo).
     if (!leadSearch.trim()) return leads.filter(l => !l.is_not_lead);
     // Refina os resultados do servidor com a lógica multi-termo do matchesSearch.
-    return searchResults.filter(l => !l.is_not_lead && matchesSearch(leadSearch, { name: l.name, email: l.email, phone: l.phone }, ['phone']));
-  }, [leads, leadSearch, searchResults]);
-  const selectedLead = leads.find(l => l.id === selectedLeadId) || searchResults.find(l => l.id === selectedLeadId);
+    // Com "Não lidos" ligado o recorte também vale na busca: senão o filtro pareceria desligar
+    // sozinho ao digitar um nome, e a lista devolveria conversa já lida sem explicação.
+    return searchResults.filter(l => !l.is_not_lead
+      && (!naoLidosOnly || !!l.unread_since)
+      && matchesSearch(leadSearch, { name: l.name, email: l.email, phone: l.phone }, ['phone']));
+  }, [leads, leadSearch, searchResults, naoLidosOnly]);
+
+  // ⚠️ Abrir a conversa a marca como lida NA HORA, e com o filtro "não lidas" ligado ela deixaria
+  // de casar com a consulta: o item sumia da lista debaixo do cursor e a conversa da direita voltava
+  // para "Selecione um atendimento" — com a pessoa lendo. Por isso guardo a conversa aberta e a
+  // seguro nos dois lugares até trocarem de conversa.
+  const leadDaLista = leads.find(l => l.id === selectedLeadId) || searchResults.find(l => l.id === selectedLeadId);
+  const leadAbertoRef = useRef<Lead | null>(null);
+  useEffect(() => { if (leadDaLista) leadAbertoRef.current = leadDaLista; }, [leadDaLista]);
+  const selectedLead = leadDaLista
+    ?? (leadAbertoRef.current?.id === selectedLeadId ? leadAbertoRef.current : undefined);
+
+  const filteredLeads = useMemo(() => {
+    if (!selectedLead || leadsListados.some(l => l.id === selectedLead.id)) return leadsListados;
+    return [selectedLead, ...leadsListados];
+  }, [leadsListados, selectedLead]);
   const { data: messages, loading: messagesLoading, send: sendMessage, sendAudio: sendAudioMessage } = useChatMessages(selectedLeadId || undefined, selectedLead?.phone);
 
   // Auto-select first lead if none selected (ignora Não Leads, que não são listados)
@@ -2883,7 +2905,10 @@ function ChatsView() {
     return () => { cancelled = true; };
   }, [leads, searchResults, activeClinicId]);
 
-  if (leadsLoading) {
+  // Spinner de tela cheia só na PRIMEIRA carga. Ligar/desligar "Não lidos" refaz a consulta, e sem
+  // o `leads.length === 0` a tela inteira (lista + conversa aberta) piscava fora a cada clique no
+  // filtro, como se tivesse recarregado.
+  if (leadsLoading && leads.length === 0) {
     return (
       <div className="flex items-center justify-center h-64">
         <Loader2 className="w-8 h-8 text-teal-600 animate-spin" />
@@ -2920,6 +2945,33 @@ function ChatsView() {
             />
             <User className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
           </div>
+          {/* Filtro de não lidas. O contador vem do banco (conta a clínica inteira), não da página
+              de 20 carregada: mostrar "3" porque só 3 couberam na tela seria mentira. */}
+          <button
+            onClick={() => setNaoLidosOnly(v => !v)}
+            title={unreadCount > 0
+              ? `${unreadCount} ${unreadCount === 1 ? 'conversa esperando' : 'conversas esperando'} leitura de alguém da equipe`
+              : 'Nenhuma conversa esperando leitura'}
+            className={cn(
+              "mt-2 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-bold border transition-all",
+              naoLidosOnly
+                ? "bg-rose-600 border-rose-700 text-white"
+                : unreadCount > 0
+                  ? "bg-white border-rose-200 text-rose-600 hover:bg-rose-50"
+                  : "bg-white border-slate-200 text-slate-400 hover:text-slate-600"
+            )}
+          >
+            <MessageSquare className={cn("w-3.5 h-3.5", !naoLidosOnly && unreadCount > 0 && "animate-pulse")} />
+            {naoLidosOnly ? 'Mostrando só não lidas' : 'Não lidas'}
+            {unreadCount > 0 && (
+              <span className={cn(
+                "min-w-[18px] px-1 rounded-full text-[10px] font-black tabular-nums",
+                naoLidosOnly ? "bg-white text-rose-700" : "bg-rose-600 text-white"
+              )}>
+                {unreadCount}
+              </span>
+            )}
+          </button>
         </CardHeader>
         <CardContent
           className="flex-1 overflow-y-auto p-2 space-y-1 mt-2 custom-scrollbar"
@@ -2936,7 +2988,9 @@ function ChatsView() {
             </div>
           ) : !leadSearch.trim() && leads.length === 0 ? (
             <div className="p-8 text-center text-slate-400">
-              <p className="text-sm font-medium">Nenhum atendimento ativo no momento.</p>
+              <p className="text-sm font-medium">
+                {naoLidosOnly ? 'Nenhuma conversa esperando leitura. Fila zerada.' : 'Nenhum atendimento ativo no momento.'}
+              </p>
             </div>
           ) : filteredLeads.length === 0 ? (
             <div className="p-8 text-center text-slate-400">
@@ -2948,6 +3002,9 @@ function ChatsView() {
               const isGoogle = !!lead.g_campaign_name || lead.source === 'google_ads';
               const isInstagram = !isMeta && !isGoogle && lead.source === 'instagram';
               const lastActivityAt = lead.last_activity_at ?? lead.created_at;
+              // Não lida = o contato falou e ninguém da equipe abriu. Para de piscar assim que
+              // esta conversa é aberta (quem zera é o useChatMessages, do lado direito da tela).
+              const naoLido = !!lead.unread_since && selectedLeadId !== lead.id;
               return (
               <motion.div
                 key={lead.id}
@@ -2960,7 +3017,8 @@ function ChatsView() {
                     : isMeta ? "bg-blue-50/50 border-blue-100/60 hover:bg-blue-50"
                     : isGoogle ? "bg-emerald-50/50 border-emerald-100/60 hover:bg-emerald-50"
                     : isInstagram ? "bg-pink-50/50 border-pink-100/60 hover:bg-pink-50"
-                    : "border-transparent hover:bg-slate-50"
+                    : "border-transparent hover:bg-slate-50",
+                  naoLido && "pisca-nao-lida bg-rose-50/60"
                 )}
               >
                 <div className="flex items-center gap-3">
@@ -2989,7 +3047,7 @@ function ChatsView() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex justify-between items-center mb-0.5">
-                      <span className="font-bold text-sm text-slate-900 truncate">
+                      <span className={cn("font-bold text-sm truncate", naoLido ? "text-rose-700" : "text-slate-900")}>
                         {lead.name}
                       </span>
                       <span className="text-[10px] font-medium text-slate-400">
@@ -3009,6 +3067,16 @@ function ChatsView() {
                             !lead.last_outbound_at || parseISO(lead.last_message_at) > parseISO(lead.last_outbound_at)
                           );
 
+                          // Ganha dos outros dois: "Aguardando"/"Responder" dizem quem falou por
+                          // último, isto diz que ninguém LEU — é o que precisa de gente agora.
+                          if (naoLido) return (
+                            <span
+                              className="text-[8px] font-black px-1 py-0.5 rounded bg-rose-600 text-white uppercase tracking-wider"
+                              title={`Sem leitura desde ${format(parseISO(lead.unread_since!), "dd/MM 'às' HH:mm")}`}
+                            >
+                              Não lida
+                            </span>
+                          );
                           if (isAguardando) return (
                             <span className="text-[8px] font-bold px-1 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-100 uppercase">
                               Aguardando Lead

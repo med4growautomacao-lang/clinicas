@@ -6,6 +6,7 @@ import { cn } from "@/src/lib/utils";
 import { ChatThread } from "./ChatThread";
 import { LeadFollowupOptouts } from "./LeadFollowupOptouts";
 import { ChatComposer } from "./ChatComposer";
+import { AbrirNoWhatsApp } from "./AbrirNoWhatsApp";
 
 // Reexports — outros módulos importam daqui (ex.: AISecretary)
 export { extractMessageText, detectMedia, MediaBubble } from "./ChatThread";
@@ -65,6 +66,7 @@ export function LeadChat({ lead, onClose, isDragging = false, ticketId, currentS
             <div className="flex items-center justify-between gap-2">
               <h3 className="font-bold text-slate-900 truncate">{lead.name}</h3>
               <div className="flex items-center gap-1 shrink-0 -mr-1">
+                <AbrirNoWhatsApp phone={lead.phone} invalid={lead.whatsapp_invalid} compact className="mr-1 px-1.5 py-1" />
                 {onEdit && (
                   <button onClick={onEdit} title="Editar lead" className="p-1.5 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded-full transition-all">
                     <Pencil className="w-4 h-4" />

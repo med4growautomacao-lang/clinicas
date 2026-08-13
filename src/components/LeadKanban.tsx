@@ -43,6 +43,7 @@ import { useFunnelStages, useLeads, useNotLeads, useTickets, useSettings, useTra
 import { useTelaLarga } from "../hooks/useTelaLarga";
 import { ChatThread } from "./ChatThread";
 import { ChatComposer } from "./ChatComposer";
+import { AbrirNoWhatsApp } from "./AbrirNoWhatsApp";
 import { NotLeadPanel } from "./NotLeadPanel";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -2758,6 +2759,7 @@ export function OrcamentoModal({ lead, ticketId, dadosPreAtendimento, initialQuo
             <MessageSquare className="w-4 h-4 text-slate-400 shrink-0" />
             <p className="text-xs font-black text-slate-700 truncate">Conversa com {lead.name}</p>
             {lead.phone && <span className="text-[11px] text-slate-400 font-mono truncate">{lead.phone}</span>}
+            <AbrirNoWhatsApp phone={lead.phone} invalid={lead.whatsapp_invalid} className="ml-auto" />
           </div>
           <ChatThread
             messages={chatMessages}

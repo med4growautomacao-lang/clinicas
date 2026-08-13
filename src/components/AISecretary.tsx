@@ -49,6 +49,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { LeadKanban } from "./LeadKanban";
 import { ComercialDashboard } from "./ComercialDashboard";
 import { ChatThread } from "./ChatThread";
+import { AbrirNoWhatsApp } from "./AbrirNoWhatsApp";
 import { ChatComposer } from "./ChatComposer";
 import { useLeads, useNotLeads, useChatMessages, useSettings, useFunnelStages, usePromptTemplates, FunnelStage, useFollowupSteps, FollowupStep, useConvAiInsights, Lead, logSystemError } from "../hooks/useSupabase";
 import { FOLLOWUP_LABELS, type FollowupKind } from "../lib/followupKinds";
@@ -3074,6 +3075,11 @@ function ChatsView() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                <AbrirNoWhatsApp
+                  phone={selectedLead.phone}
+                  invalid={selectedLead.whatsapp_invalid}
+                  className="px-2.5 py-1 rounded-full uppercase tracking-wider"
+                />
                 {/* Cadeado "Atendimento pessoal": IA/follow-up nunca assumem e NADA religa sozinho
                     (blindado por trigger no banco). Destravar não religa nada: religa-se na mão. */}
                 <button

@@ -78,12 +78,19 @@ export function ChatComposer({ onSend, disabled, disabledReason }: ChatComposerP
           disabled={disabled || sending}
           onChange={e => {
             setText(e.target.value);
+            // ⚠️ `scrollHeight` NÃO inclui a borda, mas o `height` daqui sim (box-sizing: border-box
+            // em tudo). Sem somar a borda de volta, a caixa nascia 2px menor que o próprio texto e
+            // o navegador punha barra de rolagem já na PRIMEIRA linha, com as setinhas ao lado do
+            // cursor. `offsetHeight - clientHeight` é exatamente essa borda.
+            const borda = e.target.offsetHeight - e.target.clientHeight;
             e.target.style.height = "auto";
-            e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
+            e.target.style.height = `${Math.min(e.target.scrollHeight + borda, 120)}px`;
           }}
           onKeyDown={onKeyDown}
           placeholder={disabled ? "Envio indisponível" : "Escreva uma mensagem…"}
-          className="flex-1 resize-none text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-2xl px-3.5 py-2.5 max-h-[120px] placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 disabled:opacity-60 transition-all"
+          // `scrollbar-hide`: passando de 120px a caixa rola, mas sem barra nem setas em cima do
+          // texto. Rolagem por roda e teclado continua funcionando.
+          className="flex-1 resize-none scrollbar-hide text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-2xl px-3.5 py-2.5 max-h-[120px] placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 disabled:opacity-60 transition-all"
         />
         <button
           onClick={enviar}

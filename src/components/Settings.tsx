@@ -1375,7 +1375,7 @@ function QuoteTemplateModal({ initial, clinic, onClose, onSave }: {
     const rodape = '';
     // Mensagem que sai DEPOIS de tudo (orçamento + fotos).
     const [mensagemFinal, setMensagemFinal] = useState<string>(t.mensagem_final ?? '');
-    const [enviarFinal, setEnviarFinal] = useState<boolean>(t.enviar_mensagem_final ?? false);
+    const [enviarFinal, setEnviarFinal] = useState<boolean>(t.enviar_mensagem_final ?? true);
     const [validade, setValidade] = useState<string>(t.validade ?? '');
     const [pagamento, setPagamento] = useState<string>(t.pagamento ?? '');
     const [includeSpecs, setIncludeSpecs] = useState<boolean>(t.include_specs ?? true);

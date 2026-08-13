@@ -1568,7 +1568,9 @@ export function OrcamentoModal({ lead, ticketId, dadosPreAtendimento, initialQuo
   const [accompTouched, setAccompTouched] = useState<boolean>(!!iq?.accompText);
   // Mensagem de fechamento: sai DEPOIS de tudo (documento + fotos). O padrão vem do Modelo do
   // Orçamento (Configurações); o orçamento salvo, quando tem valor próprio, ganha dele.
-  const [includeClosing, setIncludeClosing] = useState<boolean>(iq?.includeClosing ?? (tpl.enviar_mensagem_final ?? false));
+  // Sem nada configurado, nasce LIGADA (decisão do dono, 13/08): fecha o envio com o texto de
+  // apresentação da empresa, e quem não quiser desmarca antes de enviar.
+  const [includeClosing, setIncludeClosing] = useState<boolean>(iq?.includeClosing ?? (tpl.enviar_mensagem_final ?? true));
   const [closingText, setClosingText] = useState<string>(iq?.closingText ?? String(tpl.mensagem_final ?? ''));
   const [messageText, setMessageText] = useState('');
   const [msgTouched, setMsgTouched] = useState(false);
@@ -2548,7 +2550,7 @@ export function OrcamentoModal({ lead, ticketId, dadosPreAtendimento, initialQuo
               )}
 
               {/* Mensagem final: sai por ÚLTIMO, depois do orçamento e de todas as fotos. Nasce
-                  desligada porque é a única mensagem que o cliente recebe sem ter pedido nada. */}
+                  LIGADA; quem não quiser mandar desmarca aqui, antes de enviar. */}
               <div className="space-y-1.5">
                 <label className="flex items-center gap-2 text-sm font-medium text-slate-600 cursor-pointer select-none">
                   <input type="checkbox" checked={includeClosing} onChange={e => setIncludeClosing(e.target.checked)} className="w-4 h-4 accent-blue-600" />

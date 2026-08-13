@@ -368,7 +368,7 @@ export function OrcamentosCentral() {
         {editTarget && editTarget.lead_id && (
           <OrcamentoModal
             // Sem `key` por seq: aqui o modal edita UMA proposta, não empilha propostas novas.
-            lead={{ id: editTarget.lead_id, name: editTarget.client_name || editTarget.lead?.name || "", phone: editTarget.lead?.phone ?? null }}
+            lead={{ id: editTarget.lead_id, name: editTarget.client_name || editTarget.lead?.name || "", phone: editTarget.lead?.phone ?? null, whatsapp_invalid: editTarget.lead?.whatsapp_invalid ?? null }}
             // Sem isto a coluna "Dados coletados no atendimento" nunca aparecia AQUI: quem edita
             // uma proposta pela Central via o modal largo e a conversa, e a ficha com malha,
             // altura e comprimento vazia — justo o dado que o recurso existe para mostrar. A

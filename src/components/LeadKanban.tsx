@@ -42,6 +42,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useFunnelStages, useLeads, useNotLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useProducts, Product, ProductInput, ProductAttribute, useQuoteImages, useAppointments, useDoctors, usePatients, useConsultationTypes, useProductionOrders, useInventoryItems, useOrcamentos, useClinicLossReasons, useChatMessages, getVigenteOrcamento, logSystemError, Conversion, Lead, Ticket, TransitionRule } from "../hooks/useSupabase";
 import { useTelaLarga } from "../hooks/useTelaLarga";
 import { ChatThread } from "./ChatThread";
+import { ChatComposer } from "./ChatComposer";
 import { NotLeadPanel } from "./NotLeadPanel";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -1377,7 +1378,10 @@ function ProductPicker({ value, products, protocols, useProd, useProt, sourceNou
 // manter dois orçamentos diferentes vivos (catálogo, alturas, cálculo, documento e envio), e eles
 // divergiriam na primeira mudança.
 export function OrcamentoModal({ lead, ticketId, dadosPreAtendimento, initialQuote, sessionIndex = 1, projetosDoCliente = [], onClose, onCancel, onConfirm, onSavedAndNew }: {
-  lead: { id: string; name: string; phone?: string | null };
+  // `whatsapp_invalid` só serve à caixa de envio da conversa (trava com o motivo na tela, igual
+  // ao Kanban e às Conversas). Opcional: quem não passar cai no comportamento antigo, com a caixa
+  // liberada e o erro vindo do envio.
+  lead: { id: string; name: string; phone?: string | null; whatsapp_invalid?: boolean | null };
   // Atendimento aberto. É por ele que se lê o que o pré-atendimento coletou (malha, altura,
   // comprimento): o dado é do ATENDIMENTO, não do contato — o mesmo cliente volta meses depois
   // querendo outra tela, e a medida do pedido anterior não pode reaparecer aqui.
@@ -1428,7 +1432,7 @@ export function OrcamentoModal({ lead, ticketId, dadosPreAtendimento, initialQuo
   // jogado fora. Pode virar e desvirar em tempo de execução; quem cuida disso é o useChatMessages,
   // que nomeia cada inscrição de forma nova justamente para aguentar desligar e religar.
   const mostrarConversa = useTelaLarga();
-  const { data: chatMessages, loading: chatLoading } = useChatMessages(
+  const { data: chatMessages, loading: chatLoading, send: enviarMensagem } = useChatMessages(
     mostrarConversa ? lead.id : undefined,
     mostrarConversa ? (lead.phone ?? undefined) : undefined,
   );
@@ -2763,6 +2767,15 @@ export function OrcamentoModal({ lead, ticketId, dadosPreAtendimento, initialQuo
             emptyTitle="Nenhuma mensagem nesta conversa."
             emptyHint="O histórico aparece aqui assim que o contato escrever."
           />
+          {/* MESMA caixa de envio do Kanban e das Conversas (mesmo componente, mesmo gate
+              `feature_chat_send`, mesma edge). Aqui o vendedor precisa combinar medida ou preço
+              sem sair do orçamento: só ler a conversa o obrigava a fechar o modal para responder,
+              e o que estava digitado ia junto. */}
+          <ChatComposer
+            onSend={enviarMensagem}
+            disabled={!lead.phone || !!lead.whatsapp_invalid}
+            disabledReason={lead.whatsapp_invalid ? "Este número não está no WhatsApp." : !lead.phone ? "Este lead não tem telefone." : undefined}
+          />
         </div>
         )}
         </div>
@@ -3399,7 +3412,7 @@ export function LeadKanban() {
   // `seq` = nº da proposta DENTRO desta sessão do modal, e é a `key` do OrcamentoModal: trocar o
   // seq REMONTA o modal, que é o que zera o formulário inteiro de uma vez (dezenas de estados, os
   // refs de mão única e o `quoteMeta`, que foi escrito sem setter e nenhum reset manual alcança).
-  const [orcamentoLead, setOrcamentoLead] = useState<{ id: string; name: string; phone: string | null; prevStageId: string | null; ticketId: string; initialQuote?: any; orcamentoId?: string | null; seq?: number } | null>(null);
+  const [orcamentoLead, setOrcamentoLead] = useState<{ id: string; name: string; phone: string | null; whatsapp_invalid?: boolean | null; prevStageId: string | null; ticketId: string; initialQuote?: any; orcamentoId?: string | null; seq?: number } | null>(null);
   const [poLead, setPoLead] = useState<{ id: string; name: string; phone: string | null; quoteData: any; ticketId?: string | null } | null>(null);
   // Aviso ao arrastar um card já resolvido (venda/perda) para uma etapa ativa: manter (novo
   // ciclo, card único) ou cancelar (reabre o mesmo ticket). Guarda o ticket p/ o fluxo "Manter".
@@ -3603,7 +3616,7 @@ export function LeadKanban() {
 
     if (targetStage?.slug === 'orcamento') {
       // Registra valor + produto/serviço (NÃO gera conversão; só metadados no lead/ticket).
-      setOrcamentoLead({ id: ticket.lead_id, name: ticket.lead?.name ?? '', phone: ticket.lead?.phone ?? null, prevStageId: ticket.stage_id, ticketId: ticket.id });
+      setOrcamentoLead({ id: ticket.lead_id, name: ticket.lead?.name ?? '', phone: ticket.lead?.phone ?? null, whatsapp_invalid: ticket.lead?.whatsapp_invalid ?? null, prevStageId: ticket.stage_id, ticketId: ticket.id });
     }
 
     // Etapa de conversão que não é 'ganho' (o backend já enfileira o evento CAPI): se o lead veio de
@@ -5135,7 +5148,7 @@ export function LeadKanban() {
                         type="button"
                         onClick={() => {
                           setShowModal(false);
-                          setOrcamentoLead({ id: selectedLead.id, name: selectedLead.name, phone: selectedLead.phone ?? null, prevStageId: null, ticketId: et.id, initialQuote: undefined, orcamentoId: null });
+                          setOrcamentoLead({ id: selectedLead.id, name: selectedLead.name, phone: selectedLead.phone ?? null, whatsapp_invalid: selectedLead.whatsapp_invalid ?? null, prevStageId: null, ticketId: et.id, initialQuote: undefined, orcamentoId: null });
                         }}
                         className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 font-bold text-sm hover:bg-emerald-100 transition-colors"
                       >
@@ -5152,7 +5165,7 @@ export function LeadKanban() {
                           onClick={() => {
                             setShowModal(false);
                             const vig = getVigenteOrcamento(orcamentos, selectedLead.id, et.id);
-                            setOrcamentoLead({ id: selectedLead.id, name: selectedLead.name, phone: selectedLead.phone ?? null, prevStageId: null, ticketId: et.id, initialQuote: et.quote_data, orcamentoId: vig?.id ?? null });
+                            setOrcamentoLead({ id: selectedLead.id, name: selectedLead.name, phone: selectedLead.phone ?? null, whatsapp_invalid: selectedLead.whatsapp_invalid ?? null, prevStageId: null, ticketId: et.id, initialQuote: et.quote_data, orcamentoId: vig?.id ?? null });
                           }}
                           className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 font-bold text-sm hover:bg-blue-100 transition-colors"
                         >

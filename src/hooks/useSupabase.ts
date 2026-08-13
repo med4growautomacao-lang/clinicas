@@ -4183,7 +4183,10 @@ export interface Orcamento {
   sent_at: string | null;
   approved_at: string | null;
   rejected_at: string | null;
-  lead?: { name: string; phone: string | null } | null;
+  // `whatsapp_invalid` vem junto porque a Central abre o MESMO construtor de orçamento do Kanban,
+  // e lá dentro a conversa tem caixa de envio: sem esta coluna a trava do número sem WhatsApp
+  // existiria num caminho e não no outro.
+  lead?: { name: string; phone: string | null; whatsapp_invalid?: boolean | null } | null;
 }
 
 export interface SaveOrcamentoInput {
@@ -4231,7 +4234,7 @@ export function useOrcamentos() {
     if (!silent) setLoading(true);
     const { data, error } = await supabase
       .from('orcamentos')
-      .select('*, lead:leads(name, phone)')
+      .select('*, lead:leads(name, phone, whatsapp_invalid)')
       .eq('clinic_id', activeClinicId)
       .order('number', { ascending: false });
     if (error) {

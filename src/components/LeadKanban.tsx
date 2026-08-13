@@ -39,7 +39,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { useFunnelStages, useLeads, useNotLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useProducts, Product, ProductInput, ProductAttribute, useQuoteImages, useAppointments, useDoctors, usePatients, useConsultationTypes, useProductionOrders, useInventoryItems, useOrcamentos, useClinicLossReasons, useChatMessages, getVigenteOrcamento, logSystemError, Conversion, Lead, Ticket, TransitionRule } from "../hooks/useSupabase";
+import { useFunnelStages, useLeads, useNotLeads, useTickets, useSettings, useTransitionRules, useConversions, useFinancial, useProtocols, useProducts, Product, ProductInput, ProductAttribute, useQuoteImages, useAppointments, useDoctors, usePatients, useConsultationTypes, useProductionOrders, useInventoryItems, useOrcamentos, useClinicLossReasons, useChatMessages, getVigenteOrcamento, logSystemError, fetchLeadCompleto, Conversion, Lead, LeadResumo, Ticket, TransitionRule } from "../hooks/useSupabase";
 import { useTelaLarga } from "../hooks/useTelaLarga";
 import { ChatThread } from "./ChatThread";
 import { ChatComposer } from "./ChatComposer";
@@ -3431,7 +3431,8 @@ export function LeadKanban() {
   const [formData, setFormData] = useState({ name: '', phone: '', source: 'sincronizacao', capture_channel: 'whatsapp', stage_id: '', estimated_value: '', loss_reason: '', avatar_url: '' });
   const [submitting, setSubmitting] = useState(false);
   const [chatLead, setChatLead] = useState<{ lead: any; ticketId: string } | null>(null);
-  const [scheduleLead, setScheduleLead] = useState<{ lead: Lead; ticketId: string; prevStageId: string | null } | null>(null);
+  // Resumo basta: esta janela só exibe o nome do contato e agenda pelo id.
+  const [scheduleLead, setScheduleLead] = useState<{ lead: LeadResumo; ticketId: string; prevStageId: string | null } | null>(null);
   const [scheduleForm, setScheduleForm] = useState({ doctor_id: '', date: '', time: '', notes: '', consultation_type_id: '' as string });
   const [scheduleSubmitting, setScheduleSubmitting] = useState(false);
   const [scheduleSlots, setScheduleSlots] = useState<string[] | null>(null);
@@ -3728,8 +3729,15 @@ export function LeadKanban() {
     setSubmitting(false);
   };
 
-  const openEditModal = (ticket: Ticket) => {
-    const lead = ticket.lead!;
+  // ⚠️ Busca o contato INTEIRO antes de abrir: o quadro carrega só o resumo (ver `LeadResumo`),
+  // e esta janela mostra campos que ficam de fora dele, como o painel "O que a IA sabe deste
+  // contato" (`ai_summary`, `ai_long_memory`). Sem esta leitura o painel abre vazio, e vazio aqui
+  // parece "a IA não sabe nada" em vez de "a tela não carregou".
+  const openEditModal = async (ticket: Ticket) => {
+    const completo = ticket.lead_id ? await fetchLeadCompleto(ticket.lead_id) : null;
+    // Falhou a leitura: segue com o resumo em vez de não abrir nada. Os campos do formulário
+    // (nome, telefone, plataforma, captação, valor, foto) estão todos no resumo.
+    const lead: any = completo ?? ticket.lead!;
     setSelectedLead({ ...lead, _ticketId: ticket.id });
     // O campo se chama "Valor do orçamento" e passa a carregar SÓ o orçamento do contato.
     // Venda lançada não entra aqui: o card pode ter várias, cada uma com sua data, e um campo
@@ -5952,7 +5960,9 @@ export function LeadKanban() {
                     const sl = alvo.lead;
                     // RPC atômica: resolve paciente + vincula lead + cria appointment com proteção a sobreposição
                     const { data, error } = await supabase.rpc('convert_lead_to_appointment', {
-                      p_clinic_id: sl.clinic_id,
+                      // Clínica ativa em vez de `sl.clinic_id`: o resumo do quadro não carrega essa
+                      // coluna, e o card em tela é sempre da clínica aberta.
+                      p_clinic_id: activeClinicId,
                       p_lead_id: sl.id,
                       p_doctor_id: scheduleForm.doctor_id,
                       p_date: scheduleForm.date,

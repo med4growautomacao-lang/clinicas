@@ -1081,7 +1081,52 @@ export interface Ticket {
    *  mesmo cliente volta meses depois querendo outra coisa, e a medida antiga não pode reaparecer
    *  no pedido novo. Sem tipo garantido no banco (jsonb), então converta antes de exibir. */
   dados_pre_atendimento?: any | null;
-  lead?: Lead;
+  /** ⚠️ RESUMO, não o contato inteiro. Ver `LeadResumo`. Quem precisa do lead completo (Editar
+   *  Lead, agendamento, conversa) chama `fetchLeadCompleto(id)` na hora de abrir. */
+  lead?: LeadResumo;
+}
+
+// ⚠️ O QUADRO NÃO CARREGA O CONTATO INTEIRO, e isso não é economia de estilo: medido em 11/08 na
+// Metaltres (4.115 cards), `lead:leads(*)` fazia a tela baixar **10 MB de JSON**, dos quais 7,1 MB
+// eram campos de contato que nenhum card mostra. E não era uma vez: o quadro recarrega 1,5s depois
+// de qualquer mudança, a cada 30s por segurança e toda vez que a aba volta ao foco. O banco
+// respondia em 55 ms; o peso estava no fio e no navegador.
+// Só o que o CARD desenha entra aqui. Cortar isto levou os 10 MB para 4,1 MB.
+// ⚠️ A lista saiu do COMPILADOR, não de palpite: tipei o resumo com o mínimo e deixei o
+// `tsc` apontar cada campo que o card desenha de verdade. Se um dia o card mostrar algo novo,
+// o compilador reclama aqui, e é o lugar certo para decidir se vale carregar aquilo em 4 mil linhas.
+export type LeadResumo = Pick<Lead,
+  | 'id' | 'name' | 'phone' | 'email' | 'source' | 'capture_channel'
+  | 'estimated_value' | 'whatsapp_invalid' | 'is_not_lead' | 'loss_reason'
+  // ⚠️ `ai_enabled` não é desenhado no card: entra porque o painel de conversa recebe este mesmo
+  // objeto e desenha a chave da IA com ele. Sem a coluna, a chave aparece no estado errado e o
+  // usuário liga a IA achando que estava desligada. O compilador NÃO pega este caso (o painel
+  // recebe `any`), então foi achado lendo o componente. Repasse novo? Confira o que ele lê.
+  | 'ai_enabled'
+  | 'ctwa_clid' | 'fb_clid' | 'rast_id' | 'avatar_url'
+  | 'converted_patient_id' | 'sla_breach_count'
+  | 'last_activity_at' | 'last_message_at' | 'last_outbound_at' | 'created_at' | 'updated_at'
+  // Marcas de campanha: o card mostra os chips de origem.
+  | 'fb_campaign_name' | 'fb_adset_name' | 'fb_ad_name'
+  | 'g_campaign_name' | 'g_adset_name' | 'g_ad_name' | 'g_source_name' | 'g_term_name'>;
+
+/** Colunas do resumo, na forma que o PostgREST espera. Fonte única: mudar aqui muda a consulta. */
+export const LEAD_RESUMO_COLS =
+  'id, name, phone, email, source, capture_channel, estimated_value, whatsapp_invalid, is_not_lead, ai_enabled, ' +
+  'loss_reason, ctwa_clid, fb_clid, rast_id, avatar_url, converted_patient_id, sla_breach_count, ' +
+  'last_activity_at, last_message_at, last_outbound_at, created_at, updated_at, ' +
+  'fb_campaign_name, fb_adset_name, fb_ad_name, g_campaign_name, g_adset_name, g_ad_name, g_source_name, g_term_name';
+
+/** O contato INTEIRO, sob demanda. Use ao abrir tela que edita ou exibe o cadastro completo:
+ *  o quadro só traz o resumo. Devolve null (e acende a Central) quando falha. */
+export async function fetchLeadCompleto(leadId: string): Promise<Lead | null> {
+  const { data, error } = await supabase.from('leads').select('*').eq('id', leadId).maybeSingle();
+  if (error || !data) {
+    logSystemError('LEAD_FULL_FETCH_FAIL', `Falha ao carregar o contato ${leadId}`, null,
+      { lead_id: leadId, error: error?.message ?? 'sem retorno' }, 'error');
+    return null;
+  }
+  return data as Lead;
 }
 
 // ── Hook genérico para RPCs de leitura do painel ─────────────────────────────
@@ -1484,7 +1529,9 @@ export function useTickets() {
     for (let page = 0; page < MAX_PAGES; page++) {
       const { data, error } = await supabase
         .from('tickets')
-        .select('*, lead:leads(*)')
+        // ⚠️ RESUMO do contato, não `leads(*)`: ver o comentário de `LeadResumo`. Trocar por `*`
+        // aqui devolve os 10 MB por carregamento, e o sintoma é "o Kanban está lento".
+        .select(`*, lead:leads(${LEAD_RESUMO_COLS})`)
         .eq('clinic_id', activeClinicId)
         .or(`status.eq.open,closed_at.gte.${ninetyDaysAgo}`)
         .order('opened_at', { ascending: false })
@@ -1609,7 +1656,7 @@ export function useTickets() {
   const openTicket = async (leadId: string, stageId: string) => {
     const alreadyOpen = tickets.some(t => t.lead_id === leadId && t.status === 'open');
     if (alreadyOpen) return null;
-    const { data, error } = await supabase.from('tickets').insert({ clinic_id: activeClinicId, lead_id: leadId, stage_id: stageId }).select('*, lead:leads(*)').single();
+    const { data, error } = await supabase.from('tickets').insert({ clinic_id: activeClinicId, lead_id: leadId, stage_id: stageId }).select(`*, lead:leads(${LEAD_RESUMO_COLS})`).single();
     if (!error && data) setTickets(prev => [data as Ticket, ...prev]);
     return error ? null : (data as Ticket);
   };

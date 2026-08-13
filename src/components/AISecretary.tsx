@@ -2847,7 +2847,7 @@ function ChatsView() {
     return searchResults.filter(l => !l.is_not_lead && matchesSearch(leadSearch, { name: l.name, email: l.email, phone: l.phone }, ['phone']));
   }, [leads, leadSearch, searchResults]);
   const selectedLead = leads.find(l => l.id === selectedLeadId) || searchResults.find(l => l.id === selectedLeadId);
-  const { data: messages, loading: messagesLoading, send: sendMessage } = useChatMessages(selectedLeadId || undefined, selectedLead?.phone);
+  const { data: messages, loading: messagesLoading, send: sendMessage, sendAudio: sendAudioMessage } = useChatMessages(selectedLeadId || undefined, selectedLead?.phone);
 
   // Auto-select first lead if none selected (ignora Não Leads, que não são listados)
   useEffect(() => {
@@ -3200,6 +3200,7 @@ function ChatsView() {
 
             <ChatComposer
               onSend={sendMessage}
+              onSendAudio={sendAudioMessage}
               disabled={!selectedLead.phone || !!selectedLead.whatsapp_invalid}
               disabledReason={selectedLead.whatsapp_invalid ? "Este número não está no WhatsApp." : !selectedLead.phone ? "Este lead não tem telefone." : undefined}
             />

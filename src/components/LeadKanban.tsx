@@ -1433,7 +1433,7 @@ export function OrcamentoModal({ lead, ticketId, dadosPreAtendimento, initialQuo
   // jogado fora. Pode virar e desvirar em tempo de execução; quem cuida disso é o useChatMessages,
   // que nomeia cada inscrição de forma nova justamente para aguentar desligar e religar.
   const mostrarConversa = useTelaLarga();
-  const { data: chatMessages, loading: chatLoading, send: enviarMensagem } = useChatMessages(
+  const { data: chatMessages, loading: chatLoading, send: enviarMensagem, sendAudio: enviarAudio } = useChatMessages(
     mostrarConversa ? lead.id : undefined,
     mostrarConversa ? (lead.phone ?? undefined) : undefined,
   );
@@ -2775,6 +2775,7 @@ export function OrcamentoModal({ lead, ticketId, dadosPreAtendimento, initialQuo
               e o que estava digitado ia junto. */}
           <ChatComposer
             onSend={enviarMensagem}
+            onSendAudio={enviarAudio}
             disabled={!lead.phone || !!lead.whatsapp_invalid}
             disabledReason={lead.whatsapp_invalid ? "Este número não está no WhatsApp." : !lead.phone ? "Este lead não tem telefone." : undefined}
           />

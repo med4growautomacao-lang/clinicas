@@ -25,7 +25,7 @@ interface LeadChatProps {
 }
 
 export function LeadChat({ lead, onClose, isDragging = false, ticketId, currentStageId, onGanho, onPerdido, onStageChange, onEdit }: LeadChatProps) {
-  const { data: messages, loading, send } = useChatMessages(lead.id, lead.phone);
+  const { data: messages, loading, send, sendAudio } = useChatMessages(lead.id, lead.phone);
   const { update: updateLead } = useLeads();
   const { byLead: conversionsByLead } = useConversions();
   const [showConversions, setShowConversions] = useState(false);
@@ -174,6 +174,7 @@ export function LeadChat({ lead, onClose, isDragging = false, ticketId, currentS
 
       <ChatComposer
         onSend={send}
+        onSendAudio={sendAudio}
         disabled={!lead.phone || !!lead.whatsapp_invalid}
         disabledReason={lead.whatsapp_invalid ? "Este número não está no WhatsApp." : !lead.phone ? "Este lead não tem telefone." : undefined}
       />

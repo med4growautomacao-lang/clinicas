@@ -2625,21 +2625,17 @@ export function useChatMessages(leadId?: string, leadPhone?: string | null) {
   // a mensagem na conversa SEM ter sido entregue ao lead. A mensagem aparece na tela pelo
   // realtime de INSERT (que já deduplica por id), então não há inserção otimista.
   // Erros são devolvidos ao chamador para a UI decidir; a Central de Erros registra o lado servidor.
-  const send = async (text: string): Promise<{ ok: boolean; error?: string }> => {
-    if (!activeClinicId) return { ok: false, error: 'sem_clinica' };
-    const clean = (text || '').trim();
-    if (!clean) return { ok: false, error: 'texto_vazio' };
-
-    // leadPhone pode vir como session_id (telefone da clínica + telefone do lead concatenados).
+  // leadPhone pode vir como session_id (telefone da clínica + telefone do lead concatenados).
+  const telefoneDoLead = (): string | null => {
     let rawPhone = leadPhone || null;
     if (rawPhone && clinicPhone && rawPhone.startsWith(clinicPhone) && rawPhone.length > clinicPhone.length) {
       rawPhone = rawPhone.slice(clinicPhone.length);
     }
-    if (!rawPhone) return { ok: false, error: 'sem_telefone' };
+    return rawPhone || null;
+  };
 
-    const { data: res, error: fnError } = await supabase.functions.invoke('chat-send', {
-      body: { clinic_id: activeClinicId, lead_id: leadId ?? null, phone: rawPhone, text: clean },
-    });
+  const chamarEdge = async (body: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> => {
+    const { data: res, error: fnError } = await supabase.functions.invoke('chat-send', { body });
     if (fnError || !(res as any)?.ok) {
       const code = (res as any)?.error || fnError?.message || 'falha_no_envio';
       setError(code);
@@ -2648,7 +2644,35 @@ export function useChatMessages(leadId?: string, leadPhone?: string | null) {
     return { ok: true };
   };
 
-  return { data, loading, error, refetch: fetch, send };
+  const send = async (text: string): Promise<{ ok: boolean; error?: string }> => {
+    if (!activeClinicId) return { ok: false, error: 'sem_clinica' };
+    const clean = (text || '').trim();
+    if (!clean) return { ok: false, error: 'texto_vazio' };
+    const rawPhone = telefoneDoLead();
+    if (!rawPhone) return { ok: false, error: 'sem_telefone' };
+
+    return chamarEdge({ clinic_id: activeClinicId, lead_id: leadId ?? null, phone: rawPhone, text: clean });
+  };
+
+  // Áudio gravado no navegador (ChatComposer). Mesma edge, mesmo gate e mesma regra do texto: quem
+  // grava a mensagem na conversa é a edge, DEPOIS de entregue — aqui não há inserção otimista. O
+  // binário vai em base64 no corpo porque o bucket `chat-media` é privado e quem sobe arquivo lá é
+  // sempre o servidor (o cliente nunca escreve em mídia de paciente).
+  const sendAudio = async (
+    base64: string, mimetype: string, durationMs?: number,
+  ): Promise<{ ok: boolean; error?: string }> => {
+    if (!activeClinicId) return { ok: false, error: 'sem_clinica' };
+    if (!base64) return { ok: false, error: 'audio_invalido' };
+    const rawPhone = telefoneDoLead();
+    if (!rawPhone) return { ok: false, error: 'sem_telefone' };
+
+    return chamarEdge({
+      clinic_id: activeClinicId, lead_id: leadId ?? null, phone: rawPhone,
+      audio: { base64, mimetype, duration_ms: durationMs ?? null },
+    });
+  };
+
+  return { data, loading, error, refetch: fetch, send, sendAudio };
 }
 // ==========================================
 // MARKETING DATA

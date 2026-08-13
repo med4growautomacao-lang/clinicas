@@ -190,11 +190,16 @@ async function processar(supa: Supa, m: Mensagem, cache: Map<string, string | nu
     ? { number: m.to_addr, text: m.body ?? "", delay: m.delay_ms ?? 0 }
     : {
         number: m.to_addr,
+        // `media_kind` vai CRU no `type` da uazapi (image, video, document, audio, ptt, sticker...):
+        // 'ptt' e o que faz o WhatsApp mostrar MENSAGEM DE VOZ em vez de arquivo anexado.
         type: m.media_kind ?? (m.kind === "audio" ? "audio" : "document"),
         file: m.media_base64 ?? m.media_url,
         text: m.body ?? undefined,
         // docName: nome do arquivo que o destinatario ve (ex.: orcamento em PDF do send-quote).
         docName: m.media_filename ?? undefined,
+        // Em base64 nao ha nome de arquivo nem Content-Type para a uazapi deduzir o formato; o
+        // campo e opcional na doc e nenhum produtor preenchia media_mime ate o audio do chat.
+        mimetype: m.media_mime ?? undefined,
         delay: m.delay_ms ?? 0,
       };
 

@@ -44,6 +44,11 @@ interface ChatComposerProps {
   onSend: (text: string) => Promise<{ ok: boolean; error?: string }>;
   // Idem: envia o áudio gravado. Ausente = sem botão de microfone.
   onSendAudio?: (base64: string, mimetype: string, durationMs: number) => Promise<{ ok: boolean; error?: string }>;
+  // ⚠️ DE QUEM é esta conversa. Não é enfeite nem telemetria: trocar de contato NÃO desmonta este
+  // componente (é o mesmo ramo do JSX nas três telas que o usam), então sem saber que o contato
+  // mudou a gravação em curso continuaria viva e, ao encerrar, seria entregue ao contato ANTERIOR
+  // — a função de envio fica presa na closure do momento em que o microfone foi clicado.
+  leadId?: string;
   disabled?: boolean;
   disabledReason?: string;
 }
@@ -53,7 +58,7 @@ interface ChatComposerProps {
  * ligada na clínica (Gestão Organizacional). A mensagem enviada entra na conversa
  * pelo realtime — não há eco local, para a tela nunca mostrar algo que não foi entregue.
  */
-export function ChatComposer({ onSend, onSendAudio, disabled, disabledReason }: ChatComposerProps) {
+export function ChatComposer({ onSend, onSendAudio, leadId, disabled, disabledReason }: ChatComposerProps) {
   const { clinic } = useSettings();
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -71,6 +76,17 @@ export function ChatComposer({ onSend, onSendAudio, disabled, disabledReason }: 
   // enxergaria o valor congelado do estado no momento em que a gravação começou.
   const descartarRef = useRef(false);
   const duracaoRef = useRef(0);
+  // ⚠️ Trava SÍNCRONA de reentrância. Conferir `gravando` não basta: ele só vira true DEPOIS do
+  // `await` do getUserMedia, e enquanto o navegador abre o dispositivo (ou enquanto o balão de
+  // permissão está aberto) a tela não muda nada. Dois cliques nessa janela abriam DOIS microfones
+  // e DOIS cronômetros, e as refs guardavam só o segundo: o primeiro seguia capturando até
+  // recarregar a página, e o contador órfão fazia a gravação seguinte andar 2s por segundo.
+  const abrindoRef = useRef(false);
+  // ⚠️ Muda a cada troca de contato e ao sair da tela. É o que separa "esta gravação ainda é da
+  // conversa que está aberta" de "isto sobrou de outra conversa". Um booleano de montagem não
+  // serviria: trocar de contato não desmonta nada aqui, e uma checagem de montagem voltaria a
+  // true na mesma hora, deixando a gravação órfã seguir viagem para o contato errado.
+  const geracaoRef = useRef(0);
 
   const encerrarStream = () => {
     streamRef.current?.getTracks().forEach(t => t.stop());
@@ -78,14 +94,16 @@ export function ChatComposer({ onSend, onSendAudio, disabled, disabledReason }: 
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
   };
 
-  // Sair da tela (fechar o modal, trocar de lead) com o microfone aberto deixaria a luzinha de
+  // Trocar de contato ou sair da tela (fechar o modal) com o microfone aberto deixaria a luzinha de
   // gravação acesa e o navegador ouvindo à toa. Descarta: enviar áudio de uma conversa que já não
-  // está aberta seria enviar sem querer.
+  // está aberta seria enviar para a pessoa errada.
   useEffect(() => () => {
+    geracaoRef.current += 1;
     descartarRef.current = true;
     try { if (recorderRef.current?.state === "recording") recorderRef.current.stop(); } catch { /* já parado */ }
     encerrarStream();
-  }, []);
+    setGravando(false);
+  }, [leadId]);
 
   // Opt-in: ausente ou false = escondido.
   if (clinic?.features?.feature_chat_send !== true) return null;
@@ -120,12 +138,16 @@ export function ChatComposer({ onSend, onSendAudio, disabled, disabledReason }: 
     && typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
 
   const iniciarGravacao = async () => {
-    if (!podeGravar || gravando || sending || disabled) return;
+    if (!podeGravar || gravando || sending || disabled || abrindoRef.current) return;
+    abrindoRef.current = true;
     setErro(null);
+    // Congelado ANTES do await: é com esta conversa que a gravação vai ser comparada lá na frente.
+    const geracao = geracaoRef.current;
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (e) {
+      abrindoRef.current = false;
       const nome = (e as Error)?.name ?? "";
       setErro(nome === "NotAllowedError" || nome === "SecurityError"
         ? "Permita o acesso ao microfone no navegador para gravar áudio."
@@ -135,9 +157,33 @@ export function ChatComposer({ onSend, onSendAudio, disabled, disabledReason }: 
       return;
     }
 
+    // ⚠️ Abrir o microfone DEMORA (o navegador inicializa o dispositivo, e no primeiro uso ainda
+    // pergunta a permissão). Se o operador trocou de contato nesse meio tempo, seguir daqui seria
+    // gravar escondido para uma conversa que não está mais na tela: sem cronômetro, sem botão de
+    // parar, e ao bater o teto de 5 minutos o áudio sairia para o contato ANTERIOR sozinho.
+    if (geracao !== geracaoRef.current) {
+      stream.getTracks().forEach(t => t.stop());
+      abrindoRef.current = false;
+      return;
+    }
+
     // 32 kbps: o padrão do Chrome grava voz a ~100 kbps, três vezes mais bytes para trafegar sem
     // ganho nenhum de inteligibilidade (a própria mensagem de voz do WhatsApp fica abaixo disso).
-    const rec = new MediaRecorder(stream, { mimeType: formato!, audioBitsPerSecond: 32000 });
+    let rec: MediaRecorder;
+    try {
+      rec = new MediaRecorder(stream, { mimeType: formato!, audioBitsPerSecond: 32000 });
+    } catch {
+      // O microfone JÁ está aberto neste ponto: sem fechar aqui, o construtor recusando o formato
+      // deixaria o navegador capturando com a luzinha acesa e nenhuma gravação acontecendo.
+      stream.getTracks().forEach(t => t.stop());
+      abrindoRef.current = false;
+      setErro("Este navegador não conseguiu gravar áudio.");
+      return;
+    }
+
+    // Cinto: se sobrou stream ou cronômetro de uma tentativa anterior, morre aqui antes de as refs
+    // serem sobrescritas (o que deixaria o anterior sem dono, sem ninguém para pará-lo).
+    encerrarStream();
     streamRef.current = stream;
     recorderRef.current = rec;
     pedacosRef.current = [];
@@ -150,7 +196,8 @@ export function ChatComposer({ onSend, onSendAudio, disabled, disabledReason }: 
       setGravando(false);
       const pedacos = pedacosRef.current;
       pedacosRef.current = [];
-      if (descartarRef.current) return;
+      // Descartada de propósito (lixeira) OU sobrou de outra conversa: nos dois casos não sai daqui.
+      if (descartarRef.current || geracao !== geracaoRef.current) return;
 
       const blob = new Blob(pedacos, { type: formato! });
       // Toque no microfone sem falar nada: não vale mandar um áudio mudo de 0s.
@@ -175,9 +222,21 @@ export function ChatComposer({ onSend, onSendAudio, disabled, disabledReason }: 
       }
     };
 
-    rec.start();
+    try {
+      rec.start();
+    } catch {
+      // `start()` ainda pode recusar depois de tudo dar certo (encoder que não inicializa, fone que
+      // some entre abrir e gravar). Sem este catch a trava de reentrância ficaria presa em true e
+      // TODO clique seguinte no microfone seria ignorado, sem mensagem e com o dispositivo aberto.
+      encerrarStream();
+      recorderRef.current = null;
+      abrindoRef.current = false;
+      setErro("Não foi possível iniciar a gravação. Tente de novo.");
+      return;
+    }
     setGravando(true);
     setSegundos(0);
+    abrindoRef.current = false;
     timerRef.current = setInterval(() => {
       duracaoRef.current += 1;
       setSegundos(duracaoRef.current);

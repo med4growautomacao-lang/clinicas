@@ -2774,6 +2774,9 @@ export function OrcamentoModal({ lead, ticketId, dadosPreAtendimento, initialQuo
               sem sair do orçamento: só ler a conversa o obrigava a fechar o modal para responder,
               e o que estava digitado ia junto. */}
           <ChatComposer
+            // `leadId`: o modal é reaproveitado ao abrir outro orçamento sem desmontar, e sem ele
+            // uma gravação em curso seria enviada ao contato anterior (ver AISecretary.tsx).
+            leadId={lead.id}
             onSend={enviarMensagem}
             onSendAudio={enviarAudio}
             disabled={!lead.phone || !!lead.whatsapp_invalid}

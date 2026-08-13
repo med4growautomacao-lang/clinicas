@@ -225,6 +225,61 @@ function useSigned(items: SignItem[], enabled: boolean) {
   return { urls, settled, transient, retry: () => setNonce((n) => n + 1) };
 }
 
+// ─── Áudio com velocidade (1×, 1,5×, 2×) ─────────────────────────────────────
+// Quem ouve áudio de paciente ouve dezenas por dia, e boa parte é recado longo. O botão fica ao
+// lado do player nativo (não substitui: barra, volume e download continuam sendo do navegador).
+const VELOCIDADES = [1, 1.5, 2] as const;
+// Escolha do operador, guardada no módulo: quem acelerou um áudio quer os PRÓXIMOS acelerados
+// também. Não vai para localStorage de propósito — é preferência da sessão, não configuração.
+let velocidadePadrao: number = 1;
+
+function AudioPlayer({ src, dark, onFalha }: { src: string; dark: boolean; onFalha?: () => void }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [velocidade, setVelocidade] = useState<number>(velocidadePadrao);
+
+  // ⚠️ Reaplicar também quando o `src` muda: a URL assinada chega DEPOIS (lazy + lote), e trocar o
+  // src devolve o elemento ao 1× sem avisar. Sem isto, o áudio que ainda estava carregando quando
+  // o operador escolheu 2× voltaria à velocidade normal ao começar a tocar.
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.playbackRate = velocidade;
+  }, [velocidade, src]);
+
+  const alternar = () => {
+    const proxima = VELOCIDADES[(VELOCIDADES.indexOf(velocidade as typeof VELOCIDADES[number]) + 1) % VELOCIDADES.length];
+    setVelocidade(proxima);
+    velocidadePadrao = proxima;
+  };
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <audio
+        ref={audioRef}
+        src={src}
+        controls
+        className="max-w-[210px] h-10"
+        preload="metadata"
+        // Alguns navegadores zeram o playbackRate ao carregar os metadados do arquivo.
+        onLoadedMetadata={e => { e.currentTarget.playbackRate = velocidade; }}
+        // A URL assinada vale 1h. Numa conversa deixada aberta a manhã toda, ela vence e o play
+        // simplesmente não acontece (o placeholder de falha só existe ANTES de haver URL). Aqui o
+        // player pede uma assinatura nova — uma vez só, senão arquivo de fato ausente viraria laço.
+        onError={onFalha}
+      />
+      <button
+        type="button"
+        onClick={alternar}
+        title="Velocidade de reprodução"
+        className={cn(
+          "shrink-0 px-1.5 py-1 rounded-lg text-[11px] font-bold tabular-nums transition-colors",
+          dark ? "bg-white/15 text-white hover:bg-white/25" : "bg-slate-100 text-slate-600 hover:bg-slate-200",
+        )}
+      >
+        {velocidade === 1 ? '1×' : velocidade === 1.5 ? '1,5×' : '2×'}
+      </button>
+    </div>
+  );
+}
+
 export function MediaBubble({ media, dark }: { media: NonNullable<ReturnType<typeof detectMedia>>; dark: boolean }) {
   const { kind, mime, caption, filename } = media;
   const [ref, inView] = useInViewport<HTMLDivElement>();
@@ -238,6 +293,20 @@ export function MediaBubble({ media, dark }: { media: NonNullable<ReturnType<typ
     if (kind === 'image') items.push({ id: `${path}@thumb`, path, width: 520, quality: 60 });
   }
   const { urls, settled, transient, retry } = useSigned(items, inView);
+  // Re-assinatura no máximo 1x por minuto. O limite é de FREQUÊNCIA, não "uma vez para sempre":
+  // uma falha qualquer de rede logo no início queimaria a única chance e a bolha ficaria sem defesa
+  // justamente na hora em que a URL vencesse de verdade. Assim, arquivo de fato ausente não vira
+  // laço (falha, espera um minuto) e a bolha continua se recuperando pelo resto da sessão.
+  const ultimaReassinatura = useRef(0);
+  const reassinar = () => {
+    const agora = Date.now();
+    if (agora - ultimaReassinatura.current < 60_000) return;
+    ultimaReassinatura.current = agora;
+    // ⚠️ Sem limpar o cache do módulo, `retry()` devolve a MESMA URL enquanto a margem de 5 min não
+    // venceu: o React não reescreve um `src` idêntico e a tentativa não faz absolutamente nada.
+    for (const it of items) signCache.delete(it.id);
+    retry();
+  };
 
   const fullUrl = media.url ?? (path ? urls[path] ?? null : null);
   const thumbUrl = media.url ?? (path ? urls[`${path}@thumb`] ?? null : null) ?? fullUrl;
@@ -299,12 +368,12 @@ export function MediaBubble({ media, dark }: { media: NonNullable<ReturnType<typ
       );
     }
     if (kind === 'audio') {
-      return <audio src={displayUrl} controls className="max-w-[260px] h-10" preload="metadata" />;
+      return <AudioPlayer src={displayUrl} dark={dark} onFalha={reassinar} />;
     }
     if (kind === 'video') {
       return (
         <div className="space-y-2">
-          <video src={displayUrl} controls className="rounded-lg max-w-[260px] max-h-[320px]" preload="metadata" />
+          <video src={displayUrl} controls className="rounded-lg max-w-[260px] max-h-[320px]" preload="metadata" onError={reassinar} />
           {caption && <p className="text-sm font-medium leading-relaxed whitespace-pre-wrap">{caption}</p>}
         </div>
       );

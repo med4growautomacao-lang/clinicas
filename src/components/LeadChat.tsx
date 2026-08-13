@@ -173,6 +173,9 @@ export function LeadChat({ lead, onClose, isDragging = false, ticketId, currentS
       />
 
       <ChatComposer
+        // `leadId`: o painel é reaproveitado ao trocar de card sem desmontar, e sem ele uma
+        // gravação em curso seria enviada ao contato anterior (ver comentário em AISecretary.tsx).
+        leadId={lead.id}
         onSend={send}
         onSendAudio={sendAudio}
         disabled={!lead.phone || !!lead.whatsapp_invalid}

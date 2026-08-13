@@ -2637,9 +2637,20 @@ export function useChatMessages(leadId?: string, leadPhone?: string | null) {
   const chamarEdge = async (body: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> => {
     const { data: res, error: fnError } = await supabase.functions.invoke('chat-send', { body });
     if (fnError || !(res as any)?.ok) {
-      const code = (res as any)?.error || fnError?.message || 'falha_no_envio';
-      setError(code);
-      return { ok: false, error: code };
+      let code = (res as any)?.error as string | undefined;
+      // ⚠️ Em resposta 4xx/5xx o supabase-js LANÇA antes de ler o corpo e devolve `data: null`, então
+      // o código que a edge mandou (`whatsapp_nao_conectado`, `audio_muito_grande`…) se perde e a
+      // tela cai sempre na frase genérica. A resposta crua fica no `context` do erro: é de lá que o
+      // motivo real sai, e é o que faz o dicionário de mensagens do ChatComposer valer para algo.
+      if (!code && fnError) {
+        try {
+          const resp = (fnError as any)?.context;
+          if (resp && typeof resp.clone === 'function') code = (await resp.clone().json())?.error;
+        } catch { /* corpo não-JSON: fica o texto do SDK mesmo */ }
+      }
+      const final = code || fnError?.message || 'falha_no_envio';
+      setError(final);
+      return { ok: false, error: final };
     }
     return { ok: true };
   };

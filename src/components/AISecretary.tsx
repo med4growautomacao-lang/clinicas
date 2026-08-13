@@ -3199,6 +3199,12 @@ function ChatsView() {
             />
 
             <ChatComposer
+              // ⚠️ `leadId` NÃO é enfeite: trocar de contato aqui não desmonta o painel (é o mesmo
+              // ramo do JSX), e é por ele que a caixa descobre a troca e descarta uma gravação em
+              // curso. Sem isso o áudio sairia para o contato ANTERIOR. Usar `key` também resolveria
+              // a gravação, mas remontaria a caixa a cada clique de contato: a barra de envio some
+              // por um instante e o `useSettings` de dentro dela refaz 4 consultas por clique.
+              leadId={selectedLead.id}
               onSend={sendMessage}
               onSendAudio={sendAudioMessage}
               disabled={!selectedLead.phone || !!selectedLead.whatsapp_invalid}

@@ -1,6 +1,7 @@
 import React from "react";
 import { ExternalLink } from "lucide-react";
 import { cn } from "@/src/lib/utils";
+import { useSettings } from "../hooks/useSupabase";
 import WhatsAppLogo from "../assets/logos/Logo Whatsapp.png";
 
 /**
@@ -41,8 +42,12 @@ interface AbrirNoWhatsAppProps {
 }
 
 export function AbrirNoWhatsApp({ phone, invalid, compact, className }: AbrirNoWhatsAppProps) {
+  const { clinic } = useSettings();
   const digits = waDigits(phone);
   if (!digits) return null;
+  // Chave do cliente (Configurações › Integrações › WhatsApp). OPT-OUT: ausente ou true = aparece.
+  // Ler como `=== true` esconderia o atalho de todos os clientes de uma vez, sem erro nenhum.
+  if (clinic?.wa_shortcut_enabled === false) return null;
 
   return (
     <a

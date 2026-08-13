@@ -2450,6 +2450,31 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                 </CardContent>
             </Card>
 
+            {/* Atalho "Abrir no WhatsApp" no topo das conversas.
+                OPT-OUT (`!== false`): o atalho subiu ligado para todos. Ler como `=== true` aqui
+                apagaria o botão de todos os clientes de uma vez, sem erro nenhum. */}
+            <Card className="border border-slate-200 shadow-sm bg-white overflow-hidden">
+                <CardContent className="p-6 flex items-start justify-between gap-6">
+                    <div className="min-w-0">
+                        <p className="font-bold text-slate-800 text-sm">Atalho para abrir a conversa no WhatsApp</p>
+                        <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                            Mostra, no topo de cada conversa do painel, um botão que abre aquele contato direto no
+                            WhatsApp (no aplicativo ou no WhatsApp Web, conforme a máquina de quem clicar). É só um
+                            atalho de navegação: não envia mensagem nem altera o histórico.
+                        </p>
+                    </div>
+                    <button
+                        onClick={() => onClinicChange({ wa_shortcut_enabled: clinicData.wa_shortcut_enabled === false })}
+                        title={clinicData.wa_shortcut_enabled === false ? "Clique para mostrar o atalho" : "Clique para esconder o atalho"}
+                        className="shrink-0 mt-0.5"
+                    >
+                        {clinicData.wa_shortcut_enabled === false
+                            ? <ToggleLeft className="w-9 h-9 text-slate-300" />
+                            : <ToggleRight className="w-9 h-9 text-emerald-500" />}
+                    </button>
+                </CardContent>
+            </Card>
+
             <RedirectLinksCard connectToken={data.connect_token} redirectMessage={data.redirect_message} onMessageChange={(v) => onChange({ redirect_message: v })} />
                 </div>
             )}

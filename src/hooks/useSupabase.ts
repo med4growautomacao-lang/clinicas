@@ -4352,7 +4352,10 @@ export function useOrcamentos() {
   // faturamento de dobrar quando a venda foi lançada à mão no Kanban e a proposta ficou em aberto.
   // `linkSyncValue` traz o valor da proposta para a venda e para a receita; sem ele, o valor
   // lançado fica como está.
-  const approve = async (id: string, opts: { paymentMethod: string; paymentStatus: 'pago' | 'pendente'; paymentDate: string; category?: string; dataEntrega?: string | null; lineKeys?: string[] | null; total?: number | null; linkConversionId?: string | null; linkSyncValue?: boolean }): Promise<RpcResult> => {
+  // `total` é o valor que vira venda (fechado com o cliente), e `subtotal`/`desconto` são a
+  // decomposição dele. ⚠️ Os três andam JUNTOS: a RPC recusa (`valores_incoerentes`) se
+  // subtotal - desconto não bater com total, porque é esse trio que o recibo imprime.
+  const approve = async (id: string, opts: { paymentMethod: string; paymentStatus: 'pago' | 'pendente'; paymentDate: string; category?: string; dataEntrega?: string | null; lineKeys?: string[] | null; total?: number | null; subtotal?: number | null; desconto?: number | null; linkConversionId?: string | null; linkSyncValue?: boolean }): Promise<RpcResult> => {
     const { data: res, error } = await supabase.rpc('close_sale_from_orcamento', {
       p_orcamento_id: id,
       p_payment_method: opts.paymentMethod,
@@ -4362,6 +4365,8 @@ export function useOrcamentos() {
       p_data_entrega: opts.dataEntrega || null,
       p_line_keys: opts.lineKeys ?? null,
       p_total: opts.total ?? null,
+      p_subtotal: opts.subtotal ?? null,
+      p_desconto: opts.desconto ?? null,
       p_link_conversion_id: opts.linkConversionId ?? null,
       p_link_sync_value: opts.linkSyncValue ?? false,
     });

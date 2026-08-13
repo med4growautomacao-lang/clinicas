@@ -39,6 +39,11 @@ export type AprovarPropostaOpts = {
   dataEntrega?: string | null;
   lineKeys?: string[] | null;
   total?: number | null;
+  // Desconto de fechamento: `total` é o valor FECHADO com o cliente, `subtotal` é o cotado e
+  // `desconto` é a diferença. ⚠️ Os três andam juntos (a RPC recusa trio que não fecha a conta):
+  // é o que o recibo imprime, e é o que impede o valor cotado de sumir quando o total é reescrito.
+  subtotal?: number | null;
+  desconto?: number | null;
   // Vínculo: quando preenchido, a proposta é amarrada a uma venda que JÁ existe e nada de dinheiro
   // é criado. `linkSyncValue` traz o valor da proposta para a venda e para o financeiro.
   linkConversionId?: string | null;
@@ -84,6 +89,8 @@ export function mensagemDeErroDeVenda(code?: string): string {
       venda_ja_vinculada: "Esta venda já está amarrada a outra proposta.",
       multiplas_vendas: "Este card tem mais de uma venda lançada. Escolha qual delas.",
       valor_invalido: "Informe um valor maior que zero.",
+      desconto_invalido: "O desconto não pode ser negativo. Confira o valor fechado.",
+      valores_incoerentes: "As contas não fecharam (cotado menos desconto tem que dar o valor fechado). Reabra a janela e informe o valor de novo.",
       forbidden: "Sem permissão para registrar venda nesta clínica.",
       orcamento_not_found: "Proposta não encontrada.",
     } as Record<string, string>
@@ -384,13 +391,32 @@ export function RegistrarVendaModal({
   const selectedLines = lines.filter(l => sel.has(l.key));
   const selectedTotal = selectedLines.reduce((s, l) => s + l.value, 0);
   const isPartial = lines.length > 1 && selectedLines.length < lines.length;
-  const totalDaProposta = orcSel ? (isPartial ? selectedTotal : Number(orcSel.total || 0)) : 0;
   const selKey = selectedLines.map(l => l.key).join(",");
   const toggleLinha = (key: string) => {
     const next = new Set(sel);
     if (next.has(key)) next.delete(key); else next.add(key);
     setSelected(next);
   };
+
+  // ── Desconto de fechamento ──────────────────────────────────────────────────────────────
+  // A negociação quase nunca termina no valor cotado. Sem este campo, quem dava desconto na hora de
+  // fechar só tinha a venda avulsa (que deixa a proposta viva, fora da produção e sem recibo), e na
+  // Central de Orçamentos não tinha saída nenhuma.
+  //
+  // ⚠️ O valor digitado NÃO reescreve os itens: o que muda é quanto o cliente pagou, não o que a
+  // fábrica produz. Estoque, pedido e ordem de produção continuam saindo das linhas marcadas.
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  // Base do desconto = o que está sendo vendido AGORA (com seleção parcial, só os itens marcados).
+  const baseCotada = orcSel ? r2(isPartial ? selectedTotal : Number(orcSel.total || 0)) : 0;
+  const [valorFechado, setValorFechado] = useState("");
+  const [editandoValor, setEditandoValor] = useState(false);
+  // Trocou de proposta (ou de itens): o valor negociado da anterior não vale para esta.
+  useEffect(() => { setValorFechado(""); setEditandoValor(false); }, [orcSelecionadoId, selKey]);
+  const valorFechadoNum = valorFechado !== "" && !isNaN(Number(valorFechado)) ? Number(valorFechado) : null;
+  const totalDaProposta = valorFechadoNum ?? baseCotada;
+  // Positivo = desconto, negativo = acréscimo (passa, mas avisado: é quase sempre dedo errado).
+  const descontoFechamento = valorFechadoNum != null ? r2(baseCotada - valorFechadoNum) : 0;
+  const pctDesconto = baseCotada > 0 ? Math.round((descontoFechamento / baseCotada) * 1000) / 10 : 0;
 
   // ── Vínculo: é a MESMA venda ou OUTRA? ──────────────────────────────────────────────────
   // Venda que outra proposta já reivindicou não pode ser oferecida: a RPC recusaria com
@@ -426,6 +452,9 @@ export function RegistrarVendaModal({
   const vendaAlvo = vendas.find(v => v.id === vendaAlvoId) ?? null;
   const vinculando = !!orcSel && respostaVinculo === "mesma";
   const valorDivergente = !!vendaAlvo && Math.abs(Number(vendaAlvo.value) - totalDaProposta) > 0.005;
+  // Quem manda no número em destaque: a proposta, ou a venda que já está lançada. Sem esta
+  // separação, a linha "cotado X · desconto Y" apareceria embaixo de um valor que ela não explica.
+  const mostrandoValorDaProposta = !(vinculando && vendaAlvo && !sincronizarValor);
 
   // ── Pagamento / datas ───────────────────────────────────────────────────────────────────
   const [paymentMethod, setPaymentMethod] = useState("pix");
@@ -629,7 +658,12 @@ export function RegistrarVendaModal({
       dataEntrega: isFactory ? (dataEntrega || null) : null,
       // Só manda a seleção quando ela é parcial, sem seleção o servidor mantém tudo/total cotado.
       lineKeys: isPartial ? selectedLines.map(l => l.key) : null,
-      total: isPartial ? selectedTotal : null,
+      total: isPartial || valorFechadoNum != null ? totalDaProposta : null,
+      // O par cotado/desconto só viaja quando houve desconto de verdade: acréscimo gravado em
+      // `desconto` viraria uma linha "-R$ 714,00" num recibo que cobrou R$ 714,00 a mais, e a RPC
+      // recusa desconto negativo justamente por isso.
+      subtotal: descontoFechamento > 0 ? baseCotada : null,
+      desconto: descontoFechamento > 0 ? descontoFechamento : null,
       linkConversionId: vinculando ? vendaAlvoId : null,
       linkSyncValue: vinculando ? sincronizarValor : false,
     });
@@ -643,7 +677,11 @@ export function RegistrarVendaModal({
     showToast(
       res.vinculado
         ? `Proposta #${orcSel.number} marcada como ganha e amarrada à venda que já existia (nada de dinheiro novo foi lançado).`
-        : `Venda registrada: proposta #${orcSel.number} marcada como ganha.`,
+        : descontoFechamento > 0
+          // O desconto aparece no aviso de propósito: é a confirmação de que a venda entrou pelo
+          // valor negociado, e não pelo cotado, que é justamente o que o vendedor precisa conferir.
+          ? `Venda registrada: proposta #${orcSel.number} fechada por ${fmtBRL(totalDaProposta)} (desconto de ${fmtBRL(descontoFechamento)}).`
+          : `Venda registrada: proposta #${orcSel.number} marcada como ganha.`,
       "success",
     );
     onClose();
@@ -935,14 +973,63 @@ export function RegistrarVendaModal({
 
           {/* ── Valor ────────────────────────────────────────────────────────────────── */}
           {orcSel ? (<>
-            <div className="bg-emerald-50 rounded-xl px-4 py-3 flex items-center justify-between">
-              <span className="text-sm font-bold text-emerald-800">{vinculando ? "Valor da venda amarrada" : "Valor da venda"}</span>
-              <div className="text-right">
-                <span className="text-xl font-black text-emerald-700">
-                  {fmtBRL(vinculando && vendaAlvo && !sincronizarValor ? vendaAlvo.value : totalDaProposta)}
-                </span>
-                {isPartial && <div className="text-[11px] text-emerald-700/70">cotado {fmtBRL(orcSel.total)}</div>}
+            <div className="bg-emerald-50 rounded-xl px-4 py-3 space-y-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-bold text-emerald-800">{vinculando ? "Valor da venda amarrada" : "Valor da venda"}</span>
+                <div className="text-right">
+                  <span className="text-xl font-black text-emerald-700">
+                    {fmtBRL(mostrandoValorDaProposta ? totalDaProposta : vendaAlvo!.value)}
+                  </span>
+                  {isPartial && <div className="text-[11px] text-emerald-700/70">cotado {fmtBRL(orcSel.total)}</div>}
+                  {mostrandoValorDaProposta && descontoFechamento > 0 && (
+                    <div className="text-[11px] text-emerald-700/70">
+                      {isPartial ? "itens marcados" : "cotado"} {fmtBRL(baseCotada)} · desconto de {fmtBRL(descontoFechamento)} ({pctDesconto}%)
+                    </div>
+                  )}
+                  {mostrandoValorDaProposta && descontoFechamento < 0 && (
+                    <div className="text-[11px] text-amber-600 font-semibold">
+                      {isPartial ? "itens marcados" : "cotado"} {fmtBRL(baseCotada)} · acréscimo de {fmtBRL(-descontoFechamento)}
+                    </div>
+                  )}
+                </div>
               </div>
+              {/* No vínculo o campo não aparece: ali a pergunta de valor já é outra ("qual dos dois
+                  vale?"), e nenhuma venda nova nasce para receber o valor negociado. */}
+              {!vinculando && (editandoValor ? (
+                <div className="space-y-1.5 pt-0.5">
+                  <label className="text-xs font-bold text-emerald-800/80 uppercase tracking-wider">Valor fechado com o cliente</label>
+                  {/* Vazio = cotado: o placeholder mostra de onde ele parte, sem preencher o campo
+                      (preencher faria o primeiro dígito digitado virar centavo do valor antigo). */}
+                  <CurrencyInput
+                    autoFocus
+                    value={valorFechado}
+                    onChange={setValorFechado}
+                    placeholder={new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(baseCotada)}
+                  />
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-[11px] text-emerald-800/70 leading-snug">
+                      {descontoFechamento < 0
+                        ? "Valor acima do cotado. Confira, e note que o acréscimo não sai detalhado no recibo."
+                        : "O recibo sai com o valor cotado, o desconto e o total fechado. Os itens produzidos não mudam."}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => { setValorFechado(""); setEditandoValor(false); }}
+                      className="text-[11px] font-bold text-emerald-700 underline underline-offset-2 shrink-0"
+                    >
+                      Voltar ao cotado
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setEditandoValor(true)}
+                  className="text-[11px] font-bold text-emerald-700 underline underline-offset-2 hover:text-emerald-800"
+                >
+                  Fechou por outro valor? Aplicar desconto
+                </button>
+              ))}
             </div>
             {propostaSemValor && (
               <p className="text-[11px] font-semibold text-rose-500">

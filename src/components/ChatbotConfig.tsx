@@ -108,6 +108,7 @@ export function ChatbotConfig({ clinicId }: { clinicId: string }) {
   const [erros, setErros] = useState<string[]>([]);
   const [erroCarga, setErroCarga] = useState<string | null>(null);
   const [subindo, setSubindo] = useState<string | null>(null);
+  const [reiniciando, setReiniciando] = useState(false);
   const [simResp, setSimResp] = useState<Record<string, any> | null>(null);
 
   const def: Definicao = script?.definicao_rascunho || DEF_VAZIA;
@@ -264,6 +265,23 @@ export function ChatbotConfig({ clinicId }: { clinicId: string }) {
     showToast('Rascunho salvo.', 'success');
   };
 
+  /** Apaga a conversa em andamento dos NÚMEROS DE TESTE, para o próximo "olá" começar do zero.
+   *  ⚠️ A conversa fica presa na versão em que começou (é o que impede o roteiro de mudar debaixo
+   *  de quem está no meio dele), então publicar uma edição NÃO muda o que você já está vendo no
+   *  seu WhatsApp: é preciso reiniciar. O banco recusa se não houver número de teste cadastrado,
+   *  porque aí isso apagaria conversa de cliente real. */
+  const reiniciarTeste = async () => {
+    if (!script) return;
+    setReiniciando(true);
+    const { data, error } = await supabase.rpc('fn_chatbot_reiniciar_teste', { p_script_id: script.id });
+    setReiniciando(false);
+    if (error) { showToast('Não consegui reiniciar.', 'error'); return; }
+    if (!data?.ok) { showToast(data?.erro || 'Não foi possível reiniciar.', 'error'); return; }
+    showToast(data.reiniciadas > 0
+      ? 'Conversa de teste reiniciada. Mande uma mensagem que o roteiro começa do zero.'
+      : 'Não havia conversa em andamento. Pode mandar a mensagem.', 'success');
+  };
+
   const publicar = async () => {
     if (!script) return;
     setPublishing(true);
@@ -337,6 +355,18 @@ export function ChatbotConfig({ clinicId }: { clinicId: string }) {
               placeholder="5535999999999, 5535988888888 (vazio = vale para todos)"
               className="w-full mt-1 px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-teal-100"
             />
+            <div className="flex items-center justify-between gap-2 mt-1.5">
+              <p className="text-[10px] text-slate-400 leading-relaxed flex-1">
+                Publicar não muda a conversa que já está em andamento: ela fica na versão em que começou.
+                Para ver a edição no seu WhatsApp, reinicie.
+              </p>
+              <button onClick={reiniciarTeste} disabled={reiniciando || !somenteTeste}
+                className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap transition-all',
+                  somenteTeste ? 'bg-slate-100 text-slate-600 hover:bg-slate-200' : 'bg-slate-50 text-slate-300 cursor-not-allowed')}>
+                {reiniciando ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
+                Reiniciar conversa de teste
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

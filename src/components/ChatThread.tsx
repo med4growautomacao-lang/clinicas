@@ -106,10 +106,12 @@ export function detectMedia(message: any): { kind: MediaKind; url?: string; stor
 //  • LOTE: N mídias visíveis viram 1 request (fila com flush em ~60ms);
 //  • LAZY: o card só entra na fila quando encosta na viewport (não assina o que
 //    ninguém rola até ver);
-//  • THUMBNAIL: imagem no thread pede uma versão reduzida (transform do Storage);
-//    o full-res só ao clicar/onError. Corta banda em conversa com muita foto.
-// A fila é indexada por `id` (não por path): a MESMA imagem tem 2 ids (full e
-// thumb) com URLs distintas, então o cache não pode colidir por path.
+//  • SEM THUMBNAIL: todo tipo pede o ORIGINAL. O transform do Storage foi
+//    desligado em 14/08/2026 por custo (ver MediaBubble); a edge continua
+//    aceitando width/height/quality, só que ninguém manda.
+// A fila é indexada por `id` (não por path) porque o mesmo path pode ter mais de
+// uma variante assinada (ex.: um dia o thumb volta), então o cache não pode
+// colidir por path.
 type SignItem = { id: string; path: string; width?: number; height?: number; quality?: number };
 type SignEntry = { url: string; exp: number };
 // transient=true → a CHAMADA em lote falhou (rede/edge) e vale tentar de novo;
@@ -191,7 +193,7 @@ function useInViewport<T extends HTMLElement>(): [React.RefObject<T>, boolean] {
   return [ref, inView];
 }
 
-// Assina um conjunto de itens (full e/ou thumb) num único lote. `settled` vira true
+// Assina um conjunto de itens num único lote. `settled` vira true
 // quando a rodada resolveu — o placeholder distingue "carregando" de "falhou".
 function useSigned(items: SignItem[], enabled: boolean) {
   const key = items.map((i) => i.id).join("|");
@@ -286,12 +288,16 @@ export function MediaBubble({ media, dark }: { media: NonNullable<ReturnType<typ
   // mídia com URL http (ex.: enviada pela IA) não precisa assinar; path do bucket sim.
   const path = !media.url ? media.storagePath : undefined;
 
-  // Imagem: pede thumb (exibição) + full (clique/onError); demais: só full.
+  // Todos os tipos pedem SÓ o original.
+  // ⚠️ NÃO voltar a pedir thumb pelo transform do Storage (era `width: 520, quality: 60`).
+  // O Pro inclui apenas 100 imagens de ORIGEM transformadas por ciclo e cobra US$ 5 a cada
+  // mil depois, contando 1x por imagem distinta ABERTA no mês. Medido em 14/08/2026: 529 no
+  // ciclo, subindo de ~10/dia para ~130/dia conforme a equipe passou a abrir mais conversa,
+  // com teto de ~10.500/mês (as ~350 imagens/dia que chegam) = ~US$ 52/mês, mais que o
+  // próprio plano. O que a troca gasta é BANDA (~174 kB por imagem em vez de ~40 kB, algo
+  // como 1,5 GB/mês contra 250 GB inclusos), que é justamente o recurso que sobra.
   const items: SignItem[] = [];
-  if (path) {
-    items.push({ id: path, path });
-    if (kind === 'image') items.push({ id: `${path}@thumb`, path, width: 520, quality: 60 });
-  }
+  if (path) items.push({ id: path, path });
   const { urls, settled, transient, retry } = useSigned(items, inView);
   // Re-assinatura no máximo 1x por minuto. O limite é de FREQUÊNCIA, não "uma vez para sempre":
   // uma falha qualquer de rede logo no início queimaria a única chance e a bolha ficaria sem defesa
@@ -309,8 +315,7 @@ export function MediaBubble({ media, dark }: { media: NonNullable<ReturnType<typ
   };
 
   const fullUrl = media.url ?? (path ? urls[path] ?? null : null);
-  const thumbUrl = media.url ?? (path ? urls[`${path}@thumb`] ?? null : null) ?? fullUrl;
-  const displayUrl = kind === 'image' ? thumbUrl : fullUrl;
+  const displayUrl = fullUrl;
   const failed = !!path && settled && !displayUrl;
   const rotulo = kind === 'image' ? 'imagem' : kind === 'audio' ? 'áudio' : kind === 'video' ? 'vídeo' : 'arquivo';
 
@@ -350,17 +355,14 @@ export function MediaBubble({ media, dark }: { media: NonNullable<ReturnType<typ
     if (kind === 'image') {
       return (
         <div className="space-y-2">
-          <a href={fullUrl ?? displayUrl} target="_blank" rel="noopener noreferrer">
-            {/* thumbnail p/ exibir; se o transform falhar (plano sem render), cai no full-res */}
+          <a href={displayUrl} target="_blank" rel="noopener noreferrer">
+            {/* original em tamanho real, reduzido só pelo CSS (o `loading="lazy"` é quem
+                segura o download até a bolha chegar perto da viewport) */}
             <img
               src={displayUrl}
               alt={caption || 'imagem'}
               className="rounded-lg max-w-[260px] max-h-[320px] object-cover"
               loading="lazy"
-              onError={(e) => {
-                const img = e.currentTarget;
-                if (fullUrl && img.src !== fullUrl) img.src = fullUrl;
-              }}
             />
           </a>
           {caption && <p className="text-sm font-medium leading-relaxed whitespace-pre-wrap">{caption}</p>}

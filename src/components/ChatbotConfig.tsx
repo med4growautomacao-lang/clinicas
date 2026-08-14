@@ -51,6 +51,9 @@ type Script = {
   test_numbers: string[];
   modo_envio: 'menu' | 'texto';
   max_tentativas: number;
+  /** Texto simples enviado UMA vez, antes da primeira pergunta. Fica no roteiro e não na definição
+   *  versionada de propósito: só importa no instante em que a conversa começa. */
+  mensagem_abertura: string | null;
 };
 
 type Stage = { id: string; name: string; slug: string; position: number };
@@ -252,6 +255,7 @@ export function ChatbotConfig({ clinicId }: { clinicId: string }) {
     const { error } = await supabase.from('chatbot_scripts').update({
       nome: script.nome, ativo: script.ativo, modo_envio: script.modo_envio,
       etapa_destino_id: script.etapa_destino_id, test_numbers: script.test_numbers,
+      mensagem_abertura: script.mensagem_abertura,
       definicao_rascunho: script.definicao_rascunho, updated_at: new Date().toISOString(),
     }).eq('id', script.id);
     setSaving(false);
@@ -548,6 +552,16 @@ export function ChatbotConfig({ clinicId }: { clinicId: string }) {
         </button>
 
         <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+          <div>
+            <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Mensagem de abertura (antes da primeira pergunta)</label>
+            <textarea rows={3} value={script.mensagem_abertura || ''}
+              onChange={(e) => patch({ mensagem_abertura: e.target.value })}
+              className="w-full mt-1 p-3 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-teal-100 resize-none"
+              placeholder="Apresente a empresa em uma ou duas linhas. Deixe vazio para começar direto na primeira pergunta." />
+            <p className="text-[10px] text-slate-400 mt-1">
+              Mensagem de texto comum, sem botão. Sai uma vez só, no começo da conversa.
+            </p>
+          </div>
           <div>
             <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Mensagem final (depois de coletar tudo)</label>
             <textarea rows={2} value={def.fim?.mensagem || ''}

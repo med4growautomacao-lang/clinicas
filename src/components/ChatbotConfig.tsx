@@ -104,6 +104,7 @@ export function ChatbotConfig({ clinicId }: { clinicId: string }) {
   const [preview, setPreview] = useState<any>(null);
   const [erros, setErros] = useState<string[]>([]);
   const [erroCarga, setErroCarga] = useState<string | null>(null);
+  const [subindo, setSubindo] = useState<string | null>(null);
   const [simResp, setSimResp] = useState<Record<string, any> | null>(null);
 
   const def: Definicao = script?.definicao_rascunho || DEF_VAZIA;
@@ -188,6 +189,34 @@ export function ChatbotConfig({ clinicId }: { clinicId: string }) {
   const removerOpcao = (i: number, k: number) => {
     const p = def.passos[i];
     setPasso(i, { opcoes: (p.opcoes || []).filter((_, n) => n !== k) });
+  };
+
+  /** Foto do passo, escolhida do computador. Vai para o bucket `chatbot`, que é público de leitura
+   *  porque quem BAIXA a imagem para montar a mensagem é a uazapi, pela internet. Link assinado com
+   *  validade não serviria: a mensagem pode sair da fila depois do vencimento e a foto chegaria
+   *  quebrada, sem erro nenhum. A primeira pasta do caminho é a clínica, e é ela que a RLS do
+   *  storage usa para escopar a escrita. */
+  const enviarFoto = async (i: number, file: File) => {
+    const p = def.passos[i];
+    if (!file.type.startsWith('image/')) { showToast('Envie um arquivo de imagem (PNG, JPG ou WEBP).', 'error'); return; }
+    if (file.size > 5 * 1024 * 1024) { showToast('Imagem muito grande. O limite é 5 MB.', 'error'); return; }
+    setSubindo(p.slug);
+    try {
+      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+      const path = `${clinicId}/${p.slug}-${Date.now()}.${ext}`;
+      const { error } = await supabase.storage.from('chatbot')
+        .upload(path, file, { contentType: file.type, upsert: true });
+      if (error) throw error;
+      const { data } = supabase.storage.from('chatbot').getPublicUrl(path);
+      setPasso(i, { midia_url: data.publicUrl });
+      showToast('Foto enviada. Salve e publique para o contato começar a receber.', 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Não consegui enviar a foto.', 'error');
+      logSystemError('chatbot_upload_foto_falhou', 'Falha ao enviar a foto de um passo do roteiro',
+        clinicId, { passo: p.slug, erro: err?.message ?? null }, 'warn');
+    } finally {
+      setSubindo(null);
+    }
   };
 
   // ── Prévia: chama o motor de verdade ──────────────────────────────────────────────────────────
@@ -376,12 +405,60 @@ export function ChatbotConfig({ clinicId }: { clinicId: string }) {
                       <p className="text-[10px] text-slate-400 mt-1">É o nome que o vendedor lê no card.</p>
                     </div>
                     <div>
-                      <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Foto (link)</label>
-                      <input
-                        value={p.midia_url || ''} onChange={(e) => setPasso(i, { midia_url: e.target.value })}
-                        className="w-full mt-1 px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-teal-100"
-                        placeholder="https://..."
-                      />
+                      <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Foto da pergunta</label>
+                      {/* ⚠️ Lista não tem campo de imagem no WhatsApp (só `type: button` tem
+                          `imageButton`). A publicação também recusa, mas o certo é o dono nem
+                          conseguir subir a foto que não vai aparecer. */}
+                      {(p.tipo === 'opcoes' && (p.opcoes || []).length > 3) ? (
+                        <div className="mt-1 border border-slate-200 rounded-lg p-3 bg-slate-50">
+                          <p className="text-[11px] text-slate-500 leading-relaxed">
+                            Com mais de 3 opções esta pergunta é enviada como lista, e lista não mostra foto.
+                            Para usar foto, deixe no máximo 3 opções.
+                          </p>
+                          {p.midia_url && (
+                            <button onClick={() => setPasso(i, { midia_url: '' })}
+                              className="mt-2 text-[11px] font-bold text-red-500 hover:text-red-600">
+                              Remover a foto que está aqui
+                            </button>
+                          )}
+                        </div>
+                      ) : p.midia_url ? (
+                        <div className="mt-1 flex items-center gap-2 border border-slate-200 rounded-lg p-2">
+                          <img src={p.midia_url} alt="" className="w-14 h-14 object-cover rounded-md shrink-0"
+                            onError={(e) => ((e.target as HTMLImageElement).style.opacity = '0.2')} />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[10px] text-slate-400 truncate">{p.midia_url.split('/').pop()}</p>
+                            <div className="flex gap-3 mt-1">
+                              <label className="text-[11px] font-bold text-teal-600 hover:text-teal-700 cursor-pointer">
+                                Trocar
+                                <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
+                                  onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) enviarFoto(i, f); }} />
+                              </label>
+                              <button onClick={() => setPasso(i, { midia_url: '' })}
+                                className="text-[11px] font-bold text-slate-400 hover:text-red-500">Remover</button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <label className={cn(
+                          'mt-1 flex items-center justify-center gap-2 py-3 border-2 border-dashed border-slate-200 rounded-lg text-xs font-bold text-slate-500 transition-all',
+                          subindo === p.slug ? 'opacity-60' : 'cursor-pointer hover:border-teal-300 hover:text-teal-600')}>
+                          {subindo === p.slug
+                            ? <><Loader2 className="w-4 h-4 animate-spin" /> Enviando...</>
+                            : <><ImageIcon className="w-4 h-4" /> Escolher do computador</>}
+                          <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
+                            disabled={subindo === p.slug}
+                            onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) enviarFoto(i, f); }} />
+                        </label>
+                      )}
+                      {!(p.tipo === 'opcoes' && (p.opcoes || []).length > 3) && (
+                        <p className="text-[10px] text-slate-400 mt-1">
+                          {p.tipo === 'opcoes'
+                            ? 'Vai junto com os botões, no mesmo balão.'
+                            : 'Vai numa mensagem logo antes da pergunta.'}
+                          {' '}PNG, JPG ou WEBP, até 5 MB.
+                        </p>
+                      )}
                     </div>
                   </div>
 

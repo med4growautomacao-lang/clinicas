@@ -4,6 +4,7 @@ import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "./ui/toast";
 import { SandboxPanel } from "./SandboxPanel";
+import { ChatbotConfig } from "./ChatbotConfig";
 import {
   Card,
   CardContent,
@@ -2689,7 +2690,7 @@ function FinishServiceView() {
 }
 
 export function AISecretary() {
-  const [activeTab, setActiveTab] = useState<"chats" | "leads" | "dashboard" | "config" | "sandbox" | "followups" | "sugestoes">(
+  const [activeTab, setActiveTab] = useState<"chats" | "leads" | "dashboard" | "config" | "chatbot" | "sandbox" | "followups" | "sugestoes">(
     () => (localStorage.getItem('aiSecretaryTab') as any) || "chats"
   );
   const { aiConfig, updateAI, clinic } = useSettings();
@@ -2699,6 +2700,9 @@ export function AISecretary() {
   // Opt-in (só com === true): a análise custa LLM por conversa, então a aba só
   // existe onde o Super Admin liberou a funcionalidade.
   const hasConvAi = features?.feature_conv_ai === true;
+  // Opt-in (só com === true), igual ao conv_ai: o Roteiro substitui o agente no atendimento, então
+  // a aba só existe onde o módulo foi liberado. Ver §0.3 do CLAUDE.md.
+  const hasChatbot = features?.feature_chatbot === true;
   const { pending: convAiPending } = useConvAiInsights();
 
   // A aba fica no localStorage: se a funcionalidade for desligada enquanto ela
@@ -2712,7 +2716,12 @@ export function AISecretary() {
       setActiveTab("chats");
       localStorage.setItem('aiSecretaryTab', 'chats');
     }
-  }, [activeTab, hasConvAi, hasIA]);
+    // Mesmo motivo: com a aba salva no localStorage e o módulo desligado, a área ficaria em branco.
+    if (activeTab === "chatbot" && !hasChatbot) {
+      setActiveTab("chats");
+      localStorage.setItem('aiSecretaryTab', 'chats');
+    }
+  }, [activeTab, hasConvAi, hasIA, hasChatbot]);
 
   return (
     <div className="space-y-8 h-full flex flex-col">
@@ -2762,6 +2771,7 @@ export function AISecretary() {
             { id: "sugestoes", label: convAiPending.length ? `Auditoria (${convAiPending.length})` : "Auditoria", show: true },
             { id: "followups", label: "Follow-up", show: hasFollowup },
             { id: "config", label: "Configurações IA", show: hasIA },
+            { id: "chatbot", label: "Configurações Chatbot", show: hasChatbot },
             { id: "sandbox", label: "Testar o Agente", show: hasIA },
           ].filter(t => t.show).map((tab) => (
             <button
@@ -2796,6 +2806,10 @@ export function AISecretary() {
           {activeTab === "followups" && <AllFollowupsView />}
 
           {activeTab === "config" && <ConfigView />}
+          {/* Mesmo gate em clinic?.id do SandboxPanel: o roteiro é sempre de UMA clínica. */}
+          {activeTab === "chatbot" && (clinic?.id
+            ? <ChatbotConfig clinicId={clinic.id} />
+            : <div className="text-sm text-slate-400 p-6">Carregando…</div>)}
           {/* Gate em clinic?.id: sem ele, o SandboxPanel receberia undefined e mostraria o seletor
               cross-clinica dentro da tela escopada a uma clinica. */}
           {activeTab === "sandbox" && (clinic?.id

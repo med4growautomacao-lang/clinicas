@@ -2210,8 +2210,10 @@ export interface Clinic {
   google_ad_account_id?: string | null;
   google_ad_mcc_id?: string | null;
   google_ad_mcc_token?: string | null;
-  // feature_chat_send é opt-in (só vale com === true); as demais são opt-out (!== false).
-  features?: { feature_followup?: boolean; feature_ia?: boolean; agenda_via_funil?: boolean; feature_chat_send?: boolean; feature_conv_ai?: boolean } | null;
+  // feature_chat_send, feature_conv_ai e feature_chatbot são opt-in (só valem com === true);
+  // as demais são opt-out (!== false). Trocar um pelo outro liga ou desliga módulo em TODOS os
+  // clientes de uma vez, sem erro nenhum: ver §0.3 do CLAUDE.md.
+  features?: { feature_followup?: boolean; feature_ia?: boolean; agenda_via_funil?: boolean; feature_chat_send?: boolean; feature_conv_ai?: boolean; feature_chatbot?: boolean } | null;
   // Atalho "Abrir no WhatsApp" no topo das conversas. Opt-out: só some com false explícito.
   wa_shortcut_enabled?: boolean | null;
   meta_status?: 'none' | 'inactive' | 'active';

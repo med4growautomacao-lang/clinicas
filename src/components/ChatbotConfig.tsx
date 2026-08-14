@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { cn } from '@/src/lib/utils';
 import { useToast } from './ui/toast';
+import { logSystemError } from '../hooks/useSupabase';
 import {
   Plus, Trash2, ChevronDown, ChevronUp, Loader2, Save, Rocket, Play, RotateCcw,
   AlertTriangle, MessageSquare, List as ListIcon, Type, Image as ImageIcon, Check,
@@ -102,6 +103,7 @@ export function ChatbotConfig({ clinicId }: { clinicId: string }) {
   const [previewModo, setPreviewModo] = useState<'menu' | 'texto'>('menu');
   const [preview, setPreview] = useState<any>(null);
   const [erros, setErros] = useState<string[]>([]);
+  const [erroCarga, setErroCarga] = useState<string | null>(null);
   const [simResp, setSimResp] = useState<Record<string, any> | null>(null);
 
   const def: Definicao = script?.definicao_rascunho || DEF_VAZIA;
@@ -113,15 +115,28 @@ export function ChatbotConfig({ clinicId }: { clinicId: string }) {
       supabase.from('funnel_stages').select('id,name,slug,position').eq('clinic_id', clinicId).order('position'),
     ]);
     setStages((stRes.data || []) as Stage[]);
+    setErroCarga(null);
     if (sRes.data) {
       const s = sRes.data as any;
       setScript({ ...s, definicao_rascunho: s.definicao_rascunho || DEF_VAZIA });
     } else {
       // Primeira vez nesta clínica: cria o rascunho vazio e DESLIGADO.
-      const { data } = await supabase.from('chatbot_scripts')
+      const { data, error } = await supabase.from('chatbot_scripts')
         .insert({ clinic_id: clinicId, nome: 'Roteiro de Atendimento', definicao_rascunho: DEF_VAZIA })
         .select('*').maybeSingle();
-      if (data) setScript({ ...(data as any), definicao_rascunho: DEF_VAZIA });
+      if (data) {
+        setScript({ ...(data as any), definicao_rascunho: DEF_VAZIA });
+      } else {
+        // ⚠️ Falhar em VOZ ALTA. Antes daqui a tela ficava girando para sempre e nada acendia em
+        // lugar nenhum: foi assim que a falta de GRANT para `authenticated` passou por "está
+        // carregando". Se o select não trouxe e o insert também não, alguma coisa está errada e o
+        // dono precisa ver, não adivinhar.
+        const msg = error?.message || sRes.error?.message || 'sem detalhe do banco';
+        setErroCarga(msg);
+        logSystemError('chatbot_config_nao_abriu',
+          'A tela de Configurações Chatbot não conseguiu carregar nem criar o roteiro da clínica',
+          clinicId, { erro_insert: error?.message ?? null, erro_select: sRes.error?.message ?? null }, 'error');
+      }
     }
     setDirty(false);
     setLoading(false);
@@ -229,8 +244,22 @@ export function ChatbotConfig({ clinicId }: { clinicId: string }) {
     carregar();
   };
 
-  if (loading || !script) {
+  if (loading) {
     return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 text-teal-600 animate-spin" /></div>;
+  }
+
+  if (!script) {
+    return (
+      <div className="max-w-lg mx-auto mt-10 bg-red-50 border border-red-200 rounded-xl p-5 space-y-2">
+        <p className="text-sm font-bold text-red-700 flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4" /> Não consegui abrir o roteiro desta clínica
+        </p>
+        <p className="text-xs text-red-600 leading-relaxed">
+          O erro já foi registrado na Central de Erros. Detalhe do banco: {erroCarga || 'sem detalhe'}
+        </p>
+        <button onClick={carregar} className="text-xs font-bold text-red-700 underline">Tentar de novo</button>
+      </div>
+    );
   }
 
   const somenteTeste = (script.test_numbers || []).length > 0;

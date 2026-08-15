@@ -107,12 +107,13 @@ export function detectMedia(message: any): { kind: MediaKind; url?: string; stor
 //  • LAZY: o card só entra na fila quando encosta na viewport (não assina o que
 //    ninguém rola até ver);
 //  • SEM THUMBNAIL: todo tipo pede o ORIGINAL. O transform do Storage foi
-//    desligado em 14/08/2026 por custo (ver MediaBubble); a edge continua
-//    aceitando width/height/quality, só que ninguém manda.
-// A fila é indexada por `id` (não por path) porque o mesmo path pode ter mais de
-// uma variante assinada (ex.: um dia o thumb volta), então o cache não pode
-// colidir por path.
-type SignItem = { id: string; path: string; width?: number; height?: number; quality?: number };
+//    desligado em 14/08/2026 por custo, e a trava de verdade está na edge, que
+//    IGNORA width/height/quality (ver o topo de chat-media-sign). Aqui não há
+//    como pedir: o tipo abaixo nem tem esses campos.
+// A fila é indexada por `id` (hoje sempre igual ao path) porque é o `id` que a
+// edge devolve; manter a indireção deixa a porta aberta para variante futura sem
+// mexer no cache.
+type SignItem = { id: string; path: string };
 type SignEntry = { url: string; exp: number };
 // transient=true → a CHAMADA em lote falhou (rede/edge) e vale tentar de novo;
 // transient=false → o lote respondeu mas este id não veio (sem acesso / objeto
@@ -120,6 +121,15 @@ type SignEntry = { url: string; exp: number };
 // de novo" à toa numa negação permanente.
 type SignResult = { url: string | null; transient: boolean };
 const SIGN_CACHE_MAX = 500; // teto do cache de módulo (não crescer sem limite numa sessão longa)
+// ⚠️ Fatia obrigatória: a edge corta o lote em 400 (MAX_ITEMS) e o excedente volta
+// AUSENTE da resposta, indistinguível de "sem acesso". Ficando abaixo do teto, o corte
+// não acontece; se acontecer mesmo assim, a edge marca `truncated` e tratamos como
+// falha transitória (com retry) em vez de mídia permanentemente indisponível.
+const LOTE_MAX = 300;
+// Imagem que termina de carregar empurra o conteúdo para baixo sem alterar o DOM, então
+// o MutationObserver do thread não enxerga e a rolagem "pula" sob quem está lendo. Este
+// evento avisa o thread para refazer a rolagem (que só age se a pessoa estiver no rodapé).
+export const EVENTO_MIDIA_CARREGADA = "chat-midia-carregada";
 const signCache = new Map<string, SignEntry>();                              // por id
 const signWaiters = new Map<string, Array<(r: SignResult) => void>>();       // por id
 let signQueue = new Map<string, SignItem>();                                 // por id (dedup)
@@ -146,21 +156,30 @@ async function flushSignQueue() {
       w?.forEach((fn) => fn(r));
     }
   };
-  try {
-    const { data, error } = await supabase.functions.invoke("chat-media-sign", { body: { items } });
-    if (error || !data?.urls) { resolveAll({}); return; } // chamada falhou → transient p/ todos
-    const ttlMs = Math.max(60, (Number(data.ttl) || 3600) - 300) * 1000; // margem de 5min antes do vencimento
-    const urls: Record<string, string> = data.urls;
-    const results: Record<string, SignResult> = {};
-    for (const id of ids) {
-      const u = urls[id];
-      if (u) { cacheSet(id, { url: u, exp: Date.now() + ttlMs }); results[id] = { url: u, transient: false }; }
-      else results[id] = { url: null, transient: false }; // respondeu sem este id → sem acesso/ausente
+  const lotes: SignItem[][] = [];
+  for (let i = 0; i < items.length; i += LOTE_MAX) lotes.push(items.slice(i, i + LOTE_MAX));
+  const results: Record<string, SignResult> = {};
+  await Promise.all(lotes.map(async (lote) => {
+    try {
+      const { data, error } = await supabase.functions.invoke("chat-media-sign", { body: { items: lote } });
+      if (error || !data?.urls) {
+        for (const it of lote) results[it.id] = { url: null, transient: true }; // chamada falhou
+        return;
+      }
+      const ttlMs = Math.max(60, (Number(data.ttl) || 3600) - 300) * 1000; // margem de 5min antes do vencimento
+      const urls: Record<string, string> = data.urls;
+      for (const it of lote) {
+        const u = urls[it.id];
+        if (u) { cacheSet(it.id, { url: u, exp: Date.now() + ttlMs }); results[it.id] = { url: u, transient: false }; }
+        // respondeu sem este id → sem acesso/ausente (permanente), EXCETO se a edge
+        // avisou que cortou o lote: aí retry resolve e não pode virar dead-end.
+        else results[it.id] = { url: null, transient: data.truncated === true };
+      }
+    } catch {
+      for (const it of lote) results[it.id] = { url: null, transient: true }; // exceção da chamada
     }
-    resolveAll(results);
-  } catch {
-    resolveAll({}); // exceção da chamada → transient
-  }
+  }));
+  resolveAll(results); // id sem entrada aqui cai no default transient do resolveAll
 }
 
 function requestSigned(item: SignItem): Promise<SignResult> {
@@ -314,15 +333,16 @@ export function MediaBubble({ media, dark }: { media: NonNullable<ReturnType<typ
     retry();
   };
 
-  const fullUrl = media.url ?? (path ? urls[path] ?? null : null);
-  const displayUrl = fullUrl;
-  const failed = !!path && settled && !displayUrl;
+  // Um único endereço para exibir e para clicar. Já foram dois (thumb e full) e a
+  // divergência entre eles era fonte de bug; não reintroduzir sem necessidade real.
+  const mediaUrl = media.url ?? (path ? urls[path] ?? null : null);
+  const failed = !!path && settled && !mediaUrl;
   const rotulo = kind === 'image' ? 'imagem' : kind === 'audio' ? 'áudio' : kind === 'video' ? 'vídeo' : 'arquivo';
 
   // O ref fica SEMPRE no container externo (inclusive no placeholder), senão o
   // observer não anexa enquanto carrega e a assinatura nunca dispara (deadlock).
   const inner = (() => {
-    if (!displayUrl) {
+    if (!mediaUrl) {
       // erro transitório (rede/edge) → oferece retry; negação/ausência → não (retry não ajuda)
       if (failed && transient) {
         return (
@@ -355,14 +375,21 @@ export function MediaBubble({ media, dark }: { media: NonNullable<ReturnType<typ
     if (kind === 'image') {
       return (
         <div className="space-y-2">
-          <a href={displayUrl} target="_blank" rel="noopener noreferrer">
-            {/* original em tamanho real, reduzido só pelo CSS (o `loading="lazy"` é quem
-                segura o download até a bolha chegar perto da viewport) */}
+          <a href={mediaUrl} target="_blank" rel="noopener noreferrer">
+            {/* Original em tamanho real, encolhido só pelo CSS. Quem segura o download é o
+                `useInViewport` acima (a bolha só monta a <img> depois de assinar, e só
+                assina ao encostar na viewport); o `loading="lazy"` é rede de segurança,
+                não o mecanismo. ⚠️ `decoding="async"` importa aqui porque o navegador
+                gasta memória pelo tamanho em PIXELS, não em bytes: foto mandada como
+                documento (sem compressão do WhatsApp) chega a vários MP. */}
             <img
-              src={displayUrl}
+              src={mediaUrl}
               alt={caption || 'imagem'}
               className="rounded-lg max-w-[260px] max-h-[320px] object-cover"
               loading="lazy"
+              decoding="async"
+              onLoad={() => window.dispatchEvent(new Event(EVENTO_MIDIA_CARREGADA))}
+              onError={reassinar}
             />
           </a>
           {caption && <p className="text-sm font-medium leading-relaxed whitespace-pre-wrap">{caption}</p>}
@@ -370,19 +397,19 @@ export function MediaBubble({ media, dark }: { media: NonNullable<ReturnType<typ
       );
     }
     if (kind === 'audio') {
-      return <AudioPlayer src={displayUrl} dark={dark} onFalha={reassinar} />;
+      return <AudioPlayer src={mediaUrl} dark={dark} onFalha={reassinar} />;
     }
     if (kind === 'video') {
       return (
         <div className="space-y-2">
-          <video src={displayUrl} controls className="rounded-lg max-w-[260px] max-h-[320px]" preload="metadata" onError={reassinar} />
+          <video src={mediaUrl} controls className="rounded-lg max-w-[260px] max-h-[320px]" preload="metadata" onError={reassinar} />
           {caption && <p className="text-sm font-medium leading-relaxed whitespace-pre-wrap">{caption}</p>}
         </div>
       );
     }
     return (
       <a
-        href={displayUrl}
+        href={mediaUrl}
         target="_blank"
         rel="noopener noreferrer"
         className={cn(
@@ -449,13 +476,21 @@ export function ChatThread({
     scrollDown();
     const observer = new MutationObserver(scrollDown);
     observer.observe(el, { childList: true, subtree: true, characterData: true });
+    // Imagem carregando não mexe no DOM, então o observer acima é cego para ela: ela só
+    // muda a ALTURA, depois que os 10 pings já acabaram. Sem isto, a foto que termina de
+    // baixar empurra o texto e a última mensagem sai da tela de quem está no rodapé.
+    window.addEventListener(EVENTO_MIDIA_CARREGADA, scrollDown);
     let pings = 0;
     const interval = setInterval(() => {
       scrollDown();
       pings++;
       if (pings > 10) clearInterval(interval);
     }, 50);
-    return () => { observer.disconnect(); clearInterval(interval); };
+    return () => {
+      observer.disconnect();
+      clearInterval(interval);
+      window.removeEventListener(EVENTO_MIDIA_CARREGADA, scrollDown);
+    };
   }, [loading]);
 
   const getDateLabel = (date: Date) => {

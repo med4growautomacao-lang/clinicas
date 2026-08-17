@@ -151,6 +151,14 @@ export function DoctorScheduleSettings({ doctor, onClose, onSaved }: DoctorSched
   const handleAddBlockedTime = () => {
     const { date, start, end, name } = newBlockedTime;
     if (!date || !start || !end || !name) return;
+    // Bloqueio invertido ("das 18:00 às 09:00") é hora errada digitada, não intervalo válido.
+    // O motor da agenda hoje ignora o registro em vez de estourar, mas o efeito para a clínica
+    // é o mesmo de não ter bloqueado nada, então é melhor não deixar salvar.
+    if (end <= start) {
+      setError('O horário final do bloqueio precisa ser depois do inicial.');
+      return;
+    }
+    setError(null);
     setBlockedTimes(prev =>
       [...prev, { date, start, end, ...(name ? { name } : {}) }].sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start))
     );

@@ -19,16 +19,29 @@ select s.clinic_id, s.stage_id, bool_or(s.is_closing)
  group by s.clinic_id, s.stage_id
 on conflict (clinic_id, stage_id) do nothing;
 
--- (3) Coerência: régua cujo último passo É uma despedida escrita (is_closing marcado antes da
---     mudança para posicional) mas cuja chave está desligada anuncia o fim e deixa o card aberto.
---     Alinha a chave ao que o texto promete.
-update public.followup_rulesets r
-   set close_ticket_on_exhaust = true
- where not r.close_ticket_on_exhaust
-   and exists (select 1 from public.followup_steps s
-                where s.clinic_id = r.clinic_id
-                  and s.stage_id is not distinct from r.stage_id
-                  and s.enabled and s.is_closing);
+-- (3) Coerência, UMA VEZ SÓ: régua cujo último passo É uma despedida escrita (is_closing marcado
+--     antes da mudança para posicional) mas cuja chave está desligada anuncia o fim e deixa o card
+--     aberto. Alinha a chave ao que o texto promete.
+--
+-- ⚠️ Guardado atrás da existência de followup_steps.is_closing, que é LETRA MORTA e sai na próxima
+-- limpeza. O guard existe porque este UPDATE liga encerramento a partir de um dado que a tela nova
+-- nunca mais escreve: num replay depois da limpeza, ou rodando o arquivo de novo, ele poderia
+-- religar o fechamento automático em réguas onde o cliente escolheu desligar — e a regra desta
+-- mesma migration é que encerrar é opt-in explícito.
+do $$
+begin
+  if exists (select 1 from information_schema.columns
+              where table_schema = 'public' and table_name = 'followup_steps'
+                and column_name = 'is_closing') then
+    update public.followup_rulesets r
+       set close_ticket_on_exhaust = true
+     where not r.close_ticket_on_exhaust
+       and exists (select 1 from public.followup_steps s
+                    where s.clinic_id = r.clinic_id
+                      and s.stage_id is not distinct from r.stage_id
+                      and s.enabled and s.is_closing);
+  end if;
+end $$;
 
 -- (4) CICLO restaurado ao devolver o passo.
 --

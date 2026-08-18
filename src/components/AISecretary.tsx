@@ -915,12 +915,20 @@ function FollowupsView() {
   const [previaLoading, setPreviaLoading] = useState(false);
   const [criando, setCriando] = useState(false);
   const [erroSalvar, setErroSalvar] = useState<string | null>(null);
+  // o aviso é de uma cadência específica: trocar de régua no seletor tem que limpar, senão o
+  // erro da etapa A fica na tela enquanto o usuário olha a etapa B
+  useEffect(() => { setErroSalvar(null); }, [reguaStageId]);
 
   const etapasElegiveis = useMemo(
     () => (funnelStages || []).filter(s => !s.is_hidden && !ETAPAS_SEM_REENGAJAMENTO.includes(s.slug || '')),
     [funnelStages],
   );
   const passos = stepsOf(reguaStageId);
+  // calculado uma vez, não por passo renderizado (era uma cópia da lista dentro do laço)
+  const ultimoPassoAtivoId = useMemo(
+    () => [...passos].reverse().find(p => p.enabled)?.id ?? null,
+    [passos],
+  );
   const etapaSelecionada = etapasElegiveis.find(s => s.id === reguaStageId) || null;
   const temReguaPropria = reguaStageId ? stagesWithRuleset.has(reguaStageId) : true;
 
@@ -1091,7 +1099,10 @@ function FollowupsView() {
               </label>
               {temReguaPropria && (
                 <button
-                  onClick={() => addStep(reguaStageId, "Olá {paciente}, podemos continuar de onde paramos?", passos[passos.length - 1]?.delay_minutes ?? 1440)}
+                  onClick={async () => {
+                    const ok = await addStep(reguaStageId, "Olá {paciente}, podemos continuar de onde paramos?", passos[passos.length - 1]?.delay_minutes ?? 1440);
+                    setErroSalvar(ok ? null : "Não foi possível adicionar o passo. Tente de novo.");
+                  }}
                   className="flex items-center gap-1 text-xs font-bold text-teal-700 hover:text-teal-800"
                 >
                   <Plus className="w-3.5 h-3.5" /> Adicionar passo
@@ -1166,10 +1177,18 @@ function FollowupsView() {
                     key={s.id}
                     step={s}
                     index={i}
-                    onUpdate={updateStep}
-                    onRemove={removeStep}
+                    // o retorno das duas é lido: updateStep é auto-save com estado otimista, e
+                    // falhar calado deixa o texto na tela até o refetch apagá-lo sem explicação
+                    onUpdate={async (id, updates) => {
+                      const ok = await updateStep(id, updates);
+                      setErroSalvar(ok ? null : "Não foi possível salvar a alteração do passo. Tente de novo.");
+                    }}
+                    onRemove={async (id) => {
+                      const ok = await removeStep(id);
+                      setErroSalvar(ok ? null : "Não foi possível remover o passo. Tente de novo.");
+                    }}
                     // despedida = último passo ATIVO da cadência (pausar o último promove o anterior)
-                    ehDespedida={s.enabled && s.id === [...passos].reverse().find(p => p.enabled)?.id}
+                    ehDespedida={s.enabled && s.id === ultimoPassoAtivoId}
                     encerraAoFinal={closeOnExhaustOf(reguaStageId)}
                   />
                 ))}
@@ -1196,10 +1215,11 @@ function FollowupsView() {
             )}
           </div>
 
-          {/* Fim da régua sem passo de encerramento: decisão DESTA régua (followup_rulesets).
-              Os dois caminhos NÃO se acumulam: fn_check_followup_exhausted sai antes de ler esta
-              chave quando a régua tem passo de encerramento (quem fecha, ali, é a edge). A nota
-              abaixo existe porque ver as duas ligadas lado a lado parece conflito e não é. */}
+          {/* Encerramento DESTA régua (followup_rulesets.close_ticket_on_exhaust). Existe um
+              caminho só: o último passo ativo é a despedida e quem fecha o atendimento é a edge,
+              depois de a mensagem sair. O caminho antigo, que marcava Perdido em silêncio pela
+              trigger trg_followup_exhausted, foi removido em 18/08/2026. Ausência de configuração
+              vale como NÃO encerrar. */}
           {temReguaPropria && (
             <div className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-100">
               <div className="pr-4">
@@ -1212,7 +1232,12 @@ function FollowupsView() {
                 </p>
               </div>
               <button
-                onClick={() => setCloseOnExhaust(reguaStageId, !closeOnExhaustOf(reguaStageId))}
+                onClick={async () => {
+                  const ok = await setCloseOnExhaust(reguaStageId, !closeOnExhaustOf(reguaStageId));
+                  // é a chave mais destrutiva da tela: falhar calado faria o usuário achar que
+                  // desligou o encerramento enquanto a régua continua fechando atendimentos
+                  setErroSalvar(ok ? null : "Não foi possível salvar o encerramento desta cadência. Tente de novo.");
+                }}
                 className={cn(
                   "w-12 h-6 rounded-full relative transition-all shrink-0",
                   closeOnExhaustOf(reguaStageId) ? "bg-teal-600" : "bg-slate-300",

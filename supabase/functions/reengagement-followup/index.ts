@@ -108,6 +108,20 @@ serve(async (req) => {
 
   const v_stage: string | null = ruleset_stage_id ?? null;
 
+  // Central de Erros: o que falha aqui não pode morrer só no automation_logs, que é fila de
+  // trabalho da automação e não painel de defeito. Definido ANTES do claim de propósito: falha
+  // no claim é a única etapa obrigatória de toda rodada, e era justamente a que não registrava
+  // nada em lugar nenhum (o cron dispara por system_http_post e não lê a resposta).
+  const registrarErro = async (code: string, title: string, context: Record<string, unknown>) => {
+    try {
+      await supabase.rpc("log_system_error", {
+        p_scope: "reengajamento", p_code: code, p_title: title, p_level: "warn",
+        p_clinic_id: clinic_id, p_context: { lead_id, step_no: step_no ?? null, ...context },
+        p_is_monitor: false,
+      });
+    } catch { /* monitor que derruba a função monitorada é pior que não ter monitor */ }
+  };
+
   // (1) CLAIM ATÔMICO, agora no banco (fn_claim_reengagement_step). A trava não é mais só o
   // contador: é contador E régua na MESMA condição, porque quando a régua muda o passo válido
   // passa a ser o primeiro (expected = 0) mesmo com o contador em outro valor — o PostgREST não
@@ -116,7 +130,12 @@ serve(async (req) => {
   const { data: claim, error: claimErr } = await supabase.rpc("fn_claim_reengagement_step", {
     p_lead_id: lead_id, p_stage_id: v_stage, p_expected: v_expected,
   });
-  if (claimErr) return json({ ok: false, error: claimErr.message }, 500);
+  if (claimErr) {
+    await registrarErro("claim_falhou", "Reengajamento: falha ao reservar o passo da régua", {
+      detalhe: claimErr.message, ruleset_stage_id: v_stage, expected: v_expected,
+    });
+    return json({ ok: false, error: claimErr.message }, 500);
+  }
   if (!claim?.claimed) return json({ ok: true, skipped: claim?.reason ?? "not_claimed" });
 
   // Estado anterior, para devolver o passo à régua se o envio não acontecer. Devolver só o
@@ -152,18 +171,6 @@ serve(async (req) => {
     await releaseStep();
     return json({ ok: true, skipped: "lead_replied" });
   }
-
-  // Central de Erros: o que falha aqui não pode morrer só no automation_logs, que é fila de
-  // trabalho da automação e não painel de defeito.
-  const registrarErro = async (code: string, title: string, context: Record<string, unknown>) => {
-    try {
-      await supabase.rpc("log_system_error", {
-        p_scope: "reengajamento", p_code: code, p_title: title, p_level: "warn",
-        p_clinic_id: clinic_id, p_context: { lead_id, step_no: step_no ?? null, ...context },
-        p_is_monitor: false,
-      });
-    } catch { /* monitor que derruba a função monitorada é pior que não ter monitor */ }
-  };
 
   const logFail = async (reason: string) => {
     await supabase.from("automation_logs").insert({
@@ -225,10 +232,15 @@ serve(async (req) => {
       p_delay_ms: TYPING_DELAY_MS,
       p_chat_content: joined,
     });
+    // `detail` (o sqlerrm que a RPC devolve de propósito) entra junto: sem ele a Central mostra
+    // só "falha ao enfileirar", sem uma palavra sobre a causa, e o passo é retentado para sempre.
     const emitErr: string | null = emitRpcErr
       ? emitRpcErr.message
-      : (emitRes?.ok ? null : (emitRes?.reason ?? "erro_desconhecido"));
-    const bloqueado = emitErr === "lead_sem_whatsapp";
+      : (emitRes?.ok
+          ? null
+          : [emitRes?.reason ?? "erro_desconhecido", emitRes?.detail].filter(Boolean).join(": "));
+    // compara o motivo cru, não a string montada acima (que agora carrega o detalhe junto)
+    const bloqueado = emitRes?.reason === "lead_sem_whatsapp";
 
     sent = !emitErr; // enfileirado de verdade => entrega garantida (com retry) pelo Emissor
     if (emitErr) {
@@ -275,8 +287,13 @@ serve(async (req) => {
     if (!token) {
       // Falha TRANSITORIA (WhatsApp caiu entre a selecao e o envio): devolve o passo a regua,
       // senao o contato pula uma mensagem por causa de uma queda de minutos.
+      // Vai para a Central porque devolver o passo cria retentativa: se o token divergir do gate
+      // de forma permanente, o contato volta a cada tick ocupando uma das 5 vagas da clinica.
       await releaseStep();
       await logFail("sem api_token (WhatsApp não conectado)");
+      await registrarErro("sem_token_no_envio", "Reengajamento: instância sem token no momento do envio", {
+        ruleset_stage_id: v_stage,
+      });
       return json({ ok: false, error: "no_token" });
     }
 
@@ -334,8 +351,15 @@ serve(async (req) => {
         p_notes: null,
         p_resolve: true,
       });
-      if (finErr) console.error("[reengagement-followup] finalize_ticket:", finErr.message);
-      else closed = true;
+      if (finErr) {
+        // Único caminho destrutivo da função, e o mais caro de perder: a despedida JÁ saiu, o
+        // contato leu "vou encerrar seu atendimento" e o card ficaria aberto para sempre, sem
+        // registro nenhum. console.error some junto com o log da edge.
+        console.error("[reengagement-followup] finalize_ticket:", finErr.message);
+        await registrarErro("encerramento_falhou", "Reengajamento: despedida enviada mas o atendimento não foi encerrado", {
+          detalhe: finErr.message, ticket_id: ticketId, ruleset_stage_id: v_stage,
+        });
+      } else closed = true;
     }
   }
 

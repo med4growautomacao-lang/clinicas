@@ -829,8 +829,8 @@ export interface FollowupStep {
 export function useFollowupSteps() {
   const { activeClinicId } = useAuth();
   const [allSteps, setAllSteps] = useState<FollowupStep[]>([]);
-  // Configuração POR RÉGUA (followup_rulesets). Linha ausente = padrões de fábrica, que são o
-  // comportamento histórico — por isso o default é true, e não false.
+  // Configuração POR RÉGUA (followup_rulesets). Linha ausente = NÃO encerrar, igual ao selector:
+  // fechar atendimento é destrutivo e só acontece por opt-in explícito.
   const [rulesets, setRulesets] = useState<{ stage_id: string | null; close_ticket_on_exhaust: boolean }[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -925,23 +925,33 @@ export function useFollowupSteps() {
     );
     if (cfgErr) { falhou('createRuleset_config', cfgErr.message, { stageId }); return false; }
     const { error } = await supabase.from('followup_steps').insert(linhas);
-    if (error) { falhou('createRuleset', error.message, { stageId, copiarDoPadrao }); return false; }
+    if (error) {
+      falhou('createRuleset', error.message, { stageId, copiarDoPadrao });
+      // desfaz a configuração recém-gravada: sem passos ela é uma linha órfã, e a etapa
+      // continuaria mostrando "usa o Padrão" com uma decisão invisível guardada
+      await supabase.from('followup_rulesets').delete()
+        .eq('clinic_id', activeClinicId).eq('stage_id', stageId);
+      return false;
+    }
     await fetch();
     return true;
   };
 
-  // Apaga a régua da etapa: ela volta a usar o Padrão.
+  // Apaga a régua da etapa: ela volta a usar o Padrão. A CONFIGURAÇÃO vai junto — deixá-la para
+  // trás cria uma linha órfã que volta a valer, invisível, se a etapa ganhar cadência de novo.
   const removeRuleset = async (stageId: string) => {
     if (!activeClinicId || !stageId) return false;
     const { error } = await supabase.from('followup_steps').delete()
       .eq('clinic_id', activeClinicId).eq('stage_id', stageId);
     if (error) { falhou('removeRuleset', error.message, { stageId }); return false; }
+    const { error: cfgErr } = await supabase.from('followup_rulesets').delete()
+      .eq('clinic_id', activeClinicId).eq('stage_id', stageId);
+    if (cfgErr) { falhou('removeRuleset_config', cfgErr.message, { stageId }); await fetch(); return false; }
     await fetch();
     return true;
   };
 
-  // "Marcar Perdido ao terminar" é decisão DA RÉGUA (cada etapa tem a sua; o Padrão tem a dele).
-  // Sem linha gravada vale true, que é o que fn_check_followup_exhausted sempre fez.
+  // "Encerrar ao terminar" é decisão DA RÉGUA (cada etapa tem a sua; o Padrão tem a dele).
   const closeOnExhaustOf = useCallback(
     (stageId: string | null) =>
       // ausência de linha = NÃO encerrar, igual ao coalesce do selector: fechar atendimento é

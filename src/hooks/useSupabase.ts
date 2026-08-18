@@ -809,6 +809,8 @@ export function useFunnelStages() {
 export interface FollowupStep {
   id: string;
   clinic_id: string;
+  // Etapa dona da régua. null = régua PADRÃO, usada por toda etapa sem régua própria.
+  stage_id: string | null;
   step_no: number;
   message_text: string;
   delay_minutes: number;
@@ -816,30 +818,57 @@ export interface FollowupStep {
   is_closing: boolean;
 }
 
-// Régua de reengajamento (drip): passos por clínica em followup_steps.
+// Régua de reengajamento (drip) em followup_steps. Uma régua por etapa do funil, mais a régua
+// PADRÃO (stage_id null) que vale para toda etapa sem régua própria.
+//
+// ⚠️ Carrega TODOS os passos da clínica de uma vez e recorta no cliente: são poucas dezenas de
+// linhas, e é isso que permite mostrar "3 passos" / "usa o Padrão" ao lado de cada etapa sem uma
+// consulta por etapa. Os helpers são escopados por régua DE PROPÓSITO: escrever sem o escopo
+// (como o setClosing antigo, que zerava is_closing da clínica inteira) apaga a configuração das
+// outras etapas em silêncio.
 export function useFollowupSteps() {
   const { activeClinicId } = useAuth();
-  const [steps, setSteps] = useState<FollowupStep[]>([]);
+  const [allSteps, setAllSteps] = useState<FollowupStep[]>([]);
+  // Configuração POR RÉGUA (followup_rulesets). Linha ausente = padrões de fábrica, que são o
+  // comportamento histórico — por isso o default é true, e não false.
+  const [rulesets, setRulesets] = useState<{ stage_id: string | null; close_ticket_on_exhaust: boolean }[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetch = useCallback(async () => {
-    if (!activeClinicId) { setSteps([]); setLoading(false); return; }
-    const { data } = await supabase
-      .from('followup_steps')
-      .select('*')
-      .eq('clinic_id', activeClinicId)
-      .order('step_no', { ascending: true });
-    setSteps(data || []);
+    if (!activeClinicId) { setAllSteps([]); setRulesets([]); setLoading(false); return; }
+    const [{ data }, { data: cfg }] = await Promise.all([
+      supabase.from('followup_steps').select('*').eq('clinic_id', activeClinicId).order('step_no', { ascending: true }),
+      supabase.from('followup_rulesets').select('stage_id, close_ticket_on_exhaust').eq('clinic_id', activeClinicId),
+    ]);
+    setAllSteps((data || []).map(s => ({ ...s, stage_id: s.stage_id ?? null })));
+    setRulesets((cfg || []).map(r => ({ ...r, stage_id: r.stage_id ?? null })));
     setLoading(false);
   }, [activeClinicId]);
 
   useEffect(() => { fetch(); }, [fetch]);
 
-  const addStep = async (message_text: string, delay_minutes: number) => {
+  const sameRuleset = (s: FollowupStep, stageId: string | null) => (s.stage_id ?? null) === (stageId ?? null);
+  const stepsOf = useCallback(
+    (stageId: string | null) => allSteps.filter(s => (s.stage_id ?? null) === (stageId ?? null)),
+    [allSteps],
+  );
+  // Etapas COM régua própria. Vale a existência da linha, mesmo pausada: pausar todos os passos
+  // silencia aquela etapa em vez de devolvê-la ao Padrão (é assim que o motor lê).
+  const stagesWithRuleset = useMemo(
+    () => new Set(allSteps.map(s => s.stage_id).filter((id): id is string => !!id)),
+    [allSteps],
+  );
+
+  // No PostgREST, comparar com null exige .is(); .eq('stage_id', null) não casa com o Padrão.
+  const scopeToRuleset = (q: any, stageId: string | null) =>
+    stageId ? q.eq('stage_id', stageId) : q.is('stage_id', null);
+
+  const addStep = async (stageId: string | null, message_text: string, delay_minutes: number) => {
     if (!activeClinicId) return false;
-    const nextNo = (steps[steps.length - 1]?.step_no ?? 0) + 1;
+    const daRegua = stepsOf(stageId);
+    const nextNo = Math.max(0, ...daRegua.map(s => s.step_no)) + 1;
     const { error } = await supabase.from('followup_steps').insert({
-      clinic_id: activeClinicId, step_no: nextNo, message_text, delay_minutes, enabled: true,
+      clinic_id: activeClinicId, stage_id: stageId, step_no: nextNo, message_text, delay_minutes, enabled: true,
     });
     if (error) return false;
     await fetch();
@@ -847,7 +876,7 @@ export function useFollowupSteps() {
   };
 
   const updateStep = async (id: string, updates: Partial<FollowupStep>) => {
-    setSteps(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
+    setAllSteps(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
     const { error } = await supabase.from('followup_steps').update(updates).eq('id', id);
     if (error) { await fetch(); return false; }
     return true;
@@ -860,22 +889,74 @@ export function useFollowupSteps() {
     return true;
   };
 
-  // Encerramento é exclusivo: ligar num passo desliga dos outros (no máx. 1 por clínica).
-  const setClosing = async (id: string, value: boolean) => {
-    if (!activeClinicId) return false;
-    setSteps(prev => prev.map(s => (value ? { ...s, is_closing: s.id === id } : (s.id === id ? { ...s, is_closing: false } : s))));
-    if (value) {
-      // ordem importa pro índice único: zera os outros antes de ligar este
-      await supabase.from('followup_steps').update({ is_closing: false }).eq('clinic_id', activeClinicId).neq('id', id);
-      await supabase.from('followup_steps').update({ is_closing: true }).eq('id', id);
-    } else {
-      await supabase.from('followup_steps').update({ is_closing: false }).eq('id', id);
-    }
+  // ⚠️ Não existe mais "marcar ESTE passo como encerramento": a despedida é o último passo ativo
+  // da cadência, e quem decide se ela encerra o atendimento é closeOnExhaustOf/setCloseOnExhaust
+  // (followup_rulesets). A coluna followup_steps.is_closing virou letra morta em 18/08/2026 e sai
+  // do banco na limpeza seguinte, depois que este front substituir o que está publicado.
+
+  // Cria a régua de uma etapa. Copiando do Padrão ou com um passo inicial: régua sem nenhum passo
+  // seria uma etapa muda, e silenciar deve ser escolha explícita (pausar os passos), não efeito
+  // colateral de criar.
+  const createRuleset = async (stageId: string, copiarDoPadrao: boolean) => {
+    if (!activeClinicId || !stageId) return false;
+    const base = copiarDoPadrao ? stepsOf(null) : [];
+    const linhas = base.length > 0
+      ? base.map((s, i) => ({
+          clinic_id: activeClinicId, stage_id: stageId, step_no: i + 1,
+          message_text: s.message_text, delay_minutes: s.delay_minutes,
+          enabled: s.enabled,
+        }))
+      : [{
+          clinic_id: activeClinicId, stage_id: stageId, step_no: 1,
+          message_text: 'Olá {paciente}, podemos continuar de onde paramos?',
+          delay_minutes: 1440, enabled: true,
+        }];
+    const { error } = await supabase.from('followup_steps').insert(linhas);
+    if (error) return false;
     await fetch();
     return true;
   };
 
-  return { steps, loading, addStep, updateStep, removeStep, setClosing, refetch: fetch };
+  // Apaga a régua da etapa: ela volta a usar o Padrão.
+  const removeRuleset = async (stageId: string) => {
+    if (!activeClinicId || !stageId) return false;
+    const { error } = await supabase.from('followup_steps').delete()
+      .eq('clinic_id', activeClinicId).eq('stage_id', stageId);
+    if (error) return false;
+    await fetch();
+    return true;
+  };
+
+  // "Marcar Perdido ao terminar" é decisão DA RÉGUA (cada etapa tem a sua; o Padrão tem a dele).
+  // Sem linha gravada vale true, que é o que fn_check_followup_exhausted sempre fez.
+  const closeOnExhaustOf = useCallback(
+    (stageId: string | null) =>
+      rulesets.find(r => (r.stage_id ?? null) === (stageId ?? null))?.close_ticket_on_exhaust ?? true,
+    [rulesets],
+  );
+
+  const setCloseOnExhaust = async (stageId: string | null, value: boolean) => {
+    if (!activeClinicId) return false;
+    setRulesets(prev => {
+      const outros = prev.filter(r => (r.stage_id ?? null) !== (stageId ?? null));
+      return [...outros, { stage_id: stageId ?? null, close_ticket_on_exhaust: value }];
+    });
+    const { error } = await supabase
+      .from('followup_rulesets')
+      .upsert(
+        { clinic_id: activeClinicId, stage_id: stageId, close_ticket_on_exhaust: value },
+        { onConflict: 'clinic_id,stage_id' },
+      );
+    if (error) { await fetch(); return false; }
+    return true;
+  };
+
+  return {
+    allSteps, loading, stepsOf, stagesWithRuleset,
+    addStep, updateStep, removeStep, createRuleset, removeRuleset,
+    closeOnExhaustOf, setCloseOnExhaust,
+    refetch: fetch,
+  };
 }
 
 export function useLeads(options?: { pageSize?: number; unreadOnly?: boolean; withUnreadCount?: boolean }) {

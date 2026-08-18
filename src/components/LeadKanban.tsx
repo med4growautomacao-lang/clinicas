@@ -5597,7 +5597,16 @@ export function LeadKanban() {
                             </button>
                             <button
                               onClick={async () => {
-                                if (confirm(`Deseja realmente excluir a etapa "${stage.name}"?`)) {
+                                // Etapa com cadência própria de reengajamento: apagar a etapa apaga a
+                                // régua junto (FK on delete cascade), e as mensagens escritas se perdem.
+                                const { count: passosDaRegua } = await supabase
+                                  .from('followup_steps')
+                                  .select('id', { count: 'exact', head: true })
+                                  .eq('stage_id', stage.id);
+                                const avisoRegua = (passosDaRegua ?? 0) > 0
+                                  ? `\n\nATENÇÃO: esta etapa tem uma cadência própria de follow-up com ${passosDaRegua} passo(s). Excluir a etapa apaga essas mensagens.`
+                                  : '';
+                                if (confirm(`Deseja realmente excluir a etapa "${stage.name}"?${avisoRegua}`)) {
                                   const ok = await removeStage(stage.id);
                                   if (ok) {
                                     setLocalStages(p => p.filter(s => s.id !== stage.id));

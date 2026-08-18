@@ -1,9 +1,15 @@
 // reengagement-followup — envio NATIVO do follow-up de reengajamento (migra o envio do n8n).
 //
 // Chamada por pg_net (sem JWT), 1 vez por lead, a partir do selector SQL
-// process_reengagement_followup() (cron a cada 15 min) que já fez os gates duráveis.
-// Aqui: claim atômico (count++ + sent_at, com re-check das exclusões duráveis) → envio multi-balão
-// via uazapi → automation_logs (type=followup) → chat_messages (REENGAJAMENTO).
+// process_reengagement_followup() (cron a cada 30 min) que já fez os gates duráveis.
+// Aqui: claim atômico no banco (fn_claim_reengagement_step: contador E régua, com re-check das
+// exclusões duráveis e do opt-out) → envio multi-balão via Emissor/uazapi → automation_logs
+// (type=followup) → chat_messages (REENGAJAMENTO).
+//
+// RÉGUA: cada etapa do funil pode ter a sua (followup_steps.stage_id); stage_id null é a régua
+// Padrão, que vale para toda etapa sem régua própria. Quem escolhe é o selector, e a régua vem no
+// payload como ruleset_stage_id. A lógica por etapa está atrás do gate system_settings
+// 'reengajamento_por_etapa'; com ele desligado tudo cai no Padrão, como antes.
 //
 // Normalização de telefone espelha _shared/phone.ts (inline); envio espelha o ai-scheduler/welcome.
 
@@ -80,7 +86,9 @@ serve(async (req) => {
 
   let body: any;
   try { body = await req.json(); } catch { body = {}; }
-  const { lead_id, clinic_id, name, phone, clinic_phone, message_text, step_no, expected_count, is_closing } = body ?? {};
+  // ruleset_stage_id = a RÉGUA deste passo (null = régua Padrão, que vale para toda etapa sem
+  // régua própria). Vem do selector; a edge não decide régua, só repassa o que foi selecionado.
+  const { lead_id, clinic_id, name, phone, clinic_phone, message_text, step_no, expected_count, is_closing, ruleset_stage_id } = body ?? {};
 
   const json = (obj: unknown, status = 200) =>
     new Response(JSON.stringify(obj), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -98,19 +106,30 @@ serve(async (req) => {
 
   const v_expected = Number(expected_count ?? 0);
 
-  // (1) CLAIM ATÔMICO + re-check das exclusões duráveis. Só avança quem casar followup_count.
-  const { data: claimed, error: claimErr } = await supabase
-    .from("leads")
-    .update({ followup_count: v_expected + 1, followup_sent_at: nowSP() })
-    .eq("id", lead_id)
-    .eq("followup_count", v_expected)
-    .eq("followup_enabled", true)
-    .eq("ai_enabled", true)
-    .is("handoff_triggered_at", null)
-    .is("converted_patient_id", null)
-    .select("id");
+  const v_stage: string | null = ruleset_stage_id ?? null;
+
+  // (1) CLAIM ATÔMICO, agora no banco (fn_claim_reengagement_step). A trava não é mais só o
+  // contador: é contador E régua na MESMA condição, porque quando a régua muda o passo válido
+  // passa a ser o primeiro (expected = 0) mesmo com o contador em outro valor — o PostgREST não
+  // expressa esse "ou" sem abrir corrida. A RPC também re-checa as exclusões duráveis e o
+  // opt-out do tipo (janela entre listar e enviar que antes ficava aberta).
+  const { data: claim, error: claimErr } = await supabase.rpc("fn_claim_reengagement_step", {
+    p_lead_id: lead_id, p_stage_id: v_stage, p_expected: v_expected,
+  });
   if (claimErr) return json({ ok: false, error: claimErr.message }, 500);
-  if (!claimed || claimed.length === 0) return json({ ok: true, skipped: "not_claimed" });
+  if (!claim?.claimed) return json({ ok: true, skipped: claim?.reason ?? "not_claimed" });
+
+  // Estado anterior, para devolver o passo à régua se o envio não acontecer. Devolver só o
+  // contador (como antes) deixaria a régua e o relógio do contato errados.
+  const prev = { count: claim.prev_count ?? 0, stage: claim.prev_stage_id ?? null, sent_at: claim.prev_sent_at ?? null };
+  const releaseStep = async () => {
+    await supabase.rpc("fn_release_reengagement_step", {
+      p_lead_id: lead_id, p_prev_count: prev.count, p_prev_stage_id: prev.stage, p_prev_sent_at: prev.sent_at,
+    });
+  };
+  // Identificador do CICLO desta régua: é o followup_sent_at que o claim acabou de gravar.
+  // Entra na chave anti-duplicidade do Emissor — ver o comentário no emit_message abaixo.
+  const cicloId = String(claim.sent_at ?? nowSP()).replace(/\D/g, "");
 
   // (1.1) Re-check da direção da última mensagem. O selector já exige last_dir='outbound', mas há
   // uma janela entre selecionar e chegar aqui: se o lead RESPONDEU nesse meio-tempo, NÃO reengaja
@@ -123,14 +142,15 @@ serve(async (req) => {
     .order("seq", { ascending: false })
     .limit(1);
   if (lastMsg && lastMsg.length > 0 && lastMsg[0].direction === "inbound") {
-    await supabase.from("leads").update({ followup_count: v_expected }).eq("id", lead_id);
+    await releaseStep();
     return json({ ok: true, skipped: "lead_replied" });
   }
 
   const logFail = async (reason: string) => {
     await supabase.from("automation_logs").insert({
       clinic_id, lead_id, type: "followup", status: "failed",
-      message_sent: reason, triggered_at: nowSP(), metadata: { step_no: step_no ?? null },
+      message_sent: reason, triggered_at: nowSP(),
+      metadata: { step_no: step_no ?? null, ruleset_stage_id: v_stage },
     });
   };
 
@@ -166,7 +186,12 @@ serve(async (req) => {
         p_body: bubbles[i],
         p_lead_id: lead_id,
         p_delay_ms: TYPING_DELAY_MS,
-        p_dedup_key: `reeng:${lead_id}:${step_no ?? 0}:${i}`,
+        // Chave anti-duplicidade COM régua e ciclo. A antiga era `reeng:<lead>:<passo>:<balão>`,
+        // e uq_outbound_dedup é único GLOBAL: o passo 1 de duas réguas (ou o mesmo passo depois
+        // de um reinício) colidia, o emit_message devolvia o id da linha ANTIGA e o produtor
+        // marcava 'sent' sem nada ter sido enfileirado. Provado: 2 chamadas com a mesma chave
+        // => 1 linha e ids iguais. O ciclo é o followup_sent_at gravado por este claim.
+        p_dedup_key: `reeng:${lead_id}:${v_stage ?? "padrao"}:${step_no ?? 0}:${cicloId}:${i}`,
         // conversa gravada uma vez, no último balão, com o conteúdo unido (igual ao inline de hoje)
         p_chat_payload: isLast
           ? { sender: "system", message: { type: "system", content: joined, additional_kwargs: {}, response_metadata: {} } }
@@ -176,14 +201,17 @@ serve(async (req) => {
     }
     sent = !emitErr; // enfileirado com sucesso => entrega garantida (com retry) pelo Emissor
     if (emitErr) {
-      // Reverte o claim (followup_count volta ao valor anterior) p/ o cron reentrar o passo — senao o
-      // passo do drip seria consumido sem ter sido enviado e nunca reenviado. Espelha o forms-welcome.
-      await supabase.from("leads").update({ followup_count: v_expected }).eq("id", lead_id);
+      // Devolve o passo à régua (contador, régua e relógio) p/ o cron reentrar — senao o passo do
+      // drip seria consumido sem ter sido enviado e nunca reenviado. Espelha o forms-welcome.
+      await releaseStep();
     }
     await supabase.from("automation_logs").insert({
       clinic_id, lead_id, type: "followup", status: sent ? "sent" : "failed",
       message_sent: sent ? joined : `falha ao enfileirar: ${emitErr}`,
-      triggered_at: nowSP(), metadata: { step_no: step_no ?? null, via: "emissor" },
+      triggered_at: nowSP(),
+      // a régua vai no log porque "passo 2" só quer dizer alguma coisa junto com a régua dele,
+      // e auditar insistência se faz por automation_logs, não pelo contador do contato
+      metadata: { step_no: step_no ?? null, via: "emissor", ruleset_stage_id: v_stage },
     });
     // kick imediato do worker (best-effort; o cron de 1 min é o backstop)
     try {
@@ -204,10 +232,14 @@ serve(async (req) => {
       anySent = anySent || ok;
     }
     sent = anySent;
+    // Nenhum balão saiu: devolve o passo à régua, senão ele é consumido sem ter sido enviado e
+    // o contato pula uma mensagem em silêncio (o caminho do Emissor já fazia isso).
+    if (!anySent) await releaseStep();
     await supabase.from("automation_logs").insert({
       clinic_id, lead_id, type: "followup",
       status: anySent ? "sent" : "failed",
-      message_sent: joined, triggered_at: nowSP(), metadata: { step_no: step_no ?? null },
+      message_sent: joined, triggered_at: nowSP(),
+      metadata: { step_no: step_no ?? null, ruleset_stage_id: v_stage },
     });
     if (anySent) {
       // ⚠️ NÃO montar a session_id aqui. Passamos o TELEFONE (que é fato) e o banco compõe a chave
@@ -228,8 +260,14 @@ serve(async (req) => {
   // (8) ENCERRAMENTO: passo is_closing FECHA o ticket como Perdido via finalize_ticket (RPC canônica
   // — seta outcome=perdido + etapa + loss_reason + resolve + invariantes). resolve=true: a resposta
   // tardia abre um ticket NOVO limpo (reinicia a régua) e o Pós-Atendimento perdido pode disparar.
+  //
+  // ⚠️ SÓ encerra se a despedida saiu (`sent`). Antes o encerramento rodava mesmo com o envio
+  // falho: 12 atendimentos reais (Vaz e Tyago, 25/06 a 12/07/2026, período dos números inválidos)
+  // foram fechados como Perdido sem que a pessoa recebesse o "vou encerrar seu atendimento".
+  // Com a falha, o passo já foi devolvido à régua acima, então o card segue aberto e a despedida
+  // é tentada de novo na próxima rodada.
   let closed = false;
-  if (is_closing === true) {
+  if (is_closing === true && sent) {
     const { data: openTickets } = await supabase
       .from("tickets").select("id").eq("lead_id", lead_id).eq("status", "open")
       .order("opened_at", { ascending: false }).limit(1);
@@ -247,5 +285,5 @@ serve(async (req) => {
     }
   }
 
-  return json({ ok: true, sent, step_no: step_no ?? null, bubbles: bubbles.length, closed, lead_id });
+  return json({ ok: true, sent, step_no: step_no ?? null, ruleset_stage_id: v_stage, bubbles: bubbles.length, closed, lead_id });
 });

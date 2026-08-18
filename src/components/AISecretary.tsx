@@ -814,12 +814,15 @@ function RemindersView() {
 }
 
 // Editor de um passo da régua de reengajamento (auto-save no blur).
-function FollowupStepEditor({ step, index, onUpdate, onRemove, onSetClosing }: {
+function FollowupStepEditor({ step, index, onUpdate, onRemove, ehDespedida, encerraAoFinal }: {
   step: FollowupStep;
   index: number;
   onUpdate: (id: string, updates: Partial<FollowupStep>) => void;
   onRemove: (id: string) => void;
-  onSetClosing: (id: string, value: boolean) => void;
+  // Não existe mais toggle por passo: a despedida é o ÚLTIMO passo ATIVO da cadência, e ela
+  // encerra o atendimento quando a chave da régua manda encerrar.
+  ehDespedida: boolean;
+  encerraAoFinal: boolean;
 }) {
   const [msg, setMsg] = useState(step.message_text);
   const [delay, setDelay] = useState(step.delay_minutes);
@@ -839,6 +842,19 @@ function FollowupStepEditor({ step, index, onUpdate, onRemove, onSetClosing }: {
           >
             {step.enabled ? "Ativo" : "Pausado"}
           </button>
+          {ehDespedida && (
+            <span
+              title={encerraAoFinal
+                ? "Último passo ativo: é a despedida, e ao enviá-la o atendimento é encerrado como Perdido."
+                : "Último passo ativo da cadência. Como o encerramento está desligado, ela apenas termina aqui."}
+              className={cn(
+                "text-[10px] font-bold uppercase px-2 py-0.5 rounded-md",
+                encerraAoFinal ? "bg-rose-100 text-rose-700" : "bg-slate-100 text-slate-500",
+              )}
+            >
+              {encerraAoFinal ? "Despedida · encerra" : "Último passo"}
+            </span>
+          )}
         </div>
         <button onClick={() => onRemove(step.id)} title="Remover passo" className="text-slate-300 hover:text-red-500 transition-colors">
           <Trash2 className="w-4 h-4" />
@@ -867,26 +883,66 @@ function FollowupStepEditor({ step, index, onUpdate, onRemove, onSetClosing }: {
         <span className="text-[11px] font-bold text-slate-400 uppercase">min de inatividade ({fmtDelay(delay)})</span>
       </div>
 
-      <label className="flex items-center gap-2 cursor-pointer pt-1">
-        <button
-          type="button"
-          onClick={() => onSetClosing(step.id, !step.is_closing)}
-          className={cn("w-9 h-5 rounded-full relative transition-all shrink-0", step.is_closing ? "bg-rose-500" : "bg-slate-300")}
-        >
-          <div className={cn("w-3.5 h-3.5 bg-white rounded-full absolute top-[3px] transition-all shadow-sm", step.is_closing ? "right-[3px]" : "left-[3px]")} />
-        </button>
-        <span className="text-[11px] font-bold text-slate-600">🏁 Encerrar atendimento neste passo <span className="font-medium text-slate-400">(move o ticket p/ Perdido)</span></span>
-      </label>
+      {ehDespedida && encerraAoFinal && (
+        <p className="text-[11px] font-semibold text-rose-700 leading-relaxed pt-1">
+          Esta é a última mensagem da cadência: depois de enviá-la, o atendimento é encerrado como Perdido.
+        </p>
+      )}
     </div>
   );
 }
+
+// Etapas de desfecho: o motor de reengajamento não atende quem está nelas, então elas não
+// entram no seletor de régua (chave que a tela grava e o backend não lê é defeito, não recurso).
+const ETAPAS_SEM_REENGAJAMENTO = ['agendado', 'compareceu', 'ganho', 'perdido'];
 
 function FollowupsView() {
   const { aiConfig, updateAI, loading } = useSettings();
   const aiRef = useLatest(aiConfig);
   const guard = useActivationGuard();
   const [localConfig, setLocalConfig] = useState<any>(null);
-  const { steps, loading: stepsLoading, addStep, updateStep, removeStep, setClosing } = useFollowupSteps();
+  const {
+    loading: stepsLoading, stepsOf, stagesWithRuleset,
+    addStep, updateStep, removeStep, createRuleset, removeRuleset,
+    closeOnExhaustOf, setCloseOnExhaust,
+  } = useFollowupSteps();
+  const { data: funnelStages } = useFunnelStages();
+  const { activeClinicId } = useAuth();
+
+  // null = régua Padrão (a que vale para toda etapa sem régua própria). É onde a tela abre.
+  const [reguaStageId, setReguaStageId] = useState<string | null>(null);
+  const [previa, setPrevia] = useState<{ total: number; elegiveis_agora: number; por_tick: number; intervalo_min: number } | null>(null);
+  const [previaLoading, setPreviaLoading] = useState(false);
+  const [criando, setCriando] = useState(false);
+
+  const etapasElegiveis = useMemo(
+    () => (funnelStages || []).filter(s => !s.is_hidden && !ETAPAS_SEM_REENGAJAMENTO.includes(s.slug || '')),
+    [funnelStages],
+  );
+  const passos = stepsOf(reguaStageId);
+  const etapaSelecionada = etapasElegiveis.find(s => s.id === reguaStageId) || null;
+  const temReguaPropria = reguaStageId ? stagesWithRuleset.has(reguaStageId) : true;
+
+  // Prévia do público ANTES de criar a régua: criar torna todo o backlog daquela coluna elegível
+  // de uma vez, e isso já encheu a fila neste sistema antes.
+  useEffect(() => {
+    let vivo = true;
+    if (!reguaStageId || temReguaPropria || !activeClinicId) { setPrevia(null); return; }
+    setPreviaLoading(true);
+    supabase
+      .rpc('preview_regua_por_etapa', { p_clinic_id: activeClinicId, p_stage_id: reguaStageId, p_delay_minutes: 1440 })
+      .then(({ data, error }) => {
+        if (!vivo) return;
+        setPreviaLoading(false);
+        if (error) {
+          setPrevia(null);
+          logSystemError('previa_regua_etapa', 'Falha ao calcular a prévia da régua por etapa', activeClinicId, { detail: error.message, stage_id: reguaStageId });
+          return;
+        }
+        setPrevia(data as any);
+      });
+    return () => { vivo = false; };
+  }, [reguaStageId, temReguaPropria, activeClinicId]);
 
   useEffect(() => {
     if (aiConfig) {
@@ -970,37 +1026,189 @@ function FollowupsView() {
             </p>
           </div>
 
+          {/* Seletor de régua: Padrão + uma por etapa do funil */}
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1 flex items-center gap-2">
+              <LayoutGrid className="w-3 h-3" /> Cadência por etapa
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setReguaStageId(null)}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors",
+                  reguaStageId === null
+                    ? "bg-teal-600 text-white border-teal-600"
+                    : "bg-white text-slate-600 border-slate-200 hover:border-teal-300",
+                )}
+              >
+                Padrão <span className="font-medium opacity-70">· {stepsOf(null).length} passo(s)</span>
+              </button>
+              {etapasElegiveis.map(et => {
+                const propria = stagesWithRuleset.has(et.id);
+                const n = stepsOf(et.id).length;
+                return (
+                  <button
+                    key={et.id}
+                    onClick={() => setReguaStageId(et.id)}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors",
+                      reguaStageId === et.id
+                        ? "bg-teal-600 text-white border-teal-600"
+                        : "bg-white text-slate-600 border-slate-200 hover:border-teal-300",
+                    )}
+                  >
+                    {et.name}{" "}
+                    <span className="font-medium opacity-70">· {propria ? `${n} passo(s)` : "usa o Padrão"}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[11px] text-slate-400 font-medium pl-1 leading-relaxed">
+              A régua <span className="font-bold">Padrão</span> vale para toda etapa sem cadência própria. Agendado,
+              Compareceu, Ganho e Perdido não aparecem porque o reengajamento não atende quem está nelas.
+            </p>
+          </div>
+
           {/* Régua de mensagens (passos) — auto-save por passo */}
           <div className="space-y-3">
             <div className="flex items-center justify-between pl-1">
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
-                <Clock className="w-3 h-3" /> Régua de mensagens
+                <Clock className="w-3 h-3" />
+                {etapaSelecionada ? `Mensagens · ${etapaSelecionada.name}` : "Mensagens · Padrão"}
               </label>
-              <button
-                onClick={() => addStep("Olá {paciente}, podemos continuar de onde paramos?", steps[steps.length - 1]?.delay_minutes ?? 1440)}
-                className="flex items-center gap-1 text-xs font-bold text-teal-700 hover:text-teal-800"
-              >
-                <Plus className="w-3.5 h-3.5" /> Adicionar passo
-              </button>
+              {temReguaPropria && (
+                <button
+                  onClick={() => addStep(reguaStageId, "Olá {paciente}, podemos continuar de onde paramos?", passos[passos.length - 1]?.delay_minutes ?? 1440)}
+                  className="flex items-center gap-1 text-xs font-bold text-teal-700 hover:text-teal-800"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Adicionar passo
+                </button>
+              )}
             </div>
             <p className="text-[11px] text-slate-400 font-medium pl-1 leading-relaxed">
-              Cada passo é enviado após o lead ficar inativo pelo tempo do passo. Linha em branco separa em balões. <span className="font-bold">{'{paciente}'}</span> = primeiro nome.
+              Cada passo é enviado depois que o contato fica em silêncio pelo tempo do passo. Linha em branco separa em balões. <span className="font-bold">{'{paciente}'}</span> = primeiro nome.
             </p>
 
             {stepsLoading ? (
               <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 text-teal-600 animate-spin" /></div>
-            ) : steps.length === 0 ? (
+            ) : !temReguaPropria ? (
+              /* Etapa que ainda usa o Padrão: prévia do público + criação */
+              <div className="p-4 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 space-y-3">
+                <p className="text-xs font-bold text-slate-700">
+                  Esta etapa usa a régua Padrão.
+                </p>
+                <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
+                  Criando uma cadência própria, quem está nesta coluna passa a receber estas mensagens em vez das do Padrão.
+                  {previaLoading && " Calculando quantos contatos entram…"}
+                  {previa && (
+                    <>
+                      {" "}Hoje há <span className="font-bold text-slate-700">{previa.total} contato(s)</span> nesta coluna dentro do público do reengajamento
+                      {previa.elegiveis_agora > 0 && (
+                        <>
+                          , e <span className="font-bold text-amber-700">{previa.elegiveis_agora}</span> deles entram já na primeira rodada
+                          {" "}(o envio sai de {previa.por_tick} em {previa.por_tick}, a cada {previa.intervalo_min} minutos)
+                        </>
+                      )}
+                      .
+                    </>
+                  )}
+                </p>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <button
+                    disabled={criando}
+                    onClick={async () => {
+                      if (!reguaStageId) return;
+                      setCriando(true);
+                      await createRuleset(reguaStageId, false);
+                      setCriando(false);
+                    }}
+                    className="px-3 py-2 rounded-lg bg-teal-600 text-white text-[11px] font-bold hover:bg-teal-700 disabled:opacity-50"
+                  >
+                    Criar cadência para esta etapa
+                  </button>
+                  <button
+                    disabled={criando || stepsOf(null).length === 0}
+                    onClick={async () => {
+                      if (!reguaStageId) return;
+                      setCriando(true);
+                      await createRuleset(reguaStageId, true);
+                      setCriando(false);
+                    }}
+                    className="px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-700 text-[11px] font-bold hover:border-teal-300 disabled:opacity-50"
+                  >
+                    Copiar do Padrão ({stepsOf(null).length} passo(s))
+                  </button>
+                </div>
+              </div>
+            ) : passos.length === 0 ? (
               <div className="text-center py-6 text-xs text-slate-400 font-medium border border-dashed border-slate-200 rounded-xl">
                 Nenhum passo configurado. Clique em "Adicionar passo".
               </div>
             ) : (
               <div className="space-y-3">
-                {steps.map((s, i) => (
-                  <FollowupStepEditor key={s.id} step={s} index={i} onUpdate={updateStep} onRemove={removeStep} onSetClosing={setClosing} />
+                {passos.map((s, i) => (
+                  <FollowupStepEditor
+                    key={s.id}
+                    step={s}
+                    index={i}
+                    onUpdate={updateStep}
+                    onRemove={removeStep}
+                    // despedida = último passo ATIVO da cadência (pausar o último promove o anterior)
+                    ehDespedida={s.enabled && s.id === [...passos].reverse().find(p => p.enabled)?.id}
+                    encerraAoFinal={closeOnExhaustOf(reguaStageId)}
+                  />
                 ))}
+                {reguaStageId && (
+                  <div className="pt-1 space-y-2">
+                    <p className="text-[11px] text-slate-400 font-medium leading-relaxed">
+                      Para silenciar esta etapa, pause todos os passos acima: cadência própria com tudo pausado não
+                      envia nada e <span className="font-bold">não volta para o Padrão</span>.
+                    </p>
+                    <button
+                      onClick={async () => {
+                        if (!reguaStageId) return;
+                        if (!confirm(`Apagar a cadência de "${etapaSelecionada?.name}"? Esta etapa volta a usar a régua Padrão e as mensagens escritas aqui são perdidas.`)) return;
+                        await removeRuleset(reguaStageId);
+                      }}
+                      className="text-[11px] font-bold text-slate-400 hover:text-red-500 transition-colors"
+                    >
+                      Voltar a usar o Padrão nesta etapa
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
+
+          {/* Fim da régua sem passo de encerramento: decisão DESTA régua (followup_rulesets).
+              Os dois caminhos NÃO se acumulam: fn_check_followup_exhausted sai antes de ler esta
+              chave quando a régua tem passo de encerramento (quem fecha, ali, é a edge). A nota
+              abaixo existe porque ver as duas ligadas lado a lado parece conflito e não é. */}
+          {temReguaPropria && (
+            <div className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-100">
+              <div className="pr-4">
+                <p className="text-sm font-bold text-slate-900">
+                  Encerrar o atendimento ao terminar {etapaSelecionada ? `a cadência de ${etapaSelecionada.name}` : "a régua Padrão"}
+                </p>
+                <p className="text-[11px] font-semibold text-slate-500 pt-0.5 leading-relaxed">
+                  O último passo ativo é a despedida: depois de enviá-lo, o atendimento é fechado como Perdido.
+                  Desligado, a cadência apenas termina e o card fica onde está. Vale só para esta cadência.
+                </p>
+              </div>
+              <button
+                onClick={() => setCloseOnExhaust(reguaStageId, !closeOnExhaustOf(reguaStageId))}
+                className={cn(
+                  "w-12 h-6 rounded-full relative transition-all shrink-0",
+                  closeOnExhaustOf(reguaStageId) ? "bg-teal-600" : "bg-slate-300",
+                )}
+              >
+                <div className={cn(
+                  "w-4 h-4 bg-white rounded-full absolute top-1 transition-all shadow-sm",
+                  closeOnExhaustOf(reguaStageId) ? "right-1" : "left-1",
+                )}></div>
+              </button>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -1028,7 +1236,8 @@ function FollowupsView() {
           <CardContent className="pt-2">
             <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 max-w-[85%] relative">
                <p className="text-sm text-slate-700 leading-relaxed font-medium whitespace-pre-line">
-                 {steps[0]?.message_text ? steps[0].message_text.replace(/\{paciente\}/gi, "João") : "Adicione um passo para ver a prévia."}
+                 {/* prévia do 1º passo DA RÉGUA ABERTA no seletor, não da clínica inteira */}
+                 {passos[0]?.message_text ? passos[0].message_text.replace(/\{paciente\}/gi, "João") : "Adicione um passo para ver a prévia."}
                </p>
                <span className="text-[9px] text-slate-400 font-bold uppercase mt-2 block">10:45</span>
                <div className="absolute -left-2 top-4 w-4 h-4 bg-white border-l border-b border-slate-100 rotate-45" />

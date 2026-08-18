@@ -914,6 +914,7 @@ function FollowupsView() {
   const [previa, setPrevia] = useState<{ total: number; elegiveis_agora: number; por_tick: number; intervalo_min: number } | null>(null);
   const [previaLoading, setPreviaLoading] = useState(false);
   const [criando, setCriando] = useState(false);
+  const [erroSalvar, setErroSalvar] = useState<string | null>(null);
 
   const etapasElegiveis = useMemo(
     () => (funnelStages || []).filter(s => !s.is_hidden && !ETAPAS_SEM_REENGAJAMENTO.includes(s.slug || '')),
@@ -1026,6 +1027,18 @@ function FollowupsView() {
             </p>
           </div>
 
+          {/* Gravação que falha PRECISA aparecer para quem clicou: a Central sozinha é vista
+              horas depois, e nesse meio-tempo o usuário acha que salvou. */}
+          {erroSalvar && (
+            <div className="flex items-start gap-2 p-3 rounded-xl bg-rose-50 border border-rose-200">
+              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+              <p className="flex-1 text-[11px] font-bold text-rose-700 leading-relaxed">{erroSalvar}</p>
+              <button onClick={() => setErroSalvar(null)} className="text-rose-400 hover:text-rose-600">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {/* Seletor de régua: Padrão + uma por etapa do funil */}
           <div className="space-y-2">
             <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1 flex items-center gap-2">
@@ -1119,7 +1132,8 @@ function FollowupsView() {
                     onClick={async () => {
                       if (!reguaStageId) return;
                       setCriando(true);
-                      await createRuleset(reguaStageId, false);
+                      const ok = await createRuleset(reguaStageId, false);
+                      setErroSalvar(ok ? null : "Não foi possível criar a cadência desta etapa. Tente de novo.");
                       setCriando(false);
                     }}
                     className="px-3 py-2 rounded-lg bg-teal-600 text-white text-[11px] font-bold hover:bg-teal-700 disabled:opacity-50"
@@ -1131,7 +1145,8 @@ function FollowupsView() {
                     onClick={async () => {
                       if (!reguaStageId) return;
                       setCriando(true);
-                      await createRuleset(reguaStageId, true);
+                      const ok = await createRuleset(reguaStageId, true);
+                      setErroSalvar(ok ? null : "Não foi possível copiar a cadência do Padrão. Tente de novo.");
                       setCriando(false);
                     }}
                     className="px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-700 text-[11px] font-bold hover:border-teal-300 disabled:opacity-50"
@@ -1168,7 +1183,8 @@ function FollowupsView() {
                       onClick={async () => {
                         if (!reguaStageId) return;
                         if (!confirm(`Apagar a cadência de "${etapaSelecionada?.name}"? Esta etapa volta a usar a régua Padrão e as mensagens escritas aqui são perdidas.`)) return;
-                        await removeRuleset(reguaStageId);
+                        const ok = await removeRuleset(reguaStageId);
+                        setErroSalvar(ok ? null : "Não foi possível apagar a cadência desta etapa. Tente de novo.");
                       }}
                       className="text-[11px] font-bold text-slate-400 hover:text-red-500 transition-colors"
                     >

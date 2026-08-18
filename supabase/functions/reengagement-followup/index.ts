@@ -121,15 +121,22 @@ serve(async (req) => {
 
   // Estado anterior, para devolver o passo à régua se o envio não acontecer. Devolver só o
   // contador (como antes) deixaria a régua e o relógio do contato errados.
-  const prev = { count: claim.prev_count ?? 0, stage: claim.prev_stage_id ?? null, sent_at: claim.prev_sent_at ?? null };
+  const prev = {
+    count: claim.prev_count ?? 0, stage: claim.prev_stage_id ?? null,
+    sent_at: claim.prev_sent_at ?? null, cycle: claim.prev_cycle ?? null,
+  };
   const releaseStep = async () => {
+    // o CICLO volta junto: sem isso a tentativa seguinte gera chave de deduplicacao nova e o
+    // contato recebe de novo o que ja tinha entrado na fila.
     await supabase.rpc("fn_release_reengagement_step", {
-      p_lead_id: lead_id, p_prev_count: prev.count, p_prev_stage_id: prev.stage, p_prev_sent_at: prev.sent_at,
+      p_lead_id: lead_id, p_prev_count: prev.count, p_prev_stage_id: prev.stage,
+      p_prev_sent_at: prev.sent_at, p_prev_cycle: prev.cycle,
     });
   };
-  // Identificador do CICLO desta régua: é o followup_sent_at que o claim acabou de gravar.
-  // Entra na chave anti-duplicidade do Emissor — ver o comentário no emit_message abaixo.
-  const cicloId = String(claim.sent_at ?? nowSP()).replace(/\D/g, "");
+  // Rodada desta régua (leads.followup_cycle, devolvido pelo claim). Entra na chave
+  // anti-duplicidade: muda quando a cadência recomeça, e NÃO muda entre tentativas da mesma
+  // rodada — que é o que faz o retry não reenviar o que já saiu.
+  const ciclo = Number(claim.cycle ?? 0);
 
   // (1.1) Re-check da direção da última mensagem. O selector já exige last_dir='outbound', mas há
   // uma janela entre selecionar e chegar aqui: se o lead RESPONDEU nesse meio-tempo, NÃO reengaja
@@ -146,6 +153,18 @@ serve(async (req) => {
     return json({ ok: true, skipped: "lead_replied" });
   }
 
+  // Central de Erros: o que falha aqui não pode morrer só no automation_logs, que é fila de
+  // trabalho da automação e não painel de defeito.
+  const registrarErro = async (code: string, title: string, context: Record<string, unknown>) => {
+    try {
+      await supabase.rpc("log_system_error", {
+        p_scope: "reengajamento", p_code: code, p_title: title, p_level: "warn",
+        p_clinic_id: clinic_id, p_context: { lead_id, step_no: step_no ?? null, ...context },
+        p_is_monitor: false,
+      });
+    } catch { /* monitor que derruba a função monitorada é pior que não ter monitor */ }
+  };
+
   const logFail = async (reason: string) => {
     await supabase.from("automation_logs").insert({
       clinic_id, lead_id, type: "followup", status: "failed",
@@ -158,12 +177,23 @@ serve(async (req) => {
   // só servia para montar a session_id em TS, e a chave de memória agora tem um dono só, que é o
   // banco (30/07/2026).
   const leadNumber = normalizeBrazilianPhone(phone);
-  if (!leadNumber) { await logFail("telefone do lead inválido"); return json({ ok: false, error: "invalid_phone" }); }
+  if (!leadNumber) {
+    // Passo consumido de proposito: devolver faria o cron reentrar e falhar igual a cada tick.
+    // O que precisa acontecer aqui e alguem CORRIGIR o telefone, entao vai para a Central.
+    await logFail("telefone do lead inválido");
+    await registrarErro("telefone_invalido", "Reengajamento: telefone do contato nao normaliza", { phone });
+    return json({ ok: false, error: "invalid_phone" });
+  }
 
   // (3) mensagem do passo (multi-balão por parágrafo)
   const rendered = renderMessage(message_text, firstNameCapitalized(name));
   const bubbles = rendered.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
-  if (bubbles.length === 0) { await logFail("mensagem do passo vazia"); return json({ ok: false, error: "empty_message" }); }
+  if (bubbles.length === 0) {
+    // Passo em branco e defeito de configuracao: sem isto a regua inteira e consumida em silencio.
+    await logFail("mensagem do passo vazia");
+    await registrarErro("passo_sem_mensagem", "Reengajamento: passo da regua esta sem mensagem", { ruleset_stage_id: v_stage });
+    return json({ ok: false, error: "empty_message" });
+  }
   const joined = bubbles.join(" | ");
 
   // (4) EMISSOR (opt-in por clínica). Enfileira cada balão como uma mensagem; o worker resolve o
@@ -175,43 +205,61 @@ serve(async (req) => {
 
   let sent = false;
   if (viaEmissor === true) {
-    let emitErr: string | null = null;
-    for (let i = 0; i < bubbles.length; i++) {
-      const isLast = i === bubbles.length - 1;
-      // Erro de emit NAO pode virar 'sent' fantasma: rastreia e reflete no automation_logs.
-      const { error } = await supabase.rpc("emit_message", {
-        p_clinic_id: clinic_id,
-        p_to_addr: leadNumber,
-        p_producer: "reengagement",
-        p_body: bubbles[i],
-        p_lead_id: lead_id,
-        p_delay_ms: TYPING_DELAY_MS,
-        // Chave anti-duplicidade COM régua e ciclo. A antiga era `reeng:<lead>:<passo>:<balão>`,
-        // e uq_outbound_dedup é único GLOBAL: o passo 1 de duas réguas (ou o mesmo passo depois
-        // de um reinício) colidia, o emit_message devolvia o id da linha ANTIGA e o produtor
-        // marcava 'sent' sem nada ter sido enfileirado. Provado: 2 chamadas com a mesma chave
-        // => 1 linha e ids iguais. O ciclo é o followup_sent_at gravado por este claim.
-        p_dedup_key: `reeng:${lead_id}:${v_stage ?? "padrao"}:${step_no ?? 0}:${cicloId}:${i}`,
-        // conversa gravada uma vez, no último balão, com o conteúdo unido (igual ao inline de hoje)
-        p_chat_payload: isLast
-          ? { sender: "system", message: { type: "system", content: joined, additional_kwargs: {}, response_metadata: {} } }
-          : null,
-      });
-      if (error) emitErr = error.message;
-    }
-    sent = !emitErr; // enfileirado com sucesso => entrega garantida (com retry) pelo Emissor
+    // Enfileiramento TUDO OU NADA, no banco (fn_emit_reengagement). Duas coisas que o laço
+    // bolha a bolha daqui não dava conta:
+    //   1. `emit_message` BLOQUEIA contato marcado como fora do WhatsApp: grava a linha como
+    //      'dropped' e devolve o id SEM erro. Lendo só o erro, a edge dava o envio como feito e
+    //      o passo de despedida ainda encerrava o atendimento (mesma classe dos 12 casos de
+    //      julho). A RPC recusa antes de enfileirar qualquer coisa.
+    //   2. Falha no meio deixava as bolhas anteriores na fila; ao devolver o passo, a rodada
+    //      seguinte gerava chave nova e o contato recebia as primeiras bolhas duas vezes.
+    // A chave leva régua e CICLO (leads.followup_cycle): estável dentro da rodada, diferente
+    // entre rodadas — é o que impede tanto a colisão entre réguas quanto o reenvio no retry.
+    const prefixoDedup = `reeng:${lead_id}:${v_stage ?? "padrao"}:${step_no ?? 0}:${ciclo}`;
+    const { data: emitRes, error: emitRpcErr } = await supabase.rpc("fn_emit_reengagement", {
+      p_clinic_id: clinic_id,
+      p_lead_id: lead_id,
+      p_to_addr: leadNumber,
+      p_bubbles: bubbles,
+      p_dedup_prefix: prefixoDedup,
+      p_delay_ms: TYPING_DELAY_MS,
+      p_chat_content: joined,
+    });
+    const emitErr: string | null = emitRpcErr
+      ? emitRpcErr.message
+      : (emitRes?.ok ? null : (emitRes?.reason ?? "erro_desconhecido"));
+    const bloqueado = emitErr === "lead_sem_whatsapp";
+
+    sent = !emitErr; // enfileirado de verdade => entrega garantida (com retry) pelo Emissor
     if (emitErr) {
+      // Central: nenhum destes dois pode viver so no automation_logs. O bloqueio PARA a cadencia
+      // (o passo e consumido e o contato ja saiu do publico), e a falha de fila se repete a cada
+      // tick ate alguem olhar.
+      await registrarErro(
+        bloqueado ? "envio_bloqueado_sem_whatsapp" : "falha_ao_enfileirar",
+        bloqueado
+          ? "Reengajamento: contato marcado como fora do WhatsApp, cadencia interrompida"
+          : "Reengajamento: falha ao enfileirar o passo no Emissor",
+        { detalhe: emitErr, ruleset_stage_id: v_stage, ciclo },
+      );
+    }
+    if (emitErr && !bloqueado) {
       // Devolve o passo à régua (contador, régua e relógio) p/ o cron reentrar — senao o passo do
       // drip seria consumido sem ter sido enviado e nunca reenviado. Espelha o forms-welcome.
+      // Bloqueio NÃO devolve: reentrar só produziria a mesma recusa a cada tick.
       await releaseStep();
     }
     await supabase.from("automation_logs").insert({
       clinic_id, lead_id, type: "followup", status: sent ? "sent" : "failed",
-      message_sent: sent ? joined : `falha ao enfileirar: ${emitErr}`,
+      message_sent: sent
+        ? joined
+        : (bloqueado
+            ? "nao enviado: contato marcado como fora do WhatsApp"
+            : `falha ao enfileirar: ${emitErr}`),
       triggered_at: nowSP(),
       // a régua vai no log porque "passo 2" só quer dizer alguma coisa junto com a régua dele,
       // e auditar insistência se faz por automation_logs, não pelo contador do contato
-      metadata: { step_no: step_no ?? null, via: "emissor", ruleset_stage_id: v_stage },
+      metadata: { step_no: step_no ?? null, via: "emissor", ruleset_stage_id: v_stage, bloqueado },
     });
     // kick imediato do worker (best-effort; o cron de 1 min é o backstop)
     try {
@@ -224,7 +272,13 @@ serve(async (req) => {
     const { data: instance } = await supabase
       .from("whatsapp_instances").select("api_token").eq("clinic_id", clinic_id).maybeSingle();
     const token = instance?.api_token;
-    if (!token) { await logFail("sem api_token (WhatsApp não conectado)"); return json({ ok: false, error: "no_token" }); }
+    if (!token) {
+      // Falha TRANSITORIA (WhatsApp caiu entre a selecao e o envio): devolve o passo a regua,
+      // senao o contato pula uma mensagem por causa de uma queda de minutos.
+      await releaseStep();
+      await logFail("sem api_token (WhatsApp não conectado)");
+      return json({ ok: false, error: "no_token" });
+    }
 
     let anySent = false;
     for (const bubble of bubbles) {

@@ -847,7 +847,11 @@ export function useFollowupSteps() {
 
   useEffect(() => { fetch(); }, [fetch]);
 
-  const sameRuleset = (s: FollowupStep, stageId: string | null) => (s.stage_id ?? null) === (stageId ?? null);
+  // Gravacao da regua que falha PRECISA aparecer: sem isto o usuario clica, nada muda e ninguem
+  // fica sabendo (a Central e o unico olho que temos).
+  const falhou = (acao: string, detalhe: string, ctx: Record<string, any>) =>
+    logSystemError('regua_reengajamento_' + acao, 'Falha ao salvar a regua de reengajamento', activeClinicId, { detalhe, ...ctx });
+
   const stepsOf = useCallback(
     (stageId: string | null) => allSteps.filter(s => (s.stage_id ?? null) === (stageId ?? null)),
     [allSteps],
@@ -859,9 +863,6 @@ export function useFollowupSteps() {
     [allSteps],
   );
 
-  // No PostgREST, comparar com null exige .is(); .eq('stage_id', null) não casa com o Padrão.
-  const scopeToRuleset = (q: any, stageId: string | null) =>
-    stageId ? q.eq('stage_id', stageId) : q.is('stage_id', null);
 
   const addStep = async (stageId: string | null, message_text: string, delay_minutes: number) => {
     if (!activeClinicId) return false;
@@ -870,7 +871,7 @@ export function useFollowupSteps() {
     const { error } = await supabase.from('followup_steps').insert({
       clinic_id: activeClinicId, stage_id: stageId, step_no: nextNo, message_text, delay_minutes, enabled: true,
     });
-    if (error) return false;
+    if (error) { falhou('addStep', error.message, { stageId, nextNo }); return false; }
     await fetch();
     return true;
   };
@@ -878,13 +879,13 @@ export function useFollowupSteps() {
   const updateStep = async (id: string, updates: Partial<FollowupStep>) => {
     setAllSteps(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
     const { error } = await supabase.from('followup_steps').update(updates).eq('id', id);
-    if (error) { await fetch(); return false; }
+    if (error) { falhou('updateStep', error.message, { id }); await fetch(); return false; }
     return true;
   };
 
   const removeStep = async (id: string) => {
     const { error } = await supabase.from('followup_steps').delete().eq('id', id);
-    if (error) return false;
+    if (error) { falhou('removeStep', error.message, { id }); return false; }
     await fetch();
     return true;
   };
@@ -911,8 +912,20 @@ export function useFollowupSteps() {
           message_text: 'Olá {paciente}, podemos continuar de onde paramos?',
           delay_minutes: 1440, enabled: true,
         }];
+    // ⚠️ A configuração da régua é gravada JUNTO, e não deixada no default.
+    // Sem isto, cadência criada do zero nasce com um passo só, esse passo é o último (logo, a
+    // despedida) e o default liga o encerramento: o primeiro "podemos continuar de onde paramos?"
+    // fecharia o atendimento como Perdido. Cadência nova nasce sem encerrar; copiada herda a
+    // decisão do Padrão, que é o que o cliente já escolheu.
+    const encerrar = copiarDoPadrao ? closeOnExhaustOf(null) : false;
+    // A configuracao vai PRIMEIRO: se ela falhar, nao fica uma cadencia sem config na tela.
+    const { error: cfgErr } = await supabase.from('followup_rulesets').upsert(
+      { clinic_id: activeClinicId, stage_id: stageId, close_ticket_on_exhaust: encerrar },
+      { onConflict: 'clinic_id,stage_id' },
+    );
+    if (cfgErr) { falhou('createRuleset_config', cfgErr.message, { stageId }); return false; }
     const { error } = await supabase.from('followup_steps').insert(linhas);
-    if (error) return false;
+    if (error) { falhou('createRuleset', error.message, { stageId, copiarDoPadrao }); return false; }
     await fetch();
     return true;
   };
@@ -922,7 +935,7 @@ export function useFollowupSteps() {
     if (!activeClinicId || !stageId) return false;
     const { error } = await supabase.from('followup_steps').delete()
       .eq('clinic_id', activeClinicId).eq('stage_id', stageId);
-    if (error) return false;
+    if (error) { falhou('removeRuleset', error.message, { stageId }); return false; }
     await fetch();
     return true;
   };
@@ -931,7 +944,9 @@ export function useFollowupSteps() {
   // Sem linha gravada vale true, que é o que fn_check_followup_exhausted sempre fez.
   const closeOnExhaustOf = useCallback(
     (stageId: string | null) =>
-      rulesets.find(r => (r.stage_id ?? null) === (stageId ?? null))?.close_ticket_on_exhaust ?? true,
+      // ausência de linha = NÃO encerrar, igual ao coalesce do selector: fechar atendimento é
+      // destrutivo e precisa de opt-in explícito, nunca do default de quem não configurou
+      rulesets.find(r => (r.stage_id ?? null) === (stageId ?? null))?.close_ticket_on_exhaust ?? false,
     [rulesets],
   );
 
@@ -947,7 +962,7 @@ export function useFollowupSteps() {
         { clinic_id: activeClinicId, stage_id: stageId, close_ticket_on_exhaust: value },
         { onConflict: 'clinic_id,stage_id' },
       );
-    if (error) { await fetch(); return false; }
+    if (error) { falhou('setCloseOnExhaust', error.message, { stageId, value }); await fetch(); return false; }
     return true;
   };
 

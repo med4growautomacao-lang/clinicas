@@ -1353,10 +1353,10 @@ function WelcomeFollowupView() {
         <CardHeader className="pb-4">
           <CardTitle className="text-xl font-bold text-slate-900 flex items-center gap-3">
             <MessageCircle className="w-6 h-6 text-teal-600" />
-            Boas-vindas via Formulário
+            Boas-vindas via Forms
           </CardTitle>
           <CardDescription className="text-slate-500 font-medium">
-            Mensagem automática ao primeiro contato do lead por formulário.
+            Mensagem automática ao primeiro contato do lead por forms.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">

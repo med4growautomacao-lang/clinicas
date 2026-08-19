@@ -1,0 +1,207 @@
+-- REENGAJAMENTO DEIXA DE EXIGIR A IA LIGADA NO CONTATO.
+--
+-- Decisão do dono (19/08/2026): follow-up não é IA. Levantamento que sustentou:
+--   * dos 6 motores de follow-up (boas-vindas, confirmação, lembrete, encerramento, pós e
+--     reengajamento), o reengajamento era o ÚNICO que exigia `leads.ai_enabled = true`;
+--   * nenhum deles exige a chave geral do agente;
+--   * quem desliga o interruptor do contato é a passagem para atendimento humano, e essa já é
+--     barrada pelo filtro `handoff_triggered_at is null`, que continua valendo. A exigência de IA
+--     era uma segunda trava para o mesmo fato, com efeito colateral que a primeira não tem: numa
+--     clínica que atende na mão, ou que teve a IA desligada em lote, o reengajamento parava de
+--     alcançar quase todo mundo (Metaltres: 4.260 de 4.418 contatos fora, e a lista travada em
+--     ~152 por mais que a janela de dias aumentasse).
+--
+-- No lugar entra `human_only` (cadeado "Atendimento pessoal"), que é a intenção explícita de não
+-- automatizar aquele contato. O `followup_enabled` do contato e o opt-out por tipo seguem valendo.
+--
+-- Medido depois de aplicar: Metaltres 152 -> 387 (233 entraram por causa da mudança);
+-- Vaz e Tyago, as duas com o módulo LIGADO, ficaram inalteradas (4 e 5, nenhuma entrada nova).
+
+create or replace function public.fn_followup_candidates_reengagement(p_clinic_id uuid default null)
+returns table(
+  clinic_id uuid, lead_id uuid, nome text, telefone text, clinic_phone text,
+  message_text text, step_no integer, is_closing boolean, expected_count integer,
+  eligible_at timestamp without time zone, toggle_on boolean, wa_ok boolean,
+  window_start integer, window_end integer, ruleset_stage_id uuid)
+language sql
+stable
+set search_path to 'public'
+as $function$
+  with gate as (
+    select public.fn_reengajamento_por_etapa_ativo() as ligado
+  ),
+  passos as (
+    -- posição e TOTAL dentro da régua, entre os passos HABILITADOS. É por ordem de propósito:
+    -- com step_no absoluto, apagar ou pausar um passo do meio travava a régua para sempre
+    -- (94 contatos da Vaz ficaram parados assim, esperando um passo 2 que não existia mais).
+    select s.clinic_id, s.stage_id, s.message_text, s.delay_minutes,
+           row_number() over (partition by s.clinic_id, s.stage_id order by s.step_no) as pos,
+           count(*) over (partition by s.clinic_id, s.stage_id) as total
+      from public.followup_steps s
+     where s.enabled
+  ),
+  reguas as (
+    -- etapa com régua própria = TEM LINHA, mesmo que toda pausada. Pausar todos os passos
+    -- silencia aquela etapa em vez de devolvê-la ao Padrão (decisão do dono, 18/08/2026).
+    select distinct s.clinic_id, s.stage_id
+      from public.followup_steps s
+     where s.stage_id is not null
+  )
+  select
+    l.clinic_id, l.id, l.name, l.phone,
+    w.phone_number, p.message_text, p.pos::int,
+    -- despedida = último passo ativo, e só encerra se a régua mandar encerrar.
+    -- Ausência de configuração é NÃO encerrar: fechar atendimento é destrutivo e precisa de
+    -- opt-in explícito, senão a primeira mensagem de uma régua recém-criada fecha o card.
+    (p.pos = p.total and coalesce(cfg.close_ticket_on_exhaust, false)),
+    ec.expected,
+    (case when ec.trocou
+          then coalesce(lin.last_in_at, lm.last_at)
+          else greatest(lm.last_at, coalesce(l.followup_sent_at, lm.last_at))
+     end + (p.delay_minutes || ' minutes')::interval)::timestamp,
+    coalesce(ac.followup_enabled, false),
+    ss.send_token is not null,
+    coalesce(ac.followup_window_start, 6), coalesce(ac.followup_window_end, 22),
+    ec.regua
+  from gate g
+  cross join leads l
+  join ai_config ac on ac.clinic_id = l.clinic_id
+  join v_clinic_send_state ss on ss.clinic_id = l.clinic_id
+  -- ticket aberto + etapa dele. JOIN direto (não lateral) porque uq_tickets_one_open_per_lead
+  -- garante no máximo 1 aberto por contato: medido, o lateral custava o dobro.
+  join tickets tk on tk.lead_id = l.id and tk.status = 'open'
+  join funnel_stages fs on fs.id = tk.stage_id
+  join lateral (
+    select wi.phone_number from whatsapp_instances wi where wi.clinic_id = l.clinic_id
+     order by (wi.status = 'connected') desc nulls last limit 1
+  ) w on true
+  join lateral (
+    select cm.direction as last_dir, cm.created_at as last_at
+      from chat_messages cm where cm.lead_id = l.id
+     order by cm.seq desc limit 1
+  ) lm on true
+  left join lateral (
+    -- âncora da régua nova: a última vez que o CONTATO falou. `g.ligado and` deixa o planner
+    -- cortar isto inteiro (One-Time Filter) enquanto o gate estiver desligado.
+    select cm.created_at as last_in_at
+      from chat_messages cm
+     where g.ligado and cm.lead_id = l.id and cm.direction = 'inbound'
+     order by cm.seq desc limit 1
+  ) lin on true
+  cross join lateral (
+    select r.regua,
+           (g.ligado and l.followup_ruleset_stage_id is distinct from r.regua) as trocou,
+           case when g.ligado and l.followup_ruleset_stage_id is distinct from r.regua
+                then 0 else l.followup_count end as expected
+      from (
+        -- CASE aninhado de propósito: com o gate off nem chega a procurar régua de etapa
+        select case when g.ligado
+                    then (select case when exists (select 1 from reguas gg
+                                                    where gg.clinic_id = l.clinic_id
+                                                      and gg.stage_id = tk.stage_id)
+                                      then tk.stage_id end)
+               end as regua
+      ) r
+  ) ec
+  join passos p
+    on p.clinic_id = l.clinic_id
+   and p.stage_id is not distinct from ec.regua
+   and p.pos = ec.expected + 1
+  left join followup_rulesets cfg
+    on cfg.clinic_id = l.clinic_id and cfg.stage_id is not distinct from ec.regua
+  where (p_clinic_id is null or l.clinic_id = p_clinic_id)
+    and l.followup_enabled = true
+    -- opt-out por tipo (lead_followup_optout): exceção deste contato para ESTE follow-up
+    and not exists (select 1 from lead_followup_optout o
+                     where o.lead_id = l.id and o.kind = 'reengagement')
+    -- ⚠️ NÃO exige mais l.ai_enabled: follow-up não é IA (ver cabeçalho desta migration).
+    -- O que precisa mesmo ser respeitado continua aqui: atendimento humano assumido e o
+    -- cadeado "Atendimento pessoal".
+    and l.handoff_triggered_at is null
+    and coalesce(l.human_only, false) = false
+    and l.converted_patient_id is null
+    and coalesce(l.is_not_lead, false) = false
+    -- contato comprovadamente fora do WhatsApp não entra: o envio seria bloqueado pelo Emissor
+    -- e a edge leria o bloqueio como sucesso. Mesma régua de emit_message.
+    and coalesce(l.whatsapp_invalid, false) = false
+    and l.phone is not null and l.phone <> ''
+    and not exists (select 1 from tickets tg where tg.lead_id = l.id and tg.outcome = 'ganho')
+    and fs.slug not in ('agendado','compareceu','ganho','perdido')
+    and not exists (select 1 from appointments a join tickets t2 on t2.id = a.ticket_id
+                     where t2.lead_id = l.id
+                       and a.status in ('pendente','confirmado')
+                       and ((a.date + a."time") at time zone 'America/Sao_Paulo') > now())
+    and lm.last_dir = 'outbound'
+    and lm.last_at >= ((now() at time zone 'America/Sao_Paulo')
+                        - (coalesce(ac.followup_max_idle_days, 7) || ' days')::interval)
+$function$;
+
+comment on function public.fn_followup_candidates_reengagement(uuid) is
+  'Candidatos ao reengajamento. NÃO depende da IA (nem do contato, nem da clínica): o que barra é atendimento humano assumido, cadeado Atendimento pessoal, opt-out, contato fora do WhatsApp e os fatos duráveis (virou paciente, venda ganha, agendamento futuro). Próximo passo por ORDEM dentro da régua; último passo ativo é a despedida quando a régua manda encerrar.';
+
+revoke all on function public.fn_followup_candidates_reengagement(uuid) from public, anon, authenticated;
+
+-- O claim precisa acompanhar: re-checar ai_enabled recusaria o passo que o selector aprovou.
+create or replace function public.fn_claim_reengagement_step(
+  p_lead_id uuid, p_stage_id uuid, p_expected int)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public'
+as $function$
+declare
+  v_prev_count int;
+  v_prev_stage uuid;
+  v_prev_sent timestamp;
+  v_prev_cycle int;
+  v_new_sent timestamp;
+  v_cycle int;
+  v_ok int;
+begin
+  select followup_count, followup_ruleset_stage_id, followup_sent_at, coalesce(followup_cycle, 0)
+    into v_prev_count, v_prev_stage, v_prev_sent, v_prev_cycle
+    from public.leads where id = p_lead_id for update;
+
+  if not found then
+    return jsonb_build_object('claimed', false, 'reason', 'lead_nao_encontrado');
+  end if;
+
+  update public.leads l
+     set followup_count            = p_expected + 1,
+         followup_sent_at          = (now() at time zone 'America/Sao_Paulo'),
+         followup_ruleset_stage_id = p_stage_id,
+         followup_cycle            = case when p_expected = 0 then coalesce(l.followup_cycle, 0) + 1
+                                          else coalesce(l.followup_cycle, 0) end
+   where l.id = p_lead_id
+     and l.followup_enabled = true
+     -- mesmas exclusões duráveis do selector (sem ai_enabled: follow-up não é IA)
+     and l.handoff_triggered_at is null
+     and coalesce(l.human_only, false) = false
+     and l.converted_patient_id is null
+     and coalesce(l.whatsapp_invalid, false) = false
+     and not exists (select 1 from public.lead_followup_optout o
+                      where o.lead_id = l.id and o.kind = 'reengagement')
+     and (
+          (l.followup_ruleset_stage_id is not distinct from p_stage_id and l.followup_count = p_expected)
+       or (l.followup_ruleset_stage_id is distinct from p_stage_id     and p_expected = 0)
+       -- rollback do gate por etapa: com ele desligado só o contador manda, e o claim limpa a marca
+       or (not public.fn_reengajamento_por_etapa_ativo() and l.followup_count = p_expected)
+     )
+  returning l.followup_sent_at, l.followup_cycle into v_new_sent, v_cycle;
+
+  get diagnostics v_ok = row_count;
+
+  return jsonb_build_object(
+    'claimed', v_ok = 1,
+    'reason', case when v_ok = 1 then null else 'not_claimed' end,
+    'prev_count', v_prev_count,
+    'prev_stage_id', v_prev_stage,
+    'prev_sent_at', v_prev_sent,
+    'prev_cycle', v_prev_cycle,
+    'sent_at', v_new_sent,
+    'cycle', v_cycle);
+end;
+$function$;
+
+revoke all on function public.fn_claim_reengagement_step(uuid, uuid, int) from public, anon, authenticated;
+grant execute on function public.fn_claim_reengagement_step(uuid, uuid, int) to service_role;

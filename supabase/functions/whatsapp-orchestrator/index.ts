@@ -256,7 +256,9 @@ async function ensureUazapiInstance(
 // URLs nao reconhecidos (configs custom do cliente) ficam intactos.
 async function ensureUazapiWebhooks(
   api_token: string,
-  route: 'n8n' | 'hub' | 'org' = 'n8n',
+  // 'hub' é o fail-safe: rota 'n8n' está morta (motor desativado) e mandar mensagem
+  // para lá é perda silenciosa — foi o que deixou a clínica Faaz surda por 6 dias (19/08/2026).
+  route: 'n8n' | 'hub' | 'org' = 'hub',
 ): Promise<{ created: string[]; removed_duplicates: { url: string; ids: string[] }[]; removed_stale: string[] }> {
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
   const eventsUrl = `${SUPABASE_URL}/functions/v1/uazapi-events`;
@@ -410,7 +412,7 @@ async function handleStart(supa: SupabaseClient, row: InstanceRow, source: strin
     if (row.clinic_id) {
       const { data: routeRow } = await supa
         .from('whatsapp_instances').select('inbound_route').eq('id', row.id).maybeSingle();
-      route = routeRow?.inbound_route === 'hub' ? 'hub' : 'n8n';
+      route = routeRow?.inbound_route === 'n8n' ? 'n8n' : 'hub';
     }
     const whResult = await ensureUazapiWebhooks(ensured.api_token, route);
     if (whResult.created.length > 0 || whResult.removed_duplicates.length > 0 || whResult.removed_stale.length > 0) {

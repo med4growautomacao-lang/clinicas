@@ -62,7 +62,7 @@ Receber e enviar passa pela **uazapi** (`https://med4growautomacao.uazapi.com`, 
 
 📌 **Antes de criar ou alterar qualquer requisição, consulte https://docs.uazapi.com/.** Não deduza payload por analogia: `/send/text`, `/send/media` e `/send/menu` têm corpos diferentes, e campo errado às vezes falha com 200.
 
-- **Receber:** 100% na edge `wa-inbound`. ⚠️ `whatsapp_instances.inbound_route` sobrou da migração e **não decide mais nada**: não conte linha dele como se fosse tráfego.
+- **Receber:** 100% na edge `wa-inbound`. ⚠️ `whatsapp_instances.inbound_route` **AINDA decide o webhook de `messages`** que o orquestrador aplica a cada conexão (`hub` = wa-inbound; `n8n` = rota morta): o default `'n8n'` fez a clínica Faaz nascer conectada e surda por 6 dias (13→19/08/2026, ~1.700 mensagens recuperadas do store). Default corrigido para `'hub'` em 19/08. Não conte linha dele como se fosse tráfego.
 - **Enviar:** **todo envio automático passa pelo Emissor** (`emit_message` → `outbound_messages` → `emissor-worker`), gateado por `fn_emissor_ativo`.
 
 📌 **Código novo que manda mensagem produz para a fila** (`emit_message`), nunca `fetch` direto nem `system_http_post` para a uazapi. As garantias de entrega moram no Emissor (§1).

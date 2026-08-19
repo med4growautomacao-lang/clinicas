@@ -1781,6 +1781,11 @@ interface ExternalIntegrationRow {
     // Etapa em que o card NASCE para quem entra sem conversa (formulário e CRM).
     // Só a etapa: o canal do lead continua dizendo como ele chegou de verdade.
     entry_stage_slug: EntryStage;
+    // WordPress do site do cliente: Application Password (Usuários › Perfil › Senhas de
+    // aplicativo) para instalar o script de rastreamento e automações via REST API.
+    wordpress_url: string | null;
+    wordpress_username: string | null;
+    wordpress_app_password: string | null;
 }
 
 // Onde o card começa. Sem escolha, 'forms' — que é o comportamento histórico.
@@ -1813,6 +1818,12 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
     // impediria ligar 'ganho' enquanto 'lead' ainda grava. Set, e não `CrmField | null`, porque
     // a chave única se sobrescreve e liberaria o botão que ainda está em voo.
     const [togglingCrm, setTogglingCrm] = useState<Set<CrmField>>(new Set());
+    // WordPress: rascunho local dos 3 campos (só grava no Salvar, para não fazer update por tecla).
+    const [wpUrl, setWpUrl] = useState('');
+    const [wpUser, setWpUser] = useState('');
+    const [wpPass, setWpPass] = useState('');
+    const [wpShowPass, setWpShowPass] = useState(false);
+    const [savingWp, setSavingWp] = useState(false);
 
     // Carrega (ou cria, se ainda não existir) a linha de config desta clínica.
     useEffect(() => {
@@ -1820,7 +1831,7 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
         if (!effClinicId) { setLoading(true); return; }
         (async () => {
             setLoading(true);
-            const cols = 'capture_token, capture_enabled, capture_count, last_capture_at, crm_token, won_enabled, lost_enabled, lead_enabled, entry_stage_slug';
+            const cols = 'capture_token, capture_enabled, capture_count, last_capture_at, crm_token, won_enabled, lost_enabled, lead_enabled, entry_stage_slug, wordpress_url, wordpress_username, wordpress_app_password';
             let { data, error } = await supabase
                 .from('clinic_external_integrations')
                 .select(cols)
@@ -1840,7 +1851,11 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
             }
             if (!cancelled) {
                 if (error) showToast('Não foi possível carregar a Integração Externa.', 'error');
-                setRow((data as ExternalIntegrationRow) ?? null);
+                const r = (data as ExternalIntegrationRow) ?? null;
+                setRow(r);
+                setWpUrl(r?.wordpress_url ?? '');
+                setWpUser(r?.wordpress_username ?? '');
+                setWpPass(r?.wordpress_app_password ?? '');
                 setLoading(false);
             }
         })();
@@ -1926,6 +1941,34 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
                 : 'Novos contatos passam a entrar na etapa de Formulários.', 'success');
         }
         setSavingEntry(false);
+    };
+
+    // ── WordPress do site ──────────────────────────────────────────────────────────────────────
+    // Grava só os 3 campos (update parcial, nunca a linha inteira). Vazio vira null: campo
+    // limpo é "sem integração", não string vazia.
+    const wpDirty = row != null && (
+        wpUrl.trim() !== (row.wordpress_url ?? '') ||
+        wpUser.trim() !== (row.wordpress_username ?? '') ||
+        wpPass.trim() !== (row.wordpress_app_password ?? '')
+    );
+    const saveWordpress = async () => {
+        if (!effClinicId || !row || savingWp || !wpDirty) return;
+        setSavingWp(true);
+        const vals = {
+            wordpress_url: wpUrl.trim() || null,
+            wordpress_username: wpUser.trim() || null,
+            wordpress_app_password: wpPass.trim() || null,
+        };
+        const { error } = await supabase
+            .from('clinic_external_integrations')
+            .update(vals)
+            .eq('clinic_id', effClinicId);
+        if (error) showToast('Não foi possível salvar a integração WordPress.', 'error');
+        else {
+            setRow(r => r ? { ...r, ...vals } : r);
+            showToast('Integração WordPress salva.', 'success');
+        }
+        setSavingWp(false);
     };
 
     const copyChip = (e: React.MouseEvent, text: string) => {
@@ -2163,6 +2206,103 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
                                 </div>
                             </div>
                         ))}
+                    </CardContent>
+                </Card>
+            )}
+
+            {/* WordPress do site — Application Password para instalar o script de rastreamento
+                e automações via REST API, sem pedir a senha real do painel do cliente. */}
+            {row && (
+                <Card className="border border-slate-200 shadow-sm bg-white overflow-hidden">
+                    <CardHeader className="bg-slate-50 border-b border-slate-200 pb-6 px-8">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-200">
+                                    <Globe className="w-6 h-6 text-slate-600" />
+                                </div>
+                                <div>
+                                    <CardTitle className="text-xl font-bold text-slate-800">WordPress do site</CardTitle>
+                                    <p className="text-[12px] text-slate-500 font-medium mt-0.5">
+                                        Acesso ao WordPress do site do cliente para instalar o script de rastreamento e manutenções, sem a senha real do painel.
+                                    </p>
+                                </div>
+                            </div>
+                            <div className={cn(
+                                "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border bg-white shrink-0",
+                                row.wordpress_app_password ? "text-emerald-700 border-emerald-300" : "text-slate-500 border-slate-300"
+                            )}>
+                                <span className={cn("w-2 h-2 rounded-full", row.wordpress_app_password ? "bg-emerald-500" : "bg-slate-400")}></span>
+                                {row.wordpress_app_password ? 'Configurado' : 'Não configurado'}
+                            </div>
+                        </div>
+                    </CardHeader>
+                    <CardContent className="p-8 space-y-4">
+                        <div className="space-y-4 p-5 bg-slate-50 border border-slate-100 rounded-2xl relative overflow-hidden">
+                            <div className="absolute top-0 left-0 w-1 h-full bg-slate-400"></div>
+                            <p className="text-[12px] text-slate-500 font-medium leading-relaxed max-w-3xl">
+                                A senha de aplicativo é gerada no painel do site do cliente, em <span className="font-bold">Usuários › Perfil › Senhas de aplicativo</span>,
+                                por um usuário administrador. Ela vale só para a API, pode ser revogada a qualquer momento e não expõe a senha real de ninguém.
+                            </p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div className="space-y-1.5 sm:col-span-2">
+                                    <label className="text-xs font-bold text-slate-700 flex items-center gap-2">
+                                        <Globe className="w-4 h-4 text-slate-500" /> Endereço do site
+                                    </label>
+                                    <input
+                                        type="url"
+                                        value={wpUrl}
+                                        onChange={e => setWpUrl(e.target.value)}
+                                        placeholder="https://www.sitedocliente.com.br"
+                                        className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400"
+                                    />
+                                </div>
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-bold text-slate-700 flex items-center gap-2">
+                                        <UserCircle className="w-4 h-4 text-slate-500" /> Usuário
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={wpUser}
+                                        onChange={e => setWpUser(e.target.value)}
+                                        placeholder="usuário administrador do WordPress"
+                                        autoComplete="off"
+                                        className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400"
+                                    />
+                                </div>
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-bold text-slate-700 flex items-center gap-2">
+                                        <KeyRound className="w-4 h-4 text-slate-500" /> Senha de aplicativo
+                                    </label>
+                                    <div className="relative">
+                                        <input
+                                            type={wpShowPass ? 'text' : 'password'}
+                                            value={wpPass}
+                                            onChange={e => setWpPass(e.target.value)}
+                                            placeholder="xxxx xxxx xxxx xxxx xxxx xxxx"
+                                            autoComplete="new-password"
+                                            className="w-full px-4 py-3 pr-20 bg-white border border-slate-200 rounded-xl text-sm font-mono text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => setWpShowPass(s => !s)}
+                                            className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-bold text-slate-500 hover:text-slate-800"
+                                        >
+                                            {wpShowPass ? 'Ocultar' : 'Mostrar'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="flex items-center justify-end pt-1">
+                                <Button
+                                    onClick={saveWordpress}
+                                    disabled={savingWp || !wpDirty}
+                                    className="gap-2 rounded-xl font-bold bg-teal-600 hover:bg-teal-700 text-white disabled:opacity-50"
+                                >
+                                    {savingWp ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                                    {savingWp ? 'Salvando…' : 'Salvar'}
+                                </Button>
+                            </div>
+                        </div>
                     </CardContent>
                 </Card>
             )}

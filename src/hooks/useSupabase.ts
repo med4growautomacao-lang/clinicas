@@ -2397,6 +2397,7 @@ export interface AIConfig {
   followup_enabled: boolean;
   followup_message: string;
   followup_delay: number;
+  followup_max_idle_days?: number;
   followup_window_start?: number;
   followup_window_end?: number;
   handoff_enabled: boolean;

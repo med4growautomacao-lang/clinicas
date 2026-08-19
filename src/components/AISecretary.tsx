@@ -915,6 +915,10 @@ function FollowupsView() {
   const [previaLoading, setPreviaLoading] = useState(false);
   const [criando, setCriando] = useState(false);
   const [erroSalvar, setErroSalvar] = useState<string | null>(null);
+  // janela de inatividade: valor do input vive aqui e só é ressincronizado quando o valor
+  // GRAVADO muda (não a cada refetch de 30s, que era o que atropelava a digitação)
+  const [idleDays, setIdleDays] = useState<number>(aiConfig?.followup_max_idle_days ?? 7);
+  useEffect(() => { setIdleDays(aiConfig?.followup_max_idle_days ?? 7); }, [aiConfig?.followup_max_idle_days]);
   // o aviso é de uma cadência específica: trocar de régua no seletor tem que limpar, senão o
   // erro da etapa A fica na tela enquanto o usuário olha a etapa B
   useEffect(() => { setErroSalvar(null); }, [reguaStageId]);
@@ -1047,9 +1051,12 @@ function FollowupsView() {
               <span className="text-[11px] font-bold text-slate-400 uppercase">Reengajar até</span>
               <input
                 type="number" min={1} max={90}
-                value={localConfig.followup_max_idle_days ?? 7}
-                onChange={(e) => setLocalConfig({ ...localConfig, followup_max_idle_days: Math.min(90, Math.max(1, parseInt(e.target.value) || 1)) })}
-                onBlur={() => updateAI(aiRef.current ? { followup_max_idle_days: localConfig.followup_max_idle_days ?? 7 } : localConfig)}
+                // ⚠️ estado PRÓPRIO, não localConfig: useSettings refaz o fetch a cada 30s e o
+                // efeito que espelha aiConfig em localConfig apaga o que está sendo digitado —
+                // o usuário punha 30, o campo voltava para 7 sozinho e o blur salvava 7.
+                value={idleDays}
+                onChange={(e) => setIdleDays(Math.min(90, Math.max(1, parseInt(e.target.value) || 1)))}
+                onBlur={() => { if (idleDays !== (aiConfig?.followup_max_idle_days ?? 7)) updateAI({ followup_max_idle_days: idleDays }); }}
                 className="w-16 px-3 py-2 border border-slate-200 rounded-lg font-bold text-teal-700 text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-600 outline-none transition-all"
               />
               <span className="text-[11px] font-bold text-slate-400 uppercase">dias de silêncio</span>

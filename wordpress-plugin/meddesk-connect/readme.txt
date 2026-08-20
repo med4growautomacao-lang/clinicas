@@ -8,47 +8,47 @@ Stable tag: 1.0.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Conecta seu site à plataforma MedDesk/WakeDesk para atribuição de leads, instalando o script de rastreamento de origem e UTM.
+Connects your site to the MedDesk/WakeDesk platform for lead attribution by loading its source and UTM tracking script.
 
 == Description ==
 
-MedDesk Connect instala, de forma leve, o script de rastreamento da plataforma MedDesk/WakeDesk no seu site, para atribuir corretamente a origem dos seus contatos (campanha, UTM) quando um visitante interage com seus botões e formulários.
+MedDesk Connect adds a lightweight tracking script from the MedDesk/WakeDesk platform to your site, so the origin of your contacts (campaign, UTM) is attributed correctly when a visitor interacts with your buttons and forms.
 
-O script só é inserido quando o identificador da sua conta está configurado. Sem esse identificador, o plugin não faz absolutamente nada. O plugin não tem tela de configuração própria: normalmente a sua agência informa o identificador de forma remota, com a sua autorização.
+The script is only added once your account identifier is configured. Without that identifier, the plugin does nothing at all. The plugin has no settings screen of its own: usually your agency sets the identifier remotely, with your authorization.
 
-= Serviço externo =
+= External service =
 
-Ao ser configurado, este plugin carrega um script a partir da infraestrutura da MED4GROW, hospedada no endpoint `https://yzpclhuifquhfqpiwysh.supabase.co/functions/v1/site-script`. Esse script registra a página de origem e os parâmetros de campanha (UTM e cliques de anúncio) do visitante que interage com seus botões e formulários, e os associa ao seu atendimento na plataforma MedDesk/WakeDesk.
+Once configured, this plugin loads a script from MED4GROW infrastructure, hosted at the endpoint `https://yzpclhuifquhfqpiwysh.supabase.co/functions/v1/site-script`. That script records the source page and the campaign parameters (UTM and ad clicks) of visitors who interact with your buttons and forms, and associates them with your service on the MedDesk/WakeDesk platform.
 
-* Site do serviço: https://meddesk.com.br
-* Host do script carregado: https://yzpclhuifquhfqpiwysh.supabase.co
-* Política de privacidade: https://app.med4growautomacao.com.br/meddeskconnect/privacidade
-* Termos de uso: https://app.med4growautomacao.com.br/meddeskconnect/termo
+* Service website: https://meddesk.com.br
+* Host of the loaded script: https://yzpclhuifquhfqpiwysh.supabase.co
+* Privacy policy: https://app.med4growautomacao.com.br/meddeskconnect/privacidade
+* Terms of use: https://app.med4growautomacao.com.br/meddeskconnect/termo
 
-O uso do serviço está sujeito a essa política de privacidade e a esses termos.
+Use of the service is subject to that privacy policy and those terms.
 
 == Installation ==
 
-1. Instale e ative o plugin MedDesk Connect.
-2. Informe o identificador da sua conta (fornecido pela plataforma). Em geral, sua agência faz isso remotamente, com a sua autorização.
+1. Install and activate the MedDesk Connect plugin.
+2. Set your account identifier (provided by the platform). In most cases your agency does this remotely, with your authorization.
 
-Depois de configurado, o script de rastreamento passa a ser carregado em todas as páginas do site.
+Once configured, the tracking script is loaded on every page of the site.
 
 == Frequently Asked Questions ==
 
-= O plugin coleta dados dos meus visitantes? =
+= Does the plugin collect data from my visitors? =
 
-O plugin, por si só, não coleta nada. Quando configurado, ele carrega um script que registra a origem (UTM/campanha) de quem interage com seus botões e formulários, para atribuição de leads. Nada é carregado enquanto o identificador não estiver configurado.
+The plugin by itself collects nothing. When configured, it loads a script that records the source (UTM/campaign) of visitors who interact with your buttons and forms, for lead attribution. Nothing is loaded until the identifier is configured.
 
-= Preciso configurar algo manualmente? =
+= Do I need to configure anything manually? =
 
-Normalmente não. A plataforma configura o identificador remotamente, com a sua autorização (senha de aplicativo). Você também pode informá-lo manualmente, se preferir.
+Usually not. The platform sets the identifier remotely, with your authorization (a WordPress application password). You can also set it manually if you prefer.
 
-= Como removo o rastreamento? =
+= How do I remove the tracking? =
 
-Basta desativar o plugin, ou limpar o identificador da conta.
+Deactivate the plugin, or clear the account identifier.
 
 == Changelog ==
 
 = 1.0.0 =
-* Versão inicial: imprime o script de rastreamento no cabeçalho do site quando o identificador da conta está configurado.
+* Initial version: enqueues the tracking script on the site when the account identifier is configured.

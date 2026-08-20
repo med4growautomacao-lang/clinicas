@@ -2405,6 +2405,7 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
                                         {linha(a.is_admin, a.is_admin ? 'Usuário é administrador' : 'Usuário NÃO é administrador')}
                                         {linha(a.script_desta_clinica, a.script_desta_clinica ? 'Script de rastreamento no ar' : 'Script ainda não está no site')}
                                         {linha(!!a.tema?.nome, a.tema?.nome ? `Tema: ${a.tema.nome}` : 'Tema não identificado')}
+                                        {a.formularios && a.formularios.conectados > 0 && linha(true, a.formularios.conectados > 1 ? `Formulários conectados à captação (${a.formularios.conectados})` : 'Formulário conectado à captação')}
                                         {a.elementor_pro_custom_code && linha(true, 'Elementor Pro com Custom Code (via API)')}
                                         {a.cache && linha(false, `Cache detectado: ${a.cache} (pode atrasar a validação)`)}
                                     </div>

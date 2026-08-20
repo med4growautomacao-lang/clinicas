@@ -188,11 +188,40 @@ interface Auditoria {
   script_desta_clinica: boolean;
   csp: { presente: boolean; libera_nosso_host: boolean | null };
   cache: string | null;
+  // Formulários Elementor do site e se o webhook aponta para a nossa captação. null = sem formulário.
+  formularios: { total: number; conectados: number; outro_webhook: number } | null;
   caminho_recomendado: 'ja_instalado' | 'elementor_pro' | 'plugin_proprio' | 'plugin_pendente' | 'manual';
   bloqueios: string[];
 }
 
-async function auditar(base: string, b64: string, clinicId: string): Promise<Auditoria> {
+// Varre o JSON do Elementor de uma página atrás de widgets 'form' e classifica o webhook:
+// conectado ao nosso endpoint de captação, com webhook de terceiro, ou sem webhook.
+function statsFormularios(elementorRaw: string, token: string | null): { total: number; conectados: number; outro: number } {
+  let data: any;
+  try { data = JSON.parse(elementorRaw); } catch { return { total: 0, conectados: 0, outro: 0 }; }
+  const st = { total: 0, conectados: 0, outro: 0 };
+  const walk = (nodes: any[]) => {
+    for (const n of nodes || []) {
+      if (n && n.widgetType === 'form') {
+        st.total++;
+        const s = n.settings || {};
+        const actions: string[] = Array.isArray(s.submit_actions) ? s.submit_actions : [];
+        const hooks = String(s.webhooks ?? '');
+        const nosso = hooks.includes('external-forms-ingest') && (!token || hooks.includes(token));
+        if (nosso) st.conectados++;
+        else if (actions.includes('webhook') && hooks.length > 0) st.outro++;
+      }
+      if (Array.isArray(n?.elements)) walk(n.elements);
+    }
+  };
+  walk(data);
+  return st;
+}
+
+async function auditar(
+  base: string, b64: string, clinicId: string,
+  captureToken: string | null, captureEnabled: boolean,
+): Promise<Auditoria> {
   const bloqueios: string[] = [];
 
   // 1) Quem sou eu no WordPress (autentica + caps).
@@ -246,7 +275,30 @@ async function auditar(base: string, b64: string, clinicId: string): Promise<Aud
     bloqueios.push('O site envia Content-Security-Policy que não libera nosso domínio — o navegador pode bloquear o script mesmo instalado.');
   }
 
-  // 5) Decisão de caminho.
+  // 5) Formulários do site: o webhook aponta para a nossa captação? (só páginas Elementor)
+  let formularios: Auditoria['formularios'] = null;
+  if (wp_ok) {
+    const pgs = await wp(base, b64, '/wp-json/wp/v2/pages?per_page=50&status=publish&context=edit');
+    if (Array.isArray(pgs.body)) {
+      const acc = { total: 0, conectados: 0, outro_webhook: 0 };
+      for (const p of pgs.body) {
+        const ed = p?.meta?._elementor_data;
+        if (!ed || typeof ed !== 'string') continue;
+        const s = statsFormularios(ed, captureToken);
+        acc.total += s.total; acc.conectados += s.conectados; acc.outro_webhook += s.outro;
+      }
+      if (acc.total > 0) {
+        formularios = acc;
+        if (acc.conectados === 0) {
+          bloqueios.push('Há formulário no site sem o webhook de captação — o lead do formulário não entra no sistema.');
+        } else if (!captureEnabled) {
+          bloqueios.push('Formulário conectado, mas a captação está PAUSADA nas configurações — os leads não entram enquanto estiver pausada.');
+        }
+      }
+    }
+  }
+
+  // 6) Decisão de caminho.
   let caminho_recomendado: Auditoria['caminho_recomendado'];
   if (script_desta_clinica) {
     caminho_recomendado = 'ja_instalado';
@@ -261,7 +313,7 @@ async function auditar(base: string, b64: string, clinicId: string): Promise<Aud
   return {
     wp_ok, wp_status: me.status, usuario: me.body?.username ?? me.body?.slug ?? null,
     is_admin, tem_unfiltered_html, tema, elementor_pro_custom_code, snippet_existente_id,
-    script_na_home, script_desta_clinica, csp, cache, caminho_recomendado, bloqueios,
+    script_na_home, script_desta_clinica, csp, cache, formularios, caminho_recomendado, bloqueios,
   };
 }
 
@@ -379,7 +431,14 @@ serve(async (req) => {
     }
     const b64 = btoa(`${usuario}:${senha}`);
 
-    const aud = await auditar(url, b64, clinic_id);
+    // Token/estado da captação de formulário, para checar se o webhook do site aponta para nós.
+    const { data: capRow } = await admin
+      .from('clinic_external_integrations')
+      .select('capture_token, capture_enabled')
+      .eq('clinic_id', clinic_id)
+      .maybeSingle();
+
+    const aud = await auditar(url, b64, clinic_id, capRow?.capture_token ?? null, capRow?.capture_enabled === true);
 
     if (action === 'audit') {
       return json({ ok: true, action: 'audit', auditoria: aud });

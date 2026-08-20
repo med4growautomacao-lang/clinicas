@@ -73,7 +73,7 @@ export function Settings() {
     const showToast = useToast();
     const { clinic, aiConfig, whatsapp, loading, updateClinic, updateAI, updateWhatsapp, generateConnectToken } = useSettings();
     const [activeTab, setActiveTab] = useState<"clinic" | "notifications" | "integrations" | "protocols" | "products">(() => (localStorage.getItem('settingsTab') as any) || "clinic");
-    const [activeIntTab, setActiveIntTab] = useState<'whatsapp' | 'meta' | 'google' | 'external'>(() => (localStorage.getItem('settingsIntTab') as any) || 'whatsapp');
+    const [activeIntTab, setActiveIntTab] = useState<'whatsapp' | 'meta' | 'google' | 'site' | 'external'>(() => (localStorage.getItem('settingsIntTab') as any) || 'whatsapp');
     
     // Local states for editing
     const [localClinic, setLocalClinic] = useState<Partial<Clinic>>({});
@@ -293,7 +293,7 @@ export function Settings() {
     const hasWhatsapp = clinic?.has_whatsapp !== false;
     const intTabs = useMemo(() => ([
         ...(hasWhatsapp ? ['whatsapp' as const] : []),
-        ...(restrictedIntegrations ? [] : ['meta' as const, 'google' as const, 'external' as const]),
+        ...(restrictedIntegrations ? [] : ['meta' as const, 'google' as const, 'site' as const, 'external' as const]),
     ]), [hasWhatsapp, restrictedIntegrations]);
 
     // Aba escolhida some (role restrito, ou canal não contratado) → cai na primeira válida.
@@ -485,6 +485,20 @@ export function Settings() {
                         >
                             <img src={GoogleLogo} alt="Google" className={cn("w-4 h-4 object-contain filter transition-all", activeIntTab === 'google' ? 'brightness-0 invert' : 'brightness-100 opacity-60')} />
                             Google Ads
+                        </button>
+                    )}
+                    {!restrictedIntegrations && (
+                        <button
+                            onClick={() => { setActiveIntTab('site'); localStorage.setItem('settingsIntTab', 'site'); }}
+                            className={cn(
+                                "flex items-center gap-2.5 px-6 py-2 text-sm font-bold rounded-lg transition-all duration-200",
+                                activeIntTab === 'site'
+                                    ? "bg-teal-600 text-white shadow-md shadow-teal-100"
+                                    : "text-slate-500 hover:text-slate-900 hover:bg-white"
+                            )}
+                        >
+                            <Globe className={cn("w-4 h-4", activeIntTab === 'site' ? "text-white" : "text-slate-500")} />
+                            Site tracking
                         </button>
                     )}
                     {!restrictedIntegrations && (
@@ -1768,6 +1782,10 @@ const EXTERNAL_CRM_STATUS_URL = `${FUNCTIONS_URL}/external-crm-status`;
 // Serve o script de rastreamento POR CLÍNICA (placeholders resolvidos na edge). O site cola só a
 // linha do <script src> — atualizar o script no banco atualiza todos os sites sozinho.
 const SITE_SCRIPT_URL = `${FUNCTIONS_URL}/site-script`;
+// Modelo de UTM padrão para o Sufixo do URL final do Google Ads. utm_source=google é FIXO
+// (é o que o sistema lê para atribuir a origem); o resto descreve campanha/anúncio. Ver a
+// convenção canônica em _shared/attribution.ts (Google: medium=rede, content=anúncio, term=palavra-chave).
+const GOOGLE_UTM_SUFFIX = 'utm_source=google&utm_medium=cpc&utm_campaign=nome-da-campanha&utm_content=nome-do-anuncio&utm_term={keyword}';
 
 interface ExternalIntegrationRow {
     capture_token: string;
@@ -1799,10 +1817,12 @@ type CrmField = 'lead_enabled' | 'won_enabled' | 'lost_enabled';
 
 // Painel "Integração Externa" — webhook nativo por clínica para o formulário do site do cliente
 // disparar leads direto no nosso banco (substitui a planilha/n8n "Webhook Forms | Leads Captados").
-function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
+function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings, variant = 'external' }: {
     clinicId?: string;
     clinicData: Partial<Clinic>;
     systemSettings: any;
+    // 'external' = etapa de entrada + webhook de forms + CRM; 'site' = só o card WordPress.
+    variant?: 'external' | 'site';
 }) {
     const showToast = useToast();
     const { clinic } = useSettings();
@@ -2017,7 +2037,7 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
             {/* Etapa de entrada — governa os DOIS caminhos abaixo (formulário e CRM), por isso
                 vem antes deles. Não altera o canal do lead: um contato que veio de formulário
                 continua contando como Formulário nos painéis, só começa noutra coluna. */}
-            {row && (
+            {variant === 'external' && row && (
                 <Card className="border border-slate-200 shadow-sm bg-white overflow-hidden">
                     <CardHeader className="bg-slate-50 border-b border-slate-200 pb-6 px-8">
                         <div className="flex items-center gap-4">
@@ -2069,6 +2089,7 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
                 </Card>
             )}
 
+            {variant === 'external' && (
             <Card className="border border-blue-200 shadow-sm bg-white overflow-hidden">
                 <CardHeader className="bg-blue-50 border-b border-blue-200 pb-6 px-8">
                     <div className="flex items-center justify-between">
@@ -2186,9 +2207,10 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
                     )}
                 </CardContent>
             </Card>
+            )}
 
             {/* Lead / Ganho / Perdido — entrada do CRM do cliente */}
-            {row && (
+            {variant === 'external' && row && (
                 <Card className="border border-slate-200 shadow-sm bg-white overflow-hidden">
                     <CardHeader className="bg-slate-50 border-b border-slate-200 pb-6 px-8">
                         <div className="flex items-center gap-4">
@@ -2246,8 +2268,9 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
             )}
 
             {/* WordPress do site — Application Password para instalar o script de rastreamento
-                e automações via REST API, sem pedir a senha real do painel do cliente. */}
-            {row && (
+                e automações via REST API, sem pedir a senha real do painel do cliente.
+                Mora na aba "Site tracking" (variant='site'), não na Integração Externa. */}
+            {variant === 'site' && row && (
                 <Card className="border border-slate-200 shadow-sm bg-white overflow-hidden">
                     <CardHeader className="bg-slate-50 border-b border-slate-200 pb-6 px-8">
                         <div className="flex items-center justify-between">
@@ -2256,7 +2279,7 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
                                     <Globe className="w-6 h-6 text-slate-600" />
                                 </div>
                                 <div>
-                                    <CardTitle className="text-xl font-bold text-slate-800">WordPress do site</CardTitle>
+                                    <CardTitle className="text-xl font-bold text-slate-800">WordPress do site (instalação automática)</CardTitle>
                                     <p className="text-[12px] text-slate-500 font-medium mt-0.5">
                                         Acesso ao WordPress do site do cliente para instalar o script de rastreamento e manutenções, sem a senha real do painel.
                                     </p>
@@ -2447,7 +2470,7 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
     connecting: boolean,
     onCopyLink: () => void,
     linkCopied: boolean,
-    activeIntTab: 'whatsapp' | 'meta' | 'google' | 'external'
+    activeIntTab: 'whatsapp' | 'meta' | 'google' | 'site' | 'external'
 }) {
     const { clinic, refetch, systemSettings } = useSettings();
     const [showScripts, setShowScripts] = useState(false);
@@ -2942,14 +2965,81 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                         </div>
                     </div>
 
+                    {/* Vínculo no MCC — necessário para investimento/conversões sincronizarem */}
+                    <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                        <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                        <p className="text-[12px] text-amber-800 font-medium leading-relaxed">
+                            <span className="font-bold">Necessário:</span> para o investimento e as conversões sincronizarem, a conta de anúncios acima precisa estar <span className="font-bold">vinculada ao MCC (conta administradora) da organização</span> no Google Ads. Envie e aceite o convite de vínculo — sem isso, o painel fica sem dados de Google, por mais que o ID esteja preenchido.
+                        </p>
+                    </div>
+
+                    {/* UTM padrão do sistema — para o Sufixo do URL final */}
+                    <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+                        <div className="flex items-center gap-3 px-6 py-4 border-b border-slate-100 bg-slate-50">
+                            <div className="w-9 h-9 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-200 p-1.5">
+                                <Globe className="w-5 h-5 text-slate-500" />
+                            </div>
+                            <div>
+                                <p className="text-sm font-bold text-slate-800">UTM padrão para o Google Ads</p>
+                                <p className="text-[11px] text-slate-400 font-medium">Cole no campo "Sufixo do URL final"</p>
+                            </div>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <p className="text-[12px] text-slate-500 font-medium leading-relaxed">
+                                Cole este modelo no <strong>Sufixo do URL final</strong> do Google Ads (na conta, na campanha ou no anúncio). Coloque <strong>só os parâmetros</strong> — sem o endereço do site e sem "?" no começo. Manter esse padrão é o que faz o sistema atribuir o lead ao Google, à campanha e ao anúncio certos.
+                            </p>
+                            <div className="flex flex-col sm:flex-row gap-3">
+                                <div className="flex-1 px-4 py-3 bg-[#0d1117] border border-slate-800 rounded-xl flex items-center shadow-inner overflow-x-auto custom-scrollbar">
+                                    <code className="text-[13px] font-mono text-amber-300 whitespace-nowrap">{GOOGLE_UTM_SUFFIX}</code>
+                                </div>
+                                <Button
+                                    variant="outline"
+                                    onClick={(e) => {
+                                        navigator.clipboard.writeText(GOOGLE_UTM_SUFFIX);
+                                        const btn = e.currentTarget;
+                                        const orig = btn.innerHTML;
+                                        btn.innerHTML = 'Copiado!';
+                                        setTimeout(() => { btn.innerHTML = orig; }, 2000);
+                                    }}
+                                    className="bg-white border-slate-200 text-slate-700 hover:bg-slate-50 gap-2 shrink-0 h-10 sm:h-auto rounded-xl shadow-sm transition-all font-bold"
+                                >
+                                    <Copy className="w-4 h-4" /> Copiar
+                                </Button>
+                            </div>
+                            <div className="space-y-1.5 pt-1 text-[12px] text-slate-600 font-medium">
+                                <p><code className="text-slate-800 font-bold">utm_source=google</code> — <span className="text-rose-600 font-bold">não mude</span>. É o que diz ao sistema que o lead veio do Google; qualquer outro valor quebra a atribuição.</p>
+                                <p><code className="text-slate-800 font-bold">utm_medium</code> — a rede (ex.: <span className="font-semibold">cpc</span> para Pesquisa, <span className="font-semibold">display</span>).</p>
+                                <p><code className="text-slate-800 font-bold">utm_campaign</code> — o nome da campanha.</p>
+                                <p><code className="text-slate-800 font-bold">utm_content</code> — o nome do anúncio.</p>
+                                <p><code className="text-slate-800 font-bold">{'utm_term={keyword}'}</code> — a palavra-chave; o Google preenche sozinho.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {activeIntTab === 'site' && (
+                <div className="space-y-6">
+                    {/* Duas formas de instalar o rastreamento no site do cliente */}
+                    <div className="flex items-start gap-3 p-4 bg-slate-50 border border-slate-200 rounded-xl">
+                        <Globe className="w-5 h-5 text-slate-500 shrink-0 mt-0.5" />
+                        <p className="text-[12px] text-slate-600 font-medium leading-relaxed">
+                            Duas formas de instalar o rastreamento no site: <span className="font-bold">automática</span> (conectando o WordPress do cliente, abaixo) ou <span className="font-bold">manual</span> (copiando o código e colando no site). Use a que preferir — o resultado é o mesmo.
+                        </p>
+                    </div>
+
+                    {/* Automático — integrador WordPress */}
+                    <ExternalIntegrationSettings clinicId={clinicData.id} clinicData={clinicData} systemSettings={systemSettings} variant="site" />
+
+                    {/* Manual — código gerado para colar no site */}
                     <Card className="border border-amber-200 shadow-sm bg-white overflow-hidden">
                         <CardHeader className="bg-amber-100 border-b border-amber-200 pb-6 px-8">
                             <div className="flex items-center gap-4">
                                 <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm border border-amber-200 p-2">
-                                    <img src={GoogleLogo} alt="Google" className="w-full h-full object-contain opacity-90" />
+                                    <Globe className="w-6 h-6 text-slate-600" />
                                 </div>
                                 <div>
-                                    <CardTitle className="text-xl font-bold text-slate-800">Rastreamento Google Ads</CardTitle>
+                                    <CardTitle className="text-xl font-bold text-slate-800">Rastreamento do Site (código manual)</CardTitle>
                                 </div>
                             </div>
                         </CardHeader>

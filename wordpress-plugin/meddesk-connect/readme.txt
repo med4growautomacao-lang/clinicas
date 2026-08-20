@@ -2,7 +2,7 @@
 Contributors: med4grow
 Tags: analytics, lead tracking, utm, attribution, marketing
 Requires at least: 5.5
-Tested up to: 6.6
+Tested up to: 7.1
 Requires PHP: 7.2
 Stable tag: 1.0.0
 License: GPLv2 or later
@@ -18,11 +18,12 @@ O script só é inserido quando o identificador da sua conta está configurado. 
 
 = Serviço externo =
 
-Ao ser configurado, este plugin carrega um script a partir dos servidores da MED4GROW. Esse script registra a página de origem e os parâmetros de campanha (UTM e cliques de anúncio) do visitante que interage com seus botões e formulários, e os associa ao seu atendimento na plataforma MedDesk/WakeDesk.
+Ao ser configurado, este plugin carrega um script a partir da infraestrutura da MED4GROW, hospedada no endpoint `https://yzpclhuifquhfqpiwysh.supabase.co/functions/v1/site-script`. Esse script registra a página de origem e os parâmetros de campanha (UTM e cliques de anúncio) do visitante que interage com seus botões e formulários, e os associa ao seu atendimento na plataforma MedDesk/WakeDesk.
 
 * Site do serviço: https://meddesk.com.br
-* Política de privacidade: https://meddesk.com.br/privacidade
-* Termos de uso: https://meddesk.com.br/termos
+* Host do script carregado: https://yzpclhuifquhfqpiwysh.supabase.co
+* Política de privacidade: https://med4growautomacao.com.br/meddeskconnect/privacidade
+* Termos de uso: https://med4growautomacao.com.br/meddeskconnect/termo
 
 O uso do serviço está sujeito a essa política de privacidade e a esses termos.
 

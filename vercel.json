@@ -1,5 +1,7 @@
 {
   "rewrites": [
+    { "source": "/meddeskconnect/privacidade", "destination": "/meddeskconnect/privacidade.html" },
+    { "source": "/meddeskconnect/termo", "destination": "/meddeskconnect/termo.html" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

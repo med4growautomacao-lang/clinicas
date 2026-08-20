@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="index,follow">
+<title>Política de Privacidade — MedDesk Connect</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2.5rem 1.25rem 4rem;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.65; color: #1e293b; background: #f8fafc;
+  }
+  main { max-width: 760px; margin: 0 auto; background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 2.5rem 2rem; }
+  h1 { font-size: 1.6rem; margin: 0 0 .25rem; color: #0f172a; }
+  h2 { font-size: 1.1rem; margin: 2rem 0 .5rem; color: #0f172a; }
+  p, li { color: #334155; }
+  .meta { color: #64748b; font-size: .85rem; margin-bottom: 2rem; }
+  code { background: #f1f5f9; padding: .1rem .35rem; border-radius: 5px; font-size: .9em; }
+  a { color: #2563eb; }
+  footer { max-width: 760px; margin: 1.5rem auto 0; color: #64748b; font-size: .8rem; text-align: center; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #0b1220; color: #e2e8f0; }
+    main { background: #111827; border-color: #1f2937; }
+    h1, h2 { color: #f1f5f9; }
+    p, li { color: #cbd5e1; }
+    code { background: #1f2937; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Política de Privacidade — MedDesk Connect</h1>
+  <p class="meta">Plugin MedDesk Connect, mantido por MED4GROW. Última atualização: agosto de 2026.</p>
+
+  <p>Esta política descreve como o plugin <strong>MedDesk Connect</strong> e o serviço da plataforma MedDesk/WakeDesk tratam dados ao serem instalados no site de um cliente.</p>
+
+  <h2>1. O que o plugin faz</h2>
+  <p>O MedDesk Connect insere, no cabeçalho do site em que é instalado, um script de rastreamento da plataforma MedDesk/WakeDesk. Esse script é carregado a partir de <code>https://yzpclhuifquhfqpiwysh.supabase.co/functions/v1/site-script</code>. O script só é inserido quando o identificador da conta do cliente está configurado no plugin; sem esse identificador, o plugin não carrega nada e não trata nenhum dado.</p>
+
+  <h2>2. Que dados são tratados</h2>
+  <p>Quando um visitante do site interage com botões e formulários rastreados, o script registra e envia à plataforma:</p>
+  <ul>
+    <li>A página de origem (URL) da interação;</li>
+    <li>Parâmetros de campanha e atribuição presentes no endereço, como <code>utm_source</code>, <code>utm_medium</code>, <code>utm_campaign</code>, <code>utm_content</code>, <code>utm_term</code> e identificadores de clique de anúncio;</li>
+    <li>Um identificador técnico de rastreamento gerado para associar a jornada do contato.</li>
+  </ul>
+  <p>O objetivo é, exclusivamente, atribuir corretamente a origem dos contatos (leads) do cliente que opera a plataforma. O plugin não coleta dados sem que o identificador da conta esteja configurado.</p>
+
+  <h2>3. Quem é o controlador</h2>
+  <p>O tratamento é realizado por MED4GROW, operadora da plataforma MedDesk/WakeDesk, em nome do cliente que instala o plugin e opera o site. O cliente é o responsável pela relação com os seus visitantes.</p>
+
+  <h2>4. Compartilhamento</h2>
+  <p>Os dados são usados para atribuição de leads na plataforma do próprio cliente e não são vendidos. O processamento pode ocorrer em provedores de infraestrutura em nuvem contratados pela MED4GROW.</p>
+
+  <h2>5. Direitos e contato</h2>
+  <p>Para exercer direitos previstos na legislação de proteção de dados (como acesso, correção ou exclusão), ou para dúvidas sobre esta política, entre em contato pelo site <a href="https://meddesk.com.br">meddesk.com.br</a>.</p>
+
+  <h2>6. Remoção</h2>
+  <p>A qualquer momento, o cliente pode desativar o plugin ou limpar o identificador da conta, o que interrompe o carregamento do script.</p>
+</main>
+<footer>MedDesk Connect · MED4GROW · <a href="/meddeskconnect/termo">Termos de Uso</a></footer>
+</body>
+</html>

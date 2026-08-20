@@ -1785,7 +1785,8 @@ interface ExternalIntegrationRow {
     // aplicativo) para instalar o script de rastreamento e automações via REST API.
     wordpress_url: string | null;
     wordpress_username: string | null;
-    wordpress_app_password: string | null;
+    // A senha vai cifrada no banco (coluna _enc); o front só sabe se EXISTE, nunca lê o valor.
+    wordpress_app_password_enc: string | null;
 }
 
 // Onde o card começa. Sem escolha, 'forms' — que é o comportamento histórico.
@@ -1824,6 +1825,11 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
     const [wpPass, setWpPass] = useState('');
     const [wpShowPass, setWpShowPass] = useState(false);
     const [savingWp, setSavingWp] = useState(false);
+    // Só sabemos se há senha salva (nunca o valor). Digitar no campo troca; em branco = mantém.
+    const [wpHasPassword, setWpHasPassword] = useState(false);
+    // Integrador: auditoria (só leitura) e aplicação (instala o script). Relatório fica na tela.
+    const [wpBusy, setWpBusy] = useState<null | 'audit' | 'apply'>(null);
+    const [wpReport, setWpReport] = useState<any>(null);
 
     // Carrega (ou cria, se ainda não existir) a linha de config desta clínica.
     useEffect(() => {
@@ -1831,7 +1837,7 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
         if (!effClinicId) { setLoading(true); return; }
         (async () => {
             setLoading(true);
-            const cols = 'capture_token, capture_enabled, capture_count, last_capture_at, crm_token, won_enabled, lost_enabled, lead_enabled, entry_stage_slug, wordpress_url, wordpress_username, wordpress_app_password';
+            const cols = 'capture_token, capture_enabled, capture_count, last_capture_at, crm_token, won_enabled, lost_enabled, lead_enabled, entry_stage_slug, wordpress_url, wordpress_username, wordpress_app_password_enc';
             let { data, error } = await supabase
                 .from('clinic_external_integrations')
                 .select(cols)
@@ -1855,7 +1861,8 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
                 setRow(r);
                 setWpUrl(r?.wordpress_url ?? '');
                 setWpUser(r?.wordpress_username ?? '');
-                setWpPass(r?.wordpress_app_password ?? '');
+                setWpPass('');
+                setWpHasPassword(!!r?.wordpress_app_password_enc);
                 setLoading(false);
             }
         })();
@@ -1949,26 +1956,54 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
     const wpDirty = row != null && (
         wpUrl.trim() !== (row.wordpress_url ?? '') ||
         wpUser.trim() !== (row.wordpress_username ?? '') ||
-        wpPass.trim() !== (row.wordpress_app_password ?? '')
+        wpPass.trim() !== ''  // senha em branco = manter a atual (cifrada)
     );
     const saveWordpress = async () => {
         if (!effClinicId || !row || savingWp || !wpDirty) return;
         setSavingWp(true);
-        const vals = {
-            wordpress_url: wpUrl.trim() || null,
-            wordpress_username: wpUser.trim() || null,
-            wordpress_app_password: wpPass.trim() || null,
-        };
-        const { error } = await supabase
-            .from('clinic_external_integrations')
-            .update(vals)
-            .eq('clinic_id', effClinicId);
+        const novaSenha = wpPass.trim();
+        // RPC cifra a senha em repouso. Senha em branco vira null = mantém a que já está salva.
+        const { error } = await supabase.rpc('set_wordpress_integration', {
+            p_clinic_id: effClinicId,
+            p_url: wpUrl.trim() || null,
+            p_username: wpUser.trim() || null,
+            p_app_password: novaSenha === '' ? null : novaSenha,
+        });
         if (error) showToast('Não foi possível salvar a integração WordPress.', 'error');
         else {
-            setRow(r => r ? { ...r, ...vals } : r);
+            setRow(r => r ? { ...r, wordpress_url: wpUrl.trim() || null, wordpress_username: wpUser.trim() || null } : r);
+            if (novaSenha !== '') { setWpHasPassword(true); setWpPass(''); }
             showToast('Integração WordPress salva.', 'success');
         }
         setSavingWp(false);
+    };
+
+    // Chama o integrador. 'audit' só lê e reporta; 'apply' instala o script e valida.
+    const runIntegrator = async (action: 'audit' | 'apply') => {
+        if (!effClinicId || wpBusy) return;
+        if (wpDirty) { showToast('Salve os dados do WordPress antes de verificar.', 'error'); return; }
+        setWpBusy(action);
+        try {
+            const { data, error } = await supabase.functions.invoke('wordpress-integrator', {
+                body: { clinic_id: effClinicId, action },
+            });
+            if (error) throw error;
+            setWpReport(data);
+            if (action === 'apply') {
+                const est = data?.estado;
+                if (data?.ok && (est === 'aplicado' || est === 'ja_instalado')) showToast('Site integrado.', 'success');
+                else if (data?.ok && est === 'aplicado_aguardando_cache') showToast('Instalado — aguardando o cache do site atualizar.', 'success');
+                else showToast(data?.detalhe || 'Não foi possível integrar automaticamente.', 'error');
+            }
+        } catch (e: any) {
+            // supabase.functions.invoke põe o corpo da resposta non-2xx em e.context (um Response);
+            // é lá que mora o 'detalhe' em pt-BR, senão o usuário só veria "Edge Function error".
+            let msg = e?.message || 'Falha ao falar com o integrador.';
+            try { const body = await e?.context?.json?.(); if (body?.detalhe || body?.error) msg = body.detalhe || body.error; } catch { /* corpo não-JSON */ }
+            showToast(msg, 'error');
+            setWpReport({ ok: false, erro: msg });
+        }
+        setWpBusy(null);
     };
 
     const copyChip = (e: React.MouseEvent, text: string) => {
@@ -2229,10 +2264,10 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
                             </div>
                             <div className={cn(
                                 "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border bg-white shrink-0",
-                                row.wordpress_app_password ? "text-emerald-700 border-emerald-300" : "text-slate-500 border-slate-300"
+                                wpHasPassword ? "text-emerald-700 border-emerald-300" : "text-slate-500 border-slate-300"
                             )}>
-                                <span className={cn("w-2 h-2 rounded-full", row.wordpress_app_password ? "bg-emerald-500" : "bg-slate-400")}></span>
-                                {row.wordpress_app_password ? 'Configurado' : 'Não configurado'}
+                                <span className={cn("w-2 h-2 rounded-full", wpHasPassword ? "bg-emerald-500" : "bg-slate-400")}></span>
+                                {wpHasPassword ? 'Configurado' : 'Não configurado'}
                             </div>
                         </div>
                     </CardHeader>
@@ -2278,7 +2313,7 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
                                             type={wpShowPass ? 'text' : 'password'}
                                             value={wpPass}
                                             onChange={e => setWpPass(e.target.value)}
-                                            placeholder="xxxx xxxx xxxx xxxx xxxx xxxx"
+                                            placeholder={wpHasPassword ? '•••• senha salva — deixe em branco para manter' : 'xxxx xxxx xxxx xxxx xxxx xxxx'}
                                             autoComplete="new-password"
                                             className="w-full px-4 py-3 pr-20 bg-white border border-slate-200 rounded-xl text-sm font-mono text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400"
                                         />
@@ -2292,7 +2327,31 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
                                     </div>
                                 </div>
                             </div>
-                            <div className="flex items-center justify-end pt-1">
+                            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    {/* Integrador: só faz sentido com a credencial salva e sem edição pendente. */}
+                                    {wpHasPassword && !wpDirty && (
+                                        <>
+                                            <Button
+                                                variant="outline"
+                                                onClick={() => runIntegrator('audit')}
+                                                disabled={!!wpBusy}
+                                                className="gap-2 rounded-xl font-bold border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                                            >
+                                                {wpBusy === 'audit' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Globe className="w-4 h-4" />}
+                                                Verificar site
+                                            </Button>
+                                            <Button
+                                                onClick={() => runIntegrator('apply')}
+                                                disabled={!!wpBusy}
+                                                className="gap-2 rounded-xl font-bold bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
+                                            >
+                                                {wpBusy === 'apply' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plug className="w-4 h-4" />}
+                                                Integrar automaticamente
+                                            </Button>
+                                        </>
+                                    )}
+                                </div>
                                 <Button
                                     onClick={saveWordpress}
                                     disabled={savingWp || !wpDirty}
@@ -2303,6 +2362,64 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
                                 </Button>
                             </div>
                         </div>
+
+                        {/* Relatório do integrador (auditoria ou aplicação) */}
+                        {wpReport?.auditoria && (() => {
+                            const a = wpReport.auditoria;
+                            const rota: Record<string, { txt: string; cor: string }> = {
+                                ja_instalado: { txt: 'Já instalado e funcionando', cor: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
+                                elementor_pro: { txt: 'Pronto para instalar automaticamente (Elementor Pro)', cor: 'text-blue-700 bg-blue-50 border-blue-200' },
+                                plugin_proprio: { txt: 'Instala automaticamente pelo nosso plugin', cor: 'text-blue-700 bg-blue-50 border-blue-200' },
+                                plugin_pendente: { txt: 'Precisa do nosso plugin (a publicar) — por ora, manual', cor: 'text-amber-700 bg-amber-50 border-amber-200' },
+                                manual: { txt: 'Requer instalação manual', cor: 'text-amber-700 bg-amber-50 border-amber-200' },
+                            };
+                            const r = rota[a.caminho_recomendado] ?? rota.manual;
+                            const linha = (ok: boolean, txt: string) => (
+                                <div className="flex items-start gap-2 text-[12px] font-medium text-slate-600">
+                                    {ok ? <Check className="w-3.5 h-3.5 text-emerald-500 mt-0.5 shrink-0" /> : <X className="w-3.5 h-3.5 text-slate-400 mt-0.5 shrink-0" />}
+                                    <span>{txt}</span>
+                                </div>
+                            );
+                            // Faixa de desfecho da AÇÃO (só no apply): sucesso, aguardando cache, ou
+                            // AÇÃO MANUAL necessária — este é o aviso explícito pedido.
+                            const est = wpReport.action === 'apply' ? wpReport.estado : null;
+                            const precisaManual = ['manual', 'plugin_pendente', 'kses_removeu', 'falha_escrita', 'falha_instalacao', 'falha_config', 'falha_ativacao'].includes(est);
+                            const faixa = !est ? null
+                                : ['aplicado', 'ja_instalado'].includes(est) ? { cor: 'text-emerald-800 bg-emerald-50 border-emerald-200', Icone: Check, txt: 'Integrado com sucesso' }
+                                : est === 'aplicado_aguardando_cache' ? { cor: 'text-blue-800 bg-blue-50 border-blue-200', Icone: Clock, txt: 'Instalado — aguardando o cache do site atualizar' }
+                                : precisaManual ? { cor: 'text-amber-800 bg-amber-50 border-amber-200', Icone: AlertTriangle, txt: 'Precisa de ação manual' }
+                                : { cor: 'text-amber-800 bg-amber-50 border-amber-200', Icone: AlertTriangle, txt: 'Não concluído' };
+                            return (
+                                <div className="mt-4 space-y-3 p-5 bg-white border border-slate-200 rounded-2xl">
+                                    {faixa && (
+                                        <div className={cn("flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-bold border", faixa.cor)}>
+                                            <faixa.Icone className="w-5 h-5 shrink-0" /> {faixa.txt}
+                                        </div>
+                                    )}
+                                    <div className={cn("inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border", r.cor)}>
+                                        {r.txt}
+                                    </div>
+                                    {wpReport.detalhe && <p className="text-[12px] font-medium text-slate-600">{wpReport.detalhe}</p>}
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 pt-1">
+                                        {linha(a.wp_ok, a.wp_ok ? `Acesso ao WordPress OK${a.usuario ? ` (${a.usuario})` : ''}` : 'Sem acesso ao WordPress')}
+                                        {linha(a.is_admin, a.is_admin ? 'Usuário é administrador' : 'Usuário NÃO é administrador')}
+                                        {linha(a.script_desta_clinica, a.script_desta_clinica ? 'Script de rastreamento no ar' : 'Script ainda não está no site')}
+                                        {linha(!!a.tema?.nome, a.tema?.nome ? `Tema: ${a.tema.nome}` : 'Tema não identificado')}
+                                        {a.elementor_pro_custom_code && linha(true, 'Elementor Pro com Custom Code (via API)')}
+                                        {a.cache && linha(false, `Cache detectado: ${a.cache} (pode atrasar a validação)`)}
+                                    </div>
+                                    {Array.isArray(a.bloqueios) && a.bloqueios.length > 0 && (
+                                        <div className="space-y-1 pt-1">
+                                            {a.bloqueios.map((b: string, i: number) => (
+                                                <div key={i} className="flex items-start gap-2 text-[12px] font-medium text-amber-700">
+                                                    <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> <span>{b}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })()}
                     </CardContent>
                 </Card>
             )}

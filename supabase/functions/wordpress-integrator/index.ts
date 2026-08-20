@@ -190,26 +190,37 @@ interface Auditoria {
   cache: string | null;
   // Formulários Elementor do site e se o webhook aponta para a nossa captação. null = sem formulário.
   formularios: { total: number; conectados: number; outro_webhook: number } | null;
+  // Botões de WhatsApp no site e botão flutuante. null = nenhum caminho de WhatsApp no site.
+  whatsapp: { botoes: number; numero_certo: number; flutuante: boolean } | null;
   caminho_recomendado: 'ja_instalado' | 'elementor_pro' | 'plugin_proprio' | 'plugin_pendente' | 'manual';
   bloqueios: string[];
 }
 
-// Varre o JSON do Elementor de uma página atrás de widgets 'form' e classifica o webhook:
-// conectado ao nosso endpoint de captação, com webhook de terceiro, ou sem webhook.
-function statsFormularios(elementorRaw: string, token: string | null): { total: number; conectados: number; outro: number } {
+// Varre o JSON do Elementor de uma página: classifica o webhook dos formulários (conectado à
+// nossa captação, de terceiro, ou sem webhook) e conta botões de WhatsApp (e quantos usam o
+// número da clínica — comparação pelos 8 últimos dígitos, imune ao 9º dígito).
+function statsPagina(
+  elementorRaw: string, token: string | null, clinicLast8: string | null,
+): { formTotal: number; formConect: number; formOutro: number; waTotal: number; waCertos: number } {
+  const st = { formTotal: 0, formConect: 0, formOutro: 0, waTotal: 0, waCertos: 0 };
   let data: any;
-  try { data = JSON.parse(elementorRaw); } catch { return { total: 0, conectados: 0, outro: 0 }; }
-  const st = { total: 0, conectados: 0, outro: 0 };
+  try { data = JSON.parse(elementorRaw); } catch { return st; }
   const walk = (nodes: any[]) => {
     for (const n of nodes || []) {
-      if (n && n.widgetType === 'form') {
-        st.total++;
-        const s = n.settings || {};
+      const s = n?.settings ?? {};
+      if (n?.widgetType === 'form') {
+        st.formTotal++;
         const actions: string[] = Array.isArray(s.submit_actions) ? s.submit_actions : [];
         const hooks = String(s.webhooks ?? '');
         const nosso = hooks.includes('external-forms-ingest') && (!token || hooks.includes(token));
-        if (nosso) st.conectados++;
-        else if (actions.includes('webhook') && hooks.length > 0) st.outro++;
+        if (nosso) st.formConect++;
+        else if (actions.includes('webhook') && hooks.length > 0) st.formOutro++;
+      }
+      const url = String(s?.link?.url ?? s?.button_link?.url ?? '');
+      if (/wa\.me|api\.whatsapp|whatsapp/i.test(url)) {
+        st.waTotal++;
+        const digits = ((url.match(/(?:wa\.me\/\+?|phone=\+?)(\d+)/) || [])[1] ?? url.replace(/\D/g, ''));
+        if (clinicLast8 && digits.length >= 8 && digits.slice(-8) === clinicLast8) st.waCertos++;
       }
       if (Array.isArray(n?.elements)) walk(n.elements);
     }
@@ -220,7 +231,7 @@ function statsFormularios(elementorRaw: string, token: string | null): { total: 
 
 async function auditar(
   base: string, b64: string, clinicId: string,
-  captureToken: string | null, captureEnabled: boolean,
+  captureToken: string | null, captureEnabled: boolean, clinicLast8: string | null,
 ): Promise<Auditoria> {
   const bloqueios: string[] = [];
 
@@ -275,24 +286,41 @@ async function auditar(
     bloqueios.push('O site envia Content-Security-Policy que não libera nosso domínio — o navegador pode bloquear o script mesmo instalado.');
   }
 
-  // 5) Formulários do site: o webhook aponta para a nossa captação? (só páginas Elementor)
+  // 5) Formulários e botões de WhatsApp do site (só páginas Elementor).
   let formularios: Auditoria['formularios'] = null;
+  let whatsapp: Auditoria['whatsapp'] = null;
   if (wp_ok) {
     const pgs = await wp(base, b64, '/wp-json/wp/v2/pages?per_page=50&status=publish&context=edit');
     if (Array.isArray(pgs.body)) {
-      const acc = { total: 0, conectados: 0, outro_webhook: 0 };
+      const f = { total: 0, conectados: 0, outro_webhook: 0 };
+      const w = { botoes: 0, numero_certo: 0 };
       for (const p of pgs.body) {
         const ed = p?.meta?._elementor_data;
         if (!ed || typeof ed !== 'string') continue;
-        const s = statsFormularios(ed, captureToken);
-        acc.total += s.total; acc.conectados += s.conectados; acc.outro_webhook += s.outro;
+        const s = statsPagina(ed, captureToken, clinicLast8);
+        f.total += s.formTotal; f.conectados += s.formConect; f.outro_webhook += s.formOutro;
+        w.botoes += s.waTotal; w.numero_certo += s.waCertos;
       }
-      if (acc.total > 0) {
-        formularios = acc;
-        if (acc.conectados === 0) {
+      if (f.total > 0) {
+        formularios = f;
+        if (f.conectados === 0) {
           bloqueios.push('Há formulário no site sem o webhook de captação — o lead do formulário não entra no sistema.');
         } else if (!captureEnabled) {
           bloqueios.push('Formulário conectado, mas a captação está PAUSADA nas configurações — os leads não entram enquanto estiver pausada.');
+        }
+      }
+
+      // Botão flutuante: plugin Click to Chat (ou similar de WhatsApp) ativo.
+      let flutuante = false;
+      const plug = await wp(base, b64, '/wp-json/wp/v2/plugins');
+      if (Array.isArray(plug.body)) {
+        flutuante = plug.body.some((p: any) =>
+          p?.status === 'active' && /click-to-chat|whatsapp/i.test(String(p?.plugin ?? '') + ' ' + String(p?.textdomain ?? '')));
+      }
+      if (w.botoes > 0 || flutuante) {
+        whatsapp = { botoes: w.botoes, numero_certo: w.numero_certo, flutuante };
+        if (w.botoes > 0 && clinicLast8 && w.numero_certo < w.botoes) {
+          bloqueios.push(`Há botão de WhatsApp no site com número diferente do WhatsApp da clínica (${w.numero_certo}/${w.botoes} corretos).`);
         }
       }
     }
@@ -313,7 +341,7 @@ async function auditar(
   return {
     wp_ok, wp_status: me.status, usuario: me.body?.username ?? me.body?.slug ?? null,
     is_admin, tem_unfiltered_html, tema, elementor_pro_custom_code, snippet_existente_id,
-    script_na_home, script_desta_clinica, csp, cache, formularios, caminho_recomendado, bloqueios,
+    script_na_home, script_desta_clinica, csp, cache, formularios, whatsapp, caminho_recomendado, bloqueios,
   };
 }
 
@@ -438,7 +466,18 @@ serve(async (req) => {
       .eq('clinic_id', clinic_id)
       .maybeSingle();
 
-    const aud = await auditar(url, b64, clinic_id, capRow?.capture_token ?? null, capRow?.capture_enabled === true);
+    // Número do WhatsApp da clínica (para conferir os botões do site). Últimos 8 dígitos = imune ao 9º.
+    const { data: waInst } = await admin
+      .from('whatsapp_instances')
+      .select('phone_number')
+      .eq('clinic_id', clinic_id)
+      .not('phone_number', 'is', null)
+      .limit(1)
+      .maybeSingle();
+    const clinicDigits = String(waInst?.phone_number ?? '').replace(/\D/g, '');
+    const clinicLast8 = clinicDigits.length >= 8 ? clinicDigits.slice(-8) : null;
+
+    const aud = await auditar(url, b64, clinic_id, capRow?.capture_token ?? null, capRow?.capture_enabled === true, clinicLast8);
 
     if (action === 'audit') {
       return json({ ok: true, action: 'audit', auditoria: aud });

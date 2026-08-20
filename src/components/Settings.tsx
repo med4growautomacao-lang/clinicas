@@ -2374,14 +2374,7 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
                                 manual: { txt: 'Requer instalação manual', cor: 'text-amber-700 bg-amber-50 border-amber-200' },
                             };
                             const r = rota[a.caminho_recomendado] ?? rota.manual;
-                            const linha = (ok: boolean, txt: string) => (
-                                <div className="flex items-start gap-2 text-[12px] font-medium text-slate-600">
-                                    {ok ? <Check className="w-3.5 h-3.5 text-emerald-500 mt-0.5 shrink-0" /> : <X className="w-3.5 h-3.5 text-slate-400 mt-0.5 shrink-0" />}
-                                    <span>{txt}</span>
-                                </div>
-                            );
-                            // Faixa de desfecho da AÇÃO (só no apply): sucesso, aguardando cache, ou
-                            // AÇÃO MANUAL necessária — este é o aviso explícito pedido.
+                            // Faixa de desfecho da AÇÃO (só no apply): sucesso, aguardando cache, ou AÇÃO MANUAL.
                             const est = wpReport.action === 'apply' ? wpReport.estado : null;
                             const precisaManual = ['manual', 'plugin_pendente', 'kses_removeu', 'falha_escrita', 'falha_instalacao', 'falha_config', 'falha_ativacao'].includes(est);
                             const faixa = !est ? null
@@ -2389,6 +2382,30 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
                                 : est === 'aplicado_aguardando_cache' ? { cor: 'text-blue-800 bg-blue-50 border-blue-200', Icone: Clock, txt: 'Instalado — aguardando o cache do site atualizar' }
                                 : precisaManual ? { cor: 'text-amber-800 bg-amber-50 border-amber-200', Icone: AlertTriangle, txt: 'Precisa de ação manual' }
                                 : { cor: 'text-amber-800 bg-amber-50 border-amber-200', Icone: AlertTriangle, txt: 'Não concluído' };
+
+                            // Lista de checks (uma linha por item, com status).
+                            type ChkStatus = 'ok' | 'fail' | 'warn' | 'info';
+                            const checks: { status: ChkStatus; txt: string }[] = [];
+                            checks.push({ status: a.wp_ok ? 'ok' : 'fail', txt: a.wp_ok ? `Acesso ao WordPress OK${a.usuario ? ` (${a.usuario})` : ''}` : 'Sem acesso ao WordPress' });
+                            if (a.wp_ok) checks.push({ status: a.is_admin ? 'ok' : 'fail', txt: a.is_admin ? 'Usuário é administrador' : 'Usuário não é administrador' });
+                            checks.push({ status: a.script_desta_clinica ? 'ok' : 'fail', txt: a.script_desta_clinica ? 'Script de rastreamento no ar' : 'Script de rastreamento não está no site' });
+                            if (a.formularios) checks.push({ status: a.formularios.conectados > 0 ? 'ok' : 'fail', txt: a.formularios.conectados > 0 ? `Formulário conectado à captação${a.formularios.conectados > 1 ? ` (${a.formularios.conectados})` : ''}` : 'Formulário do site sem o webhook de captação' });
+                            if (a.whatsapp && a.whatsapp.botoes > 0) checks.push({ status: a.whatsapp.numero_certo === a.whatsapp.botoes ? 'ok' : 'warn', txt: a.whatsapp.numero_certo === a.whatsapp.botoes ? `Botões de WhatsApp com o número certo (${a.whatsapp.botoes})` : `Botão de WhatsApp com número diferente (${a.whatsapp.numero_certo}/${a.whatsapp.botoes} corretos)` });
+                            if (a.whatsapp && a.whatsapp.flutuante) checks.push({ status: 'ok', txt: 'Botão flutuante de WhatsApp ativo' });
+                            if (a.elementor_pro_custom_code) checks.push({ status: 'info', txt: 'Elementor Pro com Custom Code (via API)' });
+                            if (a.tema?.nome) checks.push({ status: 'info', txt: `Tema: ${a.tema.nome}` });
+                            if (a.cache) checks.push({ status: 'warn', txt: `Cache detectado: ${a.cache} (pode atrasar a validação)` });
+                            // Bloqueios do backend que não estão cobertos pelos checks estruturados acima.
+                            const jaCobertos = ['Há formulário no site sem', 'Há botão de WhatsApp'];
+                            (Array.isArray(a.bloqueios) ? a.bloqueios : [])
+                                .filter((b: string) => !jaCobertos.some((c) => b.startsWith(c)))
+                                .forEach((b: string) => checks.push({ status: 'warn', txt: b }));
+
+                            const iconeDe = (s: ChkStatus) =>
+                                s === 'ok' ? <Check className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+                                : s === 'fail' ? <X className="w-4 h-4 text-rose-500 mt-0.5 shrink-0" />
+                                : s === 'warn' ? <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
+                                : <span className="w-1.5 h-1.5 rounded-full bg-slate-300 mt-2 ml-1 mr-0.5 shrink-0" />;
                             return (
                                 <div className="mt-4 space-y-3 p-5 bg-white border border-slate-200 rounded-2xl">
                                     {faixa && (
@@ -2400,24 +2417,14 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings }: {
                                         {r.txt}
                                     </div>
                                     {wpReport.detalhe && <p className="text-[12px] font-medium text-slate-600">{wpReport.detalhe}</p>}
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 pt-1">
-                                        {linha(a.wp_ok, a.wp_ok ? `Acesso ao WordPress OK${a.usuario ? ` (${a.usuario})` : ''}` : 'Sem acesso ao WordPress')}
-                                        {linha(a.is_admin, a.is_admin ? 'Usuário é administrador' : 'Usuário NÃO é administrador')}
-                                        {linha(a.script_desta_clinica, a.script_desta_clinica ? 'Script de rastreamento no ar' : 'Script ainda não está no site')}
-                                        {linha(!!a.tema?.nome, a.tema?.nome ? `Tema: ${a.tema.nome}` : 'Tema não identificado')}
-                                        {a.formularios && a.formularios.conectados > 0 && linha(true, a.formularios.conectados > 1 ? `Formulários conectados à captação (${a.formularios.conectados})` : 'Formulário conectado à captação')}
-                                        {a.elementor_pro_custom_code && linha(true, 'Elementor Pro com Custom Code (via API)')}
-                                        {a.cache && linha(false, `Cache detectado: ${a.cache} (pode atrasar a validação)`)}
+                                    <div className="space-y-2 pt-1">
+                                        {checks.map((c, i) => (
+                                            <div key={i} className={cn("flex items-start gap-2 text-[13px] font-medium",
+                                                c.status === 'fail' ? 'text-rose-700' : c.status === 'warn' ? 'text-amber-700' : 'text-slate-700')}>
+                                                {iconeDe(c.status)}<span>{c.txt}</span>
+                                            </div>
+                                        ))}
                                     </div>
-                                    {Array.isArray(a.bloqueios) && a.bloqueios.length > 0 && (
-                                        <div className="space-y-1 pt-1">
-                                            {a.bloqueios.map((b: string, i: number) => (
-                                                <div key={i} className="flex items-start gap-2 text-[12px] font-medium text-amber-700">
-                                                    <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> <span>{b}</span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
                                 </div>
                             );
                         })()}

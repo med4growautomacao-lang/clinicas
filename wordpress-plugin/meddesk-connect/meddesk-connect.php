@@ -7,7 +7,7 @@
  * Requires at least: 5.5
  * Requires PHP:      7.2
  * Author:            MED4GROW
- * Author URI:        https://meddesk.com.br/
+ * Author URI:        https://med4growautomacao.com.br/
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain:       meddesk-connect

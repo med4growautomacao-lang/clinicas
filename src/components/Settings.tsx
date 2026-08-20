@@ -2414,7 +2414,7 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings, var
                             checks.push({ status: a.script_desta_clinica ? 'ok' : 'fail', txt: a.script_desta_clinica ? 'Script de rastreamento no ar' : 'Script de rastreamento não está no site' });
                             if (a.formularios) checks.push({ status: a.formularios.conectados > 0 ? 'ok' : 'fail', txt: a.formularios.conectados > 0 ? `Formulário conectado à captação${a.formularios.conectados > 1 ? ` (${a.formularios.conectados})` : ''}` : 'Formulário do site sem o webhook de captação' });
                             if (a.whatsapp && a.whatsapp.botoes > 0) {
-                                if (!a.whatsapp.verificavel || a.whatsapp.com_numero === 0) checks.push({ status: 'info', txt: `Botões de WhatsApp no site (${a.whatsapp.botoes}) — número não verificado` });
+                                if (!a.whatsapp.verificavel) checks.push({ status: 'info', txt: `Botões de WhatsApp no site (${a.whatsapp.botoes}) — número não verificado` });
                                 else if (a.whatsapp.numero_certo === a.whatsapp.com_numero) checks.push({ status: 'ok', txt: `Botões de WhatsApp com o número certo (${a.whatsapp.com_numero})` });
                                 else checks.push({ status: 'warn', txt: `Botão de WhatsApp com número diferente (${a.whatsapp.numero_certo}/${a.whatsapp.com_numero} corretos)` });
                             }
@@ -2423,9 +2423,11 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings, var
                             if (a.tema?.nome) checks.push({ status: 'info', txt: `Tema: ${a.tema.nome}` });
                             if (a.cache) checks.push({ status: 'warn', txt: `Cache detectado: ${a.cache} (pode atrasar a validação)` });
                             // Bloqueios do backend que não estão cobertos pelos checks estruturados acima.
-                            const jaCobertos = ['Há formulário no site sem', 'Há botão de WhatsApp'];
+                            // Casa por trecho interno estável (não pelo início da frase) para não voltar
+                            // a duplicar se o texto do backend for reescrito no começo.
+                            const jaCobertos = ['webhook de captação', 'botão de WhatsApp no site com número'];
                             (Array.isArray(a.bloqueios) ? a.bloqueios : [])
-                                .filter((b: string) => !jaCobertos.some((c) => b.startsWith(c)))
+                                .filter((b: string) => !jaCobertos.some((c) => b.includes(c)))
                                 .forEach((b: string) => checks.push({ status: 'warn', txt: b }));
 
                             const iconeDe = (s: ChkStatus) =>

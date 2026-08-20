@@ -215,12 +215,16 @@ function statsPagina(
         const hooks = String(s.webhooks ?? '');
         // "conectado" exige a AÇÃO webhook ligada, não só a URL no campo — senão um form com a
         // ação removida (mas a URL sobrando) apareceria verde sem disparar nada.
-        const nosso = actions.includes('webhook') && hooks.includes('external-forms-ingest') && (!token || hooks.includes(token));
+        // Exige o token DESTA clínica: sem um token conhecido não dá para afirmar que a captação é
+        // nossa (poderia ser o ?k= de outra clínica), então não conta como conectado.
+        const nosso = actions.includes('webhook') && hooks.includes('external-forms-ingest') && !!token && hooks.includes(token);
         if (nosso) st.formConect++;
         else if (actions.includes('webhook') && hooks.length > 0) st.formOutro++;
       }
       const url = String(s?.link?.url ?? s?.button_link?.url ?? '');
-      if (/wa\.me|api\.whatsapp|whatsapp/i.test(url)) {
+      // Só links de conversa do WhatsApp (não qualquer URL que contenha "whatsapp", tipo um post
+      // "/como-usar-whatsapp" ou a home web.whatsapp.com).
+      if (/wa\.me\/|(?:api|web)\.whatsapp\.com\/send|whatsapp:\/\/send|[?&]phone=/i.test(url)) {
         st.waTotal++;
         // Só compara quando o link CARREGA um número (wa.me/<num> ou phone=<num>). Links como
         // wa.me/message/XXX não têm número e não podem virar "número diferente".
@@ -300,11 +304,14 @@ async function auditar(
   if (wp_ok) {
     // Varre páginas, Landing Pages do Elementor Pro e posts (per_page alto). e-landing-page
     // devolve 404 quando o site não tem Landing Pages — o wp() trata e a gente ignora.
-    const itens: any[] = [];
-    for (const tipo of ['pages', 'e-landing-page', 'posts']) {
-      const r = await wp(base, b64, `/wp-json/wp/v2/${tipo}?per_page=100&status=publish&context=edit`);
-      if (Array.isArray(r.body)) itens.push(...r.body);
-    }
+    // Em paralelo (sem dependência entre si): senão 3 GETs sequenciais de até 15s cada empilham
+    // latência num site lento. per_page=100 é o teto do WP REST; itens além disso não são varridos
+    // (limitação conhecida — raro num site de clínica).
+    const respostas = await Promise.all(
+      ['pages', 'e-landing-page', 'posts'].map((tipo) =>
+        wp(base, b64, `/wp-json/wp/v2/${tipo}?per_page=100&status=publish&context=edit`)),
+    );
+    const itens: any[] = respostas.flatMap((r) => (Array.isArray(r.body) ? r.body : []));
     if (itens.length > 0) {
       const f = { total: 0, conectados: 0, outro_webhook: 0 };
       const w = { botoes: 0, com_numero: 0, numero_certo: 0 };
@@ -453,8 +460,16 @@ serve(async (req) => {
     if (!user) return json({ error: 'unauthorized' }, 401);
 
     const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
-    const { data: podeGerenciar } = await userClient.rpc('can_manage_clinic', { p_clinic_id: clinic_id });
-    if (podeGerenciar !== true) return json({ error: 'forbidden' }, 403);
+    // can_manage_clinic (canônica): super-admin, gestor da clínica, org_owner/org_admin. Ela NÃO
+    // inclui medico_gestor, mas o integrador preserva o acesso dele (em clínica tocada por
+    // médico-gestor, ele é quem administra), então checamos os dois.
+    let autorizado = (await userClient.rpc('can_manage_clinic', { p_clinic_id: clinic_id })).data === true;
+    if (!autorizado) {
+      const { data: membro } = await admin
+        .from('clinic_users').select('role').eq('id', user.id).eq('clinic_id', clinic_id).maybeSingle();
+      autorizado = membro?.role === 'medico_gestor';
+    }
+    if (!autorizado) return json({ error: 'forbidden' }, 403);
 
     // Credencial do WordPress da clínica. A senha está cifrada em repouso; a RPC decifra e só
     // service_role pode chamá-la (o front nunca lê a senha de volta).

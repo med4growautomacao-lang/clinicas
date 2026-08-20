@@ -22,8 +22,8 @@ Ao ser configurado, este plugin carrega um script a partir da infraestrutura da 
 
 * Site do serviço: https://meddesk.com.br
 * Host do script carregado: https://yzpclhuifquhfqpiwysh.supabase.co
-* Política de privacidade: https://med4growautomacao.com.br/meddeskconnect/privacidade
-* Termos de uso: https://med4growautomacao.com.br/meddeskconnect/termo
+* Política de privacidade: https://app.med4growautomacao.com.br/meddeskconnect/privacidade
+* Termos de uso: https://app.med4growautomacao.com.br/meddeskconnect/termo
 
 O uso do serviço está sujeito a essa política de privacidade e a esses termos.
 

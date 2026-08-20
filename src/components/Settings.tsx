@@ -2413,7 +2413,11 @@ function ExternalIntegrationSettings({ clinicId, clinicData, systemSettings, var
                             if (a.wp_ok) checks.push({ status: a.is_admin ? 'ok' : 'fail', txt: a.is_admin ? 'Usuário é administrador' : 'Usuário não é administrador' });
                             checks.push({ status: a.script_desta_clinica ? 'ok' : 'fail', txt: a.script_desta_clinica ? 'Script de rastreamento no ar' : 'Script de rastreamento não está no site' });
                             if (a.formularios) checks.push({ status: a.formularios.conectados > 0 ? 'ok' : 'fail', txt: a.formularios.conectados > 0 ? `Formulário conectado à captação${a.formularios.conectados > 1 ? ` (${a.formularios.conectados})` : ''}` : 'Formulário do site sem o webhook de captação' });
-                            if (a.whatsapp && a.whatsapp.botoes > 0) checks.push({ status: a.whatsapp.numero_certo === a.whatsapp.botoes ? 'ok' : 'warn', txt: a.whatsapp.numero_certo === a.whatsapp.botoes ? `Botões de WhatsApp com o número certo (${a.whatsapp.botoes})` : `Botão de WhatsApp com número diferente (${a.whatsapp.numero_certo}/${a.whatsapp.botoes} corretos)` });
+                            if (a.whatsapp && a.whatsapp.botoes > 0) {
+                                if (!a.whatsapp.verificavel || a.whatsapp.com_numero === 0) checks.push({ status: 'info', txt: `Botões de WhatsApp no site (${a.whatsapp.botoes}) — número não verificado` });
+                                else if (a.whatsapp.numero_certo === a.whatsapp.com_numero) checks.push({ status: 'ok', txt: `Botões de WhatsApp com o número certo (${a.whatsapp.com_numero})` });
+                                else checks.push({ status: 'warn', txt: `Botão de WhatsApp com número diferente (${a.whatsapp.numero_certo}/${a.whatsapp.com_numero} corretos)` });
+                            }
                             if (a.whatsapp && a.whatsapp.flutuante) checks.push({ status: 'ok', txt: 'Botão flutuante de WhatsApp ativo' });
                             if (a.elementor_pro_custom_code) checks.push({ status: 'info', txt: 'Elementor Pro com Custom Code (via API)' });
                             if (a.tema?.nome) checks.push({ status: 'info', txt: `Tema: ${a.tema.nome}` });
@@ -2499,7 +2503,6 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
         }
     };
 
-    // Token do webhook nativo de formulários (external-forms-ingest?k=…). Mesmo padrão da aba
     // Token de captação para o card MANUAL "Rastreamento do Site" (aba 'site'), que mostra o
     // webhook do formulário. Carrega só nessa aba. Substitui a URL global do n8n (forms_tracking),
     // que era igual para todas as clínicas e identificava a clínica pelo telefone dentro do
@@ -3111,6 +3114,8 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                                             if (!formsWebhookUrl) return;
                                             navigator.clipboard.writeText(formsWebhookUrl);
                                             const btn = e.currentTarget;
+                                            if (btn.dataset.copying) return; // trava contra duplo-clique (senão captura "Copiado!" como original)
+                                            btn.dataset.copying = '1';
                                             const orig = btn.innerHTML;
                                             btn.innerHTML = '<svg class="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg> Copiado!';
                                             btn.classList.add('bg-blue-600', 'text-white', 'border-blue-600');
@@ -3119,6 +3124,7 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                                                 btn.innerHTML = orig;
                                                 btn.classList.remove('bg-blue-600', 'text-white', 'border-blue-600');
                                                 btn.classList.add('bg-white', 'text-slate-700');
+                                                delete btn.dataset.copying;
                                             }, 2000);
                                         }}
                                         className="bg-white border-slate-200 text-slate-700 hover:bg-slate-50 gap-2 shrink-0 h-10 sm:h-auto rounded-xl shadow-sm transition-all font-bold"

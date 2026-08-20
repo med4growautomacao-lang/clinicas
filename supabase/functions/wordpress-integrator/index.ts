@@ -191,7 +191,8 @@ interface Auditoria {
   // Formulários Elementor do site e se o webhook aponta para a nossa captação. null = sem formulário.
   formularios: { total: number; conectados: number; outro_webhook: number } | null;
   // Botões de WhatsApp no site e botão flutuante. null = nenhum caminho de WhatsApp no site.
-  whatsapp: { botoes: number; numero_certo: number; flutuante: boolean } | null;
+  // verificavel = há número da clínica para comparar E ao menos um botão carrega número.
+  whatsapp: { botoes: number; com_numero: number; numero_certo: number; verificavel: boolean; flutuante: boolean } | null;
   caminho_recomendado: 'ja_instalado' | 'elementor_pro' | 'plugin_proprio' | 'plugin_pendente' | 'manual';
   bloqueios: string[];
 }
@@ -201,8 +202,8 @@ interface Auditoria {
 // número da clínica — comparação pelos 8 últimos dígitos, imune ao 9º dígito).
 function statsPagina(
   elementorRaw: string, token: string | null, clinicLast8: string | null,
-): { formTotal: number; formConect: number; formOutro: number; waTotal: number; waCertos: number } {
-  const st = { formTotal: 0, formConect: 0, formOutro: 0, waTotal: 0, waCertos: 0 };
+): { formTotal: number; formConect: number; formOutro: number; waTotal: number; waComNumero: number; waCertos: number } {
+  const st = { formTotal: 0, formConect: 0, formOutro: 0, waTotal: 0, waComNumero: 0, waCertos: 0 };
   let data: any;
   try { data = JSON.parse(elementorRaw); } catch { return st; }
   const walk = (nodes: any[]) => {
@@ -212,15 +213,22 @@ function statsPagina(
         st.formTotal++;
         const actions: string[] = Array.isArray(s.submit_actions) ? s.submit_actions : [];
         const hooks = String(s.webhooks ?? '');
-        const nosso = hooks.includes('external-forms-ingest') && (!token || hooks.includes(token));
+        // "conectado" exige a AÇÃO webhook ligada, não só a URL no campo — senão um form com a
+        // ação removida (mas a URL sobrando) apareceria verde sem disparar nada.
+        const nosso = actions.includes('webhook') && hooks.includes('external-forms-ingest') && (!token || hooks.includes(token));
         if (nosso) st.formConect++;
         else if (actions.includes('webhook') && hooks.length > 0) st.formOutro++;
       }
       const url = String(s?.link?.url ?? s?.button_link?.url ?? '');
       if (/wa\.me|api\.whatsapp|whatsapp/i.test(url)) {
         st.waTotal++;
-        const digits = ((url.match(/(?:wa\.me\/\+?|phone=\+?)(\d+)/) || [])[1] ?? url.replace(/\D/g, ''));
-        if (clinicLast8 && digits.length >= 8 && digits.slice(-8) === clinicLast8) st.waCertos++;
+        // Só compara quando o link CARREGA um número (wa.me/<num> ou phone=<num>). Links como
+        // wa.me/message/XXX não têm número e não podem virar "número diferente".
+        const m = url.match(/(?:wa\.me\/\+?|phone=\+?)(\d{8,})/);
+        if (m) {
+          st.waComNumero++;
+          if (clinicLast8 && m[1].slice(-8) === clinicLast8) st.waCertos++;
+        }
       }
       if (Array.isArray(n?.elements)) walk(n.elements);
     }
@@ -290,16 +298,22 @@ async function auditar(
   let formularios: Auditoria['formularios'] = null;
   let whatsapp: Auditoria['whatsapp'] = null;
   if (wp_ok) {
-    const pgs = await wp(base, b64, '/wp-json/wp/v2/pages?per_page=50&status=publish&context=edit');
-    if (Array.isArray(pgs.body)) {
+    // Varre páginas, Landing Pages do Elementor Pro e posts (per_page alto). e-landing-page
+    // devolve 404 quando o site não tem Landing Pages — o wp() trata e a gente ignora.
+    const itens: any[] = [];
+    for (const tipo of ['pages', 'e-landing-page', 'posts']) {
+      const r = await wp(base, b64, `/wp-json/wp/v2/${tipo}?per_page=100&status=publish&context=edit`);
+      if (Array.isArray(r.body)) itens.push(...r.body);
+    }
+    if (itens.length > 0) {
       const f = { total: 0, conectados: 0, outro_webhook: 0 };
-      const w = { botoes: 0, numero_certo: 0 };
-      for (const p of pgs.body) {
+      const w = { botoes: 0, com_numero: 0, numero_certo: 0 };
+      for (const p of itens) {
         const ed = p?.meta?._elementor_data;
         if (!ed || typeof ed !== 'string') continue;
         const s = statsPagina(ed, captureToken, clinicLast8);
         f.total += s.formTotal; f.conectados += s.formConect; f.outro_webhook += s.formOutro;
-        w.botoes += s.waTotal; w.numero_certo += s.waCertos;
+        w.botoes += s.waTotal; w.com_numero += s.waComNumero; w.numero_certo += s.waCertos;
       }
       if (f.total > 0) {
         formularios = f;
@@ -318,9 +332,10 @@ async function auditar(
           p?.status === 'active' && /click-to-chat|whatsapp/i.test(String(p?.plugin ?? '') + ' ' + String(p?.textdomain ?? '')));
       }
       if (w.botoes > 0 || flutuante) {
-        whatsapp = { botoes: w.botoes, numero_certo: w.numero_certo, flutuante };
-        if (w.botoes > 0 && clinicLast8 && w.numero_certo < w.botoes) {
-          bloqueios.push(`Há botão de WhatsApp no site com número diferente do WhatsApp da clínica (${w.numero_certo}/${w.botoes} corretos).`);
+        const verificavel = clinicLast8 != null && w.com_numero > 0;
+        whatsapp = { botoes: w.botoes, com_numero: w.com_numero, numero_certo: w.numero_certo, verificavel, flutuante };
+        if (verificavel && w.numero_certo < w.com_numero) {
+          bloqueios.push(`Há botão de WhatsApp no site com número diferente do WhatsApp da clínica (${w.numero_certo}/${w.com_numero} corretos).`);
         }
       }
     }

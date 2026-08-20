@@ -42,8 +42,6 @@ const PLUGIN_SLUG = Deno.env.get('MEDDESK_WP_PLUGIN_SLUG') ?? '';
 const PLUGIN_OPTION = 'meddesk_clinic_id';
 
 const SNIPPET_TITLE = 'MedDesk Tracking';
-// Papéis da clínica que podem disparar a integração (admin de verdade). super-admin passa sempre.
-const ADMIN_ROLES = ['gestor', 'medico_gestor'];
 const WP_TIMEOUT_MS = 15000;
 
 function json(body: unknown, status = 200): Response {
@@ -348,7 +346,10 @@ serve(async (req) => {
     const { clinic_id, action } = await req.json().catch(() => ({}));
     if (!clinic_id || !['audit', 'apply'].includes(action)) return json({ error: 'parametros_invalidos' }, 400);
 
-    // Identifica o solicitante e checa permissão: super-admin, ou gestor/medico_gestor DESTA clínica.
+    // Autorização: régua canônica do app can_manage_clinic — libera super-admin, gestor DESTA
+    // clínica, e org_owner/org_admin da organização dona da clínica. É a mesma função que gateia
+    // o gerenciamento da clínica no resto do sistema (evita divergência: o admin de organização
+    // gerencia a clínica mas tomava 403 no meu check antigo, que só olhava clinic_users).
     const userClient = createClient(SUPABASE_URL, ANON_KEY, {
       global: { headers: { Authorization: `Bearer ${jwt}` } },
       auth: { autoRefreshToken: false, persistSession: false },
@@ -357,14 +358,8 @@ serve(async (req) => {
     if (!user) return json({ error: 'unauthorized' }, 401);
 
     const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
-    const { data: isSuper } = await userClient.rpc('is_super_admin');
-    let autorizado = isSuper === true;
-    if (!autorizado) {
-      const { data: membro } = await admin
-        .from('clinic_users').select('role').eq('id', user.id).eq('clinic_id', clinic_id).maybeSingle();
-      autorizado = !!membro && ADMIN_ROLES.includes(membro.role);
-    }
-    if (!autorizado) return json({ error: 'forbidden' }, 403);
+    const { data: podeGerenciar } = await userClient.rpc('can_manage_clinic', { p_clinic_id: clinic_id });
+    if (podeGerenciar !== true) return json({ error: 'forbidden' }, 403);
 
     // Credencial do WordPress da clínica. A senha está cifrada em repouso; a RPC decifra e só
     // service_role pode chamá-la (o front nunca lê a senha de volta).

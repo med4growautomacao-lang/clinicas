@@ -2500,13 +2500,14 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
     };
 
     // Token do webhook nativo de formulários (external-forms-ingest?k=…). Mesmo padrão da aba
-    // Integração Externa: carrega a linha da clínica e, se não existir, cria (o token nasce por
-    // default no banco). Substitui a URL global do n8n (forms_tracking), que era igual para todas
-    // as clínicas e identificava a clínica pelo telefone dentro do form_name — frágil.
+    // Token de captação para o card MANUAL "Rastreamento do Site" (aba 'site'), que mostra o
+    // webhook do formulário. Carrega só nessa aba. Substitui a URL global do n8n (forms_tracking),
+    // que era igual para todas as clínicas e identificava a clínica pelo telefone dentro do
+    // form_name — frágil.
     const [captureToken, setCaptureToken] = useState<string | null>(null);
     useEffect(() => {
         let cancelled = false;
-        if (activeIntTab !== 'google' || !clinic?.id) return;
+        if (activeIntTab !== 'site' || !clinic?.id) return;
         (async () => {
             let { data, error } = await supabase
                 .from('clinic_external_integrations')
@@ -2997,9 +2998,13 @@ function IntegrationSettings({ data, onChange, clinicData, onClinicChange, onSav
                                     onClick={(e) => {
                                         navigator.clipboard.writeText(GOOGLE_UTM_SUFFIX);
                                         const btn = e.currentTarget;
+                                        // Trava contra duplo-clique: sem isso, o 2º clique captura
+                                        // "Copiado!" como original e o botão trava nesse texto.
+                                        if (btn.dataset.copying) return;
+                                        btn.dataset.copying = '1';
                                         const orig = btn.innerHTML;
                                         btn.innerHTML = 'Copiado!';
-                                        setTimeout(() => { btn.innerHTML = orig; }, 2000);
+                                        setTimeout(() => { btn.innerHTML = orig; delete btn.dataset.copying; }, 2000);
                                     }}
                                     className="bg-white border-slate-200 text-slate-700 hover:bg-slate-50 gap-2 shrink-0 h-10 sm:h-auto rounded-xl shadow-sm transition-all font-bold"
                                 >

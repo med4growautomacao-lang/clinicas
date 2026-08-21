@@ -113,6 +113,14 @@ Chave off é o estado normal de quase tudo, e o dono desliga de propósito: ele 
 - **Achado de terceiro é hipótese até ser confirmado** no código e no banco vivo (§3), nunca vira ação direta.
 - Entregue classificado: **provado**, **palpite** ou **descartado na verificação**.
 
+### 📌 Revisão é de agente INDEPENDENTE, e roda ANTES de entregar
+
+Ninguém se auto-revisa: o mesmo contexto que escreveu o bug tende a re-aprová-lo. Achado só vale vindo de fora.
+
+- **Para mudança não-trivial, antes do commit/push:** abra revisor(es) **independente(s)** (contexto fresco; lentes de correção, segurança, robustez), refute cada achado (§0.7 acima), conserte o que sobreviver, e só então entregue. Type-check e teste no banco vivo são **pré-requisito** da revisão, não substituem ela.
+- **Proporcional ao risco:** baixo/médio entrega já revisado; **risco alto** (produção de verdade, dado de paciente, site de cliente, migration, irreversível) mostra o resumo e **espera o OK do dono** antes de subir.
+- **O dono não é a rede de segurança da revisão.** Quando ele rodar `/code-review`, deve vir limpo. A confiança está no processo ser consistente, não em prometer "0 bug" (que seria mentira: não se entrega prova de ausência de defeito).
+
 ## 0.8 Régua de decisão (rodar antes de mexer)
 
 1. **Em que camada mora?** Repo, banco ou edge (§1). Comportamento do agente é prompt + edge, não tela.

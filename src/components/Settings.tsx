@@ -41,11 +41,13 @@ import {
     ChevronDown,
     Webhook,
     KeyRound,
+    Zap,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSettings, useProtocols, Protocol, useProducts, Product, ProductAttribute, useQuoteImages, useRedirectLinks, RedirectLink, Clinic, AIConfig, WhatsappInstance } from "../hooks/useSupabase";
 import { RedirectLinksCard } from "./RedirectLinksCard";
+import { QuickRepliesSettingsCard } from "./QuickReplies";
 import { NotificationPrefs } from "./NotificationPrefs";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -72,7 +74,7 @@ export function Settings() {
     const { userRole } = useAuth();
     const showToast = useToast();
     const { clinic, aiConfig, whatsapp, loading, updateClinic, updateAI, updateWhatsapp, generateConnectToken } = useSettings();
-    const [activeTab, setActiveTab] = useState<"clinic" | "notifications" | "integrations" | "protocols" | "products">(() => (localStorage.getItem('settingsTab') as any) || "clinic");
+    const [activeTab, setActiveTab] = useState<"clinic" | "notifications" | "integrations" | "protocols" | "products" | "quick_replies">(() => (localStorage.getItem('settingsTab') as any) || "clinic");
     const [activeIntTab, setActiveIntTab] = useState<'whatsapp' | 'meta' | 'google' | 'site' | 'external'>(() => (localStorage.getItem('settingsIntTab') as any) || 'whatsapp');
     
     // Local states for editing
@@ -314,6 +316,16 @@ export function Settings() {
         }
     }, [activeTab]);
 
+    // Respostas rápidas só fazem sentido com o envio pelo chat ligado (mesmo gate do ChatComposer,
+    // opt-in). Sem a feature a aba some, e um settingsTab antigo no localStorage volta para a primeira.
+    const chatSendOn = clinic?.features?.feature_chat_send === true;
+    useEffect(() => {
+        if (activeTab === 'quick_replies' && clinic && !chatSendOn) {
+            setActiveTab('clinic');
+            localStorage.setItem('settingsTab', 'clinic');
+        }
+    }, [activeTab, clinic, chatSendOn]);
+
     // Deep-link vindo do banner global (WhatsApp desconectado): leva direto
     // para Integracoes > WhatsApp.
     useEffect(() => {
@@ -343,6 +355,7 @@ export function Settings() {
     const tabs = [
         { id: "clinic", label: "Dados da Clínica", icon: Building2, color: "text-emerald-600" },
         { id: "notifications", label: "Notificações", icon: Bell, color: "text-amber-600" },
+        ...(chatSendOn ? [{ id: "quick_replies", label: "Respostas Rápidas", icon: Zap, color: "text-sky-600" }] : []),
         { id: "integrations", label: "Integrações", icon: Plug, color: "text-violet-600" },
     ];
 
@@ -712,6 +725,8 @@ export function Settings() {
 
                         {/* Aba própria de Notificações (grupo do WhatsApp + preferências por evento/cargo) */}
                         {activeTab === "notifications" && <NotificationsSettingsTab />}
+
+                        {activeTab === "quick_replies" && chatSendOn && <QuickRepliesSettingsCard />}
 
                         {activeTab === "clinic" && !isSecretaria && (
                             <Card className="border border-slate-200 shadow-sm max-w-4xl mx-auto">

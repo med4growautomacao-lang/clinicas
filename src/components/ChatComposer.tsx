@@ -1,7 +1,9 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import { Send, Loader2, PhoneOff, Mic, Trash2 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSettings } from "../hooks/useSupabase";
+import { useQuickReplies, type QuickReply } from "../hooks/useQuickReplies";
+import { QuickRepliesPicker, QuickRepliesManagerModal, filtrarRespostas } from "./QuickReplies";
 
 // Erros que a edge chat-send devolve, em português para o operador.
 const ERROS: Record<string, string> = {
@@ -57,6 +59,9 @@ interface ChatComposerProps {
  * Caixa de envio de mensagem do chat. Só aparece com a feature `feature_chat_send`
  * ligada na clínica (Gestão Organizacional). A mensagem enviada entra na conversa
  * pelo realtime — não há eco local, para a tela nunca mostrar algo que não foi entregue.
+ *
+ * Respostas rápidas: "/" no início da caixa abre o seletor (como no WhatsApp), a resposta escolhida
+ * entra na caixa para revisão e o lápis do seletor abre o gerenciador (tabela `quick_replies`).
  */
 export function ChatComposer({ onSend, onSendAudio, leadId, disabled, disabledReason }: ChatComposerProps) {
   const { clinic } = useSettings();
@@ -105,8 +110,52 @@ export function ChatComposer({ onSend, onSendAudio, leadId, disabled, disabledRe
     setGravando(false);
   }, [leadId]);
 
+  // ── Respostas rápidas (atalho "/") ──────────────────────────────────────────
+  const chatSendOn = clinic?.features?.feature_chat_send === true;
+  const respostas = useQuickReplies(chatSendOn);
+  // Esc (ou clique fora) fecha o seletor até o texto mudar de novo.
+  const [rapidasFechado, setRapidasFechado] = useState(false);
+  const [rapidasIdx, setRapidasIdx] = useState(0);
+  const [gerenciar, setGerenciar] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  // Só com a caixa contendo "/" e uma palavra (sem espaço), como no WhatsApp: barra no meio de uma
+  // frase não é atalho, e "/abc def" também não.
+  const rapidasMatch = /^\/(\S*)$/.exec(text);
+  const rapidasQuery = rapidasMatch?.[1] ?? "";
+  const rapidasAberto = chatSendOn && !!rapidasMatch && !rapidasFechado && !gravando && !disabled;
+  const rapidasLista = useMemo(() => filtrarRespostas(respostas.items, rapidasQuery), [respostas.items, rapidasQuery]);
+  // Digitar mais uma letra reordena a lista: o destaque volta para o primeiro.
+  useEffect(() => { setRapidasIdx(0); }, [rapidasQuery, rapidasLista.length]);
+  const rapidasIdxAtivo = Math.min(rapidasIdx, Math.max(0, rapidasLista.length - 1));
+  // Clique fora da caixa e fora do seletor fecha (o seletor mora num portal, então `contains` no
+  // elemento dele é o único jeito de saber que o clique foi "dentro").
+  useEffect(() => {
+    if (!rapidasAberto) return;
+    const onDown = (e: MouseEvent) => {
+      const alvo = e.target as Node;
+      if (inputRef.current?.contains(alvo) || pickerRef.current?.contains(alvo)) return;
+      setRapidasFechado(true);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [rapidasAberto]);
+
+  // Altura da caixa acompanha o texto, venha ele do teclado, de uma resposta rápida ou do envio
+  // (que a esvazia). Teto de 120px: passando disso, rola.
+  // ⚠️ `scrollHeight` NÃO inclui a borda, mas o `height` daqui sim (box-sizing: border-box em tudo).
+  // Sem somar a borda de volta, a caixa nascia 2px menor que o próprio texto e o navegador punha
+  // barra de rolagem já na PRIMEIRA linha, com as setinhas ao lado do cursor. `offsetHeight -
+  // clientHeight` é exatamente essa borda.
+  useLayoutEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    const borda = el.offsetHeight - el.clientHeight;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight + borda, 120)}px`;
+  }, [text, gravando]);
+
   // Opt-in: ausente ou false = escondido.
-  if (clinic?.features?.feature_chat_send !== true) return null;
+  if (!chatSendOn) return null;
 
   const enviar = async () => {
     const clean = text.trim();
@@ -123,7 +172,49 @@ export function ChatComposer({ onSend, onSendAudio, leadId, disabled, disabledRe
     }
   };
 
+  // Resposta escolhida entra na caixa (não é enviada): o operador revisa e manda com Enter, como no
+  // WhatsApp. O cursor vai para o fim, para já emendar um complemento.
+  const usarResposta = (r: QuickReply) => {
+    setText(r.content);
+    setRapidasFechado(true);
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    });
+  };
+
+  const abrirGerenciador = () => { setRapidasFechado(true); setGerenciar(true); };
+  // Ao fechar o gerenciador a caixa ainda tem o "/" digitado: o seletor reabre já com a lista nova,
+  // para escolher o que acabou de ser criado sem digitar de novo.
+  const fecharGerenciador = () => {
+    setGerenciar(false);
+    setRapidasFechado(false);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (rapidasAberto) {
+      if (e.key === "Escape") { e.preventDefault(); setRapidasFechado(true); return; }
+      const n = rapidasLista.length;
+      if (n > 0) {
+        if (e.key === "ArrowDown") { e.preventDefault(); setRapidasIdx((rapidasIdxAtivo + 1) % n); return; }
+        if (e.key === "ArrowUp") { e.preventDefault(); setRapidasIdx((rapidasIdxAtivo - 1 + n) % n); return; }
+        // Shift+Tab fica de fora: é o gesto de sair da caixa para trás, não de escolher.
+        if ((e.key === "Enter" && !e.shiftKey) || (e.key === "Tab" && !e.shiftKey)) {
+          e.preventDefault();
+          usarResposta(rapidasLista[rapidasIdxAtivo]);
+          return;
+        }
+      } else if (e.key === "Enter" && !e.shiftKey) {
+        // Nada bate com o que foi digitado (ou a lista ainda carrega): Enter fecha o seletor em vez
+        // de mandar "/abc" para o contato. Um segundo Enter envia o texto como está.
+        e.preventDefault();
+        setRapidasFechado(true);
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       enviar();
@@ -296,16 +387,11 @@ export function ChatComposer({ onSend, onSendAudio, leadId, disabled, disabledRe
           disabled={disabled || sending}
           onChange={e => {
             setText(e.target.value);
-            // ⚠️ `scrollHeight` NÃO inclui a borda, mas o `height` daqui sim (box-sizing: border-box
-            // em tudo). Sem somar a borda de volta, a caixa nascia 2px menor que o próprio texto e
-            // o navegador punha barra de rolagem já na PRIMEIRA linha, com as setinhas ao lado do
-            // cursor. `offsetHeight - clientHeight` é exatamente essa borda.
-            const borda = e.target.offsetHeight - e.target.clientHeight;
-            e.target.style.height = "auto";
-            e.target.style.height = `${Math.min(e.target.scrollHeight + borda, 120)}px`;
+            // Texto mudou: um Esc anterior deixa de valer e o seletor do "/" pode voltar.
+            setRapidasFechado(false);
           }}
           onKeyDown={onKeyDown}
-          placeholder={disabled ? "Envio indisponível" : "Escreva uma mensagem…"}
+          placeholder={disabled ? "Envio indisponível" : "Escreva uma mensagem… ou / para respostas rápidas"}
           // `scrollbar-hide`: passando de 120px a caixa rola, mas sem barra nem setas em cima do
           // texto. Rolagem por roda e teclado continua funcionando.
           className="flex-1 resize-none scrollbar-hide text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-2xl px-3.5 py-2.5 max-h-[120px] placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-400 disabled:opacity-60 transition-all"
@@ -340,6 +426,32 @@ export function ChatComposer({ onSend, onSendAudio, leadId, disabled, disabledRe
         )}
       </div>
       )}
+      {/* Seletor do "/" e gerenciador: os dois moram em portal (ver QuickReplies.tsx), então a posição
+          aqui no JSX não importa para o layout. */}
+      <QuickRepliesPicker
+        anchorRef={inputRef}
+        containerRef={pickerRef}
+        open={rapidasAberto}
+        query={rapidasQuery}
+        items={rapidasLista}
+        total={respostas.items.length}
+        loading={respostas.loading}
+        erro={respostas.erro}
+        activeIndex={rapidasIdxAtivo}
+        onHover={setRapidasIdx}
+        onPick={usarResposta}
+        onManage={abrirGerenciador}
+      />
+      <QuickRepliesManagerModal
+        open={gerenciar}
+        onClose={fecharGerenciador}
+        items={respostas.items}
+        loading={respostas.loading}
+        erro={respostas.erro}
+        onSave={respostas.save}
+        onRemove={respostas.remove}
+        comecarCriando={respostas.items.length === 0}
+      />
     </div>
   );
 }

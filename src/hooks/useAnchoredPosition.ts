@@ -15,6 +15,13 @@ export interface AnchoredPosition {
   width: number;
   /** Altura máxima já limitada ao espaço real: o popup nunca vaza a janela. */
   maxH: number;
+  /**
+   * true = o popup foi virado para CIMA da âncora. `top` é o topo da faixa de
+   * `maxH` reservada; um popup mais baixo que `maxH` deve se alinhar pela base
+   * dessa faixa (ex.: contêiner flex `justify-end`), senão fica um vão entre ele
+   * e a âncora.
+   */
+  above: boolean;
 }
 
 interface Options {
@@ -57,6 +64,7 @@ export function computeAnchoredPosition(
     left,
     width: w,
     maxH,
+    above: flip,
   };
 }
 
@@ -70,8 +78,13 @@ export function useAnchoredPosition(
   const place = useCallback(() => {
     const el = anchorRef.current;
     if (!el) return;
+    const rect = el.getBoundingClientRect();
+    // Âncora sem tamanho = escondida (aba com display:none, painel fechado): não
+    // há onde ancorar, e um popup `fixed` posicionado em (0,0) ficaria flutuando
+    // por cima de outra tela.
+    if (rect.width === 0 && rect.height === 0) { setPos(null); return; }
     setPos(computeAnchoredPosition(
-      el.getBoundingClientRect(),
+      rect,
       { width: window.innerWidth, height: window.innerHeight },
       { maxHeight, flipBelow, gap, width, align },
     ));
@@ -96,10 +109,20 @@ export function useAnchoredPosition(
     // capture=true para enxergar o scroll de containers internos, que não borbulha.
     window.addEventListener("scroll", schedule, true);
     window.addEventListener("resize", schedule);
+    // A própria âncora pode mudar de tamanho sem scroll nem resize (textarea que
+    // cresce com o texto, campo que quebra linha). O layout effect de um FILHO roda
+    // antes do layout effect do pai que redimensiona a âncora, então medir só aqui
+    // pegaria o tamanho velho; o ResizeObserver dispara depois do layout, já com o
+    // tamanho novo.
+    const ro = typeof ResizeObserver !== "undefined" && anchorRef.current
+      ? new ResizeObserver(schedule)
+      : null;
+    if (ro && anchorRef.current) ro.observe(anchorRef.current);
     return () => {
       if (frame) cancelAnimationFrame(frame);
       window.removeEventListener("scroll", schedule, true);
       window.removeEventListener("resize", schedule);
+      ro?.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, place, ...deps]);

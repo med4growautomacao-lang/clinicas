@@ -48,6 +48,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useSettings, useProtocols, Protocol, useProducts, Product, ProductAttribute, useQuoteImages, useRedirectLinks, RedirectLink, Clinic, AIConfig, WhatsappInstance } from "../hooks/useSupabase";
 import { RedirectLinksCard } from "./RedirectLinksCard";
 import { QuickRepliesSettingsCard } from "./QuickReplies";
+import { chatSendAtivo } from "../lib/features";
 import { NotificationPrefs } from "./NotificationPrefs";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -307,24 +308,27 @@ export function Settings() {
         localStorage.setItem('settingsIntTab', intTabs[0]);
     }, [intTabs, activeIntTab]);
 
-    // "Produtos" deixou de ser aba (virou card dentro de "Dados da Clínica").
-    // Redireciona qualquer settingsTab='products' antigo do localStorage.
-    useEffect(() => {
-        if (activeTab === 'products') {
-            setActiveTab('clinic');
-            localStorage.setItem('settingsTab', 'clinic');
-        }
-    }, [activeTab]);
+    // Respostas rápidas só fazem sentido com o envio pelo chat ligado (mesmo gate do ChatComposer, opt-in).
+    const chatSendOn = chatSendAtivo(clinic);
 
-    // Respostas rápidas só fazem sentido com o envio pelo chat ligado (mesmo gate do ChatComposer,
-    // opt-in). Sem a feature a aba some, e um settingsTab antigo no localStorage volta para a primeira.
-    const chatSendOn = clinic?.features?.feature_chat_send === true;
+    // Abas disponíveis. Montadas ANTES do `if (loading)` para alimentar o guard logo abaixo.
+    const tabs = useMemo(() => [
+        { id: "clinic", label: "Dados da Clínica", icon: Building2, color: "text-emerald-600" },
+        { id: "notifications", label: "Notificações", icon: Bell, color: "text-amber-600" },
+        ...(chatSendOn ? [{ id: "quick_replies", label: "Respostas Rápidas", icon: Zap, color: "text-sky-600" }] : []),
+        { id: "integrations", label: "Integrações", icon: Plug, color: "text-violet-600" },
+    ], [chatSendOn]);
+
+    // Aba guardada no localStorage que não existe (mais): 'products' e 'protocols' viraram cards dentro
+    // de "Dados da Clínica", 'quick_replies' some sem a feature. Cai na primeira válida, como o guard
+    // das integrações acima. Espera a clínica carregar para não chutar a aba certa enquanto
+    // `chatSendOn` ainda é false.
     useEffect(() => {
-        if (activeTab === 'quick_replies' && clinic && !chatSendOn) {
-            setActiveTab('clinic');
-            localStorage.setItem('settingsTab', 'clinic');
-        }
-    }, [activeTab, clinic, chatSendOn]);
+        if (loading) return;
+        if (tabs.some(t => t.id === activeTab)) return;
+        setActiveTab(tabs[0].id as any);
+        localStorage.setItem('settingsTab', tabs[0].id);
+    }, [loading, tabs, activeTab]);
 
     // Deep-link vindo do banner global (WhatsApp desconectado): leva direto
     // para Integracoes > WhatsApp.
@@ -351,13 +355,6 @@ export function Settings() {
             </div>
         );
     }
-
-    const tabs = [
-        { id: "clinic", label: "Dados da Clínica", icon: Building2, color: "text-emerald-600" },
-        { id: "notifications", label: "Notificações", icon: Bell, color: "text-amber-600" },
-        ...(chatSendOn ? [{ id: "quick_replies", label: "Respostas Rápidas", icon: Zap, color: "text-sky-600" }] : []),
-        { id: "integrations", label: "Integrações", icon: Plug, color: "text-violet-600" },
-    ];
 
     const handleSaveProtocol = async () => {
         if (!protocolModal.item?.name?.trim()) return;

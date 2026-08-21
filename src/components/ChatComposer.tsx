@@ -2,8 +2,9 @@ import React, { useState, useRef, useEffect, useLayoutEffect, useMemo } from "re
 import { Send, Loader2, PhoneOff, Mic, Trash2 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSettings } from "../hooks/useSupabase";
-import { useQuickReplies, type QuickReply } from "../hooks/useQuickReplies";
-import { QuickRepliesPicker, QuickRepliesManagerModal, filtrarRespostas } from "./QuickReplies";
+import { chatSendAtivo } from "../lib/features";
+import { useQuickReplies, filtrarRespostas, type QuickReply } from "../hooks/useQuickReplies";
+import { QuickRepliesPicker, QuickRepliesManagerModal } from "./QuickReplies";
 
 // Erros que a edge chat-send devolve, em português para o operador.
 const ERROS: Record<string, string> = {
@@ -111,8 +112,9 @@ export function ChatComposer({ onSend, onSendAudio, leadId, disabled, disabledRe
   }, [leadId]);
 
   // ── Respostas rápidas (atalho "/") ──────────────────────────────────────────
-  const chatSendOn = clinic?.features?.feature_chat_send === true;
+  const chatSendOn = chatSendAtivo(clinic);
   const respostas = useQuickReplies(chatSendOn);
+  const { refresh: recarregarRespostas } = respostas;
   // Esc (ou clique fora) fecha o seletor até o texto mudar de novo.
   const [rapidasFechado, setRapidasFechado] = useState(false);
   const [rapidasIdx, setRapidasIdx] = useState(0);
@@ -124,9 +126,12 @@ export function ChatComposer({ onSend, onSendAudio, leadId, disabled, disabledRe
   const rapidasQuery = rapidasMatch?.[1] ?? "";
   const rapidasAberto = chatSendOn && !!rapidasMatch && !rapidasFechado && !gravando && !disabled;
   const rapidasLista = useMemo(() => filtrarRespostas(respostas.items, rapidasQuery), [respostas.items, rapidasQuery]);
-  // Digitar mais uma letra reordena a lista: o destaque volta para o primeiro.
-  useEffect(() => { setRapidasIdx(0); }, [rapidasQuery, rapidasLista.length]);
+  // O destaque é zerado no onChange (síncrono, sem render extra); o clamp cobre a lista encolhendo
+  // por fora (carga terminando, item excluído no gerenciador).
   const rapidasIdxAtivo = Math.min(rapidasIdx, Math.max(0, rapidasLista.length - 1));
+  // Abriu o seletor: recarrega a lista (deduplicado no hook) para pegar o que um colega ou a aba de
+  // Configurações criou enquanto esta tela ficou montada.
+  useEffect(() => { if (rapidasAberto) recarregarRespostas(); }, [rapidasAberto, recarregarRespostas]);
   // Clique fora da caixa e fora do seletor fecha (o seletor mora num portal, então `contains` no
   // elemento dele é o único jeito de saber que o clique foi "dentro").
   useEffect(() => {
@@ -188,6 +193,10 @@ export function ChatComposer({ onSend, onSendAudio, leadId, disabled, disabledRe
   const abrirGerenciador = () => { setRapidasFechado(true); setGerenciar(true); };
   // Ao fechar o gerenciador a caixa ainda tem o "/" digitado: o seletor reabre já com a lista nova,
   // para escolher o que acabou de ser criado sem digitar de novo.
+  // O refoco explícito NÃO é redundante com o restore do Modal: quando o gerenciador abre já no
+  // formulário (lista vazia), o `autoFocus` do campo Atalho roda no commit, ANTES do effect em que o
+  // Modal captura o activeElement, e o Modal "devolve" o foco a um input que está sumindo (cai no body).
+  // Sem isto o seletor reabre com o teclado morto no primeiro uso.
   const fecharGerenciador = () => {
     setGerenciar(false);
     setRapidasFechado(false);
@@ -387,8 +396,18 @@ export function ChatComposer({ onSend, onSendAudio, leadId, disabled, disabledRe
           disabled={disabled || sending}
           onChange={e => {
             setText(e.target.value);
-            // Texto mudou: um Esc anterior deixa de valer e o seletor do "/" pode voltar.
+            // Texto mudou: um Esc anterior deixa de valer e o seletor do "/" pode voltar, e o
+            // destaque volta ao primeiro item (digitar mais uma letra reordena a lista).
             setRapidasFechado(false);
+            setRapidasIdx(0);
+          }}
+          // Foco saiu pelo teclado (Tab/Shift+Tab para outro controle): fecha o seletor, senão ele
+          // fica pintado com o teclado desligado, e Enter no botão de enviar mandaria "/abc" com a
+          // lista ainda na tela. Só com destino conhecido: clique na barra de rolagem do seletor
+          // (relatedTarget nulo) e alt-tab não fecham; os botões do seletor seguram o foco na caixa.
+          onBlur={e => {
+            const destino = e.relatedTarget as Node | null;
+            if (destino && !pickerRef.current?.contains(destino)) setRapidasFechado(true);
           }}
           onKeyDown={onKeyDown}
           placeholder={disabled ? "Envio indisponível" : "Escreva uma mensagem… ou / para respostas rápidas"}
@@ -450,7 +469,7 @@ export function ChatComposer({ onSend, onSendAudio, leadId, disabled, disabledRe
         erro={respostas.erro}
         onSave={respostas.save}
         onRemove={respostas.remove}
-        comecarCriando={respostas.items.length === 0}
+        comecarCriando={respostas.items.length === 0 && !respostas.loading && !respostas.erro}
       />
     </div>
   );
